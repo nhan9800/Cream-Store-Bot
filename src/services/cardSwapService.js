@@ -287,3 +287,78 @@ export async function handleCardSwapCallback(query, discordClient) {
     }
   }
 }
+
+// --- Hỗ trợ render Discount Board ---
+import { ContainerBuilder, TextDisplayBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } from 'discord.js';
+import { createEmojiResolver } from '../utils/emojiHelper.js';
+
+export async function buildDiscountBoardMarkdown(guildId) {
+  const fees = await getChargingFees(guildId);
+  const config = getCardSwapConfig(guildId);
+  const feeAdd = config?.cardswap_charging_fee_add || 5.0;
+  const E = createEmojiResolver(guildId);
+  
+  const telcoMap = {};
+  for (const item of fees) {
+    if (!telcoMap[item.telco]) telcoMap[item.telco] = [];
+    const val = parseInt(item.value, 10);
+    const finalFee = parseFloat(item.fees) + feeAdd;
+    telcoMap[item.telco].push({ ...item, numericValue: val, finalFee });
+  }
+  
+  const dateStr = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
+  let markdown = `### ${E('payment_money') || '💸'} BẢNG CHIẾT KHẤU ĐỔI THẺ (TỰ ĐỘNG)\n`;
+  markdown += `*Cập nhật lần cuối: **${dateStr}***\n*Phí gạch thẻ đã bao gồm chiết khấu hệ thống. Phí này sẽ bị trừ vào mệnh giá thực nhận.*\n\n`;
+  
+  const targetTelcos = ['VIETTEL', 'VINAPHONE', 'MOBIFONE', 'ZING', 'GARENA'];
+  
+  for (const [telco, items] of Object.entries(telcoMap)) {
+    if (!targetTelcos.includes(telco)) continue;
+    markdown += `**${E('icon_star') || '⭐'} Dành cho nhà mạng ${telco}**\n`;
+    items.sort((a,b) => a.numericValue - b.numericValue);
+    for (const item of items) {
+      const receiveStr = (item.numericValue - (item.numericValue * item.finalFee / 100)).toLocaleString('vi-VN');
+      markdown += `- Mệnh giá ${item.numericValue.toLocaleString('vi-VN')}đ: Phí **${item.finalFee}%** (Thực nhận: ${receiveStr}đ)\n`;
+    }
+    markdown += `\n`;
+  }
+  return markdown;
+}
+
+export async function buildDiscountBoardComponents(guildId) {
+  const E = createEmojiResolver(guildId);
+  const markdown = await buildDiscountBoardMarkdown(guildId);
+  
+  const container = new ContainerBuilder().setAccentColor(0x3498DB);
+  container.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent(markdown)
+  );
+  
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId('cardswap:btn_refresh_discount')
+      .setLabel('Cập Nhật Bảng Phí')
+      .setEmoji(E.component('icon_clock') || '🕒')
+      .setStyle(ButtonStyle.Secondary)
+  );
+  
+  return { components: [container, row], flags: MessageFlags.IsComponentsV2 };
+}
+
+export async function autoUpdateDiscountBoard(client) {
+  const rows = db.prepare('SELECT guild_id, discount_board_channel_id, discount_board_message_id FROM guild_settings WHERE discount_board_channel_id IS NOT NULL AND discount_board_message_id IS NOT NULL').all();
+  for (const row of rows) {
+    try {
+      const channel = await client.channels.fetch(row.discount_board_channel_id).catch(() => null);
+      if (!channel) continue;
+      
+      const msg = await channel.messages.fetch(row.discount_board_message_id).catch(() => null);
+      if (!msg) continue;
+      
+      const payload = await buildDiscountBoardComponents(row.guild_id);
+      await msg.edit(payload);
+    } catch (e) {
+      console.error(`[DISCOUNT BOARD] Lỗi cập nhật bảng chiết khấu cho guild ${row.guild_id}:`, e);
+    }
+  }
+}

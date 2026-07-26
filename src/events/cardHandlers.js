@@ -18,7 +18,9 @@ import {
   submitChargingCard, 
   checkAvailableCard, 
   buyCard,
-  getCardSwapConfig
+  getCardSwapConfig,
+  buildDiscountBoardMarkdown,
+  buildDiscountBoardComponents
 } from '../services/cardSwapService.js';
 import { getCustomerProfile } from '../services/customerService.js';
 import { getWalletBalance, addWalletBalance } from '../services/walletService.js';
@@ -59,29 +61,10 @@ export async function handleCardSwapInteractions(interaction) {
     return true;
   }
 
-  // --- NÚT XEM BẢNG PHÍ ---
+  // --- NÚT XEM BẢNG PHÍ TẠI PANEL ---
   if (interaction.isButton() && customId === 'cardswap:btn_fees') {
     try {
-      const fees = await getChargingFees(interaction.guild.id);
-      
-      const telcoMap = {};
-      for (const item of fees) {
-        if (!telcoMap[item.telco]) telcoMap[item.telco] = [];
-        telcoMap[item.telco].push(item);
-      }
-      
-      let markdown = `### ${E('payment_money') || '💸'} BẢNG PHÍ ĐỔI THẺ CÀO\n`;
-      markdown += `*Phí gạch thẻ đã bao gồm chiết khấu hệ thống. Phí này sẽ bị trừ vào mệnh giá thực nhận.*\n\n`;
-      
-      for (const [telco, items] of Object.entries(telcoMap)) {
-        markdown += `**${E('icon_star') || '⭐'} Dành cho nhà mạng ${telco}**\n`;
-        items.sort((a,b) => a.value - b.value);
-        for (const item of items) {
-          const receiveStr = (item.value - (item.value * item.fee / 100)).toLocaleString('vi-VN');
-          markdown += `- Mệnh giá ${item.value.toLocaleString('vi-VN')}đ: Phí **${item.fee}%** (Thực nhận: ${receiveStr}đ)\n`;
-        }
-        markdown += `\n`;
-      }
+      const markdown = await buildDiscountBoardMarkdown(interaction.guild.id);
       
       const container = new ContainerBuilder().setAccentColor(0x3498DB);
       container.addTextDisplayComponents(
@@ -91,6 +74,21 @@ export async function handleCardSwapInteractions(interaction) {
       await interaction.reply({ components: [container], flags: MessageFlags.IsComponentsV2, ephemeral: true });
     } catch (e) {
       await interaction.reply({ content: `Lỗi không thể lấy bảng phí: ${e.message}`, ephemeral: true });
+    }
+    return true;
+  }
+
+  // --- NÚT LÀM MỚI CHIẾT KHẤU TẠI DISCOUNT BOARD ---
+  if (interaction.isButton() && customId === 'cardswap:btn_refresh_discount') {
+    try {
+      await interaction.deferUpdate(); // Không hiện loading cho user
+      
+      const payload = await buildDiscountBoardComponents(interaction.guild.id);
+      await interaction.message.edit(payload);
+    } catch (e) {
+      console.error('Lỗi khi làm mới bảng phí:', e);
+      // Gửi ephemeral báo lỗi
+      await interaction.followUp({ content: `Lỗi không thể lấy bảng phí: ${e.message}`, ephemeral: true }).catch(()=>null);
     }
     return true;
   }

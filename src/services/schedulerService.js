@@ -10,11 +10,13 @@ import { emitStaffLog } from './staffLogService.js';
 import { setOrderStatus } from './orderService.js';
 import { runAutoVinhDanh } from './vinhDanhService.js';
 import { processPendingPaymentTickets, processCompletedFeedbackTickets } from './ticketAutoCloseService.js';
+import { autoUpdateDiscountBoard } from './cardSwapService.js';
 
 let schedulerHandle = null;
 let backupHandle = null;
 let bootstrapped = false;
 let lastVinhDanhRun = 0;
+let lastDiscountBoardRun = 0;
 
 function autoBackupDatabase() {
   backupDatabase().catch(e => console.error('[BACKUP] Lỗi hệ thống sao lưu tự động:', e));
@@ -58,6 +60,16 @@ export function startScheduler(client) {
         lastVinhDanhRun = nowMs;
       } catch (error) {
         console.error('[SCHEDULER] Lỗi tự động vinh danh:', error);
+      }
+    }
+
+    // Tự động cập nhật bảng chiết khấu mỗi 1 tiếng
+    if (nowMs - lastDiscountBoardRun >= 60 * 60 * 1000) {
+      try {
+        await autoUpdateDiscountBoard(client);
+        lastDiscountBoardRun = nowMs;
+      } catch (error) {
+        console.error('[SCHEDULER] Lỗi tự động cập nhật bảng chiết khấu:', error);
       }
     }
 

@@ -772,6 +772,10 @@ export function initDatabase() {
   ensureColumn('guild_settings', 'cardswap_charging_fee_add', "REAL DEFAULT 5.0");
   ensureColumn('guild_settings', 'cardswap_buy_profit_add', "INTEGER DEFAULT 3000");
 
+  // --- DISCOUNT BOARD ---
+  ensureColumn('guild_settings', 'discount_board_channel_id', 'TEXT DEFAULT NULL');
+  ensureColumn('guild_settings', 'discount_board_message_id', 'TEXT DEFAULT NULL');
+
   ensureColumn('customer_profiles', 'is_ctv', 'INTEGER DEFAULT 0');
   ensureColumn('customer_profiles', 'ctv_joined_at', 'TEXT');
   ensureColumn('product_catalog', 'ctv_price', 'INTEGER DEFAULT NULL');
