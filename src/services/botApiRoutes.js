@@ -693,10 +693,10 @@ export function registerBotApiRoutes(app) {
                         flags: welcomeV2Flags,
                     }).catch(() => null);
                     
-                    if (customerId && customerId !== 'web_user') {
+                    if (customerId && /^\\d+$/.test(customerId)) {
                         await discordChannel.send({ content: `<@${customerId}> — Đơn hàng từ Web của bạn đã tạo ticket này!` }).catch(() => null);
                     } else {
-                        await discordChannel.send({ content: `Có đơn hàng mới từ Web! Đơn hàng: **${orderCode}**.` }).catch(() => null);
+                        await discordChannel.send({ content: `Có đơn hàng mới từ Web (Khách Vãng Lai)! Đơn hàng: **${orderCode}**.` }).catch(() => null);
                     }
                 } catch (welcomeErr) {
                     console.error('[WEB ORDER] Lỗi gửi welcome embed vào kênh Discord:', welcomeErr);

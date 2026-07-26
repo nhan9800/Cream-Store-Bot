@@ -304,7 +304,7 @@ export function buildTicketWelcomeV2(ticketCode, customerId, ticketType = 'ORDER
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(joinLines(
       `## ${E(meta.titleSlot)}  ${meta.title}`,
-      `> ${E('ticket_user')} Xin chào ${fmt.user(customerId)}!`,
+      `> ${E('ticket_user')} Xin chào ${/^\\d+$/.test(customerId) ? fmt.user(customerId) : 'Khách Vãng Lai (Web)'}!`,
       `> ${E('ticket_open')} ${fmt.b('Mã Ticket:')} ${fmt.code(ticketCode)}`,
       relatedOrderCode ? `> ${E('order_id')} ${fmt.b('Liên kết Đơn:')} ${fmt.code(relatedOrderCode)}` : null,
       productName ? `> ${E('order_product')} ${fmt.b('Sản phẩm:')} ${fmt.b(productName)}` : null,

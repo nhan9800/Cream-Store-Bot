@@ -186,7 +186,8 @@ export function registerDashboardRoutes(app) {
 
   app.get('/api/public/orders/:code', (req, res) => {
     try {
-      const row = db.prepare("SELECT order_code, status FROM orders WHERE order_code = ?").get(req.params.code);
+      const code = String(req.params.code || '').toUpperCase();
+      const row = db.prepare("SELECT order_code, status FROM orders WHERE order_code = ?").get(code);
       if (!row) return res.status(404).json({ ok: false, error: 'Không tìm thấy đơn hàng.' });
       res.json({ ok: true, data: row });
     } catch (e) {
