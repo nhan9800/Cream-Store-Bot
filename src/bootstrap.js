@@ -5,6 +5,7 @@ import { getClientOptions, loadCommands, registerInteractionHandler } from './ev
 import { startScheduler } from './services/schedulerService.js';
 import { startWebhookServer } from './services/webhookServer.js';
 import { startPresenceRotation } from './services/presenceService.js';
+import { startOtpAutoCheck } from './services/otpAutoCheckService.js';
 
 import { initErrorLogger } from './services/errorLogService.js';
 
@@ -25,6 +26,7 @@ export async function buildClient() {
     startPresenceRotation(readyClient);
     startScheduler(readyClient);
     startWebhookServer(readyClient);
+    startOtpAutoCheck(readyClient);
 
     // Tự động đồng bộ emoji cho tất cả các guild bot đang tham gia
     import('./services/emojiService.js').then(({ autoSyncGuildEmojis }) => {

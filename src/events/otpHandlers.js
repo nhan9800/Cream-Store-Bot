@@ -243,6 +243,7 @@ export async function handleOtpInteraction(interaction) {
       
       // Lấy danh sách các OTP đang chờ
       const pendingOrders = db.prepare('SELECT * FROM viotp_orders WHERE customer_id = ? AND status = ?').all(interaction.user.id, 'PENDING');
+      const completedOrders = db.prepare('SELECT * FROM viotp_orders WHERE customer_id = ? AND status = ? ORDER BY id DESC LIMIT 3').all(interaction.user.id, 'COMPLETED');
 
       const container = new ContainerBuilder().setAccentColor(0x9B59B6);
       let content = `### ${E('money')} THÔNG TIN VÍ & OTP\n\n**Số dư ví hiện tại:** ${userBalance.toLocaleString('vi-VN')}đ\n\n`;
@@ -252,8 +253,16 @@ export async function handleOtpInteraction(interaction) {
         pendingOrders.forEach(o => {
           content += `> ${E('phone')} **${o.service_name}** - \`${o.phone_number}\` (Mã: \`${o.request_id}\`)\n`;
         });
+        content += `\n`;
       } else {
-        content += `*Bạn không có phiên thuê OTP nào đang chờ mã.*`;
+        content += `*Bạn không có phiên thuê OTP nào đang chờ mã.*\n\n`;
+      }
+
+      if (completedOrders.length > 0) {
+        content += `**Các phiên OTP gần đây:**\n`;
+        completedOrders.forEach(o => {
+          content += `> ${E('tickgreen') || '✅'} **${o.service_name}** (\`${o.phone_number}\`): \`${o.otp_code}\`\n`;
+        });
       }
 
       container.addTextDisplayComponents(new TextDisplayBuilder().setContent(content));
