@@ -86,7 +86,15 @@ export async function execute(interaction) {
   const checkEmoji = E.component('cr_pay') || E.component('icon_history');
   if (checkEmoji) checkBalanceBtn.setEmoji(checkEmoji);
 
-  const actionRow = new ActionRowBuilder().addComponents(rentBtn, checkBalanceBtn);
+  const topupBtn = new ButtonBuilder()
+    .setCustomId('otp:topup_menu')
+    .setLabel('Nạp Tiền')
+    .setStyle(ButtonStyle.Success);
+  
+  const topupEmoji = E.component('payment_payos') || E.component('cr_cardd');
+  if (topupEmoji) topupBtn.setEmoji(topupEmoji);
+
+  const actionRow = new ActionRowBuilder().addComponents(rentBtn, checkBalanceBtn, topupBtn);
 
   const panelPayload = {
     components: [container, actionRow],

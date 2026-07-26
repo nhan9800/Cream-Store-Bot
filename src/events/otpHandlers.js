@@ -1,5 +1,8 @@
 import {
   ActionRowBuilder,
+  ModalBuilder,
+  TextInputBuilder,
+  TextInputStyle,
   ButtonBuilder,
   ButtonStyle,
   ContainerBuilder,
@@ -9,6 +12,7 @@ import {
   SeparatorBuilder,
   SeparatorSpacingSize
 } from 'discord.js';
+import QRCode from 'qrcode';
 import { db } from '../database/db.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { getBalance, getServices, requestOtp, checkSession } from '../services/viotpService.js';
@@ -26,6 +30,7 @@ export async function handleOtpInteraction(interaction) {
 
       // Lấy danh sách dịch vụ từ ViOTP
       const services = await getServices('vn');
+      if (services) services.forEach(s => s.price += 3000);
       if (!services || services.length === 0) {
         return await interaction.editReply({ content: `${E('tick_red51')} Hệ thống thuê số đang bảo trì (không tải được dịch vụ).` });
       }
@@ -67,6 +72,7 @@ export async function handleOtpInteraction(interaction) {
       const serviceId = parseInt(interaction.values[0]);
 
       const services = await getServices('vn');
+      if (services) services.forEach(s => s.price += 3000);
       const service = services.find(s => s.id === serviceId);
       
       if (!service) {
@@ -168,6 +174,57 @@ export async function handleOtpInteraction(interaction) {
         } else {
           await interaction.editReply({ content: `${E('tick_red51')} Lỗi kiểm tra mã: \`${err.message}\`` });
         }
+      }
+      return;
+    }
+
+    
+    if (interaction.customId === 'otp:topup_menu') {
+      const modal = new ModalBuilder()
+        .setCustomId('otp:topup_modal')
+        .setTitle('N?p Ti?n V�o V�');
+      const amountInput = new TextInputBuilder()
+        .setCustomId('amount')
+        .setLabel('S? ti?n mu?n n?p (VND)')
+        .setPlaceholder('V� d?: 10000')
+        .setStyle(TextInputStyle.Short)
+        .setRequired(true);
+      modal.addComponents(new ActionRowBuilder().addComponents(amountInput));
+      await interaction.showModal(modal);
+      return;
+    }
+
+    if (interaction.isModalSubmit() && interaction.customId === 'otp:topup_modal') {
+      await interaction.deferReply({ ephemeral: true });
+      const amountStr = interaction.fields.getTextInputValue('amount');
+      const amount = parseInt(amountStr.replace(/\D/g, ''));
+      if (isNaN(amount) || amount < 10000) {
+        return interaction.editReply({ content: `${E('tick_red51')} S? ti?n kh�ng h?p l?. Vui l�ng n?p t?i thi?u 10,000d.` });
+      }
+
+      const { createTopupCheckout } = await import('../services/walletService.js');
+      try {
+        const topupData = await createTopupCheckout(interaction.guildId, interaction.user.id, amount);
+        const container = new ContainerBuilder().setAccentColor(0x3498db);
+        container.addTextDisplayComponents(
+          new TextDisplayBuilder().setContent(`### ${E('payment_payos') || '??'} QU�T M� QR �? N?P TI?N\n> Vui l�ng qu�t m� QR b�n du?i b?ng ?ng d?ng ng�n h�ng ho?c Momo d? n?p **${amount.toLocaleString('vi-VN')}d** v�o v�.\n> N?i dung chuy?n kho?n: \`${topupData.topupCode}\`\n\n*H? th?ng s? t? d?ng c?ng ti?n trong 3-10 gi�y sau khi chuy?n kho?n th�nh c�ng.*`)
+        );
+        
+        const qrBuffer = await QRCode.toBuffer(topupData.qrCode, { width: 400, margin: 2, color: { dark: '#000000', light: '#ffffff' } });
+        const qrAttachment = { attachment: qrBuffer, name: 'qr.png' };
+
+        const btnLink = new ButtonBuilder()
+          .setLabel('M? Link Thanh To�n')
+          .setStyle(ButtonStyle.Link)
+          .setURL(topupData.checkoutUrl);
+        const row = new ActionRowBuilder().addComponents(btnLink);
+
+        const payload = { components: [container, row], flags: MessageFlags.IsComponentsV2 };
+        if (qrAttachment) payload.files = [qrAttachment];
+
+        await interaction.editReply(payload);
+      } catch (err) {
+        await interaction.editReply({ content: `${E('tick_red51')} Kh�ng th? t?o m� n?p ti?n l�c n�y: ${err.message}` });
       }
       return;
     }
