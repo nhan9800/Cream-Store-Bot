@@ -30,6 +30,7 @@ import { buildTicketWelcomeV2, buildTicketControlComponents } from '../utils/emb
 import { buildTicketChannelName, parseMoneyInput, buildOrderLogContent } from '../utils/formatters.js';
 import { ensureRateLimit } from '../services/abuseService.js';
 import { isCustomerCtv } from '../services/ctvService.js';
+import { getWalletBalance, deductWalletBalance } from '../services/customerService.js';
 import {
   safeReply,
   getTicketCategoryId,
@@ -143,9 +144,19 @@ export async function handleProductPurchaseFlow(interaction, productId) {
     return;
   }
 
-  const normalizedType = 'ORDER';
+  const isCtv = isCustomerCtv(interaction.guildId, interaction.user.id);
+  const unitPrice = (isCtv && product.ctv_price !== null) ? product.ctv_price : product.price;
+  const totalPrice = unitPrice * quantity;
+
+  const currentBalance = getWalletBalance(interaction.guildId, interaction.user.id);
+  if (currentBalance < totalPrice) {
+    const missing = totalPrice - currentBalance;
+    await interaction.editReply(`${E('status_cross')} Số dư trong ví không đủ!\nSản phẩm: **${product.name}**\nĐơn giá: **${unitPrice.toLocaleString('vi-VN')}đ** x ${quantity}\nTổng tiền: **${totalPrice.toLocaleString('vi-VN')}đ**\n\nSố dư hiện tại: **${currentBalance.toLocaleString('vi-VN')}đ**\nBạn cần nạp thêm: **${missing.toLocaleString('vi-VN')}đ**.\n> Vui lòng nạp tiền vào ví bằng lệnh \`/wallet\` hoặc bảng Nạp Tiền để có thể mua sản phẩm.`);
+    return;
+  }
 
   // Khóa chống click đúp tạo 2 ticket
+  const normalizedType = 'ORDER';
   const lockKey = `${interaction.guildId}:${interaction.user.id}:${normalizedType}`;
   if (activeTicketCreations.has(lockKey)) {
     await interaction.editReply(`${E('status_warn')} Yêu cầu tạo ticket của bạn đang được xử lý, vui lòng không bấm liên tục.`);
@@ -212,8 +223,6 @@ export async function handleProductPurchaseFlow(interaction, productId) {
           await channel.setName(buildTicketChannelName(ticket.ticket_code, prefix)).catch(() => null);
         }
 
-        const unitPrice = (isCtv && product.ctv_price !== null) ? product.ctv_price : product.price;
-        const price = unitPrice * quantity;
         const order = createOrder({
           guildId: interaction.guildId,
           ticketId: ticket.id,
@@ -221,11 +230,25 @@ export async function handleProductPurchaseFlow(interaction, productId) {
           customerId: interaction.user.id,
           productName: product.name,
           quantity,
-          totalAmount: price,
+          totalAmount: totalPrice,
           durationMonths: product.duration_months,
           orderLogChannelId: guildConfig.order_log_channel_id ?? null,
           createdById: interaction.client.user.id,
         });
+
+        // Trừ tiền ngay sau khi order được tạo
+        deductWalletBalance(
+          interaction.guildId, 
+          interaction.user.id, 
+          totalPrice, 
+          'PAY_ORDER', 
+          `Thanh toán đơn ${order.order_code}: x${quantity} ${product.name}`, 
+          order.order_code
+        );
+
+        // Đánh dấu PAID trong DB
+        db.prepare("UPDATE store_orders SET status = 'PAID' WHERE order_code = ?").run(order.order_code);
+        order.status = 'PAID';
 
         // Gửi log đơn hàng vào kênh order log
         try {
@@ -261,14 +284,16 @@ export async function handleProductPurchaseFlow(interaction, productId) {
           await channel.send({ content: `${supportPing} ⚡ **ĐƠN HÀNG CTV ƯU TIÊN CAO:** CTV <@${interaction.user.id}> vừa lên đơn hàng \`${order.order_code}\` (Sản phẩm: **${product.name}**). Vui lòng ưu tiên xử lý và bàn giao nhanh nhất!` }).catch(() => null);
         }
 
-        // Nếu có tiền → tạo luôn QR PayOS (Bỏ bảng chọn phương thức)
-        if (price > 0) {
+        // Nếu có tiền và chưa thanh toán -> tạo QR PayOS
+        if (totalPrice > 0 && order.status !== 'PAID') {
           import('../services/paymentService.js').then(async ({ sendOrRefreshPaymentQr }) => {
             await sendOrRefreshPaymentQr({ guild: interaction.guild, orderCode: order.order_code }).catch(err => {
               console.error('[ORDER] Lỗi tạo QR PayOS:', err);
               channel.send(`${E('status_warn')} Lỗi tạo mã QR thanh toán: ${err.message}`);
             });
           });
+        } else if (order.status === 'PAID') {
+          await channel.send({ content: `${E('tickgreen') || '✅'} **THANH TOÁN THÀNH CÔNG:** Đơn hàng này đã được thanh toán 100% qua Ví Store. Nhân viên sẽ tiến hành xử lý và giao hàng cho bạn.` }).catch(() => null);
         }
 
         await interaction.editReply(`${E('status_check')} Đã tạo đơn hàng tại <#${channel.id}>`);

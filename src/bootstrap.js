@@ -47,6 +47,13 @@ export async function buildClient() {
       });
     }).catch(err => console.error('Failed to import autoSetupService', err));
 
+    // Tự động setup kênh Nạp Thẻ
+    import('./services/autoSetupCardService.js').then(({ autoSetupCardChannel }) => {
+      autoSetupCardChannel(readyClient).catch(err => {
+        console.log(`[AUTO-SETUP-CARD] Lỗi chạy setup: ${err.message}`);
+      });
+    }).catch(err => console.error('Failed to import autoSetupCardService', err));
+
         // Gửi thông báo ra mắt Boost Server - Đã bị tắt theo yêu cầu để tránh spam tag @everyone khi restart
     const SERVER1_GUILD_ID = '1282637033340403754';
     const isStore1 = readyClient.guilds.cache.has(SERVER1_GUILD_ID);
