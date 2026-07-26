@@ -871,6 +871,30 @@ export function registerInteractionHandler(client, commands) {
         return;
       }
 
+      if (interaction.isButton() && interaction.customId === 'announcement:edit') {
+        const cacheData = announcementCache.get(interaction.message.id);
+        if (!cacheData) {
+          await safeReply(interaction, { content: 'Phiên bản này đã hết hạn. Vui lòng gõ lại lệnh.', ephemeral: true });
+          return;
+        }
+
+        const modal = new ModalBuilder()
+          .setCustomId('announcement:modal')
+          .setTitle('Sửa nội dung thông báo');
+
+        const contentInput = new TextInputBuilder()
+          .setCustomId('announcement_content')
+          .setLabel('Nội dung bạn muốn thông báo')
+          .setStyle(TextInputStyle.Paragraph)
+          .setRequired(true)
+          .setValue(cacheData.content)
+          .setMaxLength(3000);
+
+        modal.addComponents(new ActionRowBuilder().addComponents(contentInput));
+        await interaction.showModal(modal);
+        return;
+      }
+
       if (interaction.isAnySelectMenu() && interaction.customId === 'announcement:roleselect') {
         const cacheData = announcementCache.get(interaction.message.id);
         if (!cacheData) {
