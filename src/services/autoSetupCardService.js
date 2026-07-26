@@ -57,10 +57,18 @@ export async function autoSetupCardChannel(client) {
       .setCustomId('cardswap:btn_fees')
       .setLabel('Xem Bảng Phí')
       .setEmoji(E.component('payment_money') || '💸')
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId('cardswap:btn_balance')
+      .setLabel('Kiểm Tra Số Dư')
+      .setEmoji(E.component('icon_wallet') || '💰')
       .setStyle(ButtonStyle.Secondary)
   );
 
-  await channel.send({ components: [container, row], flags: MessageFlags.IsComponentsV2 }).catch(err => {
+  const channelInfo = await channel.send({ 
+    components: [container, row], 
+    flags: MessageFlags.IsComponentsV2 
+  }).catch(err => {
     console.error('[AUTO-SETUP-CARD] Failed to send panel:', err.message);
   });
 

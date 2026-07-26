@@ -23,7 +23,8 @@ import {
   buildDiscountBoardComponents
 } from '../services/cardSwapService.js';
 import { getCustomerProfile } from '../services/customerService.js';
-import { getWalletBalance, addWalletBalance } from '../services/walletService.js';
+import { getWalletBalance, addWalletBalance, getWalletTransactions } from '../services/walletService.js';
+import { formatCurrency } from '../utils/formatters.js';
 
 export async function handleCardSwapInteractions(interaction) {
   const E = createEmojiResolver(interaction.guild.id);
@@ -58,6 +59,34 @@ export async function handleCardSwapInteractions(interaction) {
     });
 
     await interaction.reply({ content: 'Đã lưu cấu hình API Mua Thẻ thành công!', ephemeral: true });
+    return true;
+  }
+
+  // --- NÚT KIỂM TRA SỐ DƯ ---
+  if (interaction.isButton() && customId === 'cardswap:btn_balance') {
+    const guildId = interaction.guildId;
+    const targetUser = interaction.user;
+    const balance = getWalletBalance(guildId, targetUser.id);
+    const txs = getWalletTransactions(guildId, targetUser.id, 5);
+
+    const container = new ContainerBuilder().setAccentColor(0x3d5dff);
+    let desc = `### ${E('icon_wallet') || '💰'} VÍ ĐIỆN TỬ CỦA BẠN\n> **Số dư hiện tại:** \`${formatCurrency(balance)}\`\n`;
+    
+    if (txs.length > 0) {
+      desc += `\n**Lịch sử giao dịch gần đây:**\n`;
+      const history = txs.map(tx => {
+        const icon = tx.amount >= 0 ? (E('icon_green') || '🟩') : (E('icon_red') || '🟥');
+        const sign = tx.amount >= 0 ? '+' : '';
+        return `${icon} \`${sign}${formatCurrency(tx.amount)}\` - ${tx.description} (<t:${Math.floor(new Date(tx.created_at).getTime()/1000)}:R>)`;
+      }).join('\n');
+      desc += history;
+    }
+    
+    container.addTextDisplayComponents(
+      new TextDisplayBuilder().setContent(desc)
+    );
+    
+    await interaction.reply({ components: [container], flags: MessageFlags.IsComponentsV2, ephemeral: true });
     return true;
   }
 
@@ -169,8 +198,12 @@ export async function handleCardSwapInteractions(interaction) {
 
     try {
       const result = await submitChargingCard(interaction.guild.id, interaction.user.id, telco, code, serial, amount);
+      const successContainer = new ContainerBuilder().setAccentColor(0x2ECC71);
+      successContainer.addTextDisplayComponents(
+        new TextDisplayBuilder().setContent(`### ${E('tick_green') || '✅'} ĐÃ GỬI THẺ THÀNH CÔNG!\n> Yêu cầu của bạn đang được xử lý (Request ID: \`${result.request_id}\`).\n> Hệ thống sẽ gửi thông báo cho bạn khi thẻ được duyệt xong.`)
+      );
       await interaction.editReply({
-        content: `### ${E('tick_green') || '✅'} ĐÃ GỬI THẺ THÀNH CÔNG!\n> Yêu cầu của bạn đang được xử lý (Request ID: \`${result.request_id}\`).\n> Hệ thống sẽ gửi thông báo cho bạn khi thẻ được duyệt xong.`,
+        components: [successContainer],
         flags: MessageFlags.IsComponentsV2
       });
     } catch (e) {

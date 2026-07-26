@@ -29,6 +29,11 @@ export async function execute(interaction) {
       .setCustomId('cardswap:btn_fees')
       .setLabel('Xem Bảng Phí')
       .setEmoji(E.component('payment_money') || '💸')
+      .setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder()
+      .setCustomId('cardswap:btn_balance')
+      .setLabel('Kiểm Tra Số Dư')
+      .setEmoji(E.component('icon_wallet') || '💰')
       .setStyle(ButtonStyle.Secondary)
   );
 
