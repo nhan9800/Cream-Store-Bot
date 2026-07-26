@@ -39,19 +39,19 @@ export async function autoSetupCardChannel(client) {
 
   const container = new ContainerBuilder().setAccentColor(0x3498DB);
   container.addTextDisplayComponents(
-    new TextDisplayBuilder().setContent(`### ${E('star') || '✨'} DỊCH VỤ THẺ CÀO (GẠCH & MUA THẺ)\n> Hệ thống hỗ trợ xử lý thẻ cào tự động 24/7.\n> Phí gạch thẻ siêu rẻ, chiết khấu mua thẻ siêu tốt!\n\n**HƯỚNG DẪN:**\n- ${E('card') || '💳'} **Đổi Thẻ (Gạch Thẻ):** Đổi thẻ cào (Viettel, Vina, Mobi, Zing...) lấy số dư Ví tiền.\n- ${E('cart') || '🛒'} **Mua Thẻ Cào:** Dùng số dư Ví tiền để mua mã thẻ cào mới.`)
+    new TextDisplayBuilder().setContent(`### ${E('panel_support') || '✨'} DỊCH VỤ THẺ CÀO (GẠCH & MUA THẺ)\n> Hệ thống hỗ trợ xử lý thẻ cào tự động 24/7.\n> Phí gạch thẻ siêu rẻ, chiết khấu mua thẻ siêu tốt!\n\n**HƯỚNG DẪN:**\n- ${E('icon_wallet') || '💳'} **Đổi Thẻ (Gạch Thẻ):** Đổi thẻ cào (Viettel, Vina, Mobi, Zing...) lấy số dư Ví tiền.\n- ${E('icon_cart') || '🛒'} **Mua Thẻ Cào:** Dùng số dư Ví tiền để mua mã thẻ cào mới.`)
   );
 
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId('cardswap:btn_charge')
       .setLabel('Đổi Thẻ Cào')
-      .setEmoji(E.component('card') || '💳')
+      .setEmoji(E.component('icon_wallet') || '💳')
       .setStyle(ButtonStyle.Success),
     new ButtonBuilder()
       .setCustomId('cardswap:btn_buy')
       .setLabel('Mua Thẻ Cào')
-      .setEmoji(E.component('cart') || '🛒')
+      .setEmoji(E.component('icon_cart') || '🛒')
       .setStyle(ButtonStyle.Primary)
   );
 

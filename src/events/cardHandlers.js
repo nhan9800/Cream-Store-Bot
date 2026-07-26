@@ -68,7 +68,7 @@ export async function handleCardSwapInteractions(interaction) {
         
       const container = new ContainerBuilder().setAccentColor(0x3498DB);
       container.addTextDisplayComponents(
-        new TextDisplayBuilder().setContent(`### ${E('card') || '💳'} ĐỔI THẺ CÀO LẤY SỐ DƯ VÍ\nVui lòng chọn nhà mạng của thẻ bạn muốn gạch:`)
+        new TextDisplayBuilder().setContent(`### ${E('icon_wallet') || '💳'} ĐỔI THẺ CÀO LẤY SỐ DƯ VÍ\nVui lòng chọn nhà mạng của thẻ bạn muốn gạch:`)
       );
       
       const row = new ActionRowBuilder().addComponents(selectMenu);
@@ -152,7 +152,7 @@ export async function handleCardSwapInteractions(interaction) {
       
     const container = new ContainerBuilder().setAccentColor(0x3498DB);
     container.addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(`### ${E('cart') || '🛒'} MUA THẺ CÀO\nVui lòng chọn loại thẻ bạn muốn mua:`)
+      new TextDisplayBuilder().setContent(`### ${E('icon_cart') || '🛒'} MUA THẺ CÀO\nVui lòng chọn loại thẻ bạn muốn mua:`)
     );
       
     const row = new ActionRowBuilder().addComponents(selectMenu);
@@ -181,7 +181,7 @@ export async function handleCardSwapInteractions(interaction) {
       
     const container = new ContainerBuilder().setAccentColor(0x3498DB);
     container.addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(`### ${E('cart') || '🛒'} MUA THẺ ${telco.toUpperCase()}\nVui lòng chọn mệnh giá:`)
+      new TextDisplayBuilder().setContent(`### ${E('icon_cart') || '🛒'} MUA THẺ ${telco.toUpperCase()}\nVui lòng chọn mệnh giá:`)
     );
       
     const row = new ActionRowBuilder().addComponents(selectMenu);
