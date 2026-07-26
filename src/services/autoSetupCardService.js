@@ -16,21 +16,19 @@ export async function autoSetupCardChannel(client) {
   if (!guild) return;
 
   // Check if channel already exists
-  let channel = guild.channels.cache.find(c => c.name === '💳・nap-the-tu-dong' || c.name === 'nap-the-tu-dong');
-  if (channel) {
-    console.log('[AUTO-SETUP-CARD] Channel already exists. Skipping creation.');
-    return;
+  let channel = guild.channels.cache.find(c => c.name === '💳・nap-the-tu-dong' || c.name === 'nap-the-tu-dong' || c.name.includes('nap-the'));
+  
+  if (!channel) {
+    // Create channel
+    channel = await guild.channels.create({
+      name: '💳・nap-the-tu-dong',
+      type: ChannelType.GuildText,
+      reason: 'Tự động tạo kênh Gạch thẻ / Mua thẻ theo yêu cầu',
+    }).catch(err => {
+      console.error('[AUTO-SETUP-CARD] Failed to create channel:', err.message);
+      return null;
+    });
   }
-
-  // Create channel
-  channel = await guild.channels.create({
-    name: '💳・nap-the-tu-dong',
-    type: ChannelType.GuildText,
-    reason: 'Tự động tạo kênh Gạch thẻ / Mua thẻ theo yêu cầu',
-  }).catch(err => {
-    console.error('[AUTO-SETUP-CARD] Failed to create channel:', err.message);
-    return null;
-  });
 
   if (!channel) return;
 
@@ -65,12 +63,20 @@ export async function autoSetupCardChannel(client) {
       .setStyle(ButtonStyle.Secondary)
   );
 
-  const channelInfo = await channel.send({ 
+  // Xóa các tin nhắn cũ của bot trong kênh
+  const oldMessages = await channel.messages.fetch({ limit: 20 }).catch(() => null);
+  if (oldMessages) {
+    for (const m of oldMessages.filter(m => m.author.id === client.user.id).values()) {
+      await m.delete().catch(() => null);
+    }
+  }
+
+  await channel.send({ 
     components: [container, row], 
     flags: MessageFlags.IsComponentsV2 
   }).catch(err => {
     console.error('[AUTO-SETUP-CARD] Failed to send panel:', err.message);
   });
 
-  console.log('[AUTO-SETUP-CARD] Successfully created #nap-the-tu-dong and sent the panel!');
+  console.log('[AUTO-SETUP-CARD] Đã thả lại Card Panel vào kênh #' + channel.name);
 }
