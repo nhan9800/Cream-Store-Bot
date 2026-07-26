@@ -48,10 +48,24 @@ export function startOtpAutoCheck(client) {
               const E = createEmojiResolver(order.guild_id);
               const user = await client.users.fetch(order.customer_id);
               if (user) {
-                await user.send(`${E('tick_red51')} **THÔNG BÁO HOÀN TIỀN**\nPhiên chờ mã OTP của dịch vụ **${order.service_name}** (\`${order.phone_number}\`) đã quá 5 phút và bị tự động hủy.\nHệ thống đã hoàn lại **${order.price.toLocaleString('vi-VN')}đ** vào ví của bạn.`);
+                await user.send(`${E('tick_red51') || '❌'} **THÔNG BÁO HOÀN TIỀN**\nPhiên chờ mã OTP của dịch vụ **${order.service_name}** (\`${order.phone_number}\`) đã quá 5 phút và bị tự động hủy.\nHệ thống đã hoàn lại **${order.price.toLocaleString('vi-VN')}đ** vào ví của bạn.`);
               }
             } catch (dmErr) {
               console.error(`[OTP Auto] Không thể gửi DM hết hạn cho khách ${order.customer_id}:`, dmErr.message);
+            }
+          } else if (sessionData.Status === 0) {
+            const createdTime = new Date(order.created_at + 'Z').getTime();
+            if (Date.now() - createdTime > 10 * 60 * 1000) { // 10 minutes
+              db.prepare('UPDATE viotp_orders SET status = ? WHERE request_id = ?').run('EXPIRED', order.request_id);
+              addWalletBalance(order.guild_id, order.customer_id, order.price, 'REFUND', `Hoàn tiền OTP tự động hết hạn quá 10p (${order.service_name})`);
+              
+              try {
+                const E = createEmojiResolver(order.guild_id);
+                const user = await client.users.fetch(order.customer_id);
+                if (user) {
+                  await user.send(`${E('tick_red51') || '❌'} **THÔNG BÁO HOÀN TIỀN**\nPhiên chờ mã OTP của dịch vụ **${order.service_name}** (\`${order.phone_number}\`) đã quá 10 phút chưa nhận được mã.\nHệ thống đã chủ động hoàn lại **${order.price.toLocaleString('vi-VN')}đ** vào ví của bạn.`);
+                }
+              } catch (dmErr) {}
             }
           }
 

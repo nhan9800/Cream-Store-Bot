@@ -251,7 +251,7 @@ export async function handleOtpInteraction(interaction) {
       if (pendingOrders.length > 0) {
         content += `**Các phiên thuê OTP đang chờ:**\n`;
         pendingOrders.forEach(o => {
-          content += `> ${E('phone')} **${o.service_name}** - \`${o.phone_number}\` (Mã: \`${o.request_id}\`)\n`;
+          content += `> ${E('phone')} **${o.service_name}** - \`${o.phone_number}\` (Đang chờ mã OTP...)\n`;
         });
         content += `\n`;
       } else {
