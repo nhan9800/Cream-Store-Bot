@@ -179,3 +179,19 @@ export function getOrderTimeline(db, orderCode) {
 
   return rows;
 }
+
+export function transitionOrderStatus(orderCode, status, options = {}) {
+  const dbInst = options.dbInstance || options.db;
+  if (!dbInst) {
+    return { success: false, error: 'Database instance required' };
+  }
+  try {
+    const actor = options.changedBy || options.actor || 'ADMIN';
+    const reason = options.reason || 'Manual status update';
+    const trans = transitionOrder(dbInst, orderCode, status, actor, reason);
+    const order = dbInst.prepare('SELECT * FROM orders WHERE UPPER(order_code) = ?').get(String(orderCode).toUpperCase());
+    return { success: true, order, changed: trans.changed };
+  } catch (err) {
+    return { success: false, error: err.message || 'Transition failed' };
+  }
+}
