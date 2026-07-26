@@ -223,7 +223,7 @@ Spotify Premium | 25k | 1`;
 
       const lines = products.map((p, i) => {
         const status = p.is_active ? `${E('status_check')}` : `${E('status_cross')}`;
-        const priceText = p.price > 0 ? formatCurrency(p.price) : '_Miễn phí_';
+        const priceText = p.price > 0 ? formatCurrency(p.price) : '_Thương lượng_';
         return `${status} **ID ${p.id}** — ${p.emoji} **${p.name}** — ${priceText} / ${p.duration_months}T${p.description ? ` — _${p.description}_` : ''}`;
       });
 

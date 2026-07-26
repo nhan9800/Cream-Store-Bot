@@ -546,7 +546,7 @@ export function buildOrderCreatedEmbed(order, orderChannelId) {
         : '> Đơn không cần thanh toán — đưa vào hàng xử lý ngay!')
       .addFields(
         { name: 'San Pham', value: formatOrderProduct(order.quantity, order.product_name), inline: true },
-        { name: 'So Tien', value: hasPay ? `**${formatCurrency(order.total_amount)}**` : '_Miễn phí_', inline: true },
+        { name: 'So Tien', value: hasPay ? `**${formatCurrency(order.total_amount)}**` : '_Thương lượng_', inline: true },
         { name: 'Trang Thai', value: getOrderStatusLabel(order.status), inline: true },
         { name: 'Theo Doi Tai', value: `<#${orderChannelId}>`, inline: false },
       )

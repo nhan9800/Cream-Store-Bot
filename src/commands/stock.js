@@ -51,7 +51,7 @@ export function buildStockPanelComponents(guildId) {
 
   // Mỗi sản phẩm 1 dòng đẹp, dùng quote + bold
   const productLines = products.map(p => {
-    const priceText = p.price > 0 ? fmt.b(formatCurrency(p.price)) : `${E('icon_gift')} ${fmt.b('Miễn phí')}`;
+    const priceText = p.price > 0 ? fmt.b(formatCurrency(p.price)) : `${E('icon_gift')} ${fmt.b('Thương lượng')}`;
     const dur = p.duration_months > 1 ? `${p.duration_months} tháng` : '1 tháng';
     const desc = p.description ? `\n  ${subtext(p.description)}` : '';
     const emoji = resolveProductEmoji(guildId, p.emoji) || E('order_product');

@@ -87,7 +87,7 @@ function buildGroupPanel(guildId, group, products) {
       ? (hasSale
           ? `~~${formatCurrency(p.original_price)}~~ → ${fmt.b(formatCurrency(p.price))}`
           : fmt.b(formatCurrency(p.price)))
-      : `${E('icon_gift')} ${fmt.b('Miễn phí')}`;
+      : `${E('icon_gift')} ${fmt.b('Thương lượng')}`;
     return `${emoji} ${fmt.b(p.name)}\n> ${E('payment_money')} ${priceText} ${fmt.b('·')} ${E('icon_duration')} ${durText}`;
   });
 
@@ -107,7 +107,7 @@ function buildGroupPanel(guildId, group, products) {
     const durText = isLifetimeProduct(p)
       ? 'Vĩnh viễn'
       : (p.duration_months > 1 ? `${p.duration_months} tháng` : '1 tháng');
-    const priceLabel = p.price > 0 ? formatCurrency(p.price) : 'Miễn phí';
+    const priceLabel = p.price > 0 ? formatCurrency(p.price) : 'Thương lượng';
     const opt = {
       label: `${p.name}`.slice(0, 100),
       description: `${priceLabel} · ${durText}`.slice(0, 100),
