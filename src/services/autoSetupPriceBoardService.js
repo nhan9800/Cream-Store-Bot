@@ -6,10 +6,18 @@ import {
   ButtonBuilder,
   ButtonStyle,
   MessageFlags,
+  ContainerBuilder,
+  TextDisplayBuilder,
+  SeparatorBuilder,
+  SeparatorSpacingSize,
 } from 'discord.js';
-import { buildStockPanelComponents, stockPanelRegistry } from '../commands/stock.js';
+import { getActiveProducts } from './productCatalogService.js';
 import { getGuildConfig } from './guildConfigService.js';
-import { resolveSelectMenuEmoji } from './emojiService.js';
+import { resolveSelectMenuEmoji, getEmojiMap, resolveProductEmoji } from './emojiService.js';
+import { createEmojiResolver } from '../utils/emojiHelper.js';
+import { formatCurrency } from '../utils/formatters.js';
+import { fmt, subtext } from '../utils/embedHelpers.js';
+import { config } from '../config.js';
 
 export function buildPricePortalPayload(guildId, guildConfig) {
   const title = guildConfig?.price_list_title || '📺  PREMIUM SERVICES CATALOG — CENAR STORE  📺';
@@ -55,75 +63,118 @@ export function buildPricePortalPayload(guildId, guildConfig) {
       .setCustomId('price_list:select')
       .setPlaceholder('🛒 Chọn danh mục sản phẩm để xem bảng giá')
       .addOptions([
-        {
-          label: 'YouTube Premium (Siêu Ổn Định)',
-          description: 'Gói ổn định chính chủ 3T - 6T - 12T',
-          value: 'youtube',
-          emoji: resolveSelectMenuEmoji(guildId, 'brand_youtube', '📺')
-        },
-        {
-          label: 'Spotify Premium (Siêu Ổn Định)',
-          description: 'Nghe nhạc chất lượng cao offline',
-          value: 'spotify',
-          emoji: resolveSelectMenuEmoji(guildId, 'brand_spotify', '🎵')
-        },
-        {
-          label: 'Netflix Extra Premium',
-          description: 'Xem cùng lúc 1 thiết bị, UltraHD 4K',
-          value: 'netflix',
-          emoji: resolveSelectMenuEmoji(guildId, 'brand_netflix', '🍿')
-        },
-        {
-          label: 'Discord Nitro Full Premium',
-          description: 'Đầy đủ đặc quyền VIP Discord',
-          value: 'nitro',
-          emoji: resolveSelectMenuEmoji(guildId, 'brand_discord', '💎')
-        },
-        {
-          label: 'Discord Boost Server',
-          description: 'Bơm thẳng Server lên Level 3 nhanh chóng',
-          value: 'boost',
-          emoji: resolveSelectMenuEmoji(guildId, 'brand_discord', '🚀')
-        },
-        {
-          label: 'Decor Discord (Hiệu ứng hồ sơ)',
-          description: 'Hiệu ứng hồ sơ & trang trí ảnh đại diện Discord',
-          value: 'decor',
-          emoji: resolveSelectMenuEmoji(guildId, 'icon_sparkle', '✨')
-        },
-        {
-          label: 'AI & Phần Mềm Premium',
-          description: 'ChatGPT, Gemini Pro, Office 365, Adobe, CapCut...',
-          value: 'ai',
-          emoji: resolveSelectMenuEmoji(guildId, 'brand_chatgpt', '🤖')
-        },
-        {
-          label: 'GearUP Booster (Giảm Lag Ping)',
-          description: 'Tối ưu kết nối, giảm ping game 3T - 6T - 12T',
-          value: 'gearup',
-          emoji: resolveSelectMenuEmoji(guildId, 'brand_gearup', '🎮')
-        },
-        {
-          label: 'Dịch vụ Setup & Custom',
-          description: 'Thiết kế máy chủ, làm bot & website (Giá: Thương lượng)',
-          value: 'service',
-          emoji: resolveSelectMenuEmoji(guildId, 'brand_discord', '🛠️')
-        }
+        { label: 'YouTube Premium (Siêu Ổn Định)', description: 'Gói ổn định chính chủ 3T - 6T - 12T', value: 'youtube', emoji: resolveSelectMenuEmoji(guildId, 'brand_youtube', '📺') },
+        { label: 'Spotify Premium (Siêu Ổn Định)', description: 'Nghe nhạc chất lượng cao offline', value: 'spotify', emoji: resolveSelectMenuEmoji(guildId, 'brand_spotify', '🎵') },
+        { label: 'Netflix Extra Premium', description: 'Xem cùng lúc 1 thiết bị, UltraHD 4K', value: 'netflix', emoji: resolveSelectMenuEmoji(guildId, 'brand_netflix', '🍿') },
+        { label: 'Discord Nitro Full Premium', description: 'Đầy đủ đặc quyền VIP Discord', value: 'nitro', emoji: resolveSelectMenuEmoji(guildId, 'brand_discord', '💎') },
+        { label: 'Discord Boost Server', description: 'Bơm thẳng Server lên Level 3 nhanh chóng', value: 'boost', emoji: resolveSelectMenuEmoji(guildId, 'brand_discord', '🚀') },
+        { label: 'Decor Discord (Hiệu ứng hồ sơ)', description: 'Hiệu ứng hồ sơ & trang trí ảnh đại diện Discord', value: 'decor', emoji: resolveSelectMenuEmoji(guildId, 'icon_sparkle', '✨') },
+        { label: 'AI & Phần Mềm Premium', description: 'ChatGPT, Gemini Pro, Office 365, Adobe, CapCut...', value: 'ai', emoji: resolveSelectMenuEmoji(guildId, 'brand_chatgpt', '🤖') },
+        { label: 'GearUP Booster (Giảm Lag Ping)', description: 'Tối ưu kết nối, giảm ping game 3T - 6T - 12T', value: 'gearup', emoji: resolveSelectMenuEmoji(guildId, 'brand_gearup', '🎮') },
+        { label: 'Dịch vụ Setup & Custom', description: 'Thiết kế máy chủ, làm bot & website (Giá: Thương lượng)', value: 'service', emoji: resolveSelectMenuEmoji(guildId, 'brand_discord', '🛠️') }
       ])
   );
 
   const buttonRow = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId('price_list:admin:edit_portal')
-      .setLabel('Sửa bảng giá')
-      .setStyle(ButtonStyle.Secondary)
-      .setEmoji('✏️')
+    new ButtonBuilder().setCustomId('price_list:admin:edit_portal').setLabel('Sửa bảng giá').setStyle(ButtonStyle.Secondary).setEmoji('✏️')
   );
 
-  return {
-    embeds: [portalEmbed],
-    components: [selectRow, buttonRow]
-  };
+  return { embeds: [portalEmbed], components: [selectRow, buttonRow] };
+}
+
+const GROUPS = [
+  { titleSlot: 'brand_nitro',   title: 'Discord Nitro & Server Boost',           match: (p) => ['nitro', 'boost', 'GAME'].includes(p.service_type) && !/decor/i.test(p.name) },
+  { titleSlot: 'icon_art',      title: 'Decor Discord — Trang Trí Hồ Sơ',        match: (p) => p.service_type === 'decor' && /Acc /i.test(p.name) },
+  { titleSlot: 'icon_gift',     title: 'Decor Discord — Gift & Combo',           match: (p) => p.service_type === 'decor' && /Gift/i.test(p.name) },
+  { titleSlot: 'icon_brain',    title: 'AI & Phần Mềm Bản Quyền',                match: (p) => p.service_type === 'AI' },
+  { titleSlot: 'brand_youtube', title: 'Giải Trí — YouTube · Spotify · Netflix', match: (p) => ['youtube', 'spotify', 'netflix', 'STREAMING'].includes(p.service_type) },
+  { titleSlot: 'brand_gearup',  title: 'Tăng Tốc Game — GearUP Booster',         match: (p) => p.service_type === 'gearup' },
+  { titleSlot: 'brand_discord', title: 'Dịch Vụ Setup & Custom',                 match: (p) => ['SERVICE', 'service'].includes(p.service_type) },
+];
+
+const UNICODE_TO_SLOT = {
+  '✨': 'icon_sparkle', '🎨': 'icon_art', '🎁': 'icon_gift', '📦': 'order_product',
+  '💎': 'icon_gem', '🎬': 'brand_netflix', '🎵': 'brand_spotify', '🤖': 'icon_brain',
+};
+
+function getDurText(p) {
+  if (p.price === 0 || ['SERVICE', 'service'].includes(p.service_type)) return 'Theo yêu cầu';
+  if (p.service_type === 'decor') return 'Vĩnh viễn';
+  return p.duration_months > 1 ? `${p.duration_months} tháng` : '1 tháng';
+}
+
+function productEmoji(guildId, em, E, p) {
+  if (em[p.emoji]) return em[p.emoji];
+  const slot = UNICODE_TO_SLOT[p.emoji];
+  if (slot && em[slot]) return em[slot];
+  return E('order_product');
+}
+
+function productSelectEmoji(guildId, em, p) {
+  if (em[p.emoji]) return resolveSelectMenuEmoji(guildId, p.emoji, em.order_product);
+  const slot = UNICODE_TO_SLOT[p.emoji];
+  if (slot) return resolveSelectMenuEmoji(guildId, slot, em.order_product);
+  return resolveSelectMenuEmoji(guildId, 'order_product', em.order_product);
+}
+
+function buildGroupPanel(guildId, group, products) {
+  const em = getEmojiMap(guildId);
+  const E = createEmojiResolver(guildId);
+
+  const container = new ContainerBuilder().setAccentColor(config.accentColorPrimary);
+
+  container.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent(
+      `## ${E(group.titleSlot)}  ${group.title}\n` +
+      `> ${E('icon_sparkle')} ${fmt.b('Chính chủ — Bảo hành — Giao tự động 24/7')}\n` +
+      subtext('Chọn sản phẩm ở dropdown bên dưới để đặt hàng ngay!')
+    )
+  );
+
+  container.addSeparatorComponents(
+    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
+  );
+
+  const lines = products.map((p) => {
+    const emoji = productEmoji(guildId, em, E, p);
+    const durText = getDurText(p);
+    const hasSale = p.original_price > 0 && p.original_price > p.price;
+    const priceText = p.price > 0
+      ? (hasSale ? `~~${formatCurrency(p.original_price)}~~ → ${fmt.b(formatCurrency(p.price))}` : fmt.b(formatCurrency(p.price)))
+      : `${E('icon_gift')} ${fmt.b('Thương lượng')}`;
+    return `${emoji} ${fmt.b(p.name)}\n> ${E('payment_money')} ${priceText} ${fmt.b('·')} ${E('icon_duration')} ${durText}`;
+  });
+
+  container.addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join('\n')));
+
+  container.addSeparatorComponents(
+    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
+  );
+
+  container.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent(
+      subtext(`${E('icon_heart_purple')} ${products.length} sản phẩm · Cenar Store — Uy Tín & Chất Lượng`)
+    )
+  );
+
+  const options = products.slice(0, 25).map((p) => {
+    const durText = getDurText(p);
+    const priceLabel = p.price > 0 ? formatCurrency(p.price) : 'Thương lượng';
+    const opt = {
+      label: `${p.name}`.slice(0, 100),
+      description: `${priceLabel} · ${durText}`.slice(0, 100),
+      value: `${p.id}`,
+    };
+    const emoji = productSelectEmoji(guildId, em, p);
+    if (emoji) opt.emoji = emoji;
+    return opt;
+  });
+
+  const selectRow = new ActionRowBuilder().addComponents(
+    new StringSelectMenuBuilder().setCustomId('product:select').setPlaceholder('Chọn sản phẩm muốn mua...').addOptions(options)
+  );
+
+  return { components: [container, selectRow], flags: MessageFlags.IsComponentsV2 };
 }
 
 export async function autoSetupPriceBoard(client) {
@@ -138,48 +189,49 @@ export async function autoSetupPriceBoard(client) {
           name: '💰・bảng-giá',
           type: ChannelType.GuildText,
           reason: 'Tự động tạo kênh Bảng giá sản phẩm tự động',
-        }).catch(err => {
-          console.error('[AUTO-SETUP-PRICE] Lỗi tạo kênh bảng-giá:', err.message);
-          return null;
-        });
+        }).catch(() => null);
       }
-
       if (!channel) continue;
 
       const guildConfig = getGuildConfig(guild.id);
-      const portalPayload = buildPricePortalPayload(guild.id, guildConfig);
-      const stockComponents = buildStockPanelComponents(guild.id);
+      
+      // Mảng chứa TẤT CẢ các payload (tin nhắn) cần gửi theo thứ tự
+      const payloads = [];
 
-      const messages = await channel.messages.fetch({ limit: 20 }).catch(() => null);
-      let portalMsg = null;
-      let stockMsg = null;
+      // 1. Portal Catalog
+      payloads.push(buildPricePortalPayload(guild.id, guildConfig));
 
-      if (messages) {
-        portalMsg = messages.find(m => m.author.id === client.user.id && m.embeds && m.embeds.length > 0 && m.components && m.components.some(r => r.components.some(c => c.customId === 'price_list:select')));
-        stockMsg = messages.find(m => m.author.id === client.user.id && m.components && m.components.some(r => r.components.some(c => c.customId === 'product:select')));
+      // 2. Các Panel sản phẩm theo nhóm
+      const allProducts = getActiveProducts(guild.id);
+      const used = new Set();
+      for (const g of GROUPS) {
+        const items = allProducts.filter((p) => !used.has(p.id) && g.match(p));
+        items.forEach((p) => used.add(p.id));
+        if (items.length > 0) {
+          payloads.push(buildGroupPanel(guild.id, g, items));
+        }
+      }
+      const rest = allProducts.filter((p) => !used.has(p.id));
+      if (rest.length > 0) {
+        payloads.push(buildGroupPanel(guild.id, { titleSlot: 'order_product', title: 'Sản Phẩm Khác' }, rest));
       }
 
-      // 1. Gửi hoặc Cập nhật Portal Catalog Embed (có Dịch vụ Setup & Custom - Thương lượng)
-      if (portalMsg) {
-        await portalMsg.edit(portalPayload).catch(err => console.error('[AUTO-SETUP-PRICE] Lỗi edit Portal:', err.message));
-      } else {
-        await channel.send(portalPayload).catch(err => console.error('[AUTO-SETUP-PRICE] Lỗi send Portal:', err.message));
-      }
-
-      // 2. Gửi hoặc Cập nhật Stock Panel V2
-      if (stockComponents) {
-        if (stockMsg) {
-          await stockMsg.edit({ components: stockComponents, flags: MessageFlags.IsComponentsV2 }).catch(err => console.error('[AUTO-SETUP-PRICE] Lỗi edit Stock Panel:', err.message));
-          stockPanelRegistry.set(guild.id, { channelId: channel.id, messageId: stockMsg.id });
-        } else {
-          const sentMsg = await channel.send({ components: stockComponents, flags: MessageFlags.IsComponentsV2 }).catch(err => console.error('[AUTO-SETUP-PRICE] Lỗi send Stock Panel:', err.message));
-          if (sentMsg) {
-            stockPanelRegistry.set(guild.id, { channelId: channel.id, messageId: sentMsg.id });
-          }
+      // Xóa tất cả tin nhắn cũ của bot trong kênh (để setup lại từ A-Z một cách sạch sẽ và đúng thứ tự)
+      const oldMessages = await channel.messages.fetch({ limit: 50 }).catch(() => null);
+      if (oldMessages) {
+        for (const m of oldMessages.filter(m => m.author.id === client.user.id).values()) {
+          await m.delete().catch(() => null);
+          await new Promise(r => setTimeout(r, 350));
         }
       }
 
-      console.log(`[AUTO-SETUP-PRICE] Đã tự động thả/cập nhật Bảng Giá Catalog (Thương lượng) & Bảng Sản Phẩm vào #${channel.name} (${guild.name})`);
+      // Gửi lần lượt các payload
+      for (const payload of payloads) {
+        await channel.send(payload).catch(err => console.error('[AUTO-SETUP-PRICE] Lỗi gửi payload:', err.message));
+        await new Promise(r => setTimeout(r, 500)); // Delay để đảm bảo thứ tự
+      }
+
+      console.log(`[AUTO-SETUP-PRICE] Đã thả ĐẦY ĐỦ từ A-Z (${payloads.length} panels) vào #${channel.name} (${guild.name})`);
     }
   } catch (error) {
     console.error('[AUTO-SETUP-PRICE] Lỗi khi setup bảng giá:', error);
