@@ -46,7 +46,7 @@ export async function handleOtpInteraction(interaction) {
           label: `${s.name} - ${s.price.toLocaleString('vi-VN')}đ`,
           description: `Thuê số nhận OTP ${s.name}`,
           value: String(s.id),
-          emoji: E.component('cr_muahang')
+          emoji: E.component('panel_order') || undefined
         })));
 
       const row = new ActionRowBuilder().addComponents(selectMenu);
