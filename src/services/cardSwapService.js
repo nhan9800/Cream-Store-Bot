@@ -1,5 +1,8 @@
 import crypto from 'node:crypto';
 import { db, nowIso } from '../database/db.js';
+import { addWalletBalance } from './walletService.js';
+import { createEmojiResolver } from '../utils/emojiHelper.js';
+import { ContainerBuilder, TextDisplayBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } from 'discord.js';
 
 export function getCardSwapConfig(guildId) {
   const row = db.prepare('SELECT cardswap_partner_id, cardswap_partner_key, cardswap_buy_partner_id, cardswap_buy_partner_key, cardswap_domain, cardswap_charging_fee_add, cardswap_buy_profit_add FROM guild_settings WHERE guild_id = ?').get(guildId);
@@ -187,10 +190,6 @@ export async function buyCard(guildId, customerId, serviceCode, value, qty, tota
   }
 }
 
-import { addWalletBalance } from './walletService.js';
-import { createEmojiResolver } from '../utils/emojiHelper.js';
-import { ContainerBuilder, TextDisplayBuilder, MessageFlags } from 'discord.js';
-
 export async function handleCardSwapCallback(query, discordClient) {
   const { status, message, request_id, declared_value, card_value, value, amount, code, serial, telco, trans_id, callback_sign } = query;
   
@@ -289,8 +288,6 @@ export async function handleCardSwapCallback(query, discordClient) {
 }
 
 // --- Hỗ trợ render Discount Board ---
-import { ContainerBuilder, TextDisplayBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } from 'discord.js';
-import { createEmojiResolver } from '../utils/emojiHelper.js';
 
 export async function buildDiscountBoardMarkdown(guildId) {
   const fees = await getChargingFees(guildId);
