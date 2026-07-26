@@ -28,6 +28,7 @@ import {
 } from '../utils/embeds.js';
 import { formatCurrency } from '../utils/formatters.js';
 import { decrypt } from '../utils/crypto.js';
+import { createEmojiResolver } from '../utils/emojiHelper.js';
 
 const PAYOS_API_BASE = 'https://api-merchant.payos.vn';
 
@@ -611,8 +612,25 @@ export async function handlePayOSWebhook({ client, body }) {
       const isSuccess = payload.success === true || (payload.success === null && resultCode === '00');
 
       if (isSuccess && resultCode === '00' && Number(payload.data.amount ?? 0) >= topup.amount) {
-        finalizeTopup(topup.topup_code);
-        return { ok: true, status: 200, body: { ok: true, message: 'Topup confirmed', topup_code: topup.topup_code } };
+        const topupResult = finalizeTopup(topup.topup_code);
+          
+          if (topupResult && global.discordClient) {
+            try {
+              const user = await global.discordClient.users.fetch(topupResult.customer_id);
+              if (user) {
+                const E = createEmojiResolver(topupResult.guild_id);
+                const container = new ContainerBuilder().setAccentColor(0x2ECC71);
+                container.addTextDisplayComponents(
+                  new TextDisplayBuilder().setContent(`## ${E('tickgreen') || '✅'} NẠP TIỀN THÀNH CÔNG!\n\nBạn đã nạp thành công **${topupResult.amount.toLocaleString('vi-VN')}đ** vào ví.\n> ${E('status_check') || '✅'} Giao dịch: \`${topupResult.topup_code}\``)
+                );
+                await user.send({ components: [container], flags: MessageFlags.IsComponentsV2 });
+              }
+            } catch (err) {
+              console.error('[TOPUP DM ERROR]', err.message);
+            }
+          }
+
+          return { ok: true, status: 200, body: { ok: true, message: 'Topup confirmed', topup_code: topup.topup_code } };
       }
       return { ok: true, status: 200, body: { ok: true, message: 'Ignored non-success topup' } };
     }

@@ -127,7 +127,7 @@ export function getTopupByPayOSCode(payosOrderCode) {
 
 export function finalizeTopup(topupCode) {
   const topup = db.prepare('SELECT * FROM wallet_topup_orders WHERE topup_code = ?').get(topupCode);
-  if (!topup || topup.status === 'PAID') return false;
+  if (!topup || topup.status === 'PAID') return null;
 
   const updateStmt = db.prepare('UPDATE wallet_topup_orders SET status = ?, paid_at = ? WHERE topup_code = ?');
   
@@ -144,5 +144,5 @@ export function finalizeTopup(topupCode) {
   });
   
   transaction();
-  return true;
+  return topup;
 }
