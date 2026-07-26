@@ -30,7 +30,7 @@ import { buildTicketWelcomeV2, buildTicketControlComponents } from '../utils/emb
 import { buildTicketChannelName, parseMoneyInput, buildOrderLogContent } from '../utils/formatters.js';
 import { ensureRateLimit } from '../services/abuseService.js';
 import { isCustomerCtv } from '../services/ctvService.js';
-import { getWalletBalance, deductWalletBalance } from '../services/customerService.js';
+import { getWalletBalance, addWalletBalance } from '../services/walletService.js';
 import {
   safeReply,
   getTicketCategoryId,
@@ -236,11 +236,11 @@ export async function handleProductPurchaseFlow(interaction, productId) {
           createdById: interaction.client.user.id,
         });
 
-        // Trừ tiền ngay sau khi order được tạo
-        deductWalletBalance(
+        // Trừ tiền ngay sau khi order được tạo (cộng số âm)
+        addWalletBalance(
           interaction.guildId, 
           interaction.user.id, 
-          totalPrice, 
+          -totalPrice, 
           'PAY_ORDER', 
           `Thanh toán đơn ${order.order_code}: x${quantity} ${product.name}`, 
           order.order_code
