@@ -10,7 +10,9 @@ import {
   StringSelectMenuBuilder,
   TextDisplayBuilder,
   SeparatorBuilder,
-  SeparatorSpacingSize
+  SeparatorSpacingSize,
+  MediaGalleryBuilder,
+  MediaGalleryItemBuilder
 } from 'discord.js';
 import QRCode from 'qrcode';
 import { db } from '../database/db.js';
@@ -212,6 +214,12 @@ export async function handleOtpInteraction(interaction) {
         
         const qrBuffer = await QRCode.toBuffer(topupData.qrCode, { width: 400, margin: 2, color: { dark: '#000000', light: '#ffffff' } });
         const qrAttachment = { attachment: qrBuffer, name: 'qr.png' };
+        
+        container.addMediaGalleryComponents(
+          new MediaGalleryBuilder().addItems(
+            new MediaGalleryItemBuilder().setURL('attachment://qr.png')
+          )
+        );
 
         const btnLink = new ButtonBuilder()
           .setLabel('Mở Link Thanh Toán')
