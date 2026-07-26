@@ -38,6 +38,12 @@ const UNICODE_TO_SLOT = {
 };
 
 // Sản phẩm dùng 1 lần / vĩnh viễn (không hiển thị "X tháng")
+function getDurText(p) {
+  if (p.price === 0 || ['SERVICE', 'service'].includes(p.service_type)) return 'Theo yêu cầu';
+  if (isLifetimeProduct(p)) return 'Vĩnh viễn';
+  return p.duration_months > 1 ? `${p.duration_months} tháng` : '1 tháng';
+}
+
 function isLifetimeProduct(p) {
   return p.service_type === 'decor';
 }
@@ -79,9 +85,7 @@ function buildGroupPanel(guildId, group, products) {
 
   const lines = products.map((p) => {
     const emoji = productEmoji(guildId, em, E, p);
-    const durText = isLifetimeProduct(p)
-      ? 'Vĩnh viễn'
-      : (p.duration_months > 1 ? `${p.duration_months} tháng` : '1 tháng');
+    const durText = getDurText(p);
     const hasSale = p.original_price > 0 && p.original_price > p.price;
     const priceText = p.price > 0
       ? (hasSale
@@ -104,9 +108,7 @@ function buildGroupPanel(guildId, group, products) {
   );
 
   const options = products.slice(0, 25).map((p) => {
-    const durText = isLifetimeProduct(p)
-      ? 'Vĩnh viễn'
-      : (p.duration_months > 1 ? `${p.duration_months} tháng` : '1 tháng');
+    const durText = getDurText(p);
     const priceLabel = p.price > 0 ? formatCurrency(p.price) : 'Thương lượng';
     const opt = {
       label: `${p.name}`.slice(0, 100),
