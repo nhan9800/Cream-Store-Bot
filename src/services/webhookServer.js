@@ -8,6 +8,7 @@ import { registerAdminRoutes } from './adminApiRoutes.js';
 import { registerOauthRoutes } from './oauthBackupRoutes.js';
 import { securityHeaders, generalLimiter, webhookLimiter } from './rateLimitMiddleware.js';
 import { applyCors } from '../utils/cors.js';
+import { handleCardSwapCallback } from './cardSwapService.js';
 
 let httpServer = null;
 let appInstance = null;
@@ -87,7 +88,18 @@ export function registerPaymentRoutes(app) {
       });
     }
   });
+
+  app.get('/api/public/cardswap/callback', async (req, res) => {
+    try {
+      await handleCardSwapCallback(req.query, req.app.locals.discordClient);
+      res.status(200).send('OK');
+    } catch (e) {
+      console.error('[CARDSWAP WEBHOOK] Lỗi xử lý callback:', e.message);
+      res.status(400).send('ERROR');
+    }
+  });
 }
+
 
 export async function startWebhookServer(client = null) {
   if (httpServer) {

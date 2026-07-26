@@ -730,6 +730,46 @@ export function initDatabase() {
     );
   `);
 
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS card_charging_orders (
+      request_id TEXT PRIMARY KEY,
+      guild_id TEXT NOT NULL,
+      customer_id TEXT NOT NULL,
+      telco TEXT NOT NULL,
+      code TEXT NOT NULL,
+      serial TEXT NOT NULL,
+      declared_value INTEGER NOT NULL,
+      value INTEGER,
+      amount INTEGER,
+      trans_id TEXT,
+      status TEXT DEFAULT 'PENDING',
+      message TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+
+    CREATE TABLE IF NOT EXISTS card_buy_orders (
+      request_id TEXT PRIMARY KEY,
+      guild_id TEXT NOT NULL,
+      customer_id TEXT NOT NULL,
+      service_code TEXT NOT NULL,
+      value INTEGER NOT NULL,
+      qty INTEGER NOT NULL,
+      total_price INTEGER NOT NULL,
+      cards_data TEXT,
+      status TEXT DEFAULT 'PENDING',
+      message TEXT,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  `);
+
+  ensureColumn('guild_settings', 'cardswap_partner_id', 'TEXT DEFAULT NULL');
+  ensureColumn('guild_settings', 'cardswap_partner_key', 'TEXT DEFAULT NULL');
+  ensureColumn('guild_settings', 'cardswap_domain', "TEXT DEFAULT 'card2k.com'");
+  ensureColumn('guild_settings', 'cardswap_charging_fee_add', "REAL DEFAULT 5.0");
+  ensureColumn('guild_settings', 'cardswap_buy_profit_add', "INTEGER DEFAULT 3000");
+
   ensureColumn('customer_profiles', 'is_ctv', 'INTEGER DEFAULT 0');
   ensureColumn('customer_profiles', 'ctv_joined_at', 'TEXT');
   ensureColumn('product_catalog', 'ctv_price', 'INTEGER DEFAULT NULL');
