@@ -18,8 +18,8 @@ import {
   checkAvailableCard, 
   buyCard,
   getCardSwapConfig
-} from '../services/cardSwapService.js';
-import { getCustomerProfile, getWalletBalance, addWalletBalance } from '../services/customerService.js';
+import { getCustomerProfile } from '../services/customerService.js';
+import { getWalletBalance, addWalletBalance } from '../services/walletService.js';
 
 export async function handleCardSwapInteractions(interaction) {
   const E = createEmojiResolver(interaction.guild.id);
