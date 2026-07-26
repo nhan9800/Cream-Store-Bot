@@ -182,11 +182,11 @@ export async function handleOtpInteraction(interaction) {
     if (interaction.customId === 'otp:topup_menu') {
       const modal = new ModalBuilder()
         .setCustomId('otp:topup_modal')
-        .setTitle('N?p Ti?n V�o V�');
+        .setTitle('Nạp Tiền Vào Ví');
       const amountInput = new TextInputBuilder()
         .setCustomId('amount')
-        .setLabel('S? ti?n mu?n n?p (VND)')
-        .setPlaceholder('V� d?: 10000')
+        .setLabel('Số tiền muốn nạp (VND)')
+        .setPlaceholder('Ví dụ: 10000')
         .setStyle(TextInputStyle.Short)
         .setRequired(true);
       modal.addComponents(new ActionRowBuilder().addComponents(amountInput));
@@ -199,7 +199,7 @@ export async function handleOtpInteraction(interaction) {
       const amountStr = interaction.fields.getTextInputValue('amount');
       const amount = parseInt(amountStr.replace(/\D/g, ''));
       if (isNaN(amount) || amount < 10000) {
-        return interaction.editReply({ content: `${E('tick_red51')} S? ti?n kh�ng h?p l?. Vui l�ng n?p t?i thi?u 10,000d.` });
+        return interaction.editReply({ content: `${E('tick_red51')} Số tiền không hợp lệ. Vui lòng nạp tối thiểu 10,000đ.` });
       }
 
       const { createTopupCheckout } = await import('../services/walletService.js');
@@ -207,14 +207,14 @@ export async function handleOtpInteraction(interaction) {
         const topupData = await createTopupCheckout(interaction.guildId, interaction.user.id, amount);
         const container = new ContainerBuilder().setAccentColor(0x3498db);
         container.addTextDisplayComponents(
-          new TextDisplayBuilder().setContent(`### ${E('payment_payos') || '??'} QU�T M� QR �? N?P TI?N\n> Vui l�ng qu�t m� QR b�n du?i b?ng ?ng d?ng ng�n h�ng ho?c Momo d? n?p **${amount.toLocaleString('vi-VN')}d** v�o v�.\n> N?i dung chuy?n kho?n: \`${topupData.topupCode}\`\n\n*H? th?ng s? t? d?ng c?ng ti?n trong 3-10 gi�y sau khi chuy?n kho?n th�nh c�ng.*`)
+          new TextDisplayBuilder().setContent(`### ${E('payment_payos') || '💰'} QUÉT MÃ QR ĐỂ NẠP TIỀN\n> Vui lòng quét mã QR bên dưới bằng ứng dụng ngân hàng hoặc Momo để nạp **${amount.toLocaleString('vi-VN')}đ** vào ví.\n> Nội dung chuyển khoản: \`${topupData.topupCode}\`\n\n*Hệ thống sẽ tự động cộng tiền trong 3-10 giây sau khi chuyển khoản thành công.*`)
         );
         
         const qrBuffer = await QRCode.toBuffer(topupData.qrCode, { width: 400, margin: 2, color: { dark: '#000000', light: '#ffffff' } });
         const qrAttachment = { attachment: qrBuffer, name: 'qr.png' };
 
         const btnLink = new ButtonBuilder()
-          .setLabel('M? Link Thanh To�n')
+          .setLabel('Mở Link Thanh Toán')
           .setStyle(ButtonStyle.Link)
           .setURL(topupData.checkoutUrl);
         const row = new ActionRowBuilder().addComponents(btnLink);
@@ -224,7 +224,7 @@ export async function handleOtpInteraction(interaction) {
 
         await interaction.editReply(payload);
       } catch (err) {
-        await interaction.editReply({ content: `${E('tick_red51')} Kh�ng th? t?o m� n?p ti?n l�c n�y: ${err.message}` });
+        await interaction.editReply({ content: `${E('tick_red51')} Không thể tạo mã nạp tiền lúc này: ${err.message}` });
       }
       return;
     }
