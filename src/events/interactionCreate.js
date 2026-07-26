@@ -164,6 +164,7 @@ import {
 import {
   handleAnnouncementSelect,
 } from "./announcementHandlers.js";
+import { handleOtpInteraction } from "./otpHandlers.js";
 
 
 const __filename = fileURLToPath(import.meta.url);
@@ -233,6 +234,11 @@ export function registerInteractionHandler(client, commands) {
             interaction.respond([]).catch(() => null)
           );
         }
+        return;
+      }
+
+      if (interaction.customId && interaction.customId.startsWith('otp:')) {
+        await handleOtpInteraction(interaction);
         return;
       }
 

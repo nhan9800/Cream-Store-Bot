@@ -713,6 +713,21 @@ export function initDatabase() {
       ctv_role_id TEXT,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE TABLE IF NOT EXISTS viotp_orders (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      guild_id TEXT NOT NULL,
+      customer_id TEXT NOT NULL,
+      service_id INTEGER NOT NULL,
+      service_name TEXT NOT NULL,
+      price INTEGER NOT NULL,
+      request_id TEXT NOT NULL UNIQUE,
+      phone_number TEXT,
+      otp_code TEXT,
+      status TEXT NOT NULL DEFAULT 'PENDING',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
   `);
 
   ensureColumn('customer_profiles', 'is_ctv', 'INTEGER DEFAULT 0');
