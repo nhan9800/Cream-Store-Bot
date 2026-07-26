@@ -33,11 +33,11 @@ export async function execute(interaction) {
   const targetChannel = interaction.options.getChannel('kenh') || interaction.channel;
 
   // ─── Dựng Components V2 panel ───────────────────────────────
-  const iconSparkle = E('icon_sparkle', '✨');
-  const iconCheck   = E('status_check', '✅');
-  const iconPhone   = E('icon_phone', '📱');
-  const iconMoney   = E('payment_money', '💰');
-  const iconHistory = E('icon_history', '🕒');
+  const iconSparkle = E('starxoay', '✨');
+  const iconCheck   = E('tickgreen', '✅');
+  const iconPhone   = E('phone', '📱');
+  const iconMoney   = E('money', '💰');
+  const iconHistory = E('chamxanh', '🕒');
 
   const headerLine = [iconSparkle, `THUÊ SỐ ĐIỆN THOẠI ONLINE — ${storeName.toUpperCase()}`]
     .filter(Boolean).join(' ');
@@ -75,7 +75,7 @@ export async function execute(interaction) {
     .setLabel('Thuê Số Mới')
     .setStyle(ButtonStyle.Primary);
 
-  const btnEmoji = E.component('icon_cart');
+  const btnEmoji = E.component('cr_shop') || E.component('icon_cart');
   if (btnEmoji) rentBtn.setEmoji(btnEmoji);
 
   const checkBalanceBtn = new ButtonBuilder()
@@ -83,7 +83,7 @@ export async function execute(interaction) {
     .setLabel('Kiểm Tra OTP & Số Dư')
     .setStyle(ButtonStyle.Secondary);
 
-  const checkEmoji = E.component('icon_history');
+  const checkEmoji = E.component('cr_pay') || E.component('icon_history');
   if (checkEmoji) checkBalanceBtn.setEmoji(checkEmoji);
 
   const actionRow = new ActionRowBuilder().addComponents(rentBtn, checkBalanceBtn);

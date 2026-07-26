@@ -27,7 +27,7 @@ export async function handleOtpInteraction(interaction) {
       // Lấy danh sách dịch vụ từ ViOTP
       const services = await getServices('vn');
       if (!services || services.length === 0) {
-        return await interaction.editReply({ content: `${E('status_cross')} Hệ thống thuê số đang bảo trì (không tải được dịch vụ).` });
+        return await interaction.editReply({ content: `${E('tick_red51')} Hệ thống thuê số đang bảo trì (không tải được dịch vụ).` });
       }
 
       // Sắp xếp: Ưu tiên các dịch vụ trong list, sau đó đến các dịch vụ giá rẻ
@@ -46,13 +46,13 @@ export async function handleOtpInteraction(interaction) {
           label: `${s.name} - ${s.price.toLocaleString('vi-VN')}đ`,
           description: `Thuê số nhận OTP ${s.name}`,
           value: String(s.id),
-          emoji: E.component('panel_order')
+          emoji: E.component('cr_muahang')
         })));
 
       const row = new ActionRowBuilder().addComponents(selectMenu);
       const container = new ContainerBuilder().setAccentColor(0x3498db);
       container.addTextDisplayComponents(
-        new TextDisplayBuilder().setContent(`### ${E('icon_sparkle')} CHỌN DỊCH VỤ THUÊ OTP\n> Số tiền sẽ được trừ vào số dư ví của bạn.\n> Nếu không nhận được mã trong 5 phút, tiền sẽ được hoàn lại tự động.`)
+        new TextDisplayBuilder().setContent(`### ${E('starxoay')} CHỌN DỊCH VỤ THUÊ OTP\n> Số tiền sẽ được trừ vào số dư ví của bạn.\n> Nếu không nhận được mã trong 5 phút, tiền sẽ được hoàn lại tự động.`)
       );
 
       await interaction.editReply({
@@ -70,13 +70,13 @@ export async function handleOtpInteraction(interaction) {
       const service = services.find(s => s.id === serviceId);
       
       if (!service) {
-        return await interaction.editReply({ content: `${E('status_cross')} Không tìm thấy thông tin dịch vụ này.` });
+        return await interaction.editReply({ content: `${E('tick_red51')} Không tìm thấy thông tin dịch vụ này.` });
       }
 
       const userBalance = getWalletBalance(interaction.guildId, interaction.user.id);
       if (userBalance < service.price) {
         return await interaction.editReply({ 
-          content: `${E('status_warn')} Bạn không đủ số dư để thuê dịch vụ này.\n> **Giá:** ${service.price.toLocaleString('vi-VN')}đ\n> **Số dư của bạn:** ${userBalance.toLocaleString('vi-VN')}đ\n\n*Vui lòng nạp thêm tiền vào ví để tiếp tục.*` 
+          content: `${E('tick_red51')} Bạn không đủ số dư để thuê dịch vụ này.\n> **Giá:** ${service.price.toLocaleString('vi-VN')}đ\n> **Số dư của bạn:** ${userBalance.toLocaleString('vi-VN')}đ\n\n*Vui lòng nạp thêm tiền vào ví để tiếp tục.*` 
         });
       }
 
@@ -96,7 +96,7 @@ export async function handleOtpInteraction(interaction) {
 
         const container = new ContainerBuilder().setAccentColor(0x2ECC71);
         container.addTextDisplayComponents(
-          new TextDisplayBuilder().setContent(`## ${E('status_check')} THUÊ SỐ THÀNH CÔNG!\n\n**Dịch vụ:** ${service.name}\n**Số điện thoại:** \`${otpData.phone_number}\`\n**Giá:** ${service.price.toLocaleString('vi-VN')}đ\n\n> ${E('icon_clock')} Hãy sử dụng số điện thoại này để đăng ký.\n> Sau khi hệ thống gửi mã xác nhận, hãy nhấn nút **Lấy Mã OTP** bên dưới.`)
+          new TextDisplayBuilder().setContent(`## ${E('tickgreen')} THUÊ SỐ THÀNH CÔNG!\n\n**Dịch vụ:** ${service.name}\n**Số điện thoại:** \`${otpData.phone_number}\`\n**Giá:** ${service.price.toLocaleString('vi-VN')}đ\n\n> ${E('chamxanh')} Hãy sử dụng số điện thoại này để đăng ký.\n> Sau khi hệ thống gửi mã xác nhận, hãy nhấn nút **Lấy Mã OTP** bên dưới.`)
         );
 
         const btnGetCode = new ButtonBuilder()
@@ -104,7 +104,7 @@ export async function handleOtpInteraction(interaction) {
           .setLabel('Lấy Mã OTP')
           .setStyle(ButtonStyle.Success);
         
-        const btnEmoji = E.component('icon_history');
+        const btnEmoji = E.component('cr_pay');
         if (btnEmoji) btnGetCode.setEmoji(btnEmoji);
 
         const row = new ActionRowBuilder().addComponents(btnGetCode);
@@ -117,7 +117,7 @@ export async function handleOtpInteraction(interaction) {
       } catch (err) {
         // Hoàn tiền nếu request lỗi
         addWalletBalance(interaction.guildId, interaction.user.id, service.price, 'REFUND', `Hoàn tiền lỗi thuê OTP ${service.name}`);
-        await interaction.editReply({ content: `${E('status_cross')} Lỗi khi yêu cầu số: \`${err.message}\`. Tiền đã được hoàn lại vào ví.` });
+        await interaction.editReply({ content: `${E('tick_red51')} Lỗi khi yêu cầu số: \`${err.message}\`. Tiền đã được hoàn lại vào ví.` });
       }
       return;
     }
@@ -128,14 +128,14 @@ export async function handleOtpInteraction(interaction) {
 
       const orderRow = db.prepare('SELECT * FROM viotp_orders WHERE request_id = ?').get(requestId);
       if (!orderRow) {
-        return await interaction.editReply({ content: `${E('status_cross')} Không tìm thấy phiên giao dịch này trong hệ thống.` });
+        return await interaction.editReply({ content: `${E('tick_red51')} Không tìm thấy phiên giao dịch này trong hệ thống.` });
       }
 
       if (orderRow.status === 'COMPLETED') {
-        return await interaction.editReply({ content: `${E('status_check')} Mã OTP của bạn là: **${orderRow.otp_code}**` });
+        return await interaction.editReply({ content: `${E('tickgreen')} Mã OTP của bạn là: **${orderRow.otp_code}**` });
       }
       if (orderRow.status === 'EXPIRED' || orderRow.status === 'FAILED') {
-        return await interaction.editReply({ content: `${E('status_cross')} Phiên thuê này đã kết thúc hoặc quá hạn.` });
+        return await interaction.editReply({ content: `${E('tick_red51')} Phiên thuê này đã kết thúc hoặc quá hạn.` });
       }
 
       try {
@@ -146,7 +146,7 @@ export async function handleOtpInteraction(interaction) {
           
           const container = new ContainerBuilder().setAccentColor(0x2ECC71);
           container.addTextDisplayComponents(
-            new TextDisplayBuilder().setContent(`## ${E('icon_sparkle')} ĐÃ NHẬN ĐƯỢC MÃ OTP!\n\n**Dịch vụ:** ${orderRow.service_name}\n**Số điện thoại:** \`${orderRow.phone_number}\`\n**Mã OTP:** \`${sessionData.Code}\`\n\n> ${E('status_info')} **Nội dung tin nhắn:**\n> *${sessionData.SmsContent}*`)
+            new TextDisplayBuilder().setContent(`## ${E('starxoay')} ĐÃ NHẬN ĐƯỢC MÃ OTP!\n\n**Dịch vụ:** ${orderRow.service_name}\n**Số điện thoại:** \`${orderRow.phone_number}\`\n**Mã OTP:** \`${sessionData.Code}\`\n\n> ${E('status_info')} **Nội dung tin nhắn:**\n> *${sessionData.SmsContent}*`)
           );
 
           await interaction.editReply({ components: [container], flags: MessageFlags.IsComponentsV2 });
@@ -155,18 +155,18 @@ export async function handleOtpInteraction(interaction) {
           db.prepare('UPDATE viotp_orders SET status = ? WHERE request_id = ?').run('EXPIRED', requestId);
           addWalletBalance(interaction.guildId, interaction.user.id, orderRow.price, 'REFUND', `Hoàn tiền OTP hết hạn (${orderRow.service_name})`);
           
-          await interaction.editReply({ content: `${E('status_cross')} Phiên chờ OTP đã hết hạn. Hệ thống đã tự động **hoàn lại ${orderRow.price.toLocaleString('vi-VN')}đ** vào ví của bạn.` });
+          await interaction.editReply({ content: `${E('tick_red51')} Phiên chờ OTP đã hết hạn. Hệ thống đã tự động **hoàn lại ${orderRow.price.toLocaleString('vi-VN')}đ** vào ví của bạn.` });
         } else {
           // Đang đợi (Status === 0)
-          await interaction.editReply({ content: `${E('icon_clock')} Đang đợi mã OTP từ nhà mạng... Vui lòng chờ thêm vài giây rồi nhấn lại nút Lấy Mã OTP nhé.` });
+          await interaction.editReply({ content: `${E('chamxanh')} Đang đợi mã OTP từ nhà mạng... Vui lòng chờ thêm vài giây rồi nhấn lại nút Lấy Mã OTP nhé.` });
         }
       } catch (err) {
         if (err.message.includes('Mã phiên không đúng') || err.message.includes('-2')) {
           db.prepare('UPDATE viotp_orders SET status = ? WHERE request_id = ?').run('FAILED', requestId);
           addWalletBalance(interaction.guildId, interaction.user.id, orderRow.price, 'REFUND', `Hoàn tiền OTP lỗi phiên (${orderRow.service_name})`);
-          await interaction.editReply({ content: `${E('status_cross')} Phiên giao dịch bị lỗi từ ViOTP. Đã tự động hoàn tiền.` });
+          await interaction.editReply({ content: `${E('tick_red51')} Phiên giao dịch bị lỗi từ ViOTP. Đã tự động hoàn tiền.` });
         } else {
-          await interaction.editReply({ content: `${E('status_warn')} Lỗi kiểm tra mã: \`${err.message}\`` });
+          await interaction.editReply({ content: `${E('tick_red51')} Lỗi kiểm tra mã: \`${err.message}\`` });
         }
       }
       return;
@@ -180,12 +180,12 @@ export async function handleOtpInteraction(interaction) {
       const pendingOrders = db.prepare('SELECT * FROM viotp_orders WHERE customer_id = ? AND status = ?').all(interaction.user.id, 'PENDING');
 
       const container = new ContainerBuilder().setAccentColor(0x9B59B6);
-      let content = `### ${E('payment_money')} THÔNG TIN VÍ & OTP\n\n**Số dư ví hiện tại:** ${userBalance.toLocaleString('vi-VN')}đ\n\n`;
+      let content = `### ${E('money')} THÔNG TIN VÍ & OTP\n\n**Số dư ví hiện tại:** ${userBalance.toLocaleString('vi-VN')}đ\n\n`;
 
       if (pendingOrders.length > 0) {
         content += `**Các phiên thuê OTP đang chờ:**\n`;
         pendingOrders.forEach(o => {
-          content += `> ${E('icon_phone')} **${o.service_name}** - \`${o.phone_number}\` (Mã: \`${o.request_id}\`)\n`;
+          content += `> ${E('phone')} **${o.service_name}** - \`${o.phone_number}\` (Mã: \`${o.request_id}\`)\n`;
         });
       } else {
         content += `*Bạn không có phiên thuê OTP nào đang chờ mã.*`;
@@ -200,9 +200,9 @@ export async function handleOtpInteraction(interaction) {
     console.error('[OTP Handler] Error:', error);
     try {
       if (!interaction.replied && !interaction.deferred) {
-        await interaction.reply({ content: `${E('status_cross')} Đã xảy ra lỗi: ${error.message}`, ephemeral: true });
+        await interaction.reply({ content: `${E('tick_red51')} Đã xảy ra lỗi: ${error.message}`, ephemeral: true });
       } else {
-        await interaction.editReply({ content: `${E('status_cross')} Đã xảy ra lỗi: ${error.message}` });
+        await interaction.editReply({ content: `${E('tick_red51')} Đã xảy ra lỗi: ${error.message}` });
       }
     } catch {}
   }
