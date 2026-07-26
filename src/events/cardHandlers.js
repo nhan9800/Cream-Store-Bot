@@ -6,7 +6,9 @@ import {
   StringSelectMenuBuilder, 
   ButtonBuilder, 
   ButtonStyle,
-  EmbedBuilder
+  ContainerBuilder,
+  TextDisplayBuilder,
+  MessageFlags
 } from 'discord.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { 
@@ -17,7 +19,7 @@ import {
   buyCard,
   getCardSwapConfig
 } from '../services/cardSwapService.js';
-import { getCustomerProfile, getWalletBalance, deductWalletBalance } from '../services/customerService.js';
+import { getCustomerProfile, getWalletBalance, addWalletBalance } from '../services/customerService.js';
 
 export async function handleCardSwapInteractions(interaction) {
   const E = createEmojiResolver(interaction.guild.id);
@@ -63,10 +65,15 @@ export async function handleCardSwapInteractions(interaction) {
           value: t
         })));
         
+      const container = new ContainerBuilder().setAccentColor(0x3498DB);
+      container.addTextDisplayComponents(
+        new TextDisplayBuilder().setContent(`### ${E('card') || '💳'} ĐỔI THẺ CÀO LẤY SỐ DƯ VÍ\nVui lòng chọn nhà mạng của thẻ bạn muốn gạch:`)
+      );
+      
       const row = new ActionRowBuilder().addComponents(selectMenu);
       await interaction.reply({ 
-        content: `**ĐỔI THẺ CÀO LẤY SỐ DƯ VÍ**\nVui lòng chọn nhà mạng của thẻ bạn muốn gạch:`, 
-        components: [row], 
+        components: [container, row], 
+        flags: MessageFlags.IsComponentsV2,
         ephemeral: true 
       });
     } catch (e) {
@@ -113,7 +120,10 @@ export async function handleCardSwapInteractions(interaction) {
 
     try {
       const result = await submitChargingCard(interaction.guild.id, interaction.user.id, telco, code, serial, amount);
-      await interaction.editReply(`Đã gửi thẻ thành công! Yêu cầu của bạn đang được xử lý (Request ID: \`${result.request_id}\`).\nHệ thống sẽ gửi tin nhắn cho bạn khi thẻ được duyệt xong.`);
+      await interaction.editReply({
+        content: `### ${E('tick_green') || '✅'} ĐÃ GỬI THẺ THÀNH CÔNG!\n> Yêu cầu của bạn đang được xử lý (Request ID: \`${result.request_id}\`).\n> Hệ thống sẽ gửi thông báo cho bạn khi thẻ được duyệt xong.`,
+        flags: MessageFlags.IsComponentsV2
+      });
     } catch (e) {
       await interaction.editReply(`Lỗi: ${e.message}`);
     }
@@ -139,10 +149,15 @@ export async function handleCardSwapInteractions(interaction) {
         { label: 'Vcoin', value: 'Vcoin' }
       );
       
+    const container = new ContainerBuilder().setAccentColor(0x3498DB);
+    container.addTextDisplayComponents(
+      new TextDisplayBuilder().setContent(`### ${E('cart') || '🛒'} MUA THẺ CÀO\nVui lòng chọn loại thẻ bạn muốn mua:`)
+    );
+      
     const row = new ActionRowBuilder().addComponents(selectMenu);
     await interaction.reply({ 
-      content: `**MUA THẺ CÀO**\nVui lòng chọn loại thẻ bạn muốn mua:`, 
-      components: [row], 
+      components: [container, row], 
+      flags: MessageFlags.IsComponentsV2,
       ephemeral: true 
     });
     return true;
@@ -163,10 +178,15 @@ export async function handleCardSwapInteractions(interaction) {
         { label: '500.000đ', value: '500000' }
       );
       
+    const container = new ContainerBuilder().setAccentColor(0x3498DB);
+    container.addTextDisplayComponents(
+      new TextDisplayBuilder().setContent(`### ${E('cart') || '🛒'} MUA THẺ ${telco.toUpperCase()}\nVui lòng chọn mệnh giá:`)
+    );
+      
     const row = new ActionRowBuilder().addComponents(selectMenu);
     await interaction.update({ 
-      content: `**MUA THẺ ${telco.toUpperCase()}**\nVui lòng chọn mệnh giá:`, 
-      components: [row] 
+      components: [container, row],
+      flags: MessageFlags.IsComponentsV2
     });
     return true;
   }
@@ -225,24 +245,24 @@ export async function handleCardSwapInteractions(interaction) {
       const cards = await buyCard(interaction.guild.id, interaction.user.id, telco, amount, qty, totalToPay);
       
       // Trừ tiền
-      deductWalletBalance(
+      addWalletBalance(
         interaction.guild.id, 
         interaction.user.id, 
-        totalToPay, 
+        -totalToPay, 
         'BUY_CARD', 
         `Mua ${qty} thẻ ${telco} ${amount.toLocaleString('vi-VN')}đ`, 
         null
       );
 
       // Gửi danh sách mã thẻ
-      let cardsText = cards.map(c => `- **Serial:** \`${c.serial}\` | **Mã thẻ:** \`${c.code}\``).join('\n');
+      let cardsText = cards.map(c => `> **Serial:** \`${c.serial}\` | **Mã thẻ:** \`${c.code}\``).join('\n');
       
-      const embed = new EmbedBuilder()
-        .setTitle('GIAO DỊCH MUA THẺ THÀNH CÔNG')
-        .setColor(0x2ECC71)
-        .setDescription(`Bạn đã mua thành công **${qty} thẻ ${telco} ${amount.toLocaleString('vi-VN')}đ**.\nTổng thanh toán: **${totalToPay.toLocaleString('vi-VN')}đ**\n\n**THÔNG TIN THẺ:**\n${cardsText}`);
+      const container = new ContainerBuilder().setAccentColor(0x2ECC71);
+      container.addTextDisplayComponents(
+        new TextDisplayBuilder().setContent(`### ${E('tick_green') || '✅'} GIAO DỊCH MUA THẺ THÀNH CÔNG\nBạn đã mua thành công **${qty} thẻ ${telco} ${amount.toLocaleString('vi-VN')}đ**.\nTổng thanh toán: **${totalToPay.toLocaleString('vi-VN')}đ**\n\n**THÔNG TIN THẺ:**\n${cardsText}`)
+      );
 
-      await interaction.editReply({ embeds: [embed] });
+      await interaction.editReply({ components: [container], flags: MessageFlags.IsComponentsV2 });
 
     } catch (e) {
       await interaction.editReply(`Lỗi: ${e.message}`);

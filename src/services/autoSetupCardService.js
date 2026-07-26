@@ -1,4 +1,4 @@
-import { ChannelType, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
+import { ChannelType, ActionRowBuilder, ButtonBuilder, ButtonStyle, ContainerBuilder, TextDisplayBuilder, MessageFlags } from 'discord.js';
 import { db } from '../database/db.js';
 
 export async function autoSetupCardChannel(client) {
@@ -34,26 +34,28 @@ export async function autoSetupCardChannel(client) {
 
   if (!channel) return;
 
-  // Send panel
-  const embed = new EmbedBuilder()
-    .setTitle(`✨ DỊCH VỤ THẺ CÀO (GẠCH & MUA THẺ)`)
-    .setDescription(`> Hệ thống hỗ trợ xử lý thẻ cào tự động 24/7.\n> Phí gạch thẻ siêu rẻ, chiết khấu mua thẻ siêu tốt!\n\n**HƯỚNG DẪN:**\n- 💳 **Đổi Thẻ (Gạch Thẻ):** Đổi thẻ cào (Viettel, Vina, Mobi, Zing...) lấy số dư Ví tiền.\n- 🛒 **Mua Thẻ Cào:** Dùng số dư Ví tiền để mua mã thẻ cào mới.`)
-    .setColor(0x3498DB);
+  const { createEmojiResolver } = await import('../utils/emojiHelper.js');
+  const E = createEmojiResolver(guildId);
+
+  const container = new ContainerBuilder().setAccentColor(0x3498DB);
+  container.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent(`### ${E('star') || '✨'} DỊCH VỤ THẺ CÀO (GẠCH & MUA THẺ)\n> Hệ thống hỗ trợ xử lý thẻ cào tự động 24/7.\n> Phí gạch thẻ siêu rẻ, chiết khấu mua thẻ siêu tốt!\n\n**HƯỚNG DẪN:**\n- ${E('card') || '💳'} **Đổi Thẻ (Gạch Thẻ):** Đổi thẻ cào (Viettel, Vina, Mobi, Zing...) lấy số dư Ví tiền.\n- ${E('cart') || '🛒'} **Mua Thẻ Cào:** Dùng số dư Ví tiền để mua mã thẻ cào mới.`)
+  );
 
   const row = new ActionRowBuilder().addComponents(
     new ButtonBuilder()
       .setCustomId('cardswap:btn_charge')
       .setLabel('Đổi Thẻ Cào')
-      .setEmoji('💳')
+      .setEmoji(E.component('card') || '💳')
       .setStyle(ButtonStyle.Success),
     new ButtonBuilder()
       .setCustomId('cardswap:btn_buy')
       .setLabel('Mua Thẻ Cào')
-      .setEmoji('🛒')
+      .setEmoji(E.component('cart') || '🛒')
       .setStyle(ButtonStyle.Primary)
   );
 
-  await channel.send({ embeds: [embed], components: [row] }).catch(err => {
+  await channel.send({ components: [container, row], flags: MessageFlags.IsComponentsV2 }).catch(err => {
     console.error('[AUTO-SETUP-CARD] Failed to send panel:', err.message);
   });
 
