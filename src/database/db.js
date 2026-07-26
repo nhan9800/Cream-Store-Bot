@@ -766,6 +766,8 @@ export function initDatabase() {
 
   ensureColumn('guild_settings', 'cardswap_partner_id', 'TEXT DEFAULT NULL');
   ensureColumn('guild_settings', 'cardswap_partner_key', 'TEXT DEFAULT NULL');
+  ensureColumn('guild_settings', 'cardswap_buy_partner_id', 'TEXT DEFAULT NULL');
+  ensureColumn('guild_settings', 'cardswap_buy_partner_key', 'TEXT DEFAULT NULL');
   ensureColumn('guild_settings', 'cardswap_domain', "TEXT DEFAULT 'card2k.com'");
   ensureColumn('guild_settings', 'cardswap_charging_fee_add', "REAL DEFAULT 5.0");
   ensureColumn('guild_settings', 'cardswap_buy_profit_add', "INTEGER DEFAULT 3000");

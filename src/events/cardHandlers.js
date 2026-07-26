@@ -12,7 +12,8 @@ import {
 } from 'discord.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { 
-  saveCardSwapConfig, 
+  saveCardSwapConfig,
+  saveCardSwapBuyConfig,
   getChargingFees, 
   submitChargingCard, 
   checkAvailableCard, 
@@ -41,7 +42,20 @@ export async function handleCardSwapInteractions(interaction) {
       cardswap_buy_profit_add: isNaN(buyProfitAdd) ? 3000 : buyProfitAdd
     });
 
-    await interaction.reply({ content: 'Đã lưu cấu hình API CardSwap thành công!', ephemeral: true });
+    await interaction.reply({ content: 'Đã lưu cấu hình API Đổi Thẻ thành công!', ephemeral: true });
+    return true;
+  }
+
+  if (interaction.isModalSubmit() && customId === 'cardswap:setup_buy_api_modal') {
+    const buyPartnerId = interaction.fields.getTextInputValue('cardswap:buy_partner_id');
+    const buyPartnerKey = interaction.fields.getTextInputValue('cardswap:buy_partner_key');
+
+    saveCardSwapBuyConfig(interaction.guild.id, {
+      cardswap_buy_partner_id: buyPartnerId,
+      cardswap_buy_partner_key: buyPartnerKey
+    });
+
+    await interaction.reply({ content: 'Đã lưu cấu hình API Mua Thẻ thành công!', ephemeral: true });
     return true;
   }
 

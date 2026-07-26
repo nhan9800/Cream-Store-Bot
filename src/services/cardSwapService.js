@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import { db, nowIso } from '../database/db.js';
 
 export function getCardSwapConfig(guildId) {
-  const row = db.prepare('SELECT cardswap_partner_id, cardswap_partner_key, cardswap_domain, cardswap_charging_fee_add, cardswap_buy_profit_add FROM guild_settings WHERE guild_id = ?').get(guildId);
+  const row = db.prepare('SELECT cardswap_partner_id, cardswap_partner_key, cardswap_buy_partner_id, cardswap_buy_partner_key, cardswap_domain, cardswap_charging_fee_add, cardswap_buy_profit_add FROM guild_settings WHERE guild_id = ?').get(guildId);
   if (!row) return null;
   return row;
 }
@@ -19,6 +19,19 @@ export function saveCardSwapConfig(guildId, configData) {
     configData.cardswap_domain, 
     configData.cardswap_charging_fee_add, 
     configData.cardswap_buy_profit_add, 
+    guildId
+  );
+}
+
+export function saveCardSwapBuyConfig(guildId, configData) {
+  const stmt = db.prepare(`
+    UPDATE guild_settings
+    SET cardswap_buy_partner_id = ?, cardswap_buy_partner_key = ?
+    WHERE guild_id = ?
+  `);
+  stmt.run(
+    configData.cardswap_buy_partner_id, 
+    configData.cardswap_buy_partner_key, 
     guildId
   );
 }
@@ -119,11 +132,11 @@ export async function getCardBalance(guildId) {
 
 export async function checkAvailableCard(guildId, serviceCode, value, qty) {
   const config = getCardSwapConfig(guildId);
-  if (!config || !config.cardswap_partner_id) throw new Error('Chưa cấu hình CardSwap API');
+  if (!config || !config.cardswap_buy_partner_id) throw new Error('Chưa cấu hình API Mua Thẻ');
   
   const domain = config.cardswap_domain || 'card2k.com';
-  const sign = md5(config.cardswap_partner_key + config.cardswap_partner_id + 'checkavailable');
-  const url = `https://${domain}/api/cardws?partner_id=${config.cardswap_partner_id}&command=checkavailable&service_code=${serviceCode}&value=${value}&qty=${qty}&sign=${sign}`;
+  const sign = md5(config.cardswap_buy_partner_key + config.cardswap_buy_partner_id + 'checkavailable');
+  const url = `https://${domain}/api/cardws?partner_id=${config.cardswap_buy_partner_id}&command=checkavailable&service_code=${serviceCode}&value=${value}&qty=${qty}&sign=${sign}`;
   
   const res = await fetch(url);
   const data = await res.json();
@@ -132,15 +145,15 @@ export async function checkAvailableCard(guildId, serviceCode, value, qty) {
 
 export async function buyCard(guildId, customerId, serviceCode, value, qty, totalPrice) {
   const config = getCardSwapConfig(guildId);
-  if (!config || !config.cardswap_partner_id) throw new Error('Chưa cấu hình CardSwap API');
+  if (!config || !config.cardswap_buy_partner_id) throw new Error('Chưa cấu hình API Mua Thẻ');
   
   const domain = config.cardswap_domain || 'card2k.com';
   const requestId = crypto.randomUUID().replace(/-/g, '').substring(0, 20);
   const command = 'buycard';
-  const sign = md5(config.cardswap_partner_key + config.cardswap_partner_id + command + requestId);
+  const sign = md5(config.cardswap_buy_partner_key + config.cardswap_buy_partner_id + command + requestId);
   
   const body = new URLSearchParams({
-    partner_id: config.cardswap_partner_id,
+    partner_id: config.cardswap_buy_partner_id,
     request_id: requestId,
     service_code: serviceCode,
     value: value.toString(),
