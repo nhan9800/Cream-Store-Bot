@@ -131,13 +131,21 @@ export async function handleWarrantyReasonModalSubmit(interaction, orderCode) {
   const E = createEmojiResolver(interaction.guildId);
 
   // Đọc 5 trường từ modal mới (tương thích cả modal cũ 1 trường)
-  const productType   = interaction.fields.getTextInputValue('warranty_product_type')?.trim() || null;
-  const accountInfo   = interaction.fields.getTextInputValue('warranty_account_info')?.trim() || null;
-  const password      = interaction.fields.getTextInputValue('warranty_password')?.trim() || null;
-  const purchaseDate  = interaction.fields.getTextInputValue('warranty_purchase_date')?.trim() || null;
-  const dateExpired   = interaction.fields.getTextInputValue('warranty_expired_date')?.trim() || null;
+  const getSafeField = (id) => {
+    try {
+      return interaction.fields.getTextInputValue(id)?.trim() || null;
+    } catch {
+      return null;
+    }
+  };
+
+  const productType   = getSafeField('warranty_product_type');
+  const accountInfo   = getSafeField('warranty_account_info');
+  const password      = getSafeField('warranty_password');
+  const purchaseDate  = getSafeField('warranty_purchase_date');
+  const dateExpired   = getSafeField('warranty_expired_date');
   // Legacy fallback
-  const legacyReason  = interaction.fields.getTextInputValue('warranty_reason')?.trim() || null;
+  const legacyReason  = getSafeField('warranty_reason');
 
   const formData = (productType || accountInfo || password || purchaseDate || dateExpired)
     ? { productType, accountInfo, password, purchaseDate, dateExpired }
