@@ -58,6 +58,13 @@ export async function buildClient() {
       });
     }).catch(err => console.error('Failed to import autoSetupCardService', err));
 
+    // Tự động gửi / làm mới Bảng Giá đầy đủ (Components V2) vào kênh Bảng Giá
+    import('./services/autoSetupPriceBoardService.js').then(({ autoSetupPriceBoard }) => {
+      autoSetupPriceBoard(readyClient).catch(err => {
+        console.log(`[AUTO-SETUP-PRICE] Lỗi chạy setup bảng giá: ${err.message}`);
+      });
+    }).catch(err => console.error('Failed to import autoSetupPriceBoardService', err));
+
         // Gửi thông báo ra mắt Boost Server - Đã bị tắt theo yêu cầu để tránh spam tag @everyone khi restart
     const SERVER1_GUILD_ID = '1282637033340403754';
     const isStore1 = readyClient.guilds.cache.has(SERVER1_GUILD_ID);
