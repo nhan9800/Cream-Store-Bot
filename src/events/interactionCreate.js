@@ -836,6 +836,11 @@ export function registerInteractionHandler(client, commands) {
           .setLabel('Xác nhận gửi')
           .setStyle(ButtonStyle.Success);
 
+        const editBtn = new ButtonBuilder()
+          .setCustomId('announcement:edit')
+          .setLabel('Sửa nội dung')
+          .setStyle(ButtonStyle.Primary);
+
         const cancelBtn = new ButtonBuilder()
           .setCustomId('announcement:cancel')
           .setLabel('Hủy')
@@ -855,7 +860,7 @@ export function registerInteractionHandler(client, commands) {
           components: [
             new ActionRowBuilder().addComponents(roleSelect),
             new ActionRowBuilder().addComponents(everyoneBtn, hereBtn),
-            new ActionRowBuilder().addComponents(confirmBtn, cancelBtn)
+            new ActionRowBuilder().addComponents(confirmBtn, editBtn, cancelBtn)
           ],
           ephemeral: true,
           fetchReply: true
@@ -941,6 +946,11 @@ export function registerInteractionHandler(client, commands) {
           .setLabel('Xác Nhận Gửi')
           .setStyle(ButtonStyle.Success);
 
+        const editBtn = new ButtonBuilder()
+          .setCustomId('announcement:edit')
+          .setLabel('Sửa nội dung')
+          .setStyle(ButtonStyle.Primary);
+
         const cancelBtn = new ButtonBuilder()
           .setCustomId('announcement:cancel')
           .setLabel('Huy')
@@ -951,7 +961,7 @@ export function registerInteractionHandler(client, commands) {
           components: [
             new ActionRowBuilder().addComponents(roleSelect),
             new ActionRowBuilder().addComponents(everyoneBtn, hereBtn),
-            new ActionRowBuilder().addComponents(confirmBtn, cancelBtn)
+            new ActionRowBuilder().addComponents(confirmBtn, editBtn, cancelBtn)
           ]
         }).catch(() => null);
         return;
@@ -1910,6 +1920,11 @@ export function registerInteractionHandler(client, commands) {
             .setCustomId('announcement:confirm')
             .setLabel('Xác Nhận Gửi')
             .setStyle(ButtonStyle.Success);
+
+          const editBtn = new ButtonBuilder()
+            .setCustomId('announcement:edit')
+            .setLabel('Sửa nội dung')
+            .setStyle(ButtonStyle.Primary);
             
           const cancelBtn = new ButtonBuilder()
             .setCustomId('announcement:cancel')
@@ -1921,7 +1936,7 @@ export function registerInteractionHandler(client, commands) {
             components: [
               new ActionRowBuilder().addComponents(roleSelect),
               new ActionRowBuilder().addComponents(everyoneBtn, hereBtn),
-              new ActionRowBuilder().addComponents(confirmBtn, cancelBtn)
+              new ActionRowBuilder().addComponents(confirmBtn, editBtn, cancelBtn)
             ]
           }).catch(() => null);
           return;

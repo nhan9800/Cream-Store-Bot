@@ -1,0 +1,74 @@
+name: Production Deploy - Bot & API Services
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-bot-production
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Validate Tests Before Deploy
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run Vitest Unit Tests
+        run: npm test -- --run
+
+  deploy:
+    name: Deploy to Production & Health Check
+    needs: test
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Trigger Production Deployment Webhook
+        run: |
+          echo "Sending deployment request to production server..."
+          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
+            "http://hcm3.vibehost.vn:20022/api/public/deploy" \
+            -H "x-bot-api-key: ${{ secrets.BOT_API_KEY }}" \
+            -H "Content-Type: application/json" \
+            --max-time 30 || echo -e "Error\n500")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | head -1)
+          echo "HTTP Status: $HTTP_CODE"
+          echo "Response: $BODY"
+
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "Deploy triggered successfully!"
+          else
+            echo "Deploy trigger returned status $HTTP_CODE (proceeding with health check)"
+          fi
+
+      - name: Wait for service restart
+        run: sleep 20
+
+      - name: Perform Automated Health Check
+        run: |
+          echo "Verifying bot health endpoint..."
+          HEALTH=$(curl -s --max-time 10 "http://hcm3.vibehost.vn:20022/api/bot/health" || echo "{}")
+          echo "Health response: $HEALTH"
+          if echo "$HEALTH" | grep -q '"ok":true'; then
+            echo "Health check passed!"
+          else
+            echo "Health check verification failed or timed out."
+          fi

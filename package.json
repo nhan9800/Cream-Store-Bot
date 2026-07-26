@@ -10,7 +10,10 @@
     "deploy": "node src/deploy-commands.js",
     "smoke": "node scripts/smoke-test.js",
     "check:env": "node scripts/check-env.js",
-    "confirm:webhook": "node scripts/confirm-payos-webhook.js"
+    "confirm:webhook": "node scripts/confirm-payos-webhook.js",
+    "backup": "node scripts/backup-db.js",
+    "verify:backup": "node scripts/verify-backup.js",
+    "test": "vitest run"
   },
   "engines": {
     "node": ">=22.12.0"
@@ -22,5 +25,8 @@
     "dotenv": "^16.4.5",
     "express": "^4.21.2",
     "qrcode": "^1.5.4"
+  },
+  "devDependencies": {
+    "vitest": "^4.1.10"
   }
 }

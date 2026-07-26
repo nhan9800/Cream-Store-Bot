@@ -7,6 +7,8 @@ import { fileURLToPath } from 'url';
 import { encrypt, decrypt } from '../utils/crypto.js';
 import { applyCors } from '../utils/cors.js';
 import { awardOrderPoints } from './loyaltyService.js';
+import { orderLookupLimiter } from './rateLimitMiddleware.js';
+import { anonymizeCustomerEmail } from '../utils/productFormatting.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -148,6 +150,31 @@ export function registerDashboardRoutes(app) {
     }
   });
 
+  app.get('/api/public/activity', (req, res) => {
+    try {
+      const rows = db.prepare(`
+        SELECT order_code, product_name, total_amount, status, created_at, customer_id
+        FROM orders
+        WHERE status = 'COMPLETED'
+        ORDER BY completed_at DESC, created_at DESC
+        LIMIT 10
+      `).all();
+
+      const activity = rows.map(r => ({
+        order_code: r.order_code,
+        product_name: r.product_name,
+        amount: r.total_amount,
+        customer_name: anonymizeCustomerEmail(r.customer_id),
+        timestamp: r.created_at
+      }));
+
+      res.json({ ok: true, data: activity });
+    } catch (e) {
+      console.error('[PUBLIC API] Error getting activity:', e);
+      res.status(500).json({ ok: false, error: 'Lỗi tải hoạt động.' });
+    }
+  });
+
   app.get('/api/public/feedbacks', (req, res) => {
     try {
       const rows = db.prepare(`
@@ -184,12 +211,32 @@ export function registerDashboardRoutes(app) {
     }
   });
 
-  app.get('/api/public/orders/:code', (req, res) => {
+  app.get('/api/public/orders/:code', orderLookupLimiter, (req, res) => {
     try {
       const code = String(req.params.code || '').toUpperCase();
-      const row = db.prepare("SELECT order_code, status FROM orders WHERE order_code = ?").get(code);
-      if (!row) return res.status(404).json({ ok: false, error: 'Không tìm thấy đơn hàng.' });
-      res.json({ ok: true, data: row });
+      const order = db.prepare("SELECT * FROM orders WHERE order_code = ?").get(code);
+      if (!order) return res.status(404).json({ ok: false, error: 'Không tìm thấy đơn hàng.' });
+
+      const isAuthenticated = Boolean(req.headers['x-bot-api-key'] && req.headers['x-bot-api-key'] === (process.env.ADMIN_TOKEN || process.env.BOT_API_KEY));
+      const safe = { ...order };
+
+      if (!isAuthenticated) {
+        if (safe.credential_password) safe.credential_password = '••••••••••••';
+        if (safe.credential_pin) safe.credential_pin = '••••';
+        if (safe.credential_profile) safe.credential_profile = 'Protected Profile';
+        if (safe.delivery_login_url) safe.delivery_login_url = 'https://cenarstore.xyz';
+        if (safe.claim_notes) safe.claim_notes = 'Tài khoản được bảo mật IDOR.';
+      }
+
+      const deliveredAccount = order.credential_email ? {
+        email: order.credential_email,
+        password: isAuthenticated ? order.credential_password : '••••••••••••',
+        warrantyCode: `BH-${order.order_code}`,
+        activationLink: order.delivery_login_url || null,
+        note: isAuthenticated ? (order.claim_notes || '') : 'Tài khoản được bảo vệ IDOR.'
+      } : null;
+
+      res.json({ ok: true, order: { ...safe, deliveredAccount }, data: { ...safe, deliveredAccount } });
     } catch (e) {
       console.error('[PUBLIC API] Error getting order:', e);
       res.status(500).json({ ok: false, error: 'Lỗi truy vấn đơn hàng.' });

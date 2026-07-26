@@ -62,11 +62,8 @@ export function registerBotApiRoutes(app) {
         next();
     };
 
-    // Tất cả route /api/bot/* require API key
-    app.use('/api/bot', corsHandler, requireApiKey);
-
-    // ── HEALTH ──────────────────────────────────────────────────
-    app.get('/api/bot/health', (req, res) => {
+    // ── HEALTH (PUBLIC & BOT) ───────────────────────────────────
+    app.get(['/api/health', '/api/bot/health'], (req, res) => {
         res.json({
             ok: true,
             service: 'cream-bot',
@@ -74,6 +71,9 @@ export function registerBotApiRoutes(app) {
             timestamp: Date.now(),
         });
     });
+
+    // Tất cả route /api/bot/* require API key
+    app.use('/api/bot', corsHandler, requireApiKey);
 
     // ── PUBLIC SETTINGS ──────────────────────────────────────────
     app.get('/api/bot/settings', (req, res) => {
@@ -412,6 +412,30 @@ export function registerBotApiRoutes(app) {
             `).all()
         );
         res.json(result);
+    });
+
+    // ── PRODUCT DETAIL BY SLUG OR ID ─────────────────────────
+    app.get('/api/bot/products/:slugOrId', (req, res) => {
+        const query = String(req.params.slugOrId || '').trim();
+        const result = safeQuery(() => {
+            const allProducts = db.prepare(`
+                SELECT id, guild_id, name, description, price, duration_months,
+                       service_type, emoji, is_active, sort_order, original_price
+                FROM product_catalog
+                WHERE is_active = 1
+            `).all();
+            const norm = query.toLowerCase();
+            const match = allProducts.find(p =>
+                String(p.id) === norm ||
+                String(p.name || '').toLowerCase() === norm ||
+                String(p.name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') === norm
+            );
+            return match || null;
+        });
+        if (!result) {
+            return res.status(404).json({ ok: false, error: 'Sản phẩm không tồn tại' });
+        }
+        res.json({ ok: true, data: result });
     });
 
     // ── TOP CUSTOMERS — top N khách mua nhiều ─────────────

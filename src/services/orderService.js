@@ -7,6 +7,7 @@ import { normalizeQueueGroup } from '../utils/formatters.js';
 import { broadcastDashboardEvent } from './dashboardMiniServer.js';
 import { encrypt } from '../utils/crypto.js';
 import { awardOrderPoints, refundOrderPoints } from './loyaltyService.js';
+import { recordStatusChange } from './orderStateMachine.js';
 
 function createOrderStmt() {
   return db.prepare(`
@@ -121,7 +122,11 @@ export function markOrderCompleted(orderCode, completedById, timeoutHours = conf
   completeOrderStmt().run(completedAt, completedById, completedAt, completedAt, dueAt, completedAt, orderCode);
   clearClaimStmt().run(completedAt, orderCode);
   ensureOrderExpiry(orderCode, new Date(completedAt));
-  const updated = getOrderByCode(orderCode); syncCustomerStats(updated.guild_id, updated.customer_id);
+  const updated = getOrderByCode(orderCode);
+  if (order.status !== updated.status) {
+    recordStatusChange(db, { orderCode, previousStatus: order.status, newStatus: updated.status, changedBy: completedById || 'SYSTEM', reason: 'Order completed and delivered' });
+  }
+  syncCustomerStats(updated.guild_id, updated.customer_id);
 
   // Tích lũy điểm khi đơn hàng hoàn thành
   if (updated && updated.guild_id !== 'WEB' && updated.customer_id !== 'WEB') {
@@ -139,6 +144,9 @@ export function cancelOrder(orderCode, reason = null){
   const order=getOrderByCode(orderCode); if(!order) return null; 
   cancelOrderStmt().run(nowIso(), reason ?? null, nowIso(), orderCode); 
   clearClaimStmt().run(nowIso(), orderCode); 
+  if (order.status !== 'CANCELLED') {
+    recordStatusChange(db, { orderCode, previousStatus: order.status, newStatus: 'CANCELLED', changedBy: 'SYSTEM', reason: reason || 'Order cancelled' });
+  } 
   
   if (order.guild_id !== 'WEB' && order.customer_id !== 'WEB') {
     try {
@@ -192,6 +200,9 @@ export function markOrderPaid(orderCode,{amountPaid,transactionId,transactionCon
   const paidAt=nowIso();
   markOrderPaidStmt().run(amount,paidAt,transactionId ?? null,transactionContent ?? null, paidAt, paidAt, orderCode);
   const updated=getOrderByCode(orderCode);
+  if (order.status !== updated.status) {
+    recordStatusChange(db, { orderCode, previousStatus: order.status, newStatus: updated.status, changedBy: 'SYSTEM_PAYOS', reason: transactionContent || 'Payment confirmed' });
+  }
   syncCustomerStats(updated.guild_id, updated.customer_id);
   broadcastDashboardEvent('order_update');
   return updated;
@@ -199,7 +210,10 @@ export function markOrderPaid(orderCode,{amountPaid,transactionId,transactionCon
 export function setOrderStatus(orderCode,status){
   const order=getOrderByCode(orderCode); if(!order) return null; 
   setOrderStatusStmt().run(status, nowIso(), nowIso(), orderCode); 
-  const updated=getOrderByCode(orderCode); 
+  const updated=getOrderByCode(orderCode);
+  if (order.status !== updated.status) {
+    recordStatusChange(db, { orderCode, previousStatus: order.status, newStatus: updated.status, changedBy: 'SYSTEM', reason: 'setOrderStatus' });
+  }
   syncCustomerStats(updated.guild_id, updated.customer_id); 
   
   // Tích luỹ điểm thưởng khi đơn hàng chuyển sang trạng thái COMPLETED

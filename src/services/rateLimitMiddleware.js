@@ -107,6 +107,14 @@ export const dashboardLimiter = createRateLimiter({
   max: 120,
 });
 
+/** Order Lookup API: 20 requests per minute */
+export const orderLookupLimiter = createRateLimiter({
+  name: 'orderLookup',
+  windowMs: 60 * 1000,
+  max: 20,
+  message: 'Quá nhiều yêu cầu tra cứu đơn hàng, vui lòng thử lại sau.'
+});
+
 // ═══════════════════════════════════════════════
 // Login Attempt Tracker
 // ═══════════════════════════════════════════════

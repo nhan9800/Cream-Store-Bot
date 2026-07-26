@@ -13,6 +13,7 @@ import { addWalletBalance, getWalletBalance } from './walletService.js';
 import { createCoupon, listCoupons, deactivateCoupon } from './couponService.js';
 import * as subService from './subscriptionService.js';
 import { getAiKnowledge, updateAiKnowledge } from './aiKnowledgeService.js';
+import { transitionOrderStatus } from './orderStateMachine.js';
 import { encrypt, decrypt } from '../utils/crypto.js';
 
 export function registerAdminRoutes(app) {
@@ -159,8 +160,11 @@ export function registerAdminRoutes(app) {
   app.put('/api/bot/admin/orders/:code/status', requireAdminRole, (req, res) => {
     try {
       const { status } = req.body;
-      db.prepare('UPDATE orders SET status = ?, status_changed_at = CURRENT_TIMESTAMP WHERE order_code = ?').run(status, req.params.code);
-      res.json({ ok: true });
+      const result = transitionOrderStatus(req.params.code, status, { changedBy: req.user?.email || 'ADMIN', reason: 'Admin dashboard manual update', dbInstance: db });
+      if (!result.success) {
+        return res.status(400).json({ ok: false, error: result.error });
+      }
+      res.json({ ok: true, data: result.order });
     } catch (e) {
       console.error('[ADMIN]', e); res.status(500).json({ ok: false, error: 'Lỗi máy chủ nội bộ.' });
     }
