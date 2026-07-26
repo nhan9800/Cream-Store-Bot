@@ -24,7 +24,12 @@ export async function execute(interaction) {
       .setCustomId('cardswap:btn_buy')
       .setLabel('Mua Thẻ Cào')
       .setEmoji(E.component('icon_cart') || '🛒')
-      .setStyle(ButtonStyle.Primary)
+      .setStyle(ButtonStyle.Primary),
+    new ButtonBuilder()
+      .setCustomId('cardswap:btn_fees')
+      .setLabel('Xem Bảng Phí')
+      .setEmoji(E.component('payment_money') || '💸')
+      .setStyle(ButtonStyle.Secondary)
   );
 
   await interaction.channel.send({ components: [container, row], flags: MessageFlags.IsComponentsV2 });

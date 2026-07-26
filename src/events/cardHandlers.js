@@ -59,6 +59,42 @@ export async function handleCardSwapInteractions(interaction) {
     return true;
   }
 
+  // --- NÚT XEM BẢNG PHÍ ---
+  if (interaction.isButton() && customId === 'cardswap:btn_fees') {
+    try {
+      const fees = await getChargingFees(interaction.guild.id);
+      
+      const telcoMap = {};
+      for (const item of fees) {
+        if (!telcoMap[item.telco]) telcoMap[item.telco] = [];
+        telcoMap[item.telco].push(item);
+      }
+      
+      let markdown = `### ${E('payment_money') || '💸'} BẢNG PHÍ ĐỔI THẺ CÀO\n`;
+      markdown += `*Phí gạch thẻ đã bao gồm chiết khấu hệ thống. Phí này sẽ bị trừ vào mệnh giá thực nhận.*\n\n`;
+      
+      for (const [telco, items] of Object.entries(telcoMap)) {
+        markdown += `**${E('icon_star') || '⭐'} Dành cho nhà mạng ${telco}**\n`;
+        items.sort((a,b) => a.value - b.value);
+        for (const item of items) {
+          const receiveStr = (item.value - (item.value * item.fee / 100)).toLocaleString('vi-VN');
+          markdown += `- Mệnh giá ${item.value.toLocaleString('vi-VN')}đ: Phí **${item.fee}%** (Thực nhận: ${receiveStr}đ)\n`;
+        }
+        markdown += `\n`;
+      }
+      
+      const container = new ContainerBuilder().setAccentColor(0x3498DB);
+      container.addTextDisplayComponents(
+        new TextDisplayBuilder().setContent(markdown)
+      );
+      
+      await interaction.reply({ components: [container], flags: MessageFlags.IsComponentsV2, ephemeral: true });
+    } catch (e) {
+      await interaction.reply({ content: `Lỗi không thể lấy bảng phí: ${e.message}`, ephemeral: true });
+    }
+    return true;
+  }
+
   // --- NÚT ĐỔI THẺ (CHARGING) ---
   if (interaction.isButton() && customId === 'cardswap:btn_charge') {
     const config = getCardSwapConfig(interaction.guild.id);
