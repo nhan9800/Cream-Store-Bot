@@ -8,6 +8,7 @@ import { startPresenceRotation } from './services/presenceService.js';
 import { startOtpAutoCheck } from './services/otpAutoCheckService.js';
 
 import { initErrorLogger } from './services/errorLogService.js';
+import { autoSetupDiscountBoard } from './services/autoSetupDiscountBoardService.js';
 import { runTempKeySetup } from './services/tempKeySetup.js';
 
 export async function buildClient() {
@@ -29,6 +30,7 @@ export async function buildClient() {
     startScheduler(readyClient);
     startWebhookServer(readyClient);
     startOtpAutoCheck(readyClient);
+    autoSetupDiscountBoard(readyClient);
 
     // Tự động đồng bộ emoji cho tất cả các guild bot đang tham gia
     import('./services/emojiService.js').then(({ autoSyncGuildEmojis }) => {
