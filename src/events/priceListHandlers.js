@@ -180,7 +180,7 @@ export async function handlePriceListSelect(interaction) {
       embeds.push(currentEmbed);
     } else {
       for (const p of products) {
-        const priceText = Number(p.price).toLocaleString('vi-VN') + 'đ';
+        const priceText = p.price > 0 ? Number(p.price).toLocaleString('vi-VN') + 'đ' : 'Thương lượng';
         let statusText = `${E('icon_sparkle')} **Sẵn hàng**`.trim();
         if (p.description && p.description.includes('Hot')) statusText = `${E('order_pending')} **Hot**`.trim();
         else if (p.description && p.description.includes('Bán chạy')) statusText = `${E('order_processing')} **Bán chạy**`.trim();
@@ -225,7 +225,7 @@ export async function handlePriceListSelect(interaction) {
     const selectOptions = products.slice(0, 25).map(p => {
       const opt = {
         label: `${p.name}`.slice(0, 100),
-        description: `Giá: ${Number(p.price).toLocaleString('vi-VN')}đ | Hạn: ${p.duration_months}T`.slice(0, 100),
+        description: `Giá: ${p.price > 0 ? Number(p.price).toLocaleString('vi-VN') + 'đ' : 'Thương lượng'} | Hạn: ${p.duration_months}T`.slice(0, 100),
         value: `${p.id}`,
       };
       const emoji = resolveSelectMenuEmoji(interaction.guildId, p.emoji, '🛒');
@@ -273,7 +273,7 @@ export async function handlePriceListSelect(interaction) {
       if (products.length > 0) {
         const cleanSelectOptions = products.slice(0, 25).map(p => ({
           label: `${p.name}`.slice(0, 100),
-          description: `Giá: ${Number(p.price).toLocaleString('vi-VN')}đ | Hạn: ${p.duration_months}T`.slice(0, 100),
+          description: `Giá: ${p.price > 0 ? Number(p.price).toLocaleString('vi-VN') + 'đ' : 'Thương lượng'} | Hạn: ${p.duration_months}T`.slice(0, 100),
           value: `${p.id}`
         }));
 
