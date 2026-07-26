@@ -114,17 +114,20 @@ export function ensureStatusHistoryTable(db) {
   `).run();
 }
 
-export function recordStatusHistory(db, { orderCode, oldStatus, newStatus, actor = 'system', reason = '', metadata = null }) {
+export function recordStatusHistory(db, { orderCode, oldStatus, previousStatus, newStatus, actor = 'system', changedBy, reason = '', metadata = null }) {
   ensureStatusHistoryTable(db);
-  const normOld = normalizeStatus(oldStatus);
+  const normOld = normalizeStatus(oldStatus || previousStatus);
   const normNew = normalizeStatus(newStatus);
+  const actorName = String(actor || changedBy || 'system');
   const metaStr = metadata ? (typeof metadata === 'string' ? metadata : JSON.stringify(metadata)) : null;
 
   db.prepare(`
     INSERT INTO order_status_history (order_code, old_status, new_status, actor, reason, metadata)
     VALUES (?, ?, ?, ?, ?, ?)
-  `).run(String(orderCode).toUpperCase(), normOld, normNew, String(actor), String(reason), metaStr);
+  `).run(String(orderCode).toUpperCase(), normOld, normNew, actorName, String(reason), metaStr);
 }
+
+export const recordStatusChange = recordStatusHistory;
 
 export function transitionOrder(db, orderCode, newStatusRaw, actor = 'system', reason = '', metadata = null) {
   const codeUpper = String(orderCode).toUpperCase();
