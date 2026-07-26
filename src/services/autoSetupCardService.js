@@ -16,15 +16,15 @@ export async function autoSetupCardChannel(client) {
   if (!guild) return;
 
   // Check if channel already exists
-  let channel = guild.channels.cache.find(c => c.name === 'nap-the-tu-dong');
+  let channel = guild.channels.cache.find(c => c.name === '💳・nap-the-tu-dong' || c.name === 'nap-the-tu-dong');
   if (channel) {
-    console.log('[AUTO-SETUP-CARD] Channel #nap-the-tu-dong already exists. Skipping creation.');
+    console.log('[AUTO-SETUP-CARD] Channel already exists. Skipping creation.');
     return;
   }
 
   // Create channel
   channel = await guild.channels.create({
-    name: 'nap-the-tu-dong',
+    name: '💳・nap-the-tu-dong',
     type: ChannelType.GuildText,
     reason: 'Tự động tạo kênh Gạch thẻ / Mua thẻ theo yêu cầu',
   }).catch(err => {
