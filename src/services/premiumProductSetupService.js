@@ -1,4 +1,4 @@
-import { ChannelType, PermissionFlagsBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder } from 'discord.js';
+﻿import { ChannelType, PermissionFlagsBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder } from 'discord.js';
 import { db } from '../database/db.js';
 import { getProductByName } from './productCatalogService.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
@@ -456,19 +456,16 @@ export async function handlePremiumProductInteraction(interaction) {
     ));
     container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
     container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
-      `### ${E('icon_crown', '👑')} CLAUDE 4 — FLAGSHIP\n` +
-      `${E('status_check', '✅')} \`claude-opus-4-5\` — Mạnh nhất, tư duy sâu\n` +
-      `${E('status_check', '✅')} \`claude-sonnet-4-5\` — Cân bằng tốc độ & chất lượng\n` +
-      `${E('status_check', '✅')} \`claude-opus-4\` — Flagship thế hệ 4\n` +
-      `${E('status_check', '✅')} \`claude-sonnet-4\` — Thế hệ 4 phổ thông`
+      `### ${E('icon_crown', '👑')} CLAUDE 5 — FRONTIER \`MỚI NHẤT\`\n` +
+      `${E('status_check', '✅')} \`claude-fable-5\` — Mạnh nhất tuyệt đối, AI tự trị sâu\n` +
+      `${E('status_check', '✅')} \`claude-opus-5\` — Flagship tư duy, ra mắt 24/7/2026\n` +
+      `${E('status_check', '✅')} \`claude-sonnet-5\` — Cân bằng tốc độ & thông minh`
     ));
     container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
     container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
-      `### ${E('icon_gem', '💎')} CLAUDE 3.7 & 3.5 — STABLE\n` +
-      `${E('status_check', '✅')} \`claude-3-7-sonnet-20250219\` — Mới nhất thế hệ 3.7\n` +
-      `${E('status_check', '✅')} \`claude-3-5-sonnet-20241022\` — Ổn định cao\n` +
-      `${E('status_check', '✅')} \`claude-3-5-haiku-20241022\` — Nhanh & nhẹ\n` +
-      `${E('status_check', '✅')} \`claude-3-opus-20240229\` — Legacy Opus`
+      `### ${E('icon_gem', '💎')} CLAUDE 4 — STABLE\n` +
+      `${E('status_check', '✅')} \`claude-opus-4-8\` — Flagship coding dài hạn\n` +
+      `${E('status_check', '✅')} \`claude-haiku-4-5\` — Siêu nhanh, chi phí thấp`
     ));
     container.addSeparatorComponents(new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small));
     container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
@@ -818,3 +815,4 @@ export async function autoSetupAndPublishPremiumProducts(guild) {
     console.error('[AUTO-SETUP] Error during automatic setup:', error);
   }
 }
+
