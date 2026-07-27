@@ -94,12 +94,17 @@ export async function buildClient() {
     const ANNOUNCE_CHANNEL_ID = '1514598369597587546';
     const ANNOUNCE_SENT_KEY = `announce_priceboard_v2_${Date.now().toString().slice(0,-5)}`; // reset mỗi 100s
     setTimeout(async () => {
+      console.log(`[ANNOUNCE] 🔔 Đang cố gắng gửi thông báo bảng giá vào kênh ${ANNOUNCE_CHANNEL_ID}...`);
       try {
         const { ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, SeparatorSpacingSize, MessageFlags, ActionRowBuilder, ButtonBuilder, ButtonStyle } = await import('discord.js');
         const { createEmojiResolver } = await import('./utils/emojiHelper.js');
 
         for (const guild of readyClient.guilds.cache.values()) {
-          const ch = guild.channels.cache.get(ANNOUNCE_CHANNEL_ID);
+          let ch;
+          try {
+            ch = guild.channels.cache.get(ANNOUNCE_CHANNEL_ID)
+              || await guild.channels.fetch(ANNOUNCE_CHANNEL_ID).catch(() => null);
+          } catch { ch = null; }
           if (!ch?.isTextBased()) continue;
 
           const E = createEmojiResolver(guild.id);
