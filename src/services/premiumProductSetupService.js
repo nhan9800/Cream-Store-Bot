@@ -395,9 +395,9 @@ export async function handlePremiumProductInteraction(interaction) {
 
     const daysInput = new TextInputBuilder()
       .setCustomId('days')
-      .setLabel('Nhập số ngày muốn mua (Tối thiểu 1)')
+      .setLabel('Số lượng gói muốn mua (1 gói 100M = 85k)')
       .setStyle(TextInputStyle.Short)
-      .setPlaceholder('Ví dụ: 30')
+      .setPlaceholder('Mặc định: 1')
       .setRequired(true);
 
     const emailInput = new TextInputBuilder()
@@ -831,5 +831,6 @@ export async function autoSetupAndPublishPremiumProducts(guild) {
     console.error('[AUTO-SETUP] Error during automatic setup:', error);
   }
 }
+
 
 

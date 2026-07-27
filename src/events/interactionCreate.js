@@ -1052,6 +1052,14 @@ export function registerInteractionHandler(client, commands) {
         return;
       }
 
+      if (interaction.customId === 'announce:view_price') {
+        const guildConfig = getGuildConfig(interaction.guildId);
+        if (guildConfig?.price_board_channel_id) {
+          return interaction.reply({ content: `👉 Xem Bảng Giá Đầy Đủ tại kênh <#${guildConfig.price_board_channel_id}>`, ephemeral: true });
+        }
+        return interaction.reply({ content: '👉 Vui lòng xem kênh **BẢNG GIÁ** trong danh sách kênh của server.', ephemeral: true });
+      }
+
       // Xử lý duyệt bảo hành YouTube Premium - Đồng Ý
       if (interaction.customId.startsWith('ytb:approve:')) {
         const parts = interaction.customId.split(':');
@@ -2414,6 +2422,7 @@ export function getClientOptions() {
     partials: [Partials.Channel],
   };
 }
+
 
 
 

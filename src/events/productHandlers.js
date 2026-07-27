@@ -1,4 +1,4 @@
-// ═══════════════════════════════════════════════════════════════════
+﻿// ═══════════════════════════════════════════════════════════════════
 // productHandlers.js — Nhóm xử lý Sản phẩm: chọn/mua/sửa/thêm/sale (tách từ interactionCreate.js).
 // Nằm CÙNG thư mục src/events/ để mọi đường dẫn '../services', '../utils', '../database' giữ nguyên.
 // State/helper dùng chung import từ ./shared.js — KHÔNG khai báo lại.
@@ -599,3 +599,4 @@ export async function handleSaleRunModal(interaction) {
 }
 
 // ═══════════════ Subscription Handlers ═══════════════
+
