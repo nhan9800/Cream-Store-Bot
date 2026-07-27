@@ -95,14 +95,41 @@ export async function setupPremiumProducts(interaction) {
     db.prepare('UPDATE guild_settings SET locket_channel_id = ? WHERE guild_id = ?').run(locketChannel.id, guild.id);
   }
 
-  await interaction.editReply('✅ Setup category và channels thành công! Hãy chạy `/product publish` để đăng bài.');
+  // 3. Auto xóa tin cũ của bot và republish giao diện mới nhất
+  const autoFakeInteraction = {
+    guild,
+    guildId: guild.id,
+    deferReply: async () => {},
+    editReply: async (msg) => console.log('[AUTO-PUBLISH]', typeof msg === 'string' ? msg : 'Payload sent'),
+    isChatInputCommand: () => false,
+  };
+
+  // Xóa tất cả tin cũ của bot trong 2 kênh
+  for (const ch of [claudeChannel, locketChannel]) {
+    if (!ch) continue;
+    const msgs = await ch.messages.fetch({ limit: 20 }).catch(() => null);
+    if (msgs) {
+      for (const m of msgs.filter(m => m.author.id === guild.members.me.id).values()) {
+        await m.delete().catch(() => null);
+        await new Promise(r => setTimeout(r, 300));
+      }
+    }
+  }
+
+  // Reset message IDs để buộc gửi mới
+  db.prepare('UPDATE guild_settings SET claude_product_message_id = NULL, locket_product_message_id = NULL WHERE guild_id = ?').run(guild.id);
+
+  // Republish giao diện mới nhất
+  await publishPremiumProductsForGuild(guild);
+  console.log(`[AUTO-PUBLISH-PREMIUM] ✅ Đã republish xong giao diện Premium cho guild: ${guild.name}`);
 }
 
 export async function publishPremiumProducts(interaction) {
   await interaction.deferReply({ ephemeral: true });
   const guild = interaction.guild;
+
+  // Xóa tin cũ của bot trước khi publish lại
   const settings = db.prepare('SELECT * FROM guild_settings WHERE guild_id = ?').get(guild.id);
-  
   if (!settings?.claude_channel_id || !settings?.locket_channel_id) {
     return interaction.editReply('❌ Vui lòng chạy `/product setup` trước!');
   }
@@ -113,6 +140,25 @@ export async function publishPremiumProducts(interaction) {
   if (!claudeChannel || !locketChannel) {
     return interaction.editReply('❌ Không tìm thấy channel, vui lòng chạy `/product repair`.');
   }
+
+  // Xóa tin cũ
+  for (const ch of [claudeChannel, locketChannel]) {
+    const msgs = await ch.messages.fetch({ limit: 20 }).catch(() => null);
+    if (msgs) {
+      for (const m of msgs.filter(m => m.author.id === guild.members.me.id).values()) {
+        await m.delete().catch(() => null);
+        await new Promise(r => setTimeout(r, 300));
+      }
+    }
+  }
+  db.prepare('UPDATE guild_settings SET claude_product_message_id = NULL, locket_product_message_id = NULL WHERE guild_id = ?').run(guild.id);
+
+  await publishPremiumProductsForGuild(guild);
+  await interaction.editReply('✅ Đã xóa tin cũ và publish lại giao diện mới nhất!');
+}
+
+// ─── Core publish function (dùng cho cả manual và auto) ───
+export async function publishPremiumProductsForGuild(guild) {
 
   const E = createEmojiResolver(guild.id);
 
@@ -318,7 +364,8 @@ export async function publishPremiumProducts(interaction) {
     }
   }
 
-  await interaction.editReply('✅ Publish thành công giao diện sản phẩm bằng Components V2!');
+  await guild.channels.cache; // ensure cache
+  console.log(`[PUBLISH-PREMIUM] Done for guild: ${guild.name}`);
 }
 
 import { ModalBuilder, TextInputBuilder, TextInputStyle } from 'discord.js';
@@ -374,26 +421,148 @@ export async function handlePremiumProductInteraction(interaction) {
   }
 
   if (customId === 'product:claude:pricing') {
-    await interaction.reply({
-      content: '🧮 **Bảng tính giá Claude API:**\n- Ngày đầu tiên: 85,000đ\n- Các ngày tiếp theo: +5,000đ/ngày\n*(Ví dụ: 3 ngày = 85,000 + 2*5,000 = 95,000đ)*',
-      ephemeral: true
-    });
-    return;
+    const { ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, SeparatorSpacingSize, MessageFlags } = await import('discord.js');
+    const E = createEmojiResolver(interaction.guildId);
+    const container = new ContainerBuilder().setAccentColor(0xD97757);
+    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
+      `## ${E('brand_claude', '🤖')} Bảng Tính Giá Claude API\n` +
+      `> ${E('icon_sparkle', '✨')} *Giá được tính linh hoạt theo số ngày bạn chọn.*`
+    ));
+    container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
+    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
+      `### ${E('icon_price', '💰')} CÔNG THỨC TÍNH GIÁ\n` +
+      `${E('icon_gift', '🎁')} **Ngày đầu tiên:** \`85,000đ\`\n` +
+      `${E('icon_duration', '⏱️')} **Từ ngày 2 trở đi:** \`+5,000đ / ngày\`\n\n` +
+      `### ${E('icon_chart', '📊')} VÍ DỤ THỰC TẾ\n` +
+      `${E('status_check', '✅')} 1 ngày = \`85,000đ\`\n` +
+      `${E('status_check', '✅')} 7 ngày = \`85k + 6×5k\` = \`115,000đ\`\n` +
+      `${E('status_check', '✅')} 30 ngày = \`85k + 29×5k\` = \`230,000đ\`\n` +
+      `${E('status_check', '✅')} 90 ngày = \`85k + 89×5k\` = \`530,000đ\``
+    ));
+    container.addSeparatorComponents(new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small));
+    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
+      `-# ${E('icon_heart_purple', '💜')} Nhấn **Mua ngay** để nhập số ngày và đặt hàng ngay!`
+    ));
+    return interaction.reply({ components: [container], flags: MessageFlags.IsComponentsV2 | 64 });
   }
 
   if (customId === 'product:claude:models') {
-    // Gọi API của Anthropic để lấy danh sách models
-    try {
-      // Stub
-      const models = ['claude-3-5-sonnet-20240620', 'claude-3-opus-20240229', 'claude-3-haiku-20240307'];
-      await interaction.reply({
-        content: `🤖 **Danh sách model khả dụng (Cập nhật realtime):**\n` + models.map(m => `- \`${m}\``).join('\n'),
-        ephemeral: true
-      });
-    } catch (e) {
-      await interaction.reply({ content: '❌ Lỗi khi lấy danh sách model.', ephemeral: true });
-    }
-    return;
+    const { ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, SeparatorSpacingSize, MessageFlags } = await import('discord.js');
+    const E = createEmojiResolver(interaction.guildId);
+    const container = new ContainerBuilder().setAccentColor(0xD97757);
+    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
+      `## ${E('brand_claude', '🤖')} Danh Sách Models Khả Dụng\n` +
+      `> ${E('icon_sparkle', '✨')} *Cập nhật theo hệ thống Anthropic — Tháng 7/2026*`
+    ));
+    container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
+    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
+      `### ${E('icon_crown', '👑')} CLAUDE 4 — FLAGSHIP\n` +
+      `${E('status_check', '✅')} \`claude-opus-4-5\` — Mạnh nhất, tư duy sâu\n` +
+      `${E('status_check', '✅')} \`claude-sonnet-4-5\` — Cân bằng tốc độ & chất lượng\n` +
+      `${E('status_check', '✅')} \`claude-opus-4\` — Flagship thế hệ 4\n` +
+      `${E('status_check', '✅')} \`claude-sonnet-4\` — Thế hệ 4 phổ thông`
+    ));
+    container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
+    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
+      `### ${E('icon_gem', '💎')} CLAUDE 3.7 & 3.5 — STABLE\n` +
+      `${E('status_check', '✅')} \`claude-3-7-sonnet-20250219\` — Mới nhất thế hệ 3.7\n` +
+      `${E('status_check', '✅')} \`claude-3-5-sonnet-20241022\` — Ổn định cao\n` +
+      `${E('status_check', '✅')} \`claude-3-5-haiku-20241022\` — Nhanh & nhẹ\n` +
+      `${E('status_check', '✅')} \`claude-3-opus-20240229\` — Legacy Opus`
+    ));
+    container.addSeparatorComponents(new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small));
+    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
+      `-# ${E('status_warn', '⚠️')} Model khả dụng có thể thay đổi theo chính sách Anthropic. Mua API để truy cập tất cả models trên.`
+    ));
+    return interaction.reply({ components: [container], flags: MessageFlags.IsComponentsV2 | 64 });
+  }
+
+  if (customId === 'product:claude:policy') {
+    const { ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, SeparatorSpacingSize, MessageFlags } = await import('discord.js');
+    const E = createEmojiResolver(interaction.guildId);
+    const container = new ContainerBuilder().setAccentColor(0xD97757);
+    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
+      `## ${E('icon_gem', '💎')} Điều Khoản Dịch Vụ — Claude API\n` +
+      `> ${E('icon_sparkle', '✨')} *Vui lòng đọc kỹ trước khi mua.*`
+    ));
+    container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
+    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
+      `### ${E('status_check', '✅')} CAM KẾT CỦA SHOP\n` +
+      `${E('icon_gem', '💎')} Bảo hành full thời hạn sử dụng đã mua.\n` +
+      `${E('icon_key', '🔒')} Không yêu cầu cung cấp mật khẩu hay thông tin cá nhân.\n` +
+      `${E('status_check', '✅')} Hỗ trợ kỹ thuật trong suốt thời hạn.`
+    ));
+    container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
+    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
+      `### ${E('status_warn', '⚠️')} LƯU Ý QUAN TRỌNG\n` +
+      `${E('status_warn', '⚠️')} Model khả dụng có thể thay đổi theo chính sách Anthropic.\n` +
+      `${E('status_cross', '❌')} Không hoàn tiền sau khi đã kích hoạt & sử dụng API token.\n` +
+      `${E('icon_duration', '⏱️')} Thời hạn tính từ ngày kích hoạt, không gia hạn khi hết hạn.`
+    ));
+    container.addSeparatorComponents(new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small));
+    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
+      `-# ${E('icon_heart_purple', '💜')} Cenar Store — Uy Tín · Chất Lượng · Hỗ Trợ 24/7`
+    ));
+    return interaction.reply({ components: [container], flags: MessageFlags.IsComponentsV2 | 64 });
+  }
+
+  if (customId === 'product:locket:features') {
+    const { ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, SeparatorSpacingSize, MessageFlags } = await import('discord.js');
+    const E = createEmojiResolver(interaction.guildId);
+    const container = new ContainerBuilder().setAccentColor(0xFFD700);
+    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
+      `## ${E('icon_heart_purple', '💛')} Đặc Quyền Locket Gold\n` +
+      `> ${E('icon_sparkle', '✨')} *Tất cả những gì bạn nhận được khi nâng cấp Gold.*`
+    ));
+    container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
+    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
+      `### ${E('icon_crown', '🏆')} TÍNH NĂNG ĐỘC QUYỀN GOLD\n` +
+      `${E('status_check', '✅')} **Biểu tượng app tùy chỉnh** — Đổi icon app theo sở thích.\n` +
+      `${E('status_check', '✅')} **Streak Shield** — Bảo vệ & khôi phục streak dễ dàng.\n` +
+      `${E('status_check', '✅')} **Không quảng cáo** — Trải nghiệm sạch hoàn toàn.\n` +
+      `${E('status_check', '✅')} **Reaction đặc biệt** — Emoji phản ứng độc quyền Gold.\n` +
+      `${E('status_check', '✅')} **Chủ đề màu sắc** — Cá nhân hóa giao diện Locket.`
+    ));
+    container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
+    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
+      `### ${E('icon_wallet', '💳')} GÓI 1 NĂM — GIÁ TỐT NHẤT\n` +
+      `${E('icon_price', '💰')} Chỉ **\`150,000đ\`** cho **12 tháng** đầy đủ đặc quyền!\n` +
+      `${E('icon_key', '🔒')} Kích hoạt bằng **Username** — Không cần mật khẩu.`
+    ));
+    container.addSeparatorComponents(new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small));
+    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
+      `-# ${E('icon_heart_purple', '💜')} Nhấn **Mua ngay** để đặt hàng ngay!`
+    ));
+    return interaction.reply({ components: [container], flags: MessageFlags.IsComponentsV2 | 64 });
+  }
+
+  if (customId === 'product:locket:policy') {
+    const { ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, SeparatorSpacingSize, MessageFlags } = await import('discord.js');
+    const E = createEmojiResolver(interaction.guildId);
+    const container = new ContainerBuilder().setAccentColor(0xFFD700);
+    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
+      `## ${E('icon_gem', '💎')} Điều Khoản Dịch Vụ — Locket Gold\n` +
+      `> ${E('icon_sparkle', '✨')} *Vui lòng đọc kỹ trước khi mua.*`
+    ));
+    container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
+    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
+      `### ${E('status_check', '✅')} CAM KẾT CỦA SHOP\n` +
+      `${E('icon_gem', '💎')} Bảo hành full 12 tháng thời hạn đã mua.\n` +
+      `${E('icon_key', '🔒')} Kích hoạt bằng Username — Không cần mật khẩu/OTP.\n` +
+      `${E('status_check', '✅')} Hỗ trợ trong suốt thời hạn sử dụng.`
+    ));
+    container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
+    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
+      `### ${E('status_warn', '⚠️')} LƯU Ý QUAN TRỌNG\n` +
+      `${E('status_warn', '⚠️')} **Kiểm tra thật kỹ Username trước khi xác nhận!**\n` +
+      `${E('status_cross', '❌')} Không hoàn tiền sau khi đã kích hoạt thành công.\n` +
+      `${E('icon_duration', '⏱️')} Thời hạn 12 tháng tính từ ngày kích hoạt.`
+    ));
+    container.addSeparatorComponents(new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small));
+    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
+      `-# ${E('icon_heart_purple', '💜')} Cenar Store — Uy Tín · Chất Lượng · Hỗ Trợ 24/7`
+    ));
+    return interaction.reply({ components: [container], flags: MessageFlags.IsComponentsV2 | 64 });
   }
 
   // Handle modals
