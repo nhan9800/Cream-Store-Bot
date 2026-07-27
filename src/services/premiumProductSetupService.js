@@ -108,8 +108,26 @@ export async function publishPremiumProducts(interaction) {
   if (claudeProduct) {
     const claudeEmbed = new EmbedBuilder()
       .setColor('#D97757')
-      .setTitle(`${E('claude_ai') || '🤖'} CLAUDE API 100M`)
-      .setDescription(`> Trải nghiệm hệ sinh thái Claude mạnh mẽ, phù hợp cho lập trình, phân tích dữ liệu, viết nội dung, nghiên cứu và xử lý công việc chuyên sâu.\n\n${E('price') || '💰'} **Giá chỉ từ ${claudeProduct.base_price.toLocaleString('vi-VN')}đ**\n${E('duration') || '⏱️'} **Thời hạn:** ${claudeProduct.base_duration_days} ngày\n${E('extend') || '➕'} **Mua thêm ngày:** Chỉ cộng thêm ${claudeProduct.additional_day_price.toLocaleString('vi-VN')}đ cho mỗi ngày tiếp theo\n${E('quota') || '📊'} **Hạn mức:** ${claudeProduct.quota_value}${claudeProduct.quota_unit}\n${E('support') || '🛠️'} **Hỗ trợ setup và hướng dẫn sử dụng tận tình**\n\n## ${E('sparkles') || '✨'} Đặc điểm nổi bật\n${E('check') || '✅'} Truy cập các model Claude mà hệ thống và nhà cung cấp đang cấp quyền.\n${E('check') || '✅'} Hỗ trợ lập trình, phân tích, nghiên cứu, xử lý tài liệu và các tác vụ AI chuyên sâu.\n\n## ${E('shield') || '🛡️'} Cam kết từ shop\n${E('check') || '✅'} Kiểm tra dịch vụ trước khi bàn giao.\n${E('check') || '✅'} Hỗ trợ trong thời hạn sử dụng.\n${E('check') || '✅'} Không yêu cầu khách hàng cung cấp mật khẩu tài khoản cá nhân.\n\n> ${E('warning') || '⚠️'} Model và tính năng khả dụng có thể thay đổi theo chính sách của Anthropic.`)
+      .setTitle(`${E('brand_claude', '🤖')} CLAUDE API 100M`)
+      .setDescription(`> ${E('icon_sparkle', '✨')} *Trải nghiệm hệ sinh thái Claude mạnh mẽ, phù hợp cho lập trình, phân tích dữ liệu, viết nội dung và xử lý công việc chuyên sâu.*
+
+▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬
+
+${E('icon_price', '💰')} **Giá khởi điểm:** \`${claudeProduct.base_price.toLocaleString('vi-VN')}đ\`
+${E('icon_duration', '⏱️')} **Thời hạn:** \`${claudeProduct.base_duration_days} ngày\`
+${E('icon_gift', '🎁')} **Mua thêm ngày:** \`+${claudeProduct.additional_day_price.toLocaleString('vi-VN')}đ / ngày\`
+${E('icon_chart', '📊')} **Hạn mức:** \`${claudeProduct.quota_value}${claudeProduct.quota_unit}\`
+
+▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬
+
+${E('icon_crown', '👑')} **ĐẶC ĐIỂM NỔI BẬT**
+${E('status_check', '✅')} Truy cập các model Claude siêu việt từ hệ thống.
+${E('status_check', '✅')} Hỗ trợ đa tác vụ lập trình, phân tích, research.
+
+${E('icon_gem', '💎')} **CAM KẾT DỊCH VỤ**
+${E('status_check', '✅')} Bảo hành full thời hạn sử dụng.
+${E('status_check', '✅')} Không yêu cầu cung cấp thông tin cá nhân.
+${E('status_warn', '⚠️')} *Lưu ý: Model khả dụng có thể thay đổi theo chính sách Anthropic.*`)
       .setImage('attachment://claude-banner.webp');
 
     const claudeRow = new ActionRowBuilder().addComponents(
@@ -140,8 +158,26 @@ export async function publishPremiumProducts(interaction) {
   if (locketProduct) {
     const locketEmbed = new EmbedBuilder()
       .setColor('#FFD700')
-      .setTitle(`${E('locket_gold') || '💛'} LOCKET GOLD — 1 NĂM`)
-      .setDescription(`> Nâng cấp trải nghiệm Locket với nhiều tính năng cá nhân hóa, kết nối bạn bè và chia sẻ khoảnh khắc tiện lợi hơn.\n\n${E('price') || '💰'} **Giá:** ${locketProduct.base_price.toLocaleString('vi-VN')}đ\n${E('duration') || '⏱️'} **Thời hạn:** 12 tháng\n${E('username') || '👤'} **Kích hoạt bằng username Locket**\n${E('privacy') || '🔒'} **Không cần mật khẩu, OTP hoặc đăng nhập tài khoản**\n\n## ${E('gold_badge') || '🏆'} Đặc quyền Locket Gold\n${E('check') || '✅'} Thay đổi biểu tượng ứng dụng theo sở thích.\n${E('check') || '✅'} Khôi phục streak khi bị gián đoạn.\n${E('check') || '✅'} Trải nghiệm không quảng cáo.\n\n## ${E('rocket') || '🚀'} Cách mua cực kỳ đơn giản\n**Bước 1:** Nhấn nút **Mua ngay**.\n**Bước 2:** Nhập chính xác username Locket.\n**Bước 3:** Hoàn tất thanh toán.\n**Bước 4:** Chờ shop xử lý và nhận thông báo kích hoạt.\n\n> ${E('warning') || '⚠️'} Khách hàng cần kiểm tra kỹ username trước khi gửi.`)
+      .setTitle(`${E('icon_heart_purple', '💛')} LOCKET GOLD — 1 NĂM`)
+      .setDescription(`> ${E('icon_sparkle', '✨')} *Nâng cấp trải nghiệm Locket với nhiều tính năng cá nhân hóa, kết nối bạn bè và chia sẻ khoảnh khắc tiện lợi hơn.*
+
+▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬
+
+${E('icon_price', '💰')} **Giá nâng cấp:** \`${locketProduct.base_price.toLocaleString('vi-VN')}đ\`
+${E('icon_duration', '⏱️')} **Thời hạn:** \`12 tháng\`
+${E('icon_id', '👤')} **Kích hoạt:** \`Bằng Username\`
+${E('icon_key', '🔒')} **Bảo mật:** \`Không cần Mật khẩu / OTP\`
+
+▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬
+
+${E('icon_crown', '🏆')} **ĐẶC QUYỀN LOCKET GOLD**
+${E('status_check', '✅')} Thay đổi biểu tượng ứng dụng theo sở thích.
+${E('status_check', '✅')} Khôi phục streak dễ dàng khi bị gián đoạn.
+${E('status_check', '✅')} Trải nghiệm hoàn toàn không quảng cáo.
+
+${E('icon_fire', '🚀')} **HƯỚNG DẪN MUA HÀNG**
+${E('status_info', 'ℹ️')} Bấm **Mua ngay** ➔ Nhập **Username** ➔ Thanh toán ➔ Hoàn tất!
+${E('status_warn', '⚠️')} *Vui lòng kiểm tra kỹ chính xác username trước khi thanh toán.*`)
       .setImage('attachment://locket-gold-banner.webp');
 
     const locketRow = new ActionRowBuilder().addComponents(
