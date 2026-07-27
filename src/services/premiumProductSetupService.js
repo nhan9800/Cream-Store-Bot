@@ -1,4 +1,4 @@
-import { ChannelType, PermissionFlagsBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder, ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, SeparatorSpacingSize, MediaGalleryBuilder, MediaGalleryItemBuilder, MessageFlags } from 'discord.js';
+﻿import { ChannelType, PermissionFlagsBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder, ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, SeparatorSpacingSize, MediaGalleryBuilder, MediaGalleryItemBuilder, MessageFlags } from 'discord.js';
 import { db } from '../database/db.js';
 import { getProductByName } from './productCatalogService.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
@@ -599,7 +599,8 @@ export async function handlePremiumProductInteraction(interaction) {
     const product = getProductByName('WEB', 'Locket Gold — 1 năm');
     if (!product) return interaction.reply({ content: '❌ Sản phẩm không khả dụng.', ephemeral: true });
 
-    await handlePremiumBuyOrder(interaction, product.name, 1, product.price, `Username Locket: ${username}`, product);
+    const locketPrice = product.base_price ?? product.price ?? 0;
+    await handlePremiumBuyOrder(interaction, product.name, 1, locketPrice, `Username Locket: ${username}`, product);
     return;
   }
 
@@ -830,4 +831,5 @@ export async function autoSetupAndPublishPremiumProducts(guild) {
     console.error('[AUTO-SETUP] Error during automatic setup:', error);
   }
 }
+
 
