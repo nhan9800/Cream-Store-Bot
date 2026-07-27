@@ -3,24 +3,23 @@
 /* Pre-emit self-critique: P5 H5 E5 S5 R5 V5 */
 
 :root {
-    /* Color Tokens (Cyberpunk / Deep Space & Neon Hue) */
-    --color-paper: oklch(12% 0.02 280);       /* Deep space purple-black */
-    --color-paper-2: oklch(16% 0.03 280);     /* Elevated card background */
-    --color-paper-3: oklch(20% 0.04 280);     /* Hover state card background */
-    --color-rule: oklch(25% 0.03 280);        /* Hairline borders & rules */
-    --color-rule-active: oklch(75% 0.15 220); /* Neon Cyan active borders */
+    /* Color Tokens (Midnight Green / Slate Hue: 160) */
+    --color-paper: oklch(14% 0.015 160);       /* Deep slate-green base background */
+    --color-paper-2: oklch(17% 0.018 160);     /* Elevated card & surface background */
+    --color-paper-3: oklch(21% 0.022 160);     /* Hover state card background */
+    --color-rule: oklch(25% 0.015 160);        /* Hairline borders & rules */
+    --color-rule-active: oklch(35% 0.025 160); /* Active state borders */
     
-    --color-neutral: oklch(65% 0.02 280);     /* Secondary/Muted text label */
-    --color-muted: oklch(50% 0.02 280);       /* Disabled/Helper text label */
-    --color-ink: oklch(96% 0.01 280);         /* Primary text content */
+    --color-neutral: oklch(62% 0.012 160);     /* Secondary/Muted text label */
+    --color-muted: oklch(48% 0.01 160);        /* Disabled/Helper text label */
+    --color-ink: oklch(96% 0.008 160);         /* Primary text content */
     
-    --color-accent: oklch(75% 0.15 220);       /* Vibrant Neon Cyan */
-    --color-accent-secondary: oklch(60% 0.25 300); /* Vibrant Neon Purple */
-    --color-accent-dim: oklch(75% 0.15 220 / 15%); /* Muted accent highlight bg */
-    --color-focus: oklch(75% 0.15 220);        /* Focus outline color */
+    --color-accent: oklch(76% 0.18 160);       /* Emerald Green accent tint */
+    --color-accent-dim: oklch(76% 0.18 160 / 10%); /* Muted accent highlight bg */
+    --color-focus: oklch(70% 0.19 160);        /* Focus outline color */
     
     --color-danger: oklch(65% 0.22 20);        /* Crisp warning red */
-    --color-danger-dim: oklch(65% 0.22 20 / 15%);
+    --color-danger-dim: oklch(65% 0.22 20 / 10%);
     
     /* Typography pairing */
     --font-heading: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif;
@@ -160,10 +159,10 @@ code {
     left: 0;
     right: 0;
     height: 72px;
-    background: rgba(15, 15, 20, 0.7);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    background: oklch(14% 0.015 160 / 75%);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border-bottom: 1px solid var(--color-rule);
     z-index: var(--z-sticky);
 }
 
@@ -259,10 +258,9 @@ code {
 }
 
 .btn-primary:hover {
-    background: var(--color-accent);
-    box-shadow: 0 0 20px var(--color-accent);
-    transform: translateY(-2px);
+    background: oklch(80% 0.17 160);
 }
+
 .btn-secondary {
     background: transparent;
     border-color: var(--color-rule);
@@ -536,62 +534,24 @@ code {
     }
 }
 
-.bg-orb {
-    position: absolute;
-    border-radius: 50%;
-    filter: blur(120px);
-    z-index: 0;
-    opacity: 0.4;
-    pointer-events: none;
-    animation: floatOrb 10s ease-in-out infinite alternate;
-}
-
-@keyframes floatOrb {
-    0% { transform: translateY(0) scale(1); }
-    100% { transform: translateY(-50px) scale(1.1); }
-}
-
-.orb-cyan {
-    top: -10%;
-    left: -10%;
-    width: 50vw;
-    height: 50vw;
-    background: var(--color-accent);
-}
-
-.orb-purple {
-    bottom: -20%;
-    right: -10%;
-    width: 60vw;
-    height: 60vw;
-    background: var(--color-accent-secondary);
-}
-
 .product-card {
-    position: relative;
-    z-index: 1;
-    background: rgba(30, 30, 40, 0.4);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: var(--color-paper-2);
+    border: 1px solid var(--color-rule);
     border-radius: var(--radius-large);
     padding: var(--space-lg);
     display: flex;
     flex-direction: column;
     justify-content: space-between;
     min-height: 310px;
-    box-shadow: 0 4px 30px rgba(0, 0, 0, 0.1);
     transition: background-color var(--dur-short) var(--ease-out),
                 border-color var(--dur-short) var(--ease-out),
-                transform var(--dur-short) var(--ease-out),
-                box-shadow var(--dur-short) var(--ease-out);
+                transform var(--dur-short) var(--ease-out);
 }
 
 .product-card:hover {
-    background-color: rgba(40, 40, 55, 0.6);
-    border-color: var(--color-accent);
-    transform: translateY(-5px);
-    box-shadow: 0 0 25px var(--color-accent-dim);
+    background-color: var(--color-paper-3);
+    border-color: var(--color-rule-active);
+    transform: translateY(-3px);
 }
 
 .p-header {
