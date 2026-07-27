@@ -304,40 +304,6 @@ export function registerDashboardRoutes(app) {
     }
   });
 
-  // --- Secure Webhook Deploy API for CI/CD ---
-  app.post('/api/public/deploy', async (req, res) => {
-    try {
-      const providedKey = req.headers['x-bot-api-key'] || req.headers['x-github-deploy-secret'] || req.query.api_key;
-      const expectedKey = process.env.BOT_API_KEY;
-      if (!expectedKey || !providedKey || !safeEqual(providedKey, expectedKey)) {
-        return res.status(401).json({ ok: false, error: 'Unauthorized' });
-      }
-
-      console.log('[DEPLOY] Received deployment trigger. Updating code...');
-      res.json({ ok: true, message: 'Deployment triggered successfully. Updating and restarting bot...' });
-
-      const { exec } = await import('child_process');
-      const { existsSync } = await import('fs');
-      const { join } = await import('path');
-
-      const cwd = process.cwd();
-      const cmd = `bash deploy.sh`;
-
-      exec(cmd, { cwd }, (err, stdout, stderr) => {
-        if (err) {
-          console.error('[DEPLOY ERROR]', err.message);
-          console.error('[DEPLOY STDERR]', stderr);
-        } else {
-          console.log('[DEPLOY SUCCESS]', stdout.slice(-500));
-        }
-        // Restart — VibeHost launcher sẽ tự khởi động lại process
-        setTimeout(() => process.exit(0), 500);
-      });
-    } catch (e) {
-      console.error('[DEPLOY API ERROR]', e);
-      res.status(500).json({ ok: false, error: e.message });
-    }
-  });
 
   app.get('/api/public/vps-debug', async (req, res) => {
     try {
