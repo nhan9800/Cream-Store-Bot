@@ -321,28 +321,7 @@ export function registerDashboardRoutes(app) {
       const { join } = await import('path');
 
       const cwd = process.cwd();
-      const gitDir = join(cwd, '.git');
-      const REPO_URL = process.env.GITHUB_REPO_URL || 'https://github.com/TranNhan09082003/Cream-Store-Bot.git';
-
-      let cmd;
-      if (!existsSync(gitDir)) {
-        // Lần đầu: clone repo vào thư mục tạm rồi di chuyển .git về
-        console.log('[DEPLOY] No .git found - initializing git repo from GitHub...');
-        cmd = [
-          `git init`,
-          `git remote add origin ${REPO_URL}`,
-          `git fetch origin main`,
-          `git reset --hard origin/main`,
-          `npm install --omit=dev --prefer-offline`,
-          `(node scripts/fix-products.js || echo "migration failed")`,
-          `(node scripts/send-price-panel.js || echo "send price failed")`,
-          `mkdir -p tmp`,
-          `touch tmp/restart.txt`
-        ].join(' && ');
-      } else {
-        // Các lần sau: pull bình thường
-        cmd = `git remote set-url origin ${REPO_URL} && git fetch origin main && git reset --hard origin/main && npm install --omit=dev --prefer-offline && (node scripts/fix-products.js || echo "migration failed") && (node scripts/send-price-panel.js || echo "send price failed") && mkdir -p tmp && touch tmp/restart.txt`;
-      }
+      const cmd = `bash deploy.sh`;
 
       exec(cmd, { cwd }, (err, stdout, stderr) => {
         if (err) {
