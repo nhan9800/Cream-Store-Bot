@@ -699,17 +699,22 @@ async function handlePremiumBuyOrder(interaction, productName, quantity, totalPr
       createdById: interaction.client.user.id,
     });
 
-    addWalletBalance(
-      interaction.guildId, 
-      interaction.user.id, 
-      -totalPrice, 
-      'PAY_ORDER', 
-      `Thanh toán đơn ${order.order_code}: x${quantity} ${productName}`, 
-      order.order_code
-    );
+    const currentBalance = getWalletBalance(interaction.guildId, interaction.user.id);
+    if (currentBalance >= totalPrice && totalPrice > 0) {
+      addWalletBalance(
+        interaction.guildId, 
+        interaction.user.id, 
+        -totalPrice, 
+        'PAY_ORDER', 
+        `Thanh toán đơn ${order.order_code}: x${quantity} ${productName}`, 
+        order.order_code
+      );
 
-    db.prepare("UPDATE store_orders SET status = 'PAID' WHERE order_code = ?").run(order.order_code);
-    order.status = 'PAID';
+      db.prepare("UPDATE store_orders SET status = 'PAID' WHERE order_code = ?").run(order.order_code);
+      order.status = 'PAID';
+    } else {
+      order.status = 'PENDING';
+    }
 
     try {
       const orderLogChannel = guildConfig.order_log_channel_id
@@ -743,9 +748,16 @@ async function handlePremiumBuyOrder(interaction, productName, quantity, totalPr
       await channel.send({ content: `${supportPing} ⚡ **ĐƠN HÀNG CTV ƯU TIÊN CAO:** CTV <@${interaction.user.id}> vừa lên đơn hàng \`${order.order_code}\` (Sản phẩm: **${productName}**). Vui lòng ưu tiên xử lý và bàn giao nhanh nhất!` }).catch(() => null);
     }
 
-    await channel.send({ content: `${E('status_check')} **THANH TOÁN THÀNH CÔNG:** Đơn hàng này đã được thanh toán 100% qua Ví Store. Nhân viên sẽ tiến hành xử lý và giao hàng cho bạn.` }).catch(() => null);
+    if (totalPrice > 0 && order.status !== 'PAID') {
+      await sendOrRefreshPaymentQr({ guild: interaction.guild, orderCode: order.order_code }).catch(err => {
+        console.error('[ORDER] Lỗi tạo QR PayOS:', err);
+        channel.send(`${E('status_warn', '⚠️')} Lỗi tạo mã QR thanh toán: ${err.message}`).catch(() => null);
+      });
+    } else {
+      await channel.send({ content: `${E('status_check', '✅')} **THANH TOÁN THÀNH CÔNG:** Đơn hàng này đã được thanh toán qua Ví Store. Nhân viên sẽ tiến hành xử lý và giao hàng cho bạn.` }).catch(() => null);
+    }
 
-    await interaction.editReply(`${E('status_check')} Đã tạo đơn hàng thành công tại <#${channel.id}>`);
+    await interaction.editReply(`${E('status_check', '✅')} Đã tạo đơn hàng thành công tại <#${channel.id}>`);
   } catch (err) {
     console.error('[PREMIUM ORDER] Lỗi xử lý:', err);
     await interaction.editReply(`${E('status_cross')} Đã xảy ra lỗi khi tạo đơn hàng: ${err.message}`);

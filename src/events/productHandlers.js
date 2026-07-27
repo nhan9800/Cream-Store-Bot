@@ -1,4 +1,4 @@
-﻿// ═══════════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════════
 // productHandlers.js — Nhóm xử lý Sản phẩm: chọn/mua/sửa/thêm/sale (tách từ interactionCreate.js).
 // Nằm CÙNG thư mục src/events/ để mọi đường dẫn '../services', '../utils', '../database' giữ nguyên.
 // State/helper dùng chung import từ ./shared.js — KHÔNG khai báo lại.
@@ -31,6 +31,7 @@ import { buildTicketChannelName, parseMoneyInput, buildOrderLogContent } from '.
 import { ensureRateLimit } from '../services/abuseService.js';
 import { isCustomerCtv } from '../services/ctvService.js';
 import { getWalletBalance, addWalletBalance } from '../services/walletService.js';
+import { sendOrRefreshPaymentQr } from '../services/paymentService.js';
 import {
   safeReply,
   getTicketCategoryId,
@@ -180,63 +181,64 @@ export async function handleProductPurchaseFlow(interaction, productId) {
       closeTicket(existingTicket.id, interaction.client.user.id);
     }
 
-    import('discord.js').then(async ({ PermissionFlagsBits, ChannelType, ActionRowBuilder, ButtonBuilder, ButtonStyle }) => {
-      try {
-        const overwrites = [
-          { id: interaction.guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
-          { id: interaction.user.id, allow: TICKET_MEMBER_PERMISSIONS },
-          { id: interaction.client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageChannels] },
-        ];
-        if (guildConfig.support_role_id) overwrites.push({ id: guildConfig.support_role_id, allow: TICKET_MEMBER_PERMISSIONS });
+    try {
+      const overwrites = [
+        { id: interaction.guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
+        { id: interaction.user.id, allow: TICKET_MEMBER_PERMISSIONS },
+        { id: interaction.client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageChannels] },
+      ];
+      if (guildConfig.support_role_id) overwrites.push({ id: guildConfig.support_role_id, allow: TICKET_MEMBER_PERMISSIONS });
 
-        const categoryId = getTicketCategoryId(guildConfig, normalizedType);
-        const channel = await interaction.guild.channels.create({
-          name: `tmp-${Math.random().toString().slice(2, 8)}`,
-          type: ChannelType.GuildText,
-          parent: categoryId,
-          permissionOverwrites: overwrites,
-        });
+      const categoryId = getTicketCategoryId(guildConfig, normalizedType);
+      const channel = await interaction.guild.channels.create({
+        name: `tmp-${Math.random().toString().slice(2, 8)}`,
+        type: ChannelType.GuildText,
+        parent: categoryId,
+        permissionOverwrites: overwrites,
+      });
 
-        const ticket = createTicket({
-          guildId: interaction.guildId,
-          channelId: channel.id,
-          customerId: interaction.user.id,
-          openedById: interaction.user.id,
-          ticketType: normalizedType,
-        });
+      const ticket = createTicket({
+        guildId: interaction.guildId,
+        channelId: channel.id,
+        customerId: interaction.user.id,
+        openedById: interaction.user.id,
+        ticketType: normalizedType,
+      });
 
-        const hub = getCenarHub();
-        if (hub) {
-          hub.upsertUser({
-            discord_id: interaction.user.id,
-            discord_username: interaction.user.username,
-            display_name: interaction.member?.displayName,
-          }).catch(e => console.error('[HUB] Lỗi upsertUser:', e.message));
-        }
+      const hub = getCenarHub();
+      if (hub) {
+        hub.upsertUser({
+          discord_id: interaction.user.id,
+          discord_username: interaction.user.username,
+          display_name: interaction.member?.displayName,
+        }).catch(e => console.error('[HUB] Lỗi upsertUser:', e.message));
+      }
 
-        const isCtv = isCustomerCtv(interaction.guildId, interaction.user.id);
-        const prefix = (product.service_type || 'ticket').toLowerCase();
-        
-        if (isCtv) {
-          await channel.setName(`⚡-ctv-${ticket.ticket_code}`).catch(() => null);
-        } else {
-          await channel.setName(buildTicketChannelName(ticket.ticket_code, prefix)).catch(() => null);
-        }
+      const isCtv = isCustomerCtv(interaction.guildId, interaction.user.id);
+      const prefix = (product.service_type || 'ticket').toLowerCase();
+      
+      if (isCtv) {
+        await channel.setName(`⚡-ctv-${ticket.ticket_code}`).catch(() => null);
+      } else {
+        await channel.setName(buildTicketChannelName(ticket.ticket_code, prefix)).catch(() => null);
+      }
 
-        const order = createOrder({
-          guildId: interaction.guildId,
-          ticketId: ticket.id,
-          ticketChannelId: channel.id,
-          customerId: interaction.user.id,
-          productName: product.name,
-          quantity,
-          totalAmount: totalPrice,
-          durationMonths: product.duration_months,
-          orderLogChannelId: guildConfig.order_log_channel_id ?? null,
-          createdById: interaction.client.user.id,
-        });
+      const order = createOrder({
+        guildId: interaction.guildId,
+        ticketId: ticket.id,
+        ticketChannelId: channel.id,
+        customerId: interaction.user.id,
+        productName: product.name,
+        quantity,
+        totalAmount: totalPrice,
+        durationMonths: product.duration_months,
+        orderLogChannelId: guildConfig.order_log_channel_id ?? null,
+        createdById: interaction.client.user.id,
+      });
 
-        // Trừ tiền ngay sau khi order được tạo (cộng số âm)
+      // Kiểm tra số dư ví trước khi thanh toán
+      const currentBalance = getWalletBalance(interaction.guildId, interaction.user.id);
+      if (currentBalance >= totalPrice && totalPrice > 0) {
         addWalletBalance(
           interaction.guildId, 
           interaction.user.id, 
@@ -246,67 +248,63 @@ export async function handleProductPurchaseFlow(interaction, productId) {
           order.order_code
         );
 
-        // Đánh dấu PAID trong DB
         db.prepare("UPDATE store_orders SET status = 'PAID' WHERE order_code = ?").run(order.order_code);
         order.status = 'PAID';
-
-        // Gửi log đơn hàng vào kênh order log
-        try {
-          const orderLogChannel = guildConfig.order_log_channel_id
-            ? await interaction.guild.channels.fetch(guildConfig.order_log_channel_id).catch(() => null)
-            : null;
-          if (orderLogChannel?.isTextBased()) {
-            const logMessage = await orderLogChannel.send({ content: buildOrderLogContent(order, interaction.guildId) });
-            saveOrderLogMessage(order.order_code, logMessage.id);
-          }
-        } catch (logErr) {
-          console.error('[PANEL ORDER] Lỗi gửi log đơn:', logErr.message);
-        }
-
-        // Gửi welcome ticket V2 (không dùng content với IsComponentsV2)
-        const { container: welcomeContainer, flags: welcomeFlags } = buildTicketWelcomeV2(
-          ticket.ticket_code,
-          interaction.user.id,
-          normalizedType,
-          order.order_code,
-          product.name,
-          interaction.guildId
-        );
-        await channel.send({
-          components: [welcomeContainer, ...buildTicketControlComponents(ticket.id, interaction.user.id)],
-          flags: welcomeFlags,
-        });
-        // Ping riêng (content không được dùng với V2 flag)
-        await channel.send({ content: `<@${interaction.user.id}> — Đơn hàng **${order.order_code}** đã được tạo!` }).catch(() => null);
-
-        if (isCtv) {
-          const supportPing = [guildConfig.support_role_id && `<@&${guildConfig.support_role_id}>`, guildConfig.shipper_role_id && `<@&${guildConfig.shipper_role_id}>`].filter(Boolean).join(' ');
-          await channel.send({ content: `${supportPing} ⚡ **ĐƠN HÀNG CTV ƯU TIÊN CAO:** CTV <@${interaction.user.id}> vừa lên đơn hàng \`${order.order_code}\` (Sản phẩm: **${product.name}**). Vui lòng ưu tiên xử lý và bàn giao nhanh nhất!` }).catch(() => null);
-        }
-
-        // Nếu có tiền và chưa thanh toán -> tạo QR PayOS
-        if (totalPrice > 0 && order.status !== 'PAID') {
-          import('../services/paymentService.js').then(async ({ sendOrRefreshPaymentQr }) => {
-            await sendOrRefreshPaymentQr({ guild: interaction.guild, orderCode: order.order_code }).catch(err => {
-              console.error('[ORDER] Lỗi tạo QR PayOS:', err);
-              channel.send(`${E('status_warn')} Lỗi tạo mã QR thanh toán: ${err.message}`);
-            });
-          });
-        } else if (order.status === 'PAID') {
-          await channel.send({ content: `${E('tickgreen') || '✅'} **THANH TOÁN THÀNH CÔNG:** Đơn hàng này đã được thanh toán 100% qua Ví Store. Nhân viên sẽ tiến hành xử lý và giao hàng cho bạn.` }).catch(() => null);
-        }
-
-        await interaction.editReply(`${E('status_check')} Đã tạo đơn hàng tại <#${channel.id}>`);
-      } catch (err) {
-        console.error('[ORDER_TICKET_CREATE_ASYNC] Lỗi:', err);
-        await interaction.editReply(`${E('status_cross')} Đã có lỗi xảy ra khi tạo ticket đơn hàng.`);
-      } finally {
-        activeTicketCreations.delete(lockKey);
+      } else {
+        order.status = 'PENDING';
       }
-    }).catch(err => {
-      console.error('[IMPORT_ERROR] Lỗi import discord.js:', err);
+
+      // Gửi log đơn hàng vào kênh order log
+      try {
+        const orderLogChannel = guildConfig.order_log_channel_id
+          ? await interaction.guild.channels.fetch(guildConfig.order_log_channel_id).catch(() => null)
+          : null;
+        if (orderLogChannel?.isTextBased()) {
+          const logMessage = await orderLogChannel.send({ content: buildOrderLogContent(order, interaction.guildId) });
+          saveOrderLogMessage(order.order_code, logMessage.id);
+        }
+      } catch (logErr) {
+        console.error('[PANEL ORDER] Lỗi gửi log đơn:', logErr.message);
+      }
+
+      // Gửi welcome ticket V2 (không dùng content với IsComponentsV2)
+      const { container: welcomeContainer, flags: welcomeFlags } = buildTicketWelcomeV2(
+        ticket.ticket_code,
+        interaction.user.id,
+        normalizedType,
+        order.order_code,
+        product.name,
+        interaction.guildId
+      );
+      await channel.send({
+        components: [welcomeContainer, ...buildTicketControlComponents(ticket.id, interaction.user.id)],
+        flags: welcomeFlags,
+      });
+      // Ping riêng (content không được dùng với V2 flag)
+      await channel.send({ content: `<@${interaction.user.id}> — Đơn hàng **${order.order_code}** đã được tạo!` }).catch(() => null);
+
+      if (isCtv) {
+        const supportPing = [guildConfig.support_role_id && `<@&${guildConfig.support_role_id}>`, guildConfig.shipper_role_id && `<@&${guildConfig.shipper_role_id}>`].filter(Boolean).join(' ');
+        await channel.send({ content: `${supportPing} ⚡ **ĐƠN HÀNG CTV ƯU TIÊN CAO:** CTV <@${interaction.user.id}> vừa lên đơn hàng \`${order.order_code}\` (Sản phẩm: **${product.name}**). Vui lòng ưu tiên xử lý và bàn giao nhanh nhất!` }).catch(() => null);
+      }
+
+      // Nếu có tiền và chưa thanh toán -> tạo QR PayOS
+      if (totalPrice > 0 && order.status !== 'PAID') {
+        await sendOrRefreshPaymentQr({ guild: interaction.guild, orderCode: order.order_code }).catch(err => {
+          console.error('[ORDER] Lỗi tạo QR PayOS:', err);
+          channel.send(`${E('status_warn', '⚠️')} Lỗi tạo mã QR thanh toán: ${err.message}`).catch(() => null);
+        });
+      } else {
+        await channel.send({ content: `${E('status_check', '✅')} **THANH TOÁN THÀNH CÔNG:** Đơn hàng này đã được thanh toán 100% qua Ví Store. Nhân viên sẽ tiến hành xử lý và giao hàng cho bạn.` }).catch(() => null);
+      }
+
+      await interaction.editReply(`${E('status_check', '✅')} Đã tạo đơn hàng tại <#${channel.id}>`);
+    } catch (err) {
+      console.error('[ORDER_TICKET_CREATE_ASYNC] Lỗi:', err);
+      await interaction.editReply(`${E('status_cross', '❌')} Đã có lỗi xảy ra khi tạo ticket đơn hàng.`);
+    } finally {
       activeTicketCreations.delete(lockKey);
-    });
+    }
 
   } catch (error) {
     activeTicketCreations.delete(lockKey);
