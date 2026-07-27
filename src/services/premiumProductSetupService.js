@@ -9,7 +9,7 @@ import { createTicket, closeTicket, getOpenTicketByCustomer } from './ticketServ
 import { getTicketCategoryId, TICKET_MEMBER_PERMISSIONS, activeTicketCreations, buildTicketChannelName } from '../events/shared.js';
 import { buildTicketWelcomeV2, buildTicketControlComponents, buildOrderLogContent } from '../utils/embeds.js';
 import { isCustomerCtv } from './ctvService.js';
-import { ensureRateLimit } from '../utils/rateLimiter.js';
+import { ensureRateLimit } from './abuseService.js';
 import { config } from '../config/index.js';
 import { getCenarHub } from './cenarHub.js';
 import { sendOrRefreshPaymentQr } from './paymentService.js';
