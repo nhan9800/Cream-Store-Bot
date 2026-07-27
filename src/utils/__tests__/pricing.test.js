@@ -2,24 +2,24 @@ import { describe, it, expect } from 'vitest';
 import { calculateClaudePrice } from '../pricing.js';
 
 describe('calculateClaudePrice', () => {
-  it('days = 1 should return 85000', () => {
+  it('input = 1 should return 85000', () => {
     expect(calculateClaudePrice(1)).toBe(85000);
   });
 
-  it('days = 2 should return 90000', () => {
-    expect(calculateClaudePrice(2)).toBe(90000);
+  it('input = 2 should return 170000', () => {
+    expect(calculateClaudePrice(2)).toBe(170000);
   });
 
-  it('days = 3 should return 95000', () => {
-    expect(calculateClaudePrice(3)).toBe(95000);
+  it('input = 3 should return 255000', () => {
+    expect(calculateClaudePrice(3)).toBe(255000);
   });
 
-  it('days = 7 should return 115000', () => {
-    expect(calculateClaudePrice(7)).toBe(115000);
+  it('input = 7 should return 595000', () => {
+    expect(calculateClaudePrice(7)).toBe(595000);
   });
 
-  it('days = 30 should return 230000', () => {
-    expect(calculateClaudePrice(30)).toBe(230000);
+  it('input = 100 (auto scale) should return 85000', () => {
+    expect(calculateClaudePrice(100)).toBe(85000);
   });
 
   it('days = 0 should throw error', () => {
