@@ -18,7 +18,9 @@ async function callApi(endpoint, params = {}) {
   
   // ViOTP trả về status_code = 200 khi thành công
   if (data.status_code !== 200) {
-    throw new Error(data.message || `Lỗi API ViOTP: ${data.status_code}`);
+    console.error('[VIOTP_API_ERROR] Raw response:', JSON.stringify(data));
+    const code = data.status_code ?? data.status ?? 'undefined';
+    throw new Error(data.message || `Lỗi API ViOTP (Code: ${code})`);
   }
   return data.data;
 }
@@ -56,9 +58,10 @@ export async function requestOtp(serviceId, network = null, country = 'vn') {
 
 /**
  * Kiểm tra trạng thái mã OTP
- * @param {string} requestId 
+ * @param {string|number} requestId 
  * @returns {Promise<{ID: string, Phone: string, Status: number, Code: string, SmsContent: string}>}
  */
 export async function checkSession(requestId) {
-  return await callApi('/session/getv2', { requestId });
+  const cleanId = Math.floor(Number(requestId));
+  return await callApi('/session/getv2', { requestId: cleanId });
 }
