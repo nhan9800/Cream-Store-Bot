@@ -65,6 +65,13 @@ export async function buildClient() {
       });
     }).catch(err => console.error('Failed to import autoSetupPriceBoardService', err));
 
+    // Tự động setup kênh Giveaway (chỉ chạy 1 lần nếu chưa có)
+    import('./services/autoSetupGiveawayService.js').then(({ autoSetupGiveawayChannel }) => {
+      autoSetupGiveawayChannel(readyClient).catch(err => {
+        console.log(`[AUTO-SETUP-GIVEAWAY] Lỗi chạy setup giveaway: ${err.message}`);
+      });
+    }).catch(err => console.error('Failed to import autoSetupGiveawayService', err));
+
         // Gửi thông báo ra mắt Boost Server - Đã bị tắt theo yêu cầu để tránh spam tag @everyone khi restart
     const SERVER1_GUILD_ID = '1282637033340403754';
     const isStore1 = readyClient.guilds.cache.has(SERVER1_GUILD_ID);
