@@ -12,6 +12,7 @@ import {
 import { config } from '../config.js';
 import { formatCurrency } from '../utils/formatters.js';
 import { setupPremiumProducts, publishPremiumProducts } from '../services/premiumProductSetupService.js';
+import { autoSetupPriceBoard } from '../services/autoSetupPriceBoardService.js';
 
 export const data = new SlashCommandBuilder()
   .setName('product')
@@ -265,7 +266,9 @@ Spotify Premium | 25k | 1`;
     }
 
     if (sub === 'sync') {
-      return interaction.editReply({ content: '✅ Đã đồng bộ catalog thành công giữa Bot và Next.js!' });
+      await interaction.editReply({ content: `${E('status_loading')} Đang rebuild bảng giá...` });
+      await autoSetupPriceBoard(interaction.client);
+      return interaction.editReply({ content: `${E('status_check')} Đã rebuild toàn bộ bảng giá thành công!` });
     }
 
     if (sub === 'repair') {
