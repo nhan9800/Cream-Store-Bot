@@ -11,19 +11,19 @@ export async function autoSetupGiveawayChannel(client) {
   if (!guild) return;
 
   // Check if channel already exists
-  let channel = guild.channels.cache.find(c => c.name === '🎁・giveaway' || c.name === 'giveaway');
+  let channel = guild.channels.cache.find(c => c.name === '🎁・su-kien' || c.name === 'su-kien');
   
   if (!channel) {
     // Create channel
     channel = await guild.channels.create({
-      name: '🎁・giveaway',
+      name: '🎁・su-kien',
       type: ChannelType.GuildText,
-      reason: 'Tự động tạo kênh Giveaway theo yêu cầu',
+      reason: 'Tự động tạo kênh Sự kiện (Giveaway) theo yêu cầu',
     }).catch(err => {
       console.error('[AUTO-SETUP-GIVEAWAY] Failed to create channel:', err.message);
       return null;
     });
-    console.log('[AUTO-SETUP-GIVEAWAY] Created new giveaway channel.');
+    console.log('[AUTO-SETUP-GIVEAWAY] Created new giveaway/event channel.');
   }
 
   if (!channel) {
