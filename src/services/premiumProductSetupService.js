@@ -121,15 +121,29 @@ export async function publishPremiumProducts(interaction) {
   // ══════════════════════════════════════════
   const claudeProduct = getProductByName('WEB', 'Claude API 100M');
   if (claudeProduct) {
-    const { ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, SeparatorSpacingSize, MediaGalleryBuilder, MediaGalleryItemBuilder, MessageFlags } = await import('discord.js');
+    const claudeBannerPath = path.join(botRoot, 'assets/products/claude/claude-banner.webp');
+    const claudeHasBanner = fs.existsSync(claudeBannerPath);
 
     const container = new ContainerBuilder().setAccentColor(0xD97757);
+
+    // 🖼️ Banner hero ảnh TRƯỚC — full-width khi đứng đầu Container
+    if (claudeHasBanner) {
+      container.addMediaGalleryComponents(
+        new MediaGalleryBuilder().addItems(
+          new MediaGalleryItemBuilder().setURL('attachment://claude-banner.webp')
+        )
+      );
+    }
+
+    container.addSeparatorComponents(
+      new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small)
+    );
 
     // Header
     container.addTextDisplayComponents(
       new TextDisplayBuilder().setContent(
         `## ${E('brand_claude', '🤖')} CLAUDE API 100M\n` +
-        `> ${E('icon_sparkle', '✨')} *Trải nghiệm hệ sinh thái Claude mạnh mẽ — lập trình, phân tích, nghiên cứu và xử lý công việc chuyên sâu.*`
+        `> ${E('icon_sparkle', '✨')} *Hệ sinh thái Claude mạnh mẽ — lập trình, phân tích, nghiên cứu và xử lý công việc chuyên sâu.*`
       )
     );
 
@@ -152,41 +166,16 @@ export async function publishPremiumProducts(interaction) {
       new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
     );
 
-    // Đặc điểm nổi bật
+    // Đặc điểm + Cam kết (gộp gọn)
     container.addTextDisplayComponents(
       new TextDisplayBuilder().setContent(
-        `### ${E('icon_crown', '👑')} ĐẶC ĐIỂM NỔI BẬT\n` +
+        `### ${E('icon_crown', '👑')} ĐẶC ĐIỂM & CAM KẾT\n` +
         `${E('status_check', '✅')} Truy cập các model Claude siêu việt từ hệ thống.\n` +
-        `${E('status_check', '✅')} Hỗ trợ lập trình, phân tích, nghiên cứu, xử lý tài liệu.`
+        `${E('status_check', '✅')} Hỗ trợ lập trình, phân tích, nghiên cứu, xử lý tài liệu.\n` +
+        `${E('icon_gem', '💎')} Bảo hành full thời hạn · Không yêu cầu thông tin cá nhân.\n` +
+        `${E('status_warn', '⚠️')} *Model có thể thay đổi theo chính sách Anthropic.*`
       )
     );
-
-    container.addSeparatorComponents(
-      new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
-    );
-
-    // Cam kết
-    container.addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(
-        `### ${E('icon_gem', '💎')} CAM KẾT DỊCH VỤ\n` +
-        `${E('status_check', '✅')} Bảo hành full thời hạn sử dụng.\n` +
-        `${E('status_check', '✅')} Không yêu cầu cung cấp thông tin cá nhân.\n` +
-        `${E('status_warn', '⚠️')} *Model khả dụng có thể thay đổi theo chính sách Anthropic.*`
-      )
-    );
-
-    container.addSeparatorComponents(
-      new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
-    );
-
-    // Banner ảnh
-    const claudeBannerPath = path.join(botRoot, 'assets/products/claude/claude-banner.webp');
-    if (fs.existsSync(claudeBannerPath)) {
-      const gallery = new MediaGalleryBuilder().addItems(
-        new MediaGalleryItemBuilder().setURL('attachment://claude-banner.webp')
-      );
-      container.addMediaGalleryComponents(gallery);
-    }
 
     container.addSeparatorComponents(
       new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small)
@@ -206,10 +195,10 @@ export async function publishPremiumProducts(interaction) {
       new ButtonBuilder().setCustomId('product:claude:policy').setLabel('Điều khoản').setStyle(ButtonStyle.Secondary).setEmoji(E.component('icon_gem') || '📜')
     );
 
-    const claudeAttachment = new AttachmentBuilder(path.join(botRoot, 'assets/products/claude/claude-banner.webp'));
+    const claudeAttachment = new AttachmentBuilder(claudeBannerPath);
     const claudePayload = {
       components: [container, claudeRow],
-      files: fs.existsSync(claudeBannerPath) ? [claudeAttachment] : [],
+      files: claudeHasBanner ? [claudeAttachment] : [],
       flags: MessageFlags.IsComponentsV2,
     };
 
@@ -234,7 +223,23 @@ export async function publishPremiumProducts(interaction) {
   if (locketProduct) {
     const { ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, SeparatorSpacingSize, MediaGalleryBuilder, MediaGalleryItemBuilder, MessageFlags } = await import('discord.js');
 
+    const locketBannerPath = path.join(botRoot, 'assets/products/locket-gold/locket-gold-banner.webp');
+    const locketHasBanner = fs.existsSync(locketBannerPath);
+
     const container = new ContainerBuilder().setAccentColor(0xFFD700);
+
+    // 🖼️ Banner hero ảnh TRƯỚC — full-width khi đứng đầu Container
+    if (locketHasBanner) {
+      container.addMediaGalleryComponents(
+        new MediaGalleryBuilder().addItems(
+          new MediaGalleryItemBuilder().setURL('attachment://locket-gold-banner.webp')
+        )
+      );
+    }
+
+    container.addSeparatorComponents(
+      new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small)
+    );
 
     // Header
     container.addTextDisplayComponents(
@@ -263,41 +268,17 @@ export async function publishPremiumProducts(interaction) {
       new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
     );
 
-    // Đặc quyền
+    // Đặc quyền + Hướng dẫn (gộp gọn)
     container.addTextDisplayComponents(
       new TextDisplayBuilder().setContent(
-        `### ${E('icon_crown', '🏆')} ĐẶC QUYỀN LOCKET GOLD\n` +
+        `### ${E('icon_crown', '🏆')} ĐẶC QUYỀN & HƯỚNG DẪN\n` +
         `${E('status_check', '✅')} Thay đổi biểu tượng ứng dụng theo sở thích.\n` +
         `${E('status_check', '✅')} Khôi phục streak dễ dàng khi bị gián đoạn.\n` +
-        `${E('status_check', '✅')} Trải nghiệm hoàn toàn không quảng cáo.`
-      )
-    );
-
-    container.addSeparatorComponents(
-      new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
-    );
-
-    // Hướng dẫn mua
-    container.addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(
-        `### ${E('icon_fire', '🚀')} HƯỚNG DẪN MUA HÀNG\n` +
-        `${E('status_info', 'ℹ️')} Bấm **Mua ngay** ➔ Nhập **Username** ➔ Thanh toán ➔ Hoàn tất!\n` +
+        `${E('status_check', '✅')} Trải nghiệm hoàn toàn không quảng cáo.\n` +
+        `${E('icon_fire', '🚀')} Bấm **Mua ngay** ➔ Nhập **Username** ➔ Thanh toán ➔ Hoàn tất!\n` +
         `${E('status_warn', '⚠️')} *Kiểm tra kỹ username trước khi xác nhận thanh toán.*`
       )
     );
-
-    container.addSeparatorComponents(
-      new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
-    );
-
-    // Banner ảnh
-    const locketBannerPath = path.join(botRoot, 'assets/products/locket-gold/locket-gold-banner.webp');
-    if (fs.existsSync(locketBannerPath)) {
-      const gallery = new MediaGalleryBuilder().addItems(
-        new MediaGalleryItemBuilder().setURL('attachment://locket-gold-banner.webp')
-      );
-      container.addMediaGalleryComponents(gallery);
-    }
 
     container.addSeparatorComponents(
       new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small)
@@ -316,10 +297,10 @@ export async function publishPremiumProducts(interaction) {
       new ButtonBuilder().setCustomId('product:locket:policy').setLabel('Điều khoản').setStyle(ButtonStyle.Secondary).setEmoji(E.component('icon_gem') || '📜')
     );
 
-    const locketAttachment = new AttachmentBuilder(path.join(botRoot, 'assets/products/locket-gold/locket-gold-banner.webp'));
+    const locketAttachment = new AttachmentBuilder(locketBannerPath);
     const locketPayload = {
       components: [container, locketRow],
-      files: fs.existsSync(locketBannerPath) ? [locketAttachment] : [],
+      files: locketHasBanner ? [locketAttachment] : [],
       flags: MessageFlags.IsComponentsV2,
     };
 
