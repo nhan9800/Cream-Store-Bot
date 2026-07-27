@@ -79,6 +79,16 @@ export async function buildClient() {
       });
     }).catch(err => console.error('Failed to import autoSetupGiveawayService', err));
 
+    // Tự động setup kênh Premium Products (Claude, Locket)
+    import('./services/premiumProductSetupService.js').then(({ autoSetupAndPublishPremiumProducts }) => {
+      for (const guild of readyClient.guilds.cache.values()) {
+        autoSetupAndPublishPremiumProducts(guild).catch(err => {
+          console.log(`[AUTO-SETUP-PREMIUM] Lỗi chạy setup cho guild ${guild.name}: ${err.message}`);
+        });
+      }
+    }).catch(err => console.error('Failed to import premiumProductSetupService', err));
+
+
         // Gửi thông báo ra mắt Boost Server - Đã bị tắt theo yêu cầu để tránh spam tag @everyone khi restart
     const SERVER1_GUILD_ID = '1282637033340403754';
     const isStore1 = readyClient.guilds.cache.has(SERVER1_GUILD_ID);

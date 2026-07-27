@@ -268,3 +268,75 @@ export async function handlePremiumProductInteraction(interaction) {
 
   await interaction.reply({ content: 'Tính năng đang được phát triển.', ephemeral: true });
 }
+
+export async function autoSetupAndPublishPremiumProducts(guild) {
+  try {
+    ensureGuildSettingColumn('premium_category_id');
+    ensureGuildSettingColumn('claude_channel_id');
+    ensureGuildSettingColumn('locket_channel_id');
+    ensureGuildSettingColumn('claude_product_message_id');
+    ensureGuildSettingColumn('locket_product_message_id');
+
+    let settings = db.prepare('SELECT * FROM guild_settings WHERE guild_id = ?').get(guild.id);
+    if (!settings) {
+      db.prepare('INSERT INTO guild_settings (guild_id) VALUES (?)').run(guild.id);
+      settings = db.prepare('SELECT * FROM guild_settings WHERE guild_id = ?').get(guild.id);
+    }
+
+    // 1. Category
+    let categoryId = settings.premium_category_id;
+    let category = categoryId ? guild.channels.cache.get(categoryId) : null;
+    
+    if (!category) {
+      category = await guild.channels.create({
+        name: 'SẢN PHẨM PREMIUM',
+        type: ChannelType.GuildCategory,
+        permissionOverwrites: [
+          {
+            id: guild.roles.everyone.id,
+            allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory],
+            deny: [PermissionFlagsBits.SendMessages, PermissionFlagsBits.CreatePublicThreads, PermissionFlagsBits.CreatePrivateThreads]
+          },
+          {
+            id: guild.members.me.id,
+            allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.ManageMessages, PermissionFlagsBits.ReadMessageHistory]
+          }
+        ]
+      });
+      db.prepare('UPDATE guild_settings SET premium_category_id = ? WHERE guild_id = ?').run(category.id, guild.id);
+    }
+
+    // 2. Channels
+    let claudeChannel = settings.claude_channel_id ? guild.channels.cache.get(settings.claude_channel_id) : null;
+    if (!claudeChannel) {
+      claudeChannel = await guild.channels.create({
+        name: 'claude-api',
+        type: ChannelType.GuildText,
+        parent: category.id,
+      });
+      db.prepare('UPDATE guild_settings SET claude_channel_id = ? WHERE guild_id = ?').run(claudeChannel.id, guild.id);
+    }
+
+    let locketChannel = settings.locket_channel_id ? guild.channels.cache.get(settings.locket_channel_id) : null;
+    if (!locketChannel) {
+      locketChannel = await guild.channels.create({
+        name: 'locket-gold',
+        type: ChannelType.GuildText,
+        parent: category.id,
+      });
+      db.prepare('UPDATE guild_settings SET locket_channel_id = ? WHERE guild_id = ?').run(locketChannel.id, guild.id);
+    }
+
+    // Auto Publish logic
+    const mockInteraction = {
+      guild,
+      deferReply: async () => {},
+      editReply: async (msg) => console.log('[AUTO-SETUP]', msg)
+    };
+    
+    await publishPremiumProducts(mockInteraction);
+    console.log('[AUTO-SETUP] Successfully created and published Premium Products channels automatically.');
+  } catch (error) {
+    console.error('[AUTO-SETUP] Error during automatic setup:', error);
+  }
+}
