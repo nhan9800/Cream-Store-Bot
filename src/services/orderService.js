@@ -135,6 +135,14 @@ export function markOrderCompleted(orderCode, completedById, timeoutHours = conf
     } catch (e) {
       console.error('[LOYALTY] Lỗi awardOrderPoints trong markOrderCompleted:', e);
     }
+
+    try {
+      // Invite Referral System: Đánh dấu người này đã mua hàng nếu họ được mời
+      db.prepare('UPDATE user_invites SET has_purchased = 1 WHERE invited_id = ? AND guild_id = ?')
+        .run(updated.customer_id, updated.guild_id);
+    } catch (e) {
+      console.error('[INVITE-TRACKER] Lỗi cập nhật has_purchased:', e);
+    }
   }
 
   broadcastDashboardEvent('order_update');

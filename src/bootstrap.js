@@ -58,12 +58,19 @@ export async function buildClient() {
       });
     }).catch(err => console.error('Failed to import autoSetupCardService', err));
 
-    // Tự động gửi / làm mới Bảng Giá đầy đủ (Components V2) vào kênh Bảng Giá
+    // Tự động setup kênh Bảng Giá
     import('./services/autoSetupPriceBoardService.js').then(({ autoSetupPriceBoard }) => {
       autoSetupPriceBoard(readyClient).catch(err => {
         console.log(`[AUTO-SETUP-PRICE] Lỗi chạy setup bảng giá: ${err.message}`);
       });
     }).catch(err => console.error('Failed to import autoSetupPriceBoardService', err));
+
+    // Khởi tạo Invite Tracker (Cache link mời)
+    import('./services/inviteTrackerService.js').then(({ initInviteCache, handleInviteCreate, handleInviteDelete }) => {
+      initInviteCache(readyClient).catch(err => console.error('[INVITE-TRACKER] Init error:', err));
+      readyClient.on('inviteCreate', invite => handleInviteCreate(invite));
+      readyClient.on('inviteDelete', invite => handleInviteDelete(invite));
+    }).catch(err => console.error('Failed to import inviteTrackerService', err));
 
     // Tự động setup kênh Giveaway (chỉ chạy 1 lần nếu chưa có)
     import('./services/autoSetupGiveawayService.js').then(({ autoSetupGiveawayChannel }) => {

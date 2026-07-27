@@ -12,6 +12,7 @@ import { runAutoVinhDanh } from './vinhDanhService.js';
 import { processPendingPaymentTickets, processCompletedFeedbackTickets } from './ticketAutoCloseService.js';
 import { autoUpdateDiscountBoard } from './cardSwapService.js';
 import { checkExpiredGiveaways } from './giveawayService.js';
+import { processPendingInviteRewards } from './inviteTrackerService.js';
 
 let schedulerHandle = null;
 let backupHandle = null;
@@ -57,6 +58,12 @@ export function startScheduler(client) {
       await checkExpiredGiveaways(client);
     } catch (error) {
       console.error('[SCHEDULER] Lỗi checkExpiredGiveaways:', error);
+    }
+
+    try {
+      await processPendingInviteRewards(client);
+    } catch (error) {
+      console.error('[SCHEDULER] Lỗi processPendingInviteRewards:', error);
     }
 
     // Tự động cập nhật vinh danh định kỳ mỗi 1 tiếng

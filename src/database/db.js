@@ -213,6 +213,21 @@ export function initDatabase() {
       FOREIGN KEY (message_id) REFERENCES giveaways(message_id)
     );
 
+    CREATE TABLE IF NOT EXISTS user_invites (
+      invited_id TEXT PRIMARY KEY,
+      inviter_id TEXT NOT NULL,
+      guild_id TEXT NOT NULL,
+      has_purchased INTEGER NOT NULL DEFAULT 0,
+      joined_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS invite_rewards_claimed (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id TEXT NOT NULL,
+      guild_id TEXT NOT NULL,
+      claimed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE TABLE IF NOT EXISTS customer_profiles (
       guild_id TEXT NOT NULL,
       customer_id TEXT NOT NULL,

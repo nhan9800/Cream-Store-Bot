@@ -6,6 +6,7 @@ import {
   ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags,
 } from 'discord.js';
 import { config } from '../config.js';
+import { handleMemberAdd } from '../services/inviteTrackerService.js';
 
 export const name = Events.GuildMemberAdd;
 export const once = false;
@@ -66,6 +67,9 @@ export async function execute(member) {
     const memberCount = guild.memberCount;
     const isServer1   = guild.id === SERVER1_ID;
     const brandName   = config.storeName || 'Cenar Store';
+
+    // Track invite (Referral Giveaway system)
+    await handleMemberAdd(member);
 
     if (shouldThrottle(user.id)) return;
 
