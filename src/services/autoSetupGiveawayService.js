@@ -3,12 +3,13 @@ import { db } from '../database/db.js';
 import { createGiveaway } from './giveawayService.js';
 
 export async function autoSetupGiveawayChannel(client) {
-  const guildRow = db.prepare('SELECT guild_id FROM guild_settings LIMIT 1').get();
-  if (!guildRow) return;
-
-  const guildId = guildRow.guild_id;
-  const guild = await client.guilds.fetch(guildId).catch(() => null);
-  if (!guild) return;
+  const SERVER1_GUILD_ID = '1282637033340403754';
+  
+  const guild = await client.guilds.fetch(SERVER1_GUILD_ID).catch(() => null);
+  if (!guild) {
+    console.log('[AUTO-SETUP-GIVEAWAY] Bot is not in Server 1 (or it is Store 2). Skipping setup.');
+    return;
+  }
 
   // Check if channel already exists
   let channel = guild.channels.cache.find(c => c.name === '🎁・su-kien' || c.name === 'su-kien');
