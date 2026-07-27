@@ -11,25 +11,34 @@ export async function autoSetupGiveawayChannel(client) {
   if (!guild) return;
 
   // Check if channel already exists
-  let channel = guild.channels.cache.find(c => c.name.includes('giveaway'));
-  if (channel) {
-    console.log('[AUTO-SETUP-GIVEAWAY] Channel already exists. Skipping creation.');
+  let channel = guild.channels.cache.find(c => c.name === '🎁・giveaway' || c.name === 'giveaway');
+  
+  if (!channel) {
+    // Create channel
+    channel = await guild.channels.create({
+      name: '🎁・giveaway',
+      type: ChannelType.GuildText,
+      reason: 'Tự động tạo kênh Giveaway theo yêu cầu',
+    }).catch(err => {
+      console.error('[AUTO-SETUP-GIVEAWAY] Failed to create channel:', err.message);
+      return null;
+    });
+    console.log('[AUTO-SETUP-GIVEAWAY] Created new giveaway channel.');
+  }
+
+  if (!channel) {
+    console.error('[AUTO-SETUP-GIVEAWAY] Could not find or create channel.');
     return;
   }
 
-  // Create channel
-  channel = await guild.channels.create({
-    name: '🎁・giveaway',
-    type: ChannelType.GuildText,
-    reason: 'Tự động tạo kênh Giveaway theo yêu cầu',
-  }).catch(err => {
-    console.error('[AUTO-SETUP-GIVEAWAY] Failed to create channel:', err.message);
-    return null;
-  });
+  // Check if there's already an ACTIVE giveaway in the DB to avoid spamming
+  const activeGA = db.prepare(`SELECT message_id FROM giveaways WHERE status = 'ACTIVE' LIMIT 1`).get();
+  if (activeGA) {
+    console.log('[AUTO-SETUP-GIVEAWAY] An active giveaway already exists. Skipping drop.');
+    return;
+  }
 
-  if (!channel) return;
-
-  console.log('[AUTO-SETUP-GIVEAWAY] Created channel, starting the first giveaway...');
+  console.log('[AUTO-SETUP-GIVEAWAY] Starting the first giveaway...');
 
   // Start the first giveaway: 24h duration, 3 winners, 50k balance
   const durationMs = 24 * 60 * 60 * 1000; // 24 hours
