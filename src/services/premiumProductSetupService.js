@@ -119,7 +119,7 @@ export async function publishPremiumProducts(interaction) {
       new ButtonBuilder().setCustomId('product:claude:policy').setLabel('Điều khoản').setStyle(ButtonStyle.Secondary).setEmoji(E('icon_clipboard', '📜'))
     );
 
-    const claudeAttachment = new AttachmentBuilder(path.join(botRoot, '../cenar-website/public/assets/products/claude/claude-banner.webp'));
+    const claudeAttachment = new AttachmentBuilder(path.join(botRoot, 'assets/products/claude/claude-banner.webp'));
 
     if (settings.claude_product_message_id) {
       try {
@@ -150,7 +150,7 @@ export async function publishPremiumProducts(interaction) {
       new ButtonBuilder().setCustomId('product:locket:policy').setLabel('Điều khoản').setStyle(ButtonStyle.Secondary).setEmoji(E('icon_clipboard', '📜'))
     );
 
-    const locketAttachment = new AttachmentBuilder(path.join(botRoot, '../cenar-website/public/assets/products/locket-gold/locket-gold-banner.webp'));
+    const locketAttachment = new AttachmentBuilder(path.join(botRoot, 'assets/products/locket-gold/locket-gold-banner.webp'));
 
     if (settings.locket_product_message_id) {
       try {

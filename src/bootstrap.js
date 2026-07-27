@@ -51,12 +51,14 @@ export async function buildClient() {
       });
     }).catch(err => console.error('Failed to import autoSetupService', err));
 
-    // Tự động setup kênh Nạp Thẻ
+    // Tự động setup kênh Nạp Thẻ (Đã tắt theo yêu cầu)
+    /*
     import('./services/autoSetupCardService.js').then(({ autoSetupCardChannel }) => {
       autoSetupCardChannel(readyClient).catch(err => {
         console.log(`[AUTO-SETUP-CARD] Lỗi chạy setup: ${err.message}`);
       });
     }).catch(err => console.error('Failed to import autoSetupCardService', err));
+    */
 
     // Tự động setup kênh Bảng Giá
     import('./services/autoSetupPriceBoardService.js').then(({ autoSetupPriceBoard }) => {
