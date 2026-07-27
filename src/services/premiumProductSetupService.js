@@ -111,20 +111,17 @@ export async function publishPremiumProducts(interaction) {
       .setTitle(`${E('brand_claude', '🤖')} CLAUDE API 100M`)
       .setDescription(`> ${E('icon_sparkle', '✨')} *Trải nghiệm hệ sinh thái Claude mạnh mẽ, phù hợp cho lập trình, phân tích dữ liệu, viết nội dung và xử lý công việc chuyên sâu.*
 
-▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬
-
+# ${E('icon_wallet', '💳')} THÔNG TIN GÓI CƯỚC
 ${E('icon_price', '💰')} **Giá khởi điểm:** \`${claudeProduct.base_price.toLocaleString('vi-VN')}đ\`
 ${E('icon_duration', '⏱️')} **Thời hạn:** \`${claudeProduct.base_duration_days} ngày\`
 ${E('icon_gift', '🎁')} **Mua thêm ngày:** \`+${claudeProduct.additional_day_price.toLocaleString('vi-VN')}đ / ngày\`
 ${E('icon_chart', '📊')} **Hạn mức:** \`${claudeProduct.quota_value}${claudeProduct.quota_unit}\`
 
-▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬
-
-${E('icon_crown', '👑')} **ĐẶC ĐIỂM NỔI BẬT**
+# ${E('icon_crown', '👑')} ĐẶC ĐIỂM NỔI BẬT
 ${E('status_check', '✅')} Truy cập các model Claude siêu việt từ hệ thống.
 ${E('status_check', '✅')} Hỗ trợ đa tác vụ lập trình, phân tích, research.
 
-${E('icon_gem', '💎')} **CAM KẾT DỊCH VỤ**
+# ${E('icon_gem', '💎')} CAM KẾT DỊCH VỤ
 ${E('status_check', '✅')} Bảo hành full thời hạn sử dụng.
 ${E('status_check', '✅')} Không yêu cầu cung cấp thông tin cá nhân.
 ${E('status_warn', '⚠️')} *Lưu ý: Model khả dụng có thể thay đổi theo chính sách Anthropic.*`)
@@ -161,21 +158,18 @@ ${E('status_warn', '⚠️')} *Lưu ý: Model khả dụng có thể thay đổi
       .setTitle(`${E('icon_heart_purple', '💛')} LOCKET GOLD — 1 NĂM`)
       .setDescription(`> ${E('icon_sparkle', '✨')} *Nâng cấp trải nghiệm Locket với nhiều tính năng cá nhân hóa, kết nối bạn bè và chia sẻ khoảnh khắc tiện lợi hơn.*
 
-▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬
-
+# ${E('icon_wallet', '💳')} THÔNG TIN GÓI CƯỚC
 ${E('icon_price', '💰')} **Giá nâng cấp:** \`${locketProduct.base_price.toLocaleString('vi-VN')}đ\`
 ${E('icon_duration', '⏱️')} **Thời hạn:** \`12 tháng\`
 ${E('icon_id', '👤')} **Kích hoạt:** \`Bằng Username\`
 ${E('icon_key', '🔒')} **Bảo mật:** \`Không cần Mật khẩu / OTP\`
 
-▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬
-
-${E('icon_crown', '🏆')} **ĐẶC QUYỀN LOCKET GOLD**
+# ${E('icon_crown', '🏆')} ĐẶC QUYỀN LOCKET GOLD
 ${E('status_check', '✅')} Thay đổi biểu tượng ứng dụng theo sở thích.
 ${E('status_check', '✅')} Khôi phục streak dễ dàng khi bị gián đoạn.
 ${E('status_check', '✅')} Trải nghiệm hoàn toàn không quảng cáo.
 
-${E('icon_fire', '🚀')} **HƯỚNG DẪN MUA HÀNG**
+# ${E('icon_fire', '🚀')} HƯỚNG DẪN MUA HÀNG
 ${E('status_info', 'ℹ️')} Bấm **Mua ngay** ➔ Nhập **Username** ➔ Thanh toán ➔ Hoàn tất!
 ${E('status_warn', '⚠️')} *Vui lòng kiểm tra kỹ chính xác username trước khi thanh toán.*`)
       .setImage('attachment://locket-gold-banner.webp');
