@@ -28,6 +28,7 @@ import { db } from '../database/db.js';
 import { getGuildConfig, upsertGuildConfig } from '../services/guildConfigService.js';
 import { getCustomerFlag, getTicketMuteStatus, setTicketMuteStatus } from '../services/blacklistService.js';
 import { emitStaffLog } from '../services/staffLogService.js';
+import { joinGiveaway } from '../services/giveawayService.js';
 import {
   cancelOrder,
   getLatestOrderByTicketChannel,
@@ -303,6 +304,12 @@ export function registerInteractionHandler(client, commands) {
       // Sale run modal: sale:run:modal:percent
       if (interaction.isModalSubmit() && interaction.customId.startsWith('sale:run:modal:')) {
         await handleSaleRunModal(interaction);
+        return;
+      }
+
+      // ═══════ Giveaway Handlers ═══════
+      if (interaction.isButton() && interaction.customId === 'giveaway:join') {
+        await joinGiveaway(interaction, interaction.message.id);
         return;
       }
 

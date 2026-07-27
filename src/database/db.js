@@ -193,6 +193,26 @@ export function initDatabase() {
       FOREIGN KEY (ticket_id) REFERENCES tickets(id)
     );
 
+    CREATE TABLE IF NOT EXISTS giveaways (
+      message_id TEXT PRIMARY KEY,
+      channel_id TEXT NOT NULL,
+      guild_id TEXT NOT NULL,
+      host_id TEXT NOT NULL,
+      prize TEXT NOT NULL,
+      winners_count INTEGER NOT NULL DEFAULT 1,
+      end_time TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'ACTIVE',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS giveaway_entries (
+      message_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      joined_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (message_id, user_id),
+      FOREIGN KEY (message_id) REFERENCES giveaways(message_id)
+    );
+
     CREATE TABLE IF NOT EXISTS customer_profiles (
       guild_id TEXT NOT NULL,
       customer_id TEXT NOT NULL,
