@@ -160,7 +160,22 @@ export async function publishPremiumProducts(interaction) {
 // ─── Core publish function (dùng cho cả manual và auto) ───
 export async function publishPremiumProductsForGuild(guild) {
 
+  const settings = db.prepare('SELECT * FROM guild_settings WHERE guild_id = ?').get(guild.id);
+  if (!settings?.claude_channel_id || !settings?.locket_channel_id) {
+    console.log(`[PUBLISH-PREMIUM] Guild ${guild.name} chưa setup channels, bỏ qua.`);
+    return;
+  }
+
+  const claudeChannel = guild.channels.cache.get(settings.claude_channel_id) || await guild.channels.fetch(settings.claude_channel_id).catch(() => null);
+  const locketChannel = guild.channels.cache.get(settings.locket_channel_id) || await guild.channels.fetch(settings.locket_channel_id).catch(() => null);
+
+  if (!claudeChannel || !locketChannel) {
+    console.log(`[PUBLISH-PREMIUM] Không tìm thấy channels cho guild ${guild.name}, bỏ qua.`);
+    return;
+  }
+
   const E = createEmojiResolver(guild.id);
+
 
   // ══════════════════════════════════════════
   // CLAUDE API — Component V2
