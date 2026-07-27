@@ -194,6 +194,13 @@ export async function autoSetupPriceBoard(client) {
       }
       if (!channel) continue;
 
+      // Kiểm tra kênh đã có bảng giá chưa, nếu có rồi thì bỏ qua không tạo lại
+      const existingMsgs = await channel.messages.fetch({ limit: 5 }).catch(() => null);
+      if (existingMsgs && existingMsgs.size > 0) {
+        console.log(`[AUTO-SETUP-PRICE] Kênh #${channel.name} (${guild.name}) đã có bảng giá, bỏ qua.`);
+        continue;
+      }
+
       const guildConfig = getGuildConfig(guild.id);
       
       // Mảng chứa TẤT CẢ các payload (tin nhắn) cần gửi theo thứ tự

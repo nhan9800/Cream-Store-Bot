@@ -1,4 +1,4 @@
-﻿import { ChannelType, PermissionFlagsBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder, ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, SeparatorSpacingSize, MediaGalleryBuilder, MediaGalleryItemBuilder, MessageFlags } from 'discord.js';
+import { ChannelType, PermissionFlagsBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder, ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, SeparatorSpacingSize, MediaGalleryBuilder, MediaGalleryItemBuilder, MessageFlags } from 'discord.js';
 import { db } from '../database/db.js';
 import { getProductByName } from './productCatalogService.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
@@ -816,6 +816,14 @@ export async function autoSetupAndPublishPremiumProducts(guild) {
       db.prepare('UPDATE guild_settings SET locket_channel_id = ? WHERE guild_id = ?').run(locketChannel.id, guild.id);
     } else if (locketChannel.name !== '💛・locket-gold') {
       await locketChannel.setName('💛・locket-gold').catch(() => {});
+    }
+
+    // Kiểm tra nếu kênh đã có tin nhắn rồi thì bỏ qua không tạo lại panel
+    const claudeMsgs = claudeChannel ? await claudeChannel.messages.fetch({ limit: 5 }).catch(() => null) : null;
+    const locketMsgs = locketChannel ? await locketChannel.messages.fetch({ limit: 5 }).catch(() => null) : null;
+    if ((claudeMsgs && claudeMsgs.size > 0) || (locketMsgs && locketMsgs.size > 0)) {
+      console.log(`[AUTO-SETUP-PREMIUM] Guild ${guild.name} đã có panel Premium, bỏ qua.`);
+      return;
     }
 
     // Auto Publish logic
