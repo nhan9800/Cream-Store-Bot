@@ -42,9 +42,9 @@ export async function setupPremiumProducts(interaction) {
   let categoryId = settings.premium_category_id;
   let category = categoryId ? guild.channels.cache.get(categoryId) : null;
   
-  if (!category) {
-    category = await guild.channels.create({
-      name: 'SẢN PHẨM PREMIUM',
+    if (!category) {
+      category = await guild.channels.create({
+        name: '👑 ｜ SẢN PHẨM PREMIUM',
       type: ChannelType.GuildCategory,
       permissionOverwrites: [
         {
@@ -65,7 +65,7 @@ export async function setupPremiumProducts(interaction) {
   let claudeChannel = settings.claude_channel_id ? guild.channels.cache.get(settings.claude_channel_id) : null;
   if (!claudeChannel) {
     claudeChannel = await guild.channels.create({
-      name: 'claude-api',
+      name: '🤖・claude-api',
       type: ChannelType.GuildText,
       parent: category.id,
     });
@@ -75,7 +75,7 @@ export async function setupPremiumProducts(interaction) {
   let locketChannel = settings.locket_channel_id ? guild.channels.cache.get(settings.locket_channel_id) : null;
   if (!locketChannel) {
     locketChannel = await guild.channels.create({
-      name: 'locket-gold',
+      name: '💛・locket-gold',
       type: ChannelType.GuildText,
       parent: category.id,
     });
@@ -289,7 +289,7 @@ export async function autoSetupAndPublishPremiumProducts(guild) {
     
     if (!category) {
       category = await guild.channels.create({
-        name: 'SẢN PHẨM PREMIUM',
+        name: '👑 ｜ SẢN PHẨM PREMIUM',
         type: ChannelType.GuildCategory,
         permissionOverwrites: [
           {
@@ -304,27 +304,33 @@ export async function autoSetupAndPublishPremiumProducts(guild) {
         ]
       });
       db.prepare('UPDATE guild_settings SET premium_category_id = ? WHERE guild_id = ?').run(category.id, guild.id);
+    } else if (category.name !== '👑 ｜ SẢN PHẨM PREMIUM') {
+      await category.setName('👑 ｜ SẢN PHẨM PREMIUM').catch(() => {});
     }
 
     // 2. Channels
     let claudeChannel = settings.claude_channel_id ? guild.channels.cache.get(settings.claude_channel_id) : null;
     if (!claudeChannel) {
       claudeChannel = await guild.channels.create({
-        name: 'claude-api',
+        name: '🤖・claude-api',
         type: ChannelType.GuildText,
         parent: category.id,
       });
       db.prepare('UPDATE guild_settings SET claude_channel_id = ? WHERE guild_id = ?').run(claudeChannel.id, guild.id);
+    } else if (claudeChannel.name !== '🤖・claude-api') {
+      await claudeChannel.setName('🤖・claude-api').catch(() => {});
     }
 
     let locketChannel = settings.locket_channel_id ? guild.channels.cache.get(settings.locket_channel_id) : null;
     if (!locketChannel) {
       locketChannel = await guild.channels.create({
-        name: 'locket-gold',
+        name: '💛・locket-gold',
         type: ChannelType.GuildText,
         parent: category.id,
       });
       db.prepare('UPDATE guild_settings SET locket_channel_id = ? WHERE guild_id = ?').run(locketChannel.id, guild.id);
+    } else if (locketChannel.name !== '💛・locket-gold') {
+      await locketChannel.setName('💛・locket-gold').catch(() => {});
     }
 
     // Auto Publish logic
