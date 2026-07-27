@@ -113,10 +113,10 @@ export async function publishPremiumProducts(interaction) {
       .setImage('attachment://claude-banner.webp');
 
     const claudeRow = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('product:claude:buy').setLabel('Mua ngay').setStyle(ButtonStyle.Success).setEmoji(E('buy', true) || '🛒'),
-      new ButtonBuilder().setCustomId('product:claude:pricing').setLabel('Tính giá').setStyle(ButtonStyle.Secondary).setEmoji(E('pricing', true) || '🧮'),
-      new ButtonBuilder().setCustomId('product:claude:models').setLabel('Model khả dụng').setStyle(ButtonStyle.Secondary).setEmoji(E('models', true) || '🤖'),
-      new ButtonBuilder().setCustomId('product:claude:policy').setLabel('Điều khoản').setStyle(ButtonStyle.Secondary).setEmoji(E('policy', true) || '📜')
+      new ButtonBuilder().setCustomId('product:claude:buy').setLabel('Mua ngay').setStyle(ButtonStyle.Success).setEmoji(E('icon_cart', '🛒')),
+      new ButtonBuilder().setCustomId('product:claude:pricing').setLabel('Tính giá').setStyle(ButtonStyle.Secondary).setEmoji(E('icon_price', '🧮')),
+      new ButtonBuilder().setCustomId('product:claude:models').setLabel('Model khả dụng').setStyle(ButtonStyle.Secondary).setEmoji(E('brand_claude', '🤖')),
+      new ButtonBuilder().setCustomId('product:claude:policy').setLabel('Điều khoản').setStyle(ButtonStyle.Secondary).setEmoji(E('icon_clipboard', '📜'))
     );
 
     const claudeAttachment = new AttachmentBuilder(path.join(botRoot, '../cenar-website/public/assets/products/claude/claude-banner.webp'));
@@ -145,9 +145,9 @@ export async function publishPremiumProducts(interaction) {
       .setImage('attachment://locket-gold-banner.webp');
 
     const locketRow = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('product:locket:buy').setLabel('Mua ngay').setStyle(ButtonStyle.Success).setEmoji(E('buy', true) || '🛒'),
-      new ButtonBuilder().setCustomId('product:locket:features').setLabel('Xem đặc quyền').setStyle(ButtonStyle.Secondary).setEmoji(E('features', true) || '✨'),
-      new ButtonBuilder().setCustomId('product:locket:policy').setLabel('Điều khoản').setStyle(ButtonStyle.Secondary).setEmoji(E('policy', true) || '📜')
+      new ButtonBuilder().setCustomId('product:locket:buy').setLabel('Mua ngay').setStyle(ButtonStyle.Success).setEmoji(E('icon_cart', '🛒')),
+      new ButtonBuilder().setCustomId('product:locket:features').setLabel('Xem đặc quyền').setStyle(ButtonStyle.Secondary).setEmoji(E('icon_star', '✨')),
+      new ButtonBuilder().setCustomId('product:locket:policy').setLabel('Điều khoản').setStyle(ButtonStyle.Secondary).setEmoji(E('icon_clipboard', '📜'))
     );
 
     const locketAttachment = new AttachmentBuilder(path.join(botRoot, '../cenar-website/public/assets/products/locket-gold/locket-gold-banner.webp'));
