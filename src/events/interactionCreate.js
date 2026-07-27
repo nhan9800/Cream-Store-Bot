@@ -73,6 +73,7 @@ import { TICKET_MEMBER_PERMISSIONS, isStaffMember, isManager, assertStaffCapabil
 import { ensureRateLimit } from '../services/abuseService.js';
 import { keepTicketOpen, scheduleTicketAutoClose } from '../services/ticketService.js';
 import { getActiveProducts, getProductById, updateProduct, addProduct, getAllProducts, getProductByName } from '../services/productCatalogService.js';
+import { handlePremiumProductInteraction } from '../services/premiumProductSetupService.js';
 import { getCenarHub } from '../services/cenarHub.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { refreshAllShopPanels } from '../services/shopPanelService.js';
@@ -1040,6 +1041,11 @@ export function registerInteractionHandler(client, commands) {
       }
 
       if (!interaction.isButton()) return;
+
+      if (interaction.customId.startsWith('product:claude:') || interaction.customId.startsWith('product:locket:')) {
+        await handlePremiumProductInteraction(interaction);
+        return;
+      }
 
       // Xử lý duyệt bảo hành YouTube Premium - Đồng Ý
       if (interaction.customId.startsWith('ytb:approve:')) {

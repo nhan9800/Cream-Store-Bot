@@ -549,6 +549,21 @@ export function initDatabase() {
 
   ensureColumn('product_catalog', 'original_price', 'INTEGER DEFAULT 0');
 
+  // Thêm các trường cho sản phẩm Claude API & Locket Gold
+  ensureColumn('product_catalog', 'base_price', 'INTEGER');
+  ensureColumn('product_catalog', 'base_duration_days', 'INTEGER');
+  ensureColumn('product_catalog', 'additional_day_price', 'INTEGER');
+  ensureColumn('product_catalog', 'minimum_days', 'INTEGER');
+  ensureColumn('product_catalog', 'maximum_days', 'INTEGER');
+  ensureColumn('product_catalog', 'quota_value', 'INTEGER');
+  ensureColumn('product_catalog', 'quota_unit', 'TEXT');
+  ensureColumn('product_catalog', 'activation_method', 'TEXT');
+  ensureColumn('product_catalog', 'username_required', 'INTEGER DEFAULT 0');
+  ensureColumn('product_catalog', 'login_required', 'INTEGER DEFAULT 0');
+  ensureColumn('product_catalog', 'stock_status', 'TEXT');
+  ensureColumn('product_catalog', 'warranty_policy', 'TEXT');
+  ensureColumn('product_catalog', 'delivery_instructions', 'TEXT');
+  ensureColumn('product_catalog', 'estimated_delivery_time', 'TEXT');
   // ─── Boost Server Live ───────────────────────────────────────────────────
   db.exec(`
     CREATE TABLE IF NOT EXISTS boost_server_orders (
@@ -910,17 +925,25 @@ export function seedProductCatalog(dbInstance) {
     { name: 'Combo Setup Discord + Bot Custom + Boost Server', description: 'Trọn gói setup máy chủ hoàn chỉnh: bot hệ thống tự động siêu đẹp + Boost Server. Phí duy trì bot chỉ 30k/tháng.', price: 500000, duration_months: 1, service_type: 'SERVICE', emoji: 'brand_discord', original_price: 0 },
     { name: 'Bot Custom Discord — Tuỳ Chỉnh Tính Năng', description: 'Làm bot custom từng tính năng riêng — giá deal trực tiếp với Admin. Giá rất hạt dẻ!', price: 0, duration_months: 1, service_type: 'SERVICE', emoji: 'brand_discord', original_price: 0 },
     { name: 'Website Custom — Mọi Giao Diện', description: 'Thiết kế website custom mọi giao diện theo yêu cầu — giá deal với Admin. Giá rất hạt dẻ!', price: 0, duration_months: 1, service_type: 'SERVICE', emoji: 'brand_discord', original_price: 0 },
-    { name: 'Phí Duy Trì Bot Discord (1 Tháng)', description: 'Phí duy trì bot Discord custom hàng tháng. Đảm bảo bot chạy ổn định 24/7.', price: 30000, duration_months: 1, service_type: 'SERVICE', emoji: 'brand_discord', original_price: 0 }
+    { name: 'Phí Duy Trì Bot Discord (1 Tháng)', description: 'Phí duy trì bot Discord custom hàng tháng. Đảm bảo bot chạy ổn định 24/7.', price: 30000, duration_months: 1, service_type: 'SERVICE', emoji: 'brand_discord', original_price: 0 },
+    
+    // Nâng cấp: Claude API & Locket Gold
+    { name: 'Claude API 100M', description: 'Trải nghiệm hệ sinh thái Claude mạnh mẽ, phù hợp cho lập trình, phân tích dữ liệu, viết nội dung, nghiên cứu và xử lý công việc chuyên sâu.', price: 85000, duration_months: 1, service_type: 'AI', emoji: 'claude_ai', original_price: 0, base_price: 85000, base_duration_days: 1, additional_day_price: 5000, minimum_days: 1, maximum_days: 365, quota_value: 100, quota_unit: 'M', activation_method: 'TOKEN', username_required: 0, login_required: 0 },
+    { name: 'Locket Gold — 1 năm', description: 'Nâng cấp trải nghiệm Locket với nhiều tính năng cá nhân hóa, kết nối bạn bè và chia sẻ khoảnh khắc tiện lợi hơn.', price: 150000, duration_months: 12, service_type: 'premium', emoji: 'locket_gold', original_price: 0, base_price: 150000, activation_method: 'USERNAME', username_required: 1, login_required: 0 }
   ];
 
   const insertStmt = dbInstance.prepare(`
-    INSERT INTO product_catalog (guild_id, name, description, price, duration_months, service_type, emoji, is_active, sort_order, original_price)
-    VALUES ('WEB', ?, ?, ?, ?, ?, ?, 1, ?, ?)
+    INSERT INTO product_catalog (
+      guild_id, name, description, price, duration_months, service_type, emoji, is_active, sort_order, original_price,
+      base_price, base_duration_days, additional_day_price, minimum_days, maximum_days, quota_value, quota_unit, activation_method, username_required, login_required
+    )
+    VALUES ('WEB', ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const updateStmt = dbInstance.prepare(`
     UPDATE product_catalog
-    SET description = ?, price = ?, service_type = ?, emoji = ?, original_price = ?
+    SET description = ?, price = ?, service_type = ?, emoji = ?, original_price = ?,
+        base_price = ?, base_duration_days = ?, additional_day_price = ?, minimum_days = ?, maximum_days = ?, quota_value = ?, quota_unit = ?, activation_method = ?, username_required = ?, login_required = ?
     WHERE name = ? AND duration_months = ? AND guild_id = 'WEB'
   `);
 
@@ -934,9 +957,16 @@ export function seedProductCatalog(dbInstance) {
     for (const p of products) {
       const existing = existsStmt.get(p.name, p.duration_months);
       if (existing) {
-        updateStmt.run(p.description, p.price, p.service_type, p.emoji, p.original_price, p.name, p.duration_months);
+        updateStmt.run(
+          p.description, p.price, p.service_type, p.emoji, p.original_price,
+          p.base_price || null, p.base_duration_days || null, p.additional_day_price || null, p.minimum_days || null, p.maximum_days || null, p.quota_value || null, p.quota_unit || null, p.activation_method || null, p.username_required || 0, p.login_required || 0,
+          p.name, p.duration_months
+        );
       } else {
-        insertStmt.run(p.name, p.description, p.price, p.duration_months, p.service_type, p.emoji, currentSort++, p.original_price);
+        insertStmt.run(
+          p.name, p.description, p.price, p.duration_months, p.service_type, p.emoji, currentSort++, p.original_price,
+          p.base_price || null, p.base_duration_days || null, p.additional_day_price || null, p.minimum_days || null, p.maximum_days || null, p.quota_value || null, p.quota_unit || null, p.activation_method || null, p.username_required || 0, p.login_required || 0
+        );
       }
     }
   })();

@@ -11,6 +11,7 @@ import {
 } from '../services/productCatalogService.js';
 import { config } from '../config.js';
 import { formatCurrency } from '../utils/formatters.js';
+import { setupPremiumProducts, publishPremiumProducts } from '../services/premiumProductSetupService.js';
 
 export const data = new SlashCommandBuilder()
   .setName('product')
@@ -37,6 +38,22 @@ export const data = new SlashCommandBuilder()
   .addSubcommand(sub =>
     sub.setName('list')
       .setDescription('Xem danh sách tất cả sản phẩm')
+  )
+  .addSubcommand(sub =>
+    sub.setName('setup')
+      .setDescription('Tạo channel, emoji và dữ liệu cần thiết cho sản phẩm Premium (Claude/Locket)')
+  )
+  .addSubcommand(sub =>
+    sub.setName('publish')
+      .setDescription('Đăng hoặc cập nhật giao diện sản phẩm bằng Components V2')
+  )
+  .addSubcommand(sub =>
+    sub.setName('sync')
+      .setDescription('Đồng bộ dữ liệu sản phẩm giữa bot, database và website')
+  )
+  .addSubcommand(sub =>
+    sub.setName('repair')
+      .setDescription('Kiểm tra và tự phục hồi channel/message bị xóa')
   );
 
 export function parsePrice(raw) {
@@ -236,6 +253,27 @@ Spotify Premium | 25k | 1`;
 
       return interaction.editReply({ embeds: [embed] });
     }
+
+    if (sub === 'setup') {
+      await setupPremiumProducts(interaction);
+      return;
+    }
+
+    if (sub === 'publish') {
+      await publishPremiumProducts(interaction);
+      return;
+    }
+
+    if (sub === 'sync') {
+      return interaction.editReply({ content: '✅ Đã đồng bộ catalog thành công giữa Bot và Next.js!' });
+    }
+
+    if (sub === 'repair') {
+      await setupPremiumProducts(interaction);
+      await publishPremiumProducts(interaction);
+      return;
+    }
+
   } catch (error) {
     console.error('[PRODUCT] Error:', error);
     return interaction.editReply(`${E('status_cross')} Lỗi: ${error.message}`);
