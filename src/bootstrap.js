@@ -98,22 +98,16 @@ export async function buildClient() {
         const { createEmojiResolver } = await import('./utils/emojiHelper.js');
 
         // Fetch trực tiếp qua client — không phụ thuộc guild cache
-        const ch = await readyClient.channels.fetch(ANNOUNCE_CHANNEL_ID).catch(e => {
-          console.error(`[ANNOUNCE] Không tìm thấy kênh: ${e.message}`);
-          return null;
-        });
+        const ch = await readyClient.channels.fetch(ANNOUNCE_CHANNEL_ID).catch(() => null);
 
-        if (!ch?.isTextBased()) {
-          console.log(`[ANNOUNCE] ⚠️ Kênh không phải text channel hoặc bot không có quyền.`);
-          return;
-        }
+        if (!ch?.isTextBased()) return;
 
         const guildId = ch.guildId || ch.guild?.id;
         const E = createEmojiResolver(guildId);
         const container = new ContainerBuilder().setAccentColor(0xFFA500);
 
         container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
-          `## ${E('icon_sparkle', '✨')} BẢNG GIÁ CẬP NHẬT — CENAR STORE\n` +
+          `@everyone\n## ${E('icon_sparkle', '✨')} BẢNG GIÁ CẬP NHẬT — CENAR STORE\n` +
           `> ${E('icon_fire', '🔥')} *Sản phẩm mới · Giá tốt nhất · Bảo hành toàn diện*`
         ));
         container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
@@ -162,7 +156,6 @@ export async function buildClient() {
         );
 
         await ch.send({
-          content: `@everyone`,
           components: [container, row],
           flags: MessageFlags.IsComponentsV2,
           allowedMentions: { parse: ['everyone'] },

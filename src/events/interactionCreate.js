@@ -398,6 +398,11 @@ export function registerInteractionHandler(client, commands) {
 
 
       // Product purchase modal
+      if (interaction.isModalSubmit() && (interaction.customId === 'product:claude:modal_buy' || interaction.customId === 'product:locket:modal_buy')) {
+        await handlePremiumProductInteraction(interaction);
+        return;
+      }
+
       if (interaction.isModalSubmit() && interaction.customId.startsWith('product:purchase:modal:')) {
         const productId = interaction.customId.split(':')[3];
         await handleProductPurchaseFlow(interaction, productId);
@@ -2409,5 +2414,6 @@ export function getClientOptions() {
     partials: [Partials.Channel],
   };
 }
+
 
 
