@@ -13,6 +13,7 @@ import {
   buildDeliveryLogText,
   buildDeliveryLoginComponents,
   buildDeliveryNoticeV2,
+  buildPublicOrderLogV2,
 } from '../utils/embeds.js';
 import { getCenarHub } from '../services/cenarHub.js';
 
@@ -82,6 +83,16 @@ export async function execute(interaction) {
     order = markOrderCompleted(order.order_code, interaction.user.id, config.feedbackTimeoutHours) ?? order;
     await updateOrderLogMessage(interaction.guild, order);
     await sendCompletedTicketFlow({ guild: interaction.guild, order, actorId: interaction.user.id, supportId: interaction.user.id });
+    
+    // Áp dụng role khách hàng và gửi log công khai (lịch sử mua hàng)
+    await applyCustomerRoles(interaction.guild, order.customer_id);
+    if (guildConfig?.public_order_log_channel_id) {
+      const publicLogChannel = await interaction.guild.channels.fetch(guildConfig.public_order_log_channel_id).catch(() => null);
+      if (publicLogChannel?.isTextBased()) {
+        await publicLogChannel.send(buildPublicOrderLogV2(order)).catch(() => null);
+      }
+    }
+    
     await emitStaffLog(interaction.client, { guildId: interaction.guildId, actorId: interaction.user.id, targetId: order.customer_id, action: 'ORDER_COMPLETE_AUTO', detail: 'Tự đồng bộ hoàn thành trong /giaohang', relatedOrderCode: order.order_code });
   }
 
