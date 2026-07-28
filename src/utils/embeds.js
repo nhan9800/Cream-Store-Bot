@@ -1011,39 +1011,39 @@ export function buildOrderCompletedV2(order, staffId, supportId = null) {
   // Header — lời cảm ơn + mention khách (V2 mention trong TextDisplay)
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(joinLines(
-      h2(`${E('order_complete')}  Đơn Hàng Hoàn Thành`),
-      `> ${E('icon_heart')} ${fmt.user(order.customer_id)} — cảm ơn bạn đã ủng hộ ${fmt.b(store)}!`,
+      `# ${E('order_complete', '<a:Dotyellow:1481134440725090315>')} **ĐƠN HÀNG HOÀN THÀNH** ${E('icon_gift', '<:gift:1392749981332541501>')}`,
+      `> ${E('icon_heart', '<:cr_shop:1392749981332541501>')} ${fmt.user(order.customer_id)} — cảm ơn bạn đã ủng hộ **${store}**!`,
     ))
   );
 
   container.addSeparatorComponents(
-    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
+    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Large)
   );
 
   // Thông tin đơn + xử lý
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(joinLines(
-      `${E('order_id')} ${fmt.b('Mã Đơn:')} ${fmt.code(order.order_code)}`,
-      `${E('order_product')} ${fmt.b('Sản Phẩm:')} ${formatOrderProduct(order.quantity, order.product_name)}`,
-      `${E('ticket_staff')} ${fmt.b('Nhân Viên:')} ${fmt.user(staffId)}`,
-      `${E('ticket_claim')} ${fmt.b('Hỗ Trợ:')} ${fmt.user(supportId || staffId)}`,
-      `${E('icon_clock')} ${fmt.b('Hoàn thành:')} ${T.rel(order.completed_at || new Date())}`,
+      `> ${E('order_id', '<:Diamond:1485905790903783465>')} **Mã Đơn:** \`${order.order_code}\``,
+      `> ${E('order_product', '<:cr_shop:1392749981332541501>')} **Sản Phẩm:** ${formatOrderProduct(order.quantity, order.product_name)}`,
+      `> ${E('ticket_staff', '<:verifybadge:1481127479702847646>')} **Nhân Viên:** ${fmt.user(staffId)}`,
+      `> ${E('ticket_claim', '<:verifybadge:1481127479702847646>')} **Hỗ Trợ:** ${fmt.user(supportId || staffId)}`,
+      `> ${E('icon_clock', '<a:Time:1481134440725090315>')} **Hoàn thành:** ${T.rel(order.completed_at || new Date())}`,
       order.expiry_at
-        ? `${E('icon_calendar')} ${fmt.b('Hết hạn:')} ${T.full(order.expiry_at)} (${T.rel(order.expiry_at)})`
+        ? `> ${E('icon_calendar', '<a:Time:1481134440725090315>')} **Hết hạn:** ${T.full(order.expiry_at)} (${T.rel(order.expiry_at)})`
         : null,
     ))
   );
 
   container.addSeparatorComponents(
-    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
+    new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Medium)
   );
 
   // Nhắc feedback + bảo hành (gộp tin thừa, chống spam)
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(joinLines(
-      `${E('icon_star')} ${fmt.b('Hãy đánh giá trải nghiệm mua hàng của bạn!')}`,
-      `> Feedback giúp shop cải thiện dịch vụ — và bạn được ${fmt.b('giảm giá đơn sau')}.`,
-      `> ${E('panel_warranty')} Cần ${fmt.b('bảo hành')}? Dùng nút bên dưới bất cứ lúc nào.`,
+      `## ${E('icon_star', '<a:Dotyellow:1481134440725090315>')} HÃY ĐÁNH GIÁ TRẢI NGHIỆM MUA HÀNG CỦA BẠN!`,
+      `> ${E('icon_sparkle', '<a:Dotyellow:1481134440725090315>')} Feedback giúp shop cải thiện dịch vụ — và bạn được **giảm giá đơn sau**.`,
+      `> ${E('panel_warranty', '<:cr_baohanh:1348625535512870965>')} Cần **bảo hành**? Dùng nút bên dưới bất cứ lúc nào.`,
     ))
   );
 
