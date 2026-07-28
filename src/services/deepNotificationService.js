@@ -145,7 +145,7 @@ function buildOwnerCustomerWantsRenewalV2(sub, customerUser) {
 
 // ═══════════════ Main: Order Expiry Notifications ═══════════════
 
-function buildExpiredSubscriptionAlertV2(order) {
+function buildExpiredSubscriptionAlertV2(order, ownerId) {
   const E = createEmojiResolver(order.guild_id);
   const expiryTs = Math.floor(new Date(order.expiry_at).getTime() / 1000);
 
@@ -170,9 +170,11 @@ function buildExpiredSubscriptionAlertV2(order) {
 
   const container = new ContainerBuilder().setAccentColor(color);
 
+  const pingText = ownerId ? `<@${ownerId}>` : '@everyone';
+
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(
-      `@everyone\n` +
+      `${pingText}\n` +
       `# <a:Dotyellow:1481134440725090315> **BÁO ĐỘNG: GÓI ${serviceName} ĐÃ HẾT HẠN** <a:Dotyellow:1481134440725090315>\n` +
       `> Đã phát hiện khách hàng hết hạn gói mua. Cần xử lý ngay để tránh lỗ gia hạn!`
     )
@@ -184,17 +186,16 @@ function buildExpiredSubscriptionAlertV2(order) {
 
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(
-      `## ${emoji} **THÔNG TIN HẾT HẠN**\n` +
-      `<a:tsm_fire:1327553120842158111> **Tài khoản (Email):** \`${order.credential_email || 'Không có Email'}\`\n` +
-      `<:cr_shop:1392749981332541501> **Sản phẩm:** \`${order.product_name}\`\n` +
-      `<:cr_shop:1392749981332541501> **Đơn hàng gốc:** \`${order.order_code}\`\n` +
-      `<:verifybadge:1481127479702847646> **Khách hàng:** <@${order.customer_id}>\n` +
-      `<a:redload:1459179959158571119> **Ngày hết hạn:** <t:${expiryTs}:d> (<t:${expiryTs}:R>)`
+      `> 🔥 **Tài khoản (Email):** \`${order.credential_email || 'Không có Email'}\`\n` +
+      `> 🎁 **Sản phẩm:** ${order.product_name}\n` +
+      `> 🛒 **Đơn hàng gốc:** \`${order.order_code}\`\n` +
+      `> 💙 **Khách hàng:** <@${order.customer_id}>\n` +
+      `> ⏰ **Ngày hết hạn:** <t:${expiryTs}:d> (<t:${expiryTs}:R>)`
     )
   );
 
   container.addSeparatorComponents(
-    new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Large)
+    new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Medium)
   );
 
   container.addTextDisplayComponents(
@@ -226,7 +227,7 @@ export async function checkExpiredSubscriptionOrders(client) {
     try {
       const ch = getReminderChannel(client, order.guild_id);
       if (ch) {
-        await ch.send(buildExpiredSubscriptionAlertV2(order));
+        await ch.send(buildExpiredSubscriptionAlertV2(order, ch.guild.ownerId));
         alerted++;
       }
     } catch (e) {
