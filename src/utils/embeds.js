@@ -1017,7 +1017,7 @@ export function buildOrderCompletedV2(order, staffId, supportId = null) {
   );
 
   container.addSeparatorComponents(
-    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Large)
+    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
   );
 
   // Thông tin đơn + xử lý
@@ -1035,7 +1035,7 @@ export function buildOrderCompletedV2(order, staffId, supportId = null) {
   );
 
   container.addSeparatorComponents(
-    new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Medium)
+    new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small)
   );
 
   // Nhắc feedback + bảo hành (gộp tin thừa, chống spam)
