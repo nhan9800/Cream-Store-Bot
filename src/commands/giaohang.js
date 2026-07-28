@@ -82,7 +82,6 @@ export async function execute(interaction) {
     }
     order = markOrderCompleted(order.order_code, interaction.user.id, config.feedbackTimeoutHours) ?? order;
     await updateOrderLogMessage(interaction.guild, order);
-    await sendCompletedTicketFlow({ guild: interaction.guild, order, actorId: interaction.user.id, supportId: interaction.user.id });
     
     // Áp dụng role khách hàng và gửi log công khai (lịch sử mua hàng)
     await applyCustomerRoles(interaction.guild, order.customer_id);
@@ -147,6 +146,9 @@ export async function execute(interaction) {
 
   await applyCustomerRoles(interaction.guild, order.customer_id);
   await emitStaffLog(interaction.client, { guildId: interaction.guildId, actorId: interaction.user.id, targetId: order.customer_id, action: 'DELIVERY_SENT', detail: sendDirect ? 'Gửi trực tiếp qua DM' : 'Gửi DM với nút nhận Gmail', relatedOrderCode: order.order_code });
+
+  // Luôn gửi bảng Feedback 5 sao vào ticket sau khi giao hàng (dù trước đó đã hoàn thành hay chưa)
+  await sendCompletedTicketFlow({ guild: interaction.guild, order, actorId: interaction.user.id, supportId: interaction.user.id });
 
   await interaction.editReply({ content: `${E('status_check')} Đã gửi DM giao hàng cho khách của đơn ${order.order_code} và đồng bộ trạng thái hoàn thành.`, ephemeral: true });
 }
