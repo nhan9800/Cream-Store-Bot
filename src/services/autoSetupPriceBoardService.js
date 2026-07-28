@@ -58,21 +58,26 @@ export function buildPricePortalPayload(guildId, guildConfig) {
     portalEmbed.setImage(imageUrl);
   }
 
+  const portalOptions = [
+    { label: 'YouTube Premium (Siêu Ổn Định)', description: 'Gói ổn định chính chủ 3T - 6T - 12T', value: 'youtube', emoji: resolveSelectMenuEmoji(guildId, 'brand_youtube', '📺') },
+    { label: 'Spotify Premium (Siêu Ổn Định)', description: 'Nghe nhạc chất lượng cao offline', value: 'spotify', emoji: resolveSelectMenuEmoji(guildId, 'brand_spotify', '🎵') },
+    { label: 'Netflix Extra Premium', description: 'Xem cùng lúc 1 thiết bị, UltraHD 4K', value: 'netflix', emoji: resolveSelectMenuEmoji(guildId, 'brand_netflix', '🍿') },
+    { label: 'Discord Nitro Full Premium', description: 'Đầy đủ đặc quyền VIP Discord', value: 'nitro', emoji: resolveSelectMenuEmoji(guildId, 'brand_discord', '💎') },
+    { label: 'Discord Boost Server', description: 'Bơm thẳng Server lên Level 3 nhanh chóng', value: 'boost', emoji: resolveSelectMenuEmoji(guildId, 'brand_discord', '🚀') },
+    { label: 'Decor Discord (Hiệu ứng hồ sơ)', description: 'Hiệu ứng hồ sơ & trang trí ảnh đại diện Discord', value: 'decor', emoji: resolveSelectMenuEmoji(guildId, 'icon_sparkle', '✨') },
+    { label: 'AI & Phần Mềm Premium', description: 'ChatGPT, Gemini Pro, Office 365, Adobe, CapCut...', value: 'ai', emoji: resolveSelectMenuEmoji(guildId, 'brand_chatgpt', '🤖') },
+    { label: 'GearUP Booster (Giảm Lag Ping)', description: 'Tối ưu kết nối, giảm ping game 3T - 6T - 12T', value: 'gearup', emoji: resolveSelectMenuEmoji(guildId, 'brand_gearup', '🎮') },
+    { label: 'Dịch vụ Setup & Custom', description: 'Thiết kế máy chủ, làm bot & website (Giá: Thương lượng)', value: 'service', emoji: resolveSelectMenuEmoji(guildId, 'brand_discord', '🛠️') }
+  ].map(opt => {
+    if (!opt.emoji) delete opt.emoji; // Bỏ emoji nếu null để tránh lỗi API
+    return opt;
+  });
+
   const selectRow = new ActionRowBuilder().addComponents(
     new StringSelectMenuBuilder()
       .setCustomId('price_list:select')
       .setPlaceholder('🛒 Chọn danh mục sản phẩm để xem bảng giá')
-      .addOptions([
-        { label: 'YouTube Premium (Siêu Ổn Định)', description: 'Gói ổn định chính chủ 3T - 6T - 12T', value: 'youtube', emoji: resolveSelectMenuEmoji(guildId, 'brand_youtube', '📺') },
-        { label: 'Spotify Premium (Siêu Ổn Định)', description: 'Nghe nhạc chất lượng cao offline', value: 'spotify', emoji: resolveSelectMenuEmoji(guildId, 'brand_spotify', '🎵') },
-        { label: 'Netflix Extra Premium', description: 'Xem cùng lúc 1 thiết bị, UltraHD 4K', value: 'netflix', emoji: resolveSelectMenuEmoji(guildId, 'brand_netflix', '🍿') },
-        { label: 'Discord Nitro Full Premium', description: 'Đầy đủ đặc quyền VIP Discord', value: 'nitro', emoji: resolveSelectMenuEmoji(guildId, 'brand_discord', '💎') },
-        { label: 'Discord Boost Server', description: 'Bơm thẳng Server lên Level 3 nhanh chóng', value: 'boost', emoji: resolveSelectMenuEmoji(guildId, 'brand_discord', '🚀') },
-        { label: 'Decor Discord (Hiệu ứng hồ sơ)', description: 'Hiệu ứng hồ sơ & trang trí ảnh đại diện Discord', value: 'decor', emoji: resolveSelectMenuEmoji(guildId, 'icon_sparkle', '✨') },
-        { label: 'AI & Phần Mềm Premium', description: 'ChatGPT, Gemini Pro, Office 365, Adobe, CapCut...', value: 'ai', emoji: resolveSelectMenuEmoji(guildId, 'brand_chatgpt', '🤖') },
-        { label: 'GearUP Booster (Giảm Lag Ping)', description: 'Tối ưu kết nối, giảm ping game 3T - 6T - 12T', value: 'gearup', emoji: resolveSelectMenuEmoji(guildId, 'brand_gearup', '🎮') },
-        { label: 'Dịch vụ Setup & Custom', description: 'Thiết kế máy chủ, làm bot & website (Giá: Thương lượng)', value: 'service', emoji: resolveSelectMenuEmoji(guildId, 'brand_discord', '🛠️') }
-      ])
+      .addOptions(portalOptions)
   );
 
   const buttonRow = new ActionRowBuilder().addComponents(
