@@ -55,6 +55,13 @@ export function startScheduler(client) {
     }
 
     try {
+      const { checkExpiredSubscriptionOrders } = await import('./deepNotificationService.js');
+      await checkExpiredSubscriptionOrders(client);
+    } catch (error) {
+      console.error('[SCHEDULER] Lỗi checkExpiredSubscriptionOrders:', error);
+    }
+
+    try {
       await checkExpiredGiveaways(client);
     } catch (error) {
       console.error('[SCHEDULER] Lỗi checkExpiredGiveaways:', error);
@@ -138,29 +145,47 @@ export function startScheduler(client) {
   if (!bootstrapped) {
     bootstrapped = true;
     setTimeout(() => {
-      tick().catch(() => null);
+      runSchedulerLoop();
       autoBackupDatabase();
     }, 5000);
   }
 
-  schedulerHandle = setInterval(() => {
-    tick().catch(() => null);
-  }, Math.max(1, intervalMinutes) * 60 * 1000);
+  const intervalMs = Math.max(1, intervalMinutes) * 60 * 1000;
+  
+  async function runSchedulerLoop() {
+    if (!schedulerHandle) return; // Stopped
+    
+    try {
+      await tick();
+    } catch (e) {
+      console.error('[SCHEDULER] Lỗi ngoài ý muốn trong tick():', e);
+    }
+    
+    if (schedulerHandle) {
+      schedulerHandle = setTimeout(runSchedulerLoop, intervalMs);
+    }
+  }
+
+  // Khởi tạo handle để cờ chạy
+  schedulerHandle = setTimeout(() => {}, 0); 
+  clearTimeout(schedulerHandle);
+  schedulerHandle = true; // Use boolean flag or actual handle to track status
 
   // Chạy file backup mỗi 12 tiếng một lần
   backupHandle = setInterval(() => {
     autoBackupDatabase();
   }, 12 * 60 * 60 * 1000);
 
-  console.log(`[V11.5] Scheduler đang chạy mỗi ${Math.max(1, intervalMinutes)} phút. Chế độ Auto-backup Bật (lưu 7 ngày).`);
+  console.log(`[V11.5] Scheduler đang chạy định kỳ (Non-overlapping) mỗi ${Math.max(1, intervalMinutes)} phút. Chế độ Auto-backup Bật (lưu 7 ngày).`);
   console.log(`[V11.5] Cenar Store Bot — Scheduler & Backup Service started.`);
 }
 
 export function stopScheduler() {
-  if (schedulerHandle) {
-    clearInterval(schedulerHandle);
-    schedulerHandle = null;
+  if (schedulerHandle && typeof schedulerHandle !== 'boolean') {
+    clearTimeout(schedulerHandle);
   }
+  schedulerHandle = null;
+  
   if (backupHandle) {
     clearInterval(backupHandle);
     backupHandle = null;

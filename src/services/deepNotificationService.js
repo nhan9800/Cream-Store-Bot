@@ -1,4 +1,4 @@
-import { getOrdersExpiringInWindowRaw, markExpiryNoticeRaw } from './v11DbHelpers.js';
+import { getOrdersExpiringInWindowRaw, markExpiryNoticeRaw, getExpiredSubscriptionOrdersRaw } from './v11DbHelpers.js';
 import { db } from '../database/db.js';
 import {
   getAllDueForRenewalGlobal,
@@ -144,6 +144,97 @@ function buildOwnerCustomerWantsRenewalV2(sub, customerUser) {
 }
 
 // ═══════════════ Main: Order Expiry Notifications ═══════════════
+
+function buildExpiredSubscriptionAlertV2(order) {
+  const E = createEmojiResolver(order.guild_id);
+  const expiryTs = Math.floor(new Date(order.expiry_at).getTime() / 1000);
+
+  let pName = (order.product_name || '').toLowerCase();
+  let emoji = E('icon_price', '<:Diamond:1485905790903783465>');
+  let color = 0x808080;
+  let serviceName = "DỊCH VỤ";
+  
+  if (pName.includes('youtube')) {
+    emoji = E('brand_youtube', '<:youtube:1373734824342327297>'); color = 0xFF0000; serviceName = "YOUTUBE PREMIUM";
+  } else if (pName.includes('netflix')) {
+    emoji = E('brand_netflix', '<:cr_shop:1392749981332541501>'); color = 0xE50914; serviceName = "NETFLIX";
+  } else if (pName.includes('spotify')) {
+    emoji = E('brand_spotify', '<a:tickgreen:1384069022831874169>'); color = 0x1DB954; serviceName = "SPOTIFY";
+  } else if (pName.includes('canva')) {
+    emoji = E('brand_canva', '<:verifybadge:1481127479702847646>'); color = 0x00C4CC; serviceName = "CANVA";
+  } else if (pName.includes('office') || pName.includes('microsoft')) {
+    emoji = E('brand_office', '<:money:1442876095442714748>'); color = 0xD83B01; serviceName = "OFFICE 365";
+  } else if (pName.includes('vpn')) {
+    emoji = E('brand_vpn', '<:verifybadge:1481127479702847646>'); color = 0x00A4FF; serviceName = "VPN";
+  }
+
+  const container = new ContainerBuilder().setAccentColor(color);
+
+  container.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent(
+      `@everyone\n` +
+      `# <a:Dotyellow:1481134440725090315> **BÁO ĐỘNG: GÓI ${serviceName} ĐÃ HẾT HẠN** <a:Dotyellow:1481134440725090315>\n` +
+      `> Đã phát hiện khách hàng hết hạn gói mua. Cần xử lý ngay để tránh lỗ gia hạn!`
+    )
+  );
+
+  container.addSeparatorComponents(
+    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Large)
+  );
+
+  container.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent(
+      `## ${emoji} **THÔNG TIN HẾT HẠN**\n` +
+      `<a:tsm_fire:1327553120842158111> **Tài khoản (Email):** \`${order.credential_email || 'Không có Email'}\`\n` +
+      `<:cr_shop:1392749981332541501> **Sản phẩm:** \`${order.product_name}\`\n` +
+      `<:cr_shop:1392749981332541501> **Đơn hàng gốc:** \`${order.order_code}\`\n` +
+      `<:verifybadge:1481127479702847646> **Khách hàng:** <@${order.customer_id}>\n` +
+      `<a:redload:1459179959158571119> **Ngày hết hạn:** <t:${expiryTs}:d> (<t:${expiryTs}:R>)`
+    )
+  );
+
+  container.addSeparatorComponents(
+    new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Large)
+  );
+
+  container.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent(
+      `<:Diamond:1485905790903783465> *Vui lòng truy cập trang quản lý để Kick/Huỷ gói này hoặc yêu cầu khách gia hạn!*`
+    )
+  );
+
+  const row = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId(`sub_order:renew:bill:${order.order_code}`)
+      .setLabel('Gửi bill nhắc gia hạn')
+      .setStyle(ButtonStyle.Success)
+      .setEmoji({ id: '1348626032747614268', name: 'cr_carttt' }),
+    new ButtonBuilder()
+      .setCustomId(`sub_order:renew:kicked:${order.order_code}`)
+      .setLabel('Đã Kick / Ngừng gia hạn')
+      .setStyle(ButtonStyle.Danger)
+      .setEmoji({ id: '1348625535512870965', name: 'cr_baohanh' })
+  );
+
+  return { components: [container, row], flags: MessageFlags.IsComponentsV2 };
+}
+
+export async function checkExpiredSubscriptionOrders(client) {
+  const expiredOrders = getExpiredSubscriptionOrdersRaw();
+  let alerted = 0;
+  for (const order of expiredOrders) {
+    try {
+      const ch = getReminderChannel(client, order.guild_id);
+      if (ch) {
+        await ch.send(buildExpiredSubscriptionAlertV2(order));
+        alerted++;
+      }
+    } catch (e) {
+      console.error(`[SUB-EXPIRY] Lỗi gửi cảnh báo Subscription Order ${order.order_code}:`, e);
+    }
+  }
+  if (alerted > 0) console.log(`[SUB-EXPIRY] Đã cảnh báo ${alerted} đơn Subscription hết hạn.`);
+}
 
 export async function runDeepNotifications(client) {
   const notify3d = getOrdersExpiringInWindowRaw(48, 72).filter((o) => !o.expiry_notice_3d_sent_at);

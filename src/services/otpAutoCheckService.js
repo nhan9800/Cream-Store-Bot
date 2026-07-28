@@ -9,8 +9,8 @@ let intervalHandle = null;
 export function startOtpAutoCheck(client) {
   if (intervalHandle) return;
 
-  // Chạy mỗi 15 giây
-  intervalHandle = setInterval(async () => {
+  async function checkLoop() {
+    if (!intervalHandle) return;
     try {
       // Lấy danh sách các đơn OTP đang PENDING
       const pendingOrders = db.prepare("SELECT * FROM viotp_orders WHERE status = 'PENDING'").all();
@@ -91,14 +91,21 @@ export function startOtpAutoCheck(client) {
     } catch (globalErr) {
       console.error('[OTP Auto] Lỗi vòng lặp quét OTP:', globalErr.message);
     }
-  }, 15 * 1000); // 15 giây
+    
+    if (intervalHandle) {
+      intervalHandle = setTimeout(checkLoop, 15 * 1000);
+    }
+  }
+  
+  // Khởi động loop
+  intervalHandle = setTimeout(checkLoop, 0);
 
-  console.log('[OTP Auto Check] Service started (15s interval).');
+  console.log('[OTP Auto Check] Service started (15s recursive interval).');
 }
 
 export function stopOtpAutoCheck() {
   if (intervalHandle) {
-    clearInterval(intervalHandle);
+    clearTimeout(intervalHandle);
     intervalHandle = null;
     console.log('[OTP Auto Check] Service stopped.');
   }

@@ -59,6 +59,21 @@ export async function execute(interaction) {
     return;
   }
 
+  // Bắt buộc nhập Gmail nếu là đơn đăng ký (Netflix, Spotify, Youtube...)
+  const subKeywords = ['youtube', 'netflix', 'spotify', 'canva', 'capcut', 'office', 'zoom', 'chatgpt', 'vpn', 'prime', 'hbo'];
+  const productNameLower = order.product_name?.toLowerCase() || '';
+  const isSubProduct = subKeywords.some(kw => productNameLower.includes(kw));
+
+  if (isSubProduct) {
+    if (!credentialEmail || credentialEmail.trim() === '') {
+      await interaction.editReply({ 
+        content: `${E('status_warn')} Đơn hàng **${order.product_name}** bắt buộc phải nhập \`gmail\` để hệ thống lưu lại và cảnh báo hết hạn sau này. Vui lòng chạy lại lệnh và điền tham số Gmail!`, 
+        ephemeral: true 
+      });
+      return;
+    }
+  }
+
   if (order.status !== 'COMPLETED') {
     if (order.total_amount > 0 && !['PAID', 'FREE'].includes(order.payment_status)) {
       await interaction.editReply({ content: `${E('status_warn')} Đơn chưa thanh toán xong nên bot chưa thể tự đồng bộ sang hoàn thành khi giao hàng.`, ephemeral: true });

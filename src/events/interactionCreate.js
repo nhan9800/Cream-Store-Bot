@@ -314,6 +314,19 @@ export function registerInteractionHandler(client, commands) {
         return;
       }
 
+      // ═══════ Announcement Footer Buttons ═══════
+      if (interaction.isButton() && interaction.customId === 'announce_dummy_1') {
+        const E = createEmojiResolver(interaction.guildId);
+        await interaction.reply({ content: `${E('icon_shop', '🏬')} **Quy Định Chung:**\n- Mọi sản phẩm đều phải tuân thủ chính sách sử dụng của nhà cung cấp.\n- Shop nghiêm cấm các hành vi gian lận (dùng chùa, share acc trái phép).\n- Vui lòng đọc kỹ mô tả sản phẩm trước khi mua.`, ephemeral: true });
+        return;
+      }
+
+      if (interaction.isButton() && interaction.customId === 'announce_dummy_2') {
+        const E = createEmojiResolver(interaction.guildId);
+        await interaction.reply({ content: `${E('cr_baohanh', '🛡️')} **Chính Sách Bảo Hành:**\n- Bảo hành 100% thời gian sử dụng đối với lỗi từ nhà cung cấp.\n- Không bảo hành đối với các trường hợp khách hàng tự ý đổi Pass hoặc vi phạm quy định.\n- Vui lòng mở Ticket để được hỗ trợ bảo hành nhanh nhất.`, ephemeral: true });
+        return;
+      }
+
       // ═══════ Subscription Modal Handlers ═══════
 
       if (interaction.isModalSubmit() && interaction.customId.startsWith('sub:add:')) {
@@ -325,6 +338,65 @@ export function registerInteractionHandler(client, commands) {
 
       if (interaction.isButton() && interaction.customId.startsWith('sub:renew:')) {
         await handleSubscriptionRenewButton(interaction);
+        return;
+      }
+
+      if (interaction.isButton() && interaction.customId.startsWith('sub_order:renew:bill:')) {
+        const orderCode = interaction.customId.split(':')[3];
+        const { getOrderByCodeRaw } = await import('../services/v11DbHelpers.js');
+        const order = getOrderByCodeRaw(orderCode);
+        if (order) {
+          const customer = await client.users.fetch(order.customer_id).catch(() => null);
+          if (customer) {
+            const { ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, SeparatorSpacingSize, MessageFlags } = await import('discord.js');
+            const E = createEmojiResolver(interaction.guildId);
+            
+            const dmContainer = new ContainerBuilder().setAccentColor(0xED4245);
+            dmContainer.addTextDisplayComponents(
+              new TextDisplayBuilder().setContent(`# <a:Dotyellow:1481134440725090315> **THÔNG BÁO HẾT HẠN DỊCH VỤ** <a:Dotyellow:1481134440725090315>\n> Gói dịch vụ của bạn đã kết thúc chu kỳ.`)
+            );
+            dmContainer.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Large));
+            dmContainer.addTextDisplayComponents(
+              new TextDisplayBuilder().setContent(
+                `## <:cr_shop:1392749981332541501> **Chi Tiết Gói Đăng Ký**\n` +
+                `<a:tsm_fire:1327553120842158111> **Tên Gói:** \`${order.product_name || 'Dịch vụ'}\`\n` +
+                `<:Diamond:1485905790903783465> **Mã Đơn:** \`${orderCode}\`\n\n` +
+                `*Vui lòng truy cập lại Server của chúng tôi và mở Ticket để gia hạn sớm, tránh bị gián đoạn trải nghiệm!*`
+              )
+            );
+            await customer.send({ components: [dmContainer], flags: MessageFlags.IsComponentsV2 }).catch(() => null);
+            await interaction.reply({ content: '✅ Đã gửi DM nhắc khách gia hạn bằng giao diện Component V2!', ephemeral: true });
+          } else {
+            await interaction.reply({ content: '❌ Không thể tìm thấy khách hàng để DM.', ephemeral: true });
+          }
+        }
+        return;
+      }
+
+      if (interaction.isButton() && interaction.customId.startsWith('sub_order:renew:kicked:')) {
+        const orderCode = interaction.customId.split(':')[3];
+        const { markOrderKickedRaw, getOrderByCodeRaw } = await import('../services/v11DbHelpers.js');
+        markOrderKickedRaw(orderCode);
+        const order = getOrderByCodeRaw(orderCode);
+        
+        const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags, ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, SeparatorSpacingSize } = await import('discord.js');
+        
+        const E = createEmojiResolver(interaction.guildId);
+        const container = new ContainerBuilder().setAccentColor(0x808080);
+        
+        container.addTextDisplayComponents(
+          new TextDisplayBuilder().setContent(`## <:cr_baohanh:1348625535512870965> **ĐÃ KICK / NGỪNG GIA HẠN**\n> Đơn \`${orderCode}\` đã được xử lý xong.`)
+        );
+        container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Large));
+        container.addTextDisplayComponents(
+          new TextDisplayBuilder().setContent(`<:cr_shop:1392749981332541501> **Sản phẩm:** \`${order?.product_name || 'Dịch vụ'}\`\n<a:tickgreen:1384069022831874169> Đã xoá khỏi hệ thống cảnh báo.`)
+        );
+
+        const row = new ActionRowBuilder().addComponents(
+          new ButtonBuilder().setCustomId('disabled_yt').setLabel(`Đã xử lý xong`).setStyle(ButtonStyle.Secondary).setDisabled(true)
+        );
+
+        await interaction.update({ components: [container, row], flags: MessageFlags.IsComponentsV2 }).catch(() => null);
         return;
       }
 
@@ -2105,34 +2177,49 @@ export function registerInteractionHandler(client, commands) {
 
            const channel = await interaction.guild.channels.fetch(cacheData.channelId).catch(() => null);
            if (channel) {
-               if (prefix) {
-                  await channel.send({ content: prefix }).catch(() => null);
-               }
+               const E = createEmojiResolver(interaction.guildId);
+               const container = new ContainerBuilder().setAccentColor(0x2B2D31);
 
-               if (fullContent.length <= 2000) {
-                  await channel.send({ content: fullContent });
-               } else {
-                  const chunks = [];
-                  let remaining = fullContent;
-                  while (remaining.length > 0) {
-                    if (remaining.length <= 2000) {
-                      chunks.push(remaining);
-                      break;
-                    }
-                    let splitAt = remaining.lastIndexOf('\n', 2000);
-                    if (splitAt <= 0) splitAt = remaining.lastIndexOf(' ', 2000);
-                    if (splitAt <= 0) splitAt = 2000;
-                    chunks.push(remaining.slice(0, splitAt));
-                    remaining = remaining.slice(splitAt).replace(/^\n/, '');
-                  }
-                  for (const chunk of chunks) {
-                    await channel.send({ content: chunk }).catch(() => null);
-                  }
-               }
+               // Header
+               container.addTextDisplayComponents(
+                 new TextDisplayBuilder().setContent(
+                   `${prefix ? prefix + '\n' : ''}` +
+                   `# <a:Dotyellow:1481134440725090315> **THÔNG BÁO TỪ BAN QUẢN TRỊ** <a:Dotyellow:1481134440725090315>`
+                 )
+               );
 
-               await interaction.editReply({ content: 'Đã đăng thông báo thành công!', embeds: [], components: [] }).catch(() => null);
+               container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Medium));
+
+               // Content
+               container.addTextDisplayComponents(
+                 new TextDisplayBuilder().setContent(fullContent)
+               );
+
+               container.addSeparatorComponents(new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Medium));
+
+               // Footer
+               container.addTextDisplayComponents(
+                 new TextDisplayBuilder().setContent(`Trân trọng,\n**Ban Quản Trị Hệ Thống** <:verifybadge:1481127479702847646>`)
+               );
+
+               const actionRow = new ActionRowBuilder().addComponents(
+                 new ButtonBuilder()
+                   .setCustomId('announce_dummy_1')
+                   .setLabel('Quy Định Chung')
+                   .setStyle(ButtonStyle.Primary)
+                   .setEmoji({ id: '1392749981332541501', name: 'cr_shop' }), 
+                 new ButtonBuilder()
+                   .setCustomId('announce_dummy_2')
+                   .setLabel('Chính Sách Bảo Hành')
+                   .setStyle(ButtonStyle.Secondary)
+                   .setEmoji({ id: '1348625535512870965', name: 'cr_baohanh' }) 
+               );
+
+               await channel.send({ components: [container, actionRow], flags: MessageFlags.IsComponentsV2 }).catch(() => null);
+
+               await interaction.editReply({ content: '✅ Đã đăng thông báo siêu xịn (Component V2) thành công!', embeds: [], components: [] }).catch(() => null);
            } else {
-               await interaction.editReply({ content: 'Không tìm thấy kênh tương ứng để đăng.', embeds: [], components: [] }).catch(() => null);
+               await interaction.editReply({ content: '❌ Không tìm thấy kênh tương ứng để đăng.', embeds: [], components: [] }).catch(() => null);
            }
          } catch (err) {
            console.error('[ANNOUNCEMENT_CONFIRM] Lỗi:', err);

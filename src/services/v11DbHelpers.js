@@ -153,6 +153,29 @@ export function getOrdersExpiringInWindowRaw(minHours, maxHours) {
   `).all(`+${maxHours} hours`, `+${minHours} hours`);
 }
 
+export function getExpiredSubscriptionOrdersRaw() {
+  const subKeywords = ['youtube', 'netflix', 'spotify', 'canva', 'capcut', 'office', 'zoom', 'chatgpt', 'vpn', 'prime', 'hbo'];
+  const likeClauses = subKeywords.map(kw => `LOWER(product_name) LIKE '%${kw}%'`).join(' OR ');
+
+  return db.prepare(`
+    SELECT *
+    FROM orders
+    WHERE expiry_at IS NOT NULL
+      AND datetime(expiry_at) <= datetime('now')
+      AND status NOT IN ('CANCELED', 'REFUNDED')
+      AND (claim_notes IS NULL OR claim_notes != 'KICKED')
+      AND (${likeClauses})
+  `).all();
+}
+
+export function markOrderKickedRaw(orderCode) {
+  db.prepare(`
+    UPDATE orders
+    SET claim_notes = 'KICKED', updated_at = ?
+    WHERE order_code = ?
+  `).run(nowIso(), orderCode);
+}
+
 export function markExpiryNoticeRaw(orderCode, fieldName) {
   const allowed = new Set(['expiry_notice_3d_sent_at', 'expiry_notice_2d_sent_at', 'expiry_notice_1d_sent_at']);
   if (!allowed.has(fieldName)) throw new Error('Field reminder không hợp lệ.');

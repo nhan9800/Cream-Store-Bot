@@ -812,6 +812,11 @@ export function initDatabase() {
       created_at TEXT NOT NULL,
       updated_at TEXT NOT NULL
     );
+
+    CREATE INDEX IF NOT EXISTS idx_orders_customer_id ON orders(customer_id);
+    CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
+    CREATE INDEX IF NOT EXISTS idx_orders_expiry_at ON orders(expiry_at);
+    CREATE INDEX IF NOT EXISTS idx_tickets_customer_id ON tickets(customer_id);
   `);
 
   ensureColumn('guild_settings', 'cardswap_partner_id', 'TEXT DEFAULT NULL');
