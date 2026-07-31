@@ -25,4 +25,4 @@ Huong dan:
 1. Backup source hien tai.
 2. Giai nen patch nay vao thu muc bot de chep de file source.
 3. KHONG xoa thu muc data va .env hien tai.
-4. Restart bot / PM2 sau khi chep de.
+4. Restart bot bang nut Restart trong panel VibeHost sau khi chep de.

@@ -1,23 +1,21 @@
-# Disaster Recovery Plan - Cenar Store
+# Disaster Recovery Plan - Cenar Store Bot
 
-## Purpose
-This document defines procedures for recovering from severe incidents (server hardware failure, database corruption, or malicious compromise).
+## Mục tiêu
 
-## Recovery Time Objective (RTO) & Recovery Point Objective (RPO)
-- **RTO**: < 15 minutes (using automated deployment workflows and backup scripts).
-- **RPO**: < 6 hours (based on automated cron backups in `backups/`).
+- Khôi phục bot trên VibeHost với source đã kiểm thử và hai bản SQLite đã xác minh.
+- Không để source deployment ghi đè secret hoặc dữ liệu production.
 
-## Disaster Recovery Steps
-1. **Provision New Host / Instance**:
-   - Clone both repositories (`Cream-Store-Bot-main` and `cenar-website-main`).
-2. **Restore Database State**:
-   - Copy the latest verified `.sqlite` backup archive into `Cream-Store-Bot-main/data/shopbot.sqlite`.
-   - Run `./scripts/verify-backup.sh` to validate schema integrity.
-3. **Configure Secrets**:
-   - Restore `.env` from secure secrets vault (including `BOT_API_KEY`, `PAYOS_CLIENT_ID`, `PAYOS_API_KEY`, `PAYOS_CHECKSUM_KEY`).
-4. **Start Services & Verify Health**:
-   ```bash
-   pm2 start ecosystem.config.js
-   curl http://localhost:5000/api/health
-   curl https://cenarstore.xyz/api/health
-   ```
+## Quy trình
+
+1. Tạo hoặc làm sạch server VibeHost, xác nhận thư mục chạy là `/home/container` và allocation public là
+   `20022`.
+2. Upload source của commit tốt gần nhất vào `/home/container`.
+3. Khôi phục `.env` và `.env.store2` từ kho secret an toàn, không lấy từ Git.
+4. Khôi phục các database đã qua integrity check:
+   - `/home/container/data/shopbot.sqlite`
+   - `/home/container/data/shopbot-store2.sqlite`
+5. Chạy `npm ci --omit=dev --no-audit --no-fund`.
+6. Cấu hình Startup command là `npm start`, sau đó Start server từ panel.
+7. Kiểm tra Console, trạng thái hai bot Discord và hai health endpoint qua cổng public `20022`.
+
+Nếu SFTP credential hoặc secret có khả năng bị lộ, phải rotate trước khi khôi phục production.
