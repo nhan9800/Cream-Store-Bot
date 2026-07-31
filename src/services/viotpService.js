@@ -1,9 +1,18 @@
 
 
-const VIOTP_TOKEN = process.env.VIOTP_TOKEN;
+// ViOTP uses a token query parameter. Keep the value out of logs and fail early
+// when the hosting environment has not been configured yet.
+const VIOTP_TOKEN = String(process.env.VIOTP_TOKEN || process.env.VIOTP_API_TOKEN || '').trim();
 const API_BASE = 'https://api.viotp.com';
 
 async function callApi(endpoint, params = {}) {
+  if (!VIOTP_TOKEN) {
+    const error = new Error('Thiếu VIOTP_TOKEN trên hosting. Hãy thêm token API ViOTP vào cả .env và .env.store2 rồi khởi động lại bot.');
+    error.code = 'VIOTP_NOT_CONFIGURED';
+    console.error('[VIOTP_CONFIG_ERROR] VIOTP_TOKEN is not configured');
+    throw error;
+  }
+
   const url = new URL(`${API_BASE}${endpoint}`);
   url.searchParams.append('token', VIOTP_TOKEN);
   
@@ -20,7 +29,13 @@ async function callApi(endpoint, params = {}) {
   if (data.status_code !== 200) {
     console.error('[VIOTP_API_ERROR] Raw response:', JSON.stringify(data));
     const code = data.status_code ?? data.status ?? 'undefined';
-    throw new Error(data.message || `Lỗi API ViOTP (Code: ${code})`);
+    const error = new Error(
+      code === 401
+        ? 'Token ViOTP không hợp lệ hoặc đã hết hạn. Hãy kiểm tra lại VIOTP_TOKEN trên hosting.'
+        : (data.message || `Lỗi API ViOTP (Code: ${code})`),
+    );
+    error.code = code === 401 ? 'VIOTP_AUTH_INVALID' : 'VIOTP_API_ERROR';
+    throw error;
   }
   return data.data;
 }
