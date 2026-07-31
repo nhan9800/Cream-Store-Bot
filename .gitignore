@@ -18,7 +18,7 @@ logs/
 .cache/
 npm-debug.log*
 
-# PM2 log files (keep directory, ignore log content)
+# Runtime log files
 logs/*.log
 
 # OS
@@ -48,15 +48,11 @@ scripts/*
 !scripts/backfill-payment-codes.js
 !scripts/backup-production.js
 !scripts/verify-backup.js
-!scripts/backup-gdrive.sh
 !scripts/check-env.js
 !scripts/confirm-payos-webhook.js
-!scripts/deploy-cloudfly.sh
-!scripts/deploy-production.sh
 !scripts/encrypt-existing-credentials.js
 !scripts/reorganize-roles.js
 !scripts/resyncCustomerStats.js
-!scripts/rollback-production.sh
 !scripts/send-announcement.js
 !scripts/smoke-test.js
 !scripts/send-combo-announcement.js

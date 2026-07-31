@@ -1,197 +1,45 @@
-# Bot API — Documentation
+# Bot API
 
-Bot expose REST API tại `/api/bot/*` để website đọc dữ liệu bot (đơn hàng, khách hàng, feedback...).
+Bot launcher expose REST API qua allocation VibeHost `hcm3.vibehost.vn:20022`. Website phải gọi API từ server
+side và gửi header `X-Bot-Api-Key`; không đưa `BOT_API_KEY` xuống trình duyệt.
 
-## Setup
+## Cấu hình
 
-### 1. Tạo API key trong `.env`
+Bot và website dùng cùng một giá trị bí mật:
 
-```env
-BOT_API_KEY=<random-32-char-key-here>
+```dotenv
+BOT_API_KEY=<random-secret>
 ```
 
-Tạo key bằng:
-```bash
-openssl rand -hex 32
-```
+Sau khi đổi key, restart bot bằng panel VibeHost và redeploy website để hai bên đồng bộ.
 
-hoặc PowerShell:
-```powershell
-[guid]::NewGuid().ToString("N") + [guid]::NewGuid().ToString("N")
-```
-
-### 2. Restart bot
+## Health
 
 ```bash
-pm2 restart cream-bot
+curl http://hcm3.vibehost.vn:20022/api/health
+curl http://hcm3.vibehost.vn:20022/store2/api/health
 ```
 
-### 3. Test
+Địa chỉ HTTP này chỉ dùng kiểm tra ban đầu. Production nên dùng custom domain HTTPS.
 
-```bash
-curl -H "X-Bot-Api-Key: YOUR_KEY" http://localhost:3000/api/bot/health
-```
+## Endpoint chính
 
-Trả về:
-```json
-{"ok":true,"service":"cream-bot","uptime":123,"timestamp":1716...}
-```
+- `GET /api/bot/health`
+- `GET /api/bot/stats`
+- `GET /api/bot/orders`
+- `GET /api/bot/orders/:code`
+- `GET /api/bot/customer/:discord_id`
+- `GET /api/bot/feedbacks`
+- `GET /api/bot/products`
+- `GET /api/bot/top-customers?limit=10`
+- `GET /api/bot/top-products?limit=10`
 
----
+Các endpoint nội bộ phải trả `401` khi thiếu hoặc sai API key. Endpoint public chỉ được trả dữ liệu đã ẩn thông
+tin nhạy cảm.
 
-## Endpoints
+## Quy tắc mạng và secret
 
-Tất cả route require header `X-Bot-Api-Key` đúng. Nếu không có/sai → `401 Unauthorized`.
-
-### `GET /api/bot/health`
-
-Check bot live & uptime.
-
-```json
-{ "ok": true, "service": "cream-bot", "uptime": 12345, "timestamp": 1716000000 }
-```
-
-### `GET /api/bot/stats`
-
-Số liệu tổng quan (cho admin dashboard web).
-
-```json
-{
-  "ok": true,
-  "data": {
-    "total_orders": 134,
-    "completed_orders": 100,
-    "pending_orders": 5,
-    "total_revenue": 15125000,
-    "total_customers": 92,
-    "total_feedbacks": 80,
-    "avg_rating": 4.85,
-    "today_orders": 3,
-    "today_revenue": 250000
-  }
-}
-```
-
-### `GET /api/bot/orders`
-
-Danh sách đơn (có pagination + filter).
-
-**Query params:**
-- `customer_id` (optional) — Discord user ID
-- `status` (optional) — `PENDING_PAYMENT`/`PROCESSING`/`COMPLETED`/`CANCELLED`
-- `limit` (default 50, max 200)
-- `offset` (default 0)
-
-```bash
-GET /api/bot/orders?customer_id=115237590985&limit=10
-```
-
-```json
-{
-  "ok": true,
-  "data": {
-    "rows": [{
-      "order_code": "CR_900426",
-      "customer_id": "115237590985",
-      "product_name": "Netflix Premium 1 tháng",
-      "quantity": 1,
-      "total_amount": 99000,
-      "amount_paid": 99000,
-      "payment_status": "PAID",
-      "status": "COMPLETED",
-      "created_at": "2026-04-15T10:00:00.000Z",
-      "completed_at": "2026-04-15T10:05:00.000Z"
-    }],
-    "total": 5,
-    "limit": 10,
-    "offset": 0
-  }
-}
-```
-
-### `GET /api/bot/orders/:code`
-
-Chi tiết 1 đơn (đầy đủ field, gồm credentials sau khi đã giao).
-
-```bash
-GET /api/bot/orders/CR_900426
-```
-
-### `GET /api/bot/customer/:discord_id`
-
-Profile + lịch sử mua + flags của 1 khách.
-
-```json
-{
-  "ok": true,
-  "data": {
-    "discord_id": "115237590985",
-    "profiles": [...],
-    "flags": [...],
-    "recentOrders": [...],
-    "stats": {
-      "total_orders": 12,
-      "total_spent": 1500000,
-      "completed": 11,
-      "last_order_at": "2026-05-20T..."
-    }
-  }
-}
-```
-
-### `GET /api/bot/feedbacks`
-
-Lấy feedback (review).
-
-**Query:**
-- `customer_id` (optional)
-- `min_stars` (optional, 1-5)
-- `limit` (default 20, max 100)
-
-### `GET /api/bot/products`
-
-Bảng giá sản phẩm bot bán.
-
-### `GET /api/bot/top-customers?limit=10`
-
-Top N khách hàng mua nhiều nhất.
-
-### `GET /api/bot/top-products?limit=10`
-
-Top N sản phẩm bán chạy nhất.
-
----
-
-## Web side — gọi từ Cenar Store
-
-Trong PHP (Cenar Store):
-
-```php
-$key = $_ENV['BOT_API_KEY'];
-$url = 'http://node.sang0023.io.vn:3000/api/bot/orders?customer_id=' . $discordId;
-$ctx = stream_context_create([
-    'http' => [
-        'header' => "X-Bot-Api-Key: $key\r\n",
-        'timeout' => 5,
-    ],
-]);
-$res = json_decode(file_get_contents($url, false, $ctx), true);
-```
-
-Hoặc dùng `BotApiClient.php` (xem `cenarstore-v2/src/Services/BotApiClient.php`).
-
----
-
-## Bảo mật
-
-- API key lưu trong `.env` cả 2 bên (bot + web), KHÔNG commit lên Git
-- Nếu key leak, regenerate ngay và update 2 bên
-- API chỉ READ — không có endpoint nào write/modify DB bot
-- CORS allow `*` (để web gọi từ browser nếu cần) — chỉ cho admin dùng, không expose ra public
-
-## Network setup
-
-Bot chạy ở `node.sang0023.io.vn:3000` (hoặc localhost nếu cùng máy).
-- Nếu web và bot khác máy: mở firewall cho web gọi tới port 3000
-- Nếu cùng máy: dùng `http://127.0.0.1:3000` cho an toàn nhất
-- Hosting nên đặt API key vào `.env` (không hardcode)
+- Không hardcode host cũ hoặc địa chỉ IP trực tiếp trong source website.
+- Website đọc URL từ `BOT_API_URL` và key từ secret của hosting website.
+- Không commit `.env`, token Discord, khóa PayOS hoặc SFTP credential.
+- Khi rotate `BOT_API_KEY`, cập nhật bot và website trong cùng một cửa sổ bảo trì.
