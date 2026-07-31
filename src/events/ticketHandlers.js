@@ -495,6 +495,10 @@ export async function handleTicketClose(interaction, ticketId) {
     // Cập nhật trạng thái database ngay lập tức để tránh race condition khi click nhanh
     closeTicket(ticket.id, interaction.user.id);
 
+    const ticketChannel = await interaction.guild.channels
+      .fetch(interaction.channelId)
+      .catch(() => interaction.channel);
+
     // 1. KHÓA QUYỀN TRUY CẬP VÀ ĐỔI TÊN KÊNH LẬP TỨC (để ép đóng giao diện đối với user)
     try {
       const everyone = interaction.guild.roles.everyone;
@@ -511,11 +515,13 @@ export async function handleTicketClose(interaction, ticketId) {
       if (guildConfig?.manager_role_id) {
         newOverwrites.push({ id: guildConfig.manager_role_id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
       }
-      await interaction.channel.permissionOverwrites.set(newOverwrites).catch(() => null);
+      if (ticketChannel?.permissionOverwrites?.set) {
+        await ticketChannel.permissionOverwrites.set(newOverwrites).catch(() => null);
+      }
 
-      if (!interaction.channel.name.startsWith('closed-')) {
-        const newName = `closed-${interaction.channel.name}`.slice(0, 95);
-        await interaction.channel.setName(newName).catch(() => null);
+      if (ticketChannel?.name && typeof ticketChannel.setName === 'function' && !ticketChannel.name.startsWith('closed-')) {
+        const newName = `closed-${ticketChannel.name}`.slice(0, 95);
+        await ticketChannel.setName(newName).catch(() => null);
       }
     } catch (err) {
       console.error('[TICKET_CLOSE] Lỗi đổi tên kênh/khóa quyền sớm:', err.message);
@@ -527,7 +533,9 @@ export async function handleTicketClose(interaction, ticketId) {
     }
 
     // 2. XUẤT TRANSCRIPT SAU KHI ĐÃ KHÓA KÊNH
-    const transcriptResult = await exportTicketTranscript(interaction.channel).catch(() => null);
+    const transcriptResult = ticketChannel
+      ? await exportTicketTranscript(ticketChannel).catch(() => null)
+      : null;
 
     await emitStaffLog(interaction.client, {
       guildId: interaction.guildId, actorId: interaction.user.id, targetId: ticket.customer_id, action: 'TICKET_CLOSE',
@@ -564,10 +572,12 @@ export async function handleTicketClose(interaction, ticketId) {
         `-# ${E('icon_heart_purple')} Cảm ơn bạn đã tin tưởng sử dụng dịch vụ!`.trim()
       )
     );
-    await interaction.channel.send({
-      components: [closeContainer],
-      flags: MessageFlags.IsComponentsV2,
-    }).catch(() => null);
+    if (ticketChannel?.send) {
+      await ticketChannel.send({
+        components: [closeContainer],
+        flags: MessageFlags.IsComponentsV2,
+      }).catch(() => null);
+    }
 
     setTimeout(async () => {
       try {
