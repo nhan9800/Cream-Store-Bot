@@ -219,7 +219,7 @@ export function registerBotApiRoutes(app) {
         const result = safeQuery(() =>
             db.prepare(`
                 SELECT id, guild_id, name, description, price, duration_months,
-                       service_type, emoji, is_active, sort_order
+                       service_type, emoji, is_active, sort_order, require_email, require_phone
                 FROM product_catalog
                 WHERE is_active = 1
                 ORDER BY sort_order ASC, name ASC

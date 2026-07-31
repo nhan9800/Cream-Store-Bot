@@ -4,6 +4,8 @@ node_modules
 # Bot data - KHÔNG được commit lên GitHub
 /data/
 data/
+backups/
+logs/
 
 # npm cache & logs
 .npm/

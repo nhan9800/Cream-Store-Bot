@@ -1,5 +1,8 @@
 import { db } from '../database/db.js';
 import crypto from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import { config } from '../config.js';
 import {
   sanitizeString, sanitizePositiveInt, sanitizePagination,
   isValidRole, isValidOrderStatus, isValidServiceType,
@@ -133,9 +136,67 @@ export function registerAdminRoutes(app) {
   // ==== 3. ORDERS ====
   app.get('/api/bot/admin/orders', requireAdminRole, (req, res) => {
     try {
+      const page = Number(req.query.page) || 1;
       const limit = Number(req.query.limit) || 50;
-      const orders = db.prepare('SELECT * FROM orders ORDER BY created_at DESC LIMIT ?').all(limit);
-      res.json({ ok: true, data: orders });
+      const offset = (page - 1) * limit;
+      
+      const search = req.query.search ? `%${req.query.search}%` : null;
+      const statusFilter = req.query.status || 'ALL';
+      const platformFilter = req.query.platform || 'ALL';
+
+      let queryStr = 'SELECT * FROM orders WHERE 1=1';
+      let countStr = 'SELECT COUNT(*) as total FROM orders WHERE 1=1';
+      const params = [];
+
+      if (search) {
+        queryStr += ' AND (order_code LIKE ? OR product_name LIKE ? OR credential_email LIKE ? OR customer_id LIKE ?)';
+        countStr += ' AND (order_code LIKE ? OR product_name LIKE ? OR credential_email LIKE ? OR customer_id LIKE ?)';
+        params.push(search, search, search, search);
+      }
+
+      if (statusFilter !== 'ALL') {
+        if (statusFilter === 'COMPLETED') {
+          queryStr += " AND status = 'COMPLETED'";
+          countStr += " AND status = 'COMPLETED'";
+        } else if (statusFilter === 'PROCESSING') {
+          queryStr += " AND (status = 'PROCESSING' OR status = 'PENDING_PAYMENT')";
+          countStr += " AND (status = 'PROCESSING' OR status = 'PENDING_PAYMENT')";
+        } else if (statusFilter === 'CANCELLED') {
+          queryStr += " AND status = 'CANCELLED'";
+          countStr += " AND status = 'CANCELLED'";
+        }
+      }
+
+      if (platformFilter !== 'ALL') {
+        if (platformFilter === 'WEB') {
+          queryStr += " AND (guild_id = 'WEB' OR ticket_channel_id = 'WEB')";
+          countStr += " AND (guild_id = 'WEB' OR ticket_channel_id = 'WEB')";
+        } else if (platformFilter === 'DISCORD') {
+          queryStr += " AND (guild_id != 'WEB' AND (ticket_channel_id IS NULL OR ticket_channel_id != 'WEB'))";
+          countStr += " AND (guild_id != 'WEB' AND (ticket_channel_id IS NULL OR ticket_channel_id != 'WEB'))";
+        }
+      }
+
+      // Count total
+      const totalRow = db.prepare(countStr).get(...params);
+      const total = totalRow ? totalRow.total : 0;
+
+      // Add ordering, limit and offset
+      queryStr += ' ORDER BY created_at DESC LIMIT ? OFFSET ?';
+      const selectParams = [...params, limit, offset];
+
+      const orders = db.prepare(queryStr).all(...selectParams);
+
+      res.json({
+        ok: true,
+        data: orders,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages: Math.ceil(total / limit)
+        }
+      });
     } catch (e) {
       res.status(500).json({ ok: false, error: e.message });
     }
@@ -145,6 +206,15 @@ export function registerAdminRoutes(app) {
     try {
       const { status } = req.body;
       db.prepare('UPDATE orders SET status = ?, status_changed_at = CURRENT_TIMESTAMP WHERE order_code = ?').run(status, req.params.code);
+      
+      // Audit log
+      try {
+        db.prepare(`INSERT INTO staff_logs (guild_id, actor_id, action, detail, related_order_code, created_at) VALUES ('WEB', ?, 'ADMIN_ORDER_STATUS', ?, ?, CURRENT_TIMESTAMP)`)
+          .run(req.header('x-user-id') || 'UNKNOWN', `Changed status of order ${req.params.code} to ${status}`, req.params.code);
+      } catch (err) {
+        console.error('[AUDIT ERROR]', err);
+      }
+
       res.json({ ok: true });
     } catch (e) {
       res.status(500).json({ ok: false, error: e.message });
@@ -281,6 +351,115 @@ export function registerAdminRoutes(app) {
       });
     } catch (e) {
       return errorResponse(res, 500, e.message);
+    }
+  });
+
+  // ==== 7. SYSTEM SETTINGS (Admin Only) ====
+  app.get('/api/bot/admin/settings', requireAdminRole, (req, res) => {
+    try {
+      if (req.adminRole !== 'admin') {
+        return errorResponse(res, 403, 'Chỉ Super Admin mới có quyền truy cập.');
+      }
+
+      // Return configuration values (mask sensitive ones)
+      const settings = {
+        BOT_TOKEN: config.botToken ? `${config.botToken.substring(0, 10)}...` : '',
+        CLIENT_ID: config.clientId || '',
+        GUILD_ID: config.guildId || '',
+        STORE_NAME: config.storeName || '',
+        PUBLIC_BASE_URL: config.publicBaseUrl || '',
+        PAYOS_CLIENT_ID: config.payosClientId || '',
+        PAYOS_API_KEY: config.payosApiKey ? `${config.payosApiKey.substring(0, 5)}...` : '',
+        PAYOS_CHECKSUM_KEY: config.payosChecksumKey ? `${config.payosChecksumKey.substring(0, 8)}...` : '',
+        PAYOS_WEBHOOK_PATH: config.payosWebhookPath || '/webhooks/payos',
+        PAYOS_RETURN_PATH: config.payosReturnPath || '/payments/payos/return',
+        PAYOS_CANCEL_PATH: config.payosCancelPath || '/payments/payos/cancel',
+        WEBSITE_URL: process.env.WEBSITE_URL || '',
+      };
+
+      res.json({ ok: true, data: settings });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: e.message });
+    }
+  });
+
+  app.put('/api/bot/admin/settings', requireAdminRole, (req, res) => {
+    try {
+      if (req.adminRole !== 'admin') {
+        return errorResponse(res, 403, 'Chỉ Super Admin mới có quyền chỉnh sửa.');
+      }
+
+      const updates = req.body;
+      const envPath = path.resolve(process.cwd(), '.env');
+      if (!fs.existsSync(envPath)) {
+        return errorResponse(res, 500, 'Không tìm thấy file .env');
+      }
+
+      let content = fs.readFileSync(envPath, 'utf8');
+      let lines = content.split(/\r?\n/);
+
+      const envToConfigMap = {
+        BOT_TOKEN: 'botToken',
+        CLIENT_ID: 'clientId',
+        GUILD_ID: 'guildId',
+        STORE_NAME: 'storeName',
+        PUBLIC_BASE_URL: 'publicBaseUrl',
+        PAYOS_CLIENT_ID: 'payosClientId',
+        PAYOS_API_KEY: 'payosApiKey',
+        PAYOS_CHECKSUM_KEY: 'payosChecksumKey',
+        PAYOS_WEBHOOK_PATH: 'payosWebhookPath',
+        PAYOS_RETURN_PATH: 'payosReturnPath',
+        PAYOS_CANCEL_PATH: 'payosCancelPath',
+        WEBSITE_URL: 'websiteUrl'
+      };
+
+      const auditDetails = [];
+
+      for (const [key, val] of Object.entries(updates)) {
+        // Skip updating if it's masked value (e.g. ends with '...')
+        if (typeof val === 'string' && val.endsWith('...')) {
+          continue;
+        }
+
+        let found = false;
+        const linePrefix = `${key}=`;
+        for (let i = 0; i < lines.length; i++) {
+          if (lines[i].trim().startsWith(linePrefix)) {
+            lines[i] = `${key}=${val}`;
+            found = true;
+            break;
+          }
+        }
+        if (!found) {
+          lines.push(`${key}=${val}`);
+        }
+
+        // Update in-memory process.env
+        process.env[key] = String(val);
+
+        // Update config object in-memory
+        const configKey = envToConfigMap[key];
+        if (configKey) {
+          config[configKey] = val;
+        }
+
+        // Update database system_settings
+        db.prepare('INSERT OR REPLACE INTO system_settings (key, value) VALUES (?, ?)').run(key, String(val));
+
+        auditDetails.push(`${key} changed`);
+      }
+
+      fs.writeFileSync(envPath, lines.join('\n'), 'utf8');
+
+      // Audit log
+      try {
+        db.prepare(`INSERT INTO staff_logs (guild_id, actor_id, action, detail, created_at) VALUES ('WEB', ?, 'ADMIN_SETTINGS_UPDATE', ?, CURRENT_TIMESTAMP)`)
+          .run(req.header('x-user-id'), `Updated settings: ${auditDetails.join(', ')}`);
+      } catch { /* ignore audit failures */ }
+
+      res.json({ ok: true, message: 'Đã cập nhật cấu hình hệ thống thành công.' });
+    } catch (e) {
+      res.status(500).json({ ok: false, error: e.message });
     }
   });
 }
