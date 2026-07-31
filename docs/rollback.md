@@ -1,20 +1,42 @@
-# Bot rollback v2
+# Rollback Bot Cenar Store v2
 
-The production workflow automatically rolls back when deployment or exact-SHA health checks
-fail. Rollback state is scoped to the failed SHA, so an SSH failure before activation cannot
-roll a healthy deployment back an extra version.
+Workflow tự rollback khi deploy hoặc exact-SHA health thất bại. Metadata rollback gắn với failed SHA,
+nên lỗi SSH trước activation không thể kéo một bản production khỏe lùi thêm phiên bản.
 
-For a manual emergency rollback, use GitHub Actions `workflow_dispatch` with the full SHA of
-a known-good commit that is already reachable from `main`. Do not use `git checkout` or edit
-the live worktree by hand; doing so breaks revision and rollback tracking.
+Rollback còn đăng ký lại slash commands từ previous SHA, restart đúng runtime đã khai báo và kiểm tra
+cả Store 1 lẫn Store 2.
 
-After rollback, verify both configured health URLs show:
+## Rollback thủ công
 
-- HTTP 200
-- `ok: true`
-- `discordReady: true`
-- the same expected 40-character `commitSha`
+Tạm đóng băng merge/push, chọn full SHA tốt đã thuộc `main`, rồi chạy workflow từ branch `main`:
 
-If a database migration caused the incident, stop both stores and restore only a verified
-SQLite backup from `backups/deploy/` under an incident-specific recovery plan. Never replace
-a live SQLite file while either bot process is writing to it.
+```bash
+GOOD_SHA=<KNOWN_GOOD_FULL_40_CHARACTER_SHA>
+git fetch origin main
+git merge-base --is-ancestor "$GOOD_SHA" origin/main
+
+gh workflow run deploy-production.yml --ref main \
+  -f sha="$GOOD_SHA" \
+  -f confirm_production=true
+gh run list --workflow deploy-production.yml --branch main --limit 5
+gh run watch <RUN_ID> --exit-status
+```
+
+Sau rollback, hai health URL phải trả HTTP 200, `ok: true`, `discordReady: true` và cùng
+`commitSha` mong đợi.
+
+Không gọi trực tiếp `scripts/rollback-production.sh` nếu không xử lý đúng file
+`.deployments/<failed-sha>.previous`.
+
+## Restore database
+
+Code rollback không tự restore SQLite. Nếu incident liên quan migration/dữ liệu:
+
+1. Tắt auto-deploy.
+2. Dừng launcher để cả hai bot ngừng ghi.
+3. Tạo thêm bản incident backup của DB hiện tại.
+4. Chạy `npm run verify:backup -- <backup.sqlite>`.
+5. Chỉ thay đúng DB của store bị ảnh hưởng.
+6. Start bot và kiểm tra health/nghiệp vụ.
+
+Tuyệt đối không thay file SQLite khi process đang ghi.

@@ -28,6 +28,19 @@ jobs:
       - name: Install Dependencies
         run: npm ci
 
+      - name: Validate production deployment source
+        run: |
+          set -Eeuo pipefail
+          test -f scripts/backup-production.js
+          test -f scripts/deploy-production.sh
+          test -f scripts/rollback-production.sh
+          test -f src/utils/ports.js
+          test -f src/utils/revision.js
+          bash -n scripts/deploy-production.sh scripts/rollback-production.sh
+          node --check scripts/backup-production.js
+          node --check src/utils/ports.js
+          node --check src/utils/revision.js
+
       - name: Run Vitest Unit Tests
         run: npm test
         env:
