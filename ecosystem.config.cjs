@@ -34,6 +34,16 @@ module.exports = {
         NODE_ENV: 'production',
         LAUNCHER_PORT: 20022
       }
+    },
+    {
+      name: 'backup-job',
+      script: 'npm',
+      args: 'run backup',
+      instances: 1,
+      exec_mode: 'fork',
+      cron_restart: '0 0,12 * * *',
+      autorestart: false,
+      watch: false
     }
   ]
 };

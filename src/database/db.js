@@ -11,7 +11,28 @@ const resolvedDatabasePath = path.resolve(projectRoot, config.databasePath);
 
 fs.mkdirSync(path.dirname(resolvedDatabasePath), { recursive: true });
 
-export const db = new Database(resolvedDatabasePath);
+// Timeout 10000ms giúp xử lý SQLITE_BUSY mặc định bằng C busy-polling
+export const db = new Database(resolvedDatabasePath, { timeout: 10000 });
+
+// Retry pattern cho lỗi SQLITE_BUSY (database is locked)
+export function withRetry(operation, maxRetries = 3) {
+  let retries = 0;
+  while (true) {
+    try {
+      return operation();
+    } catch (error) {
+      if (error.code === 'SQLITE_BUSY' && retries < maxRetries) {
+        retries++;
+        // Blocking sleep nhỏ
+        const start = Date.now();
+        while (Date.now() - start < 100 * retries) { /* wait */ }
+        continue;
+      }
+      throw error;
+    }
+  }
+}
+
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 db.pragma('synchronous = NORMAL');     // Cân bằng tốc độ và an toàn

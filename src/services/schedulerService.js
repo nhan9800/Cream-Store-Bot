@@ -94,22 +94,14 @@ export function startScheduler(client) {
     tick().catch(() => null);
   }, Math.max(1, intervalMinutes) * 60 * 1000);
 
-  // Chạy file backup mỗi 12 tiếng một lần
-  backupHandle = setInterval(() => {
-    autoBackupDatabase();
-  }, 12 * 60 * 60 * 1000);
+  console.log(`[V11.5] Scheduler đang chạy mỗi ${Math.max(1, intervalMinutes)} phút. Chế độ Auto-backup sẽ được xử lý qua PM2 cron.`);
 
   console.log(`[V11.5] Scheduler đang chạy mỗi ${Math.max(1, intervalMinutes)} phút. Chế độ Auto-backup Bật (lưu 7 ngày).`);
   console.log(`[V11.5] Cenar Store Bot — Scheduler & Backup Service started.`);
 }
-
 export function stopScheduler() {
   if (schedulerHandle) {
     clearInterval(schedulerHandle);
     schedulerHandle = null;
-  }
-  if (backupHandle) {
-    clearInterval(backupHandle);
-    backupHandle = null;
   }
 }
