@@ -111,7 +111,10 @@ install_revision() {
     return 0
   fi
 
-  if [[ "$target_sha" != "$current_sha" ]]; then
+  # The panel may pull the target revision before the supervisor starts. In that
+  # first-run case the source is already at target, but the database still needs
+  # a verified backup before dependencies and runtime validation can proceed.
+  if [[ "$target_sha" != "$current_sha" || -z "$installed_sha" ]]; then
     if ! backup_databases "$current_sha"; then
       write_marker "$FAILED_REVISION_FILE" "$target_sha"
       return 1
