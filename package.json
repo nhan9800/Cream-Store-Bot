@@ -16,6 +16,8 @@
     "test:integration": "node --test tests/**/*.integration.js",
     "test:migrations": "echo \"Migration tests will be added\"",
     "test:ci": "npm run test:unit",
+    "backup": "node scripts/backup.js",
+    "verify:backup": "node scripts/verify-backup.js",
     "confirm:webhook": "node scripts/confirm-payos-webhook.js"
   },
   "engines": {
