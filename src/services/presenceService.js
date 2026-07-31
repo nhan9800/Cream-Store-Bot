@@ -5,7 +5,6 @@ let presenceIntervalHandle = null;
 
 function safeCount(sql, fallback = 0) {
   try {
-    console.log('[DEBUG-SAFECOUNT] db path:', db?.name, 'db open:', db?.open);
     const row = db.prepare(sql).get();
     const value = row?.total ?? row?.count ?? fallback;
     return Number.isFinite(Number(value)) ? Number(value) : fallback;
