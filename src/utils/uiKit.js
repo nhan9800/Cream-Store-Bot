@@ -82,7 +82,7 @@ export function addFieldsBlock(c, pairs) {
 
 /** Separator (đường kẻ ngang). */
 export function addSeparator(c, { divider = true, size = 'small' } = {}) {
-  const spacing = size === 'large' ? SeparatorSpacingSize.Large : SeparatorSpacingSize.Small;
+  const spacing = size === 'large' ? SeparatorSpacingSize.Small : SeparatorSpacingSize.Small;
   c.addSeparatorComponents(new SeparatorBuilder().setDivider(divider).setSpacing(spacing));
   return c;
 }

@@ -29,7 +29,7 @@ export async function createGiveaway(client, channel, hostUser, prize, winnersCo
     )
   );
 
-  container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Medium));
+  container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
 
   // Body
   container.addTextDisplayComponents(
@@ -41,7 +41,7 @@ export async function createGiveaway(client, channel, hostUser, prize, winnersCo
     )
   );
 
-  container.addSeparatorComponents(new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Large));
+  container.addSeparatorComponents(new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small));
 
   // Footer
   container.addTextDisplayComponents(
@@ -161,7 +161,7 @@ export async function endGiveaway(client, messageId) {
     )
   );
 
-  container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Medium));
+  container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
 
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(

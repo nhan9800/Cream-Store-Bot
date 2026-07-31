@@ -181,7 +181,7 @@ function buildExpiredSubscriptionAlertV2(order, ownerId) {
   );
 
   container.addSeparatorComponents(
-    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Large)
+    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
   );
 
   container.addTextDisplayComponents(
@@ -195,7 +195,7 @@ function buildExpiredSubscriptionAlertV2(order, ownerId) {
   );
 
   container.addSeparatorComponents(
-    new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Medium)
+    new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small)
   );
 
   container.addTextDisplayComponents(

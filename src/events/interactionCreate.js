@@ -355,7 +355,7 @@ export function registerInteractionHandler(client, commands) {
             dmContainer.addTextDisplayComponents(
               new TextDisplayBuilder().setContent(`# <a:Dotyellow:1481134440725090315> **THÔNG BÁO HẾT HẠN DỊCH VỤ** <a:Dotyellow:1481134440725090315>\n> Gói dịch vụ của bạn đã kết thúc chu kỳ.`)
             );
-            dmContainer.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Large));
+            dmContainer.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
             dmContainer.addTextDisplayComponents(
               new TextDisplayBuilder().setContent(
                 `## <:cr_shop:1392749981332541501> **Chi Tiết Gói Đăng Ký**\n` +
@@ -387,7 +387,7 @@ export function registerInteractionHandler(client, commands) {
         container.addTextDisplayComponents(
           new TextDisplayBuilder().setContent(`## <:cr_baohanh:1348625535512870965> **ĐÃ KICK / NGỪNG GIA HẠN**\n> Đơn \`${orderCode}\` đã được xử lý xong.`)
         );
-        container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Large));
+        container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
         container.addTextDisplayComponents(
           new TextDisplayBuilder().setContent(`<:cr_shop:1392749981332541501> **Sản phẩm:** \`${order?.product_name || 'Dịch vụ'}\`\n<a:tickgreen:1384069022831874169> Đã xoá khỏi hệ thống cảnh báo.`)
         );
@@ -2188,14 +2188,14 @@ export function registerInteractionHandler(client, commands) {
                  )
                );
 
-               container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Medium));
+               container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
 
                // Content
                container.addTextDisplayComponents(
                  new TextDisplayBuilder().setContent(fullContent)
                );
 
-               container.addSeparatorComponents(new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Medium));
+               container.addSeparatorComponents(new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small));
 
                // Footer
                container.addTextDisplayComponents(
