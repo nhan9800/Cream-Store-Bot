@@ -131,9 +131,16 @@ install_revision() {
   fi
 
   log "Installing verified revision ${target_sha}"
-  if ! git reset --hard "$target_sha" \
-    || { [[ "$dependencies_installed" == true ]] || install_dependencies; } \
-    || ! validate_environment; then
+  local install_failed=false
+  if ! git reset --hard "$target_sha"; then
+    install_failed=true
+  elif [[ "$dependencies_installed" != true ]] && ! install_dependencies; then
+    install_failed=true
+  elif ! validate_environment; then
+    install_failed=true
+  fi
+
+  if [[ "$install_failed" == true ]]; then
     log "Revision ${target_sha} failed installation"
 
     if [[ "$target_sha" != "$current_sha" ]]; then
