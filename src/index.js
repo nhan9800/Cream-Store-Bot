@@ -3,6 +3,7 @@ import http from 'http';
 import { fileURLToPath } from 'url';
 import path from 'path';
 import { timingSafeEqual } from 'node:crypto';
+import { resolveLauncherPorts } from './utils/ports.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -65,10 +66,20 @@ if (process.env.IS_CHILD_BOT === 'true') {
     console.error('[LAUNCHER] Error loading .env:', e.message);
   }
 
-  const PORT = Number(process.env.SERVER_PORT || process.env.PORT || 2753);
-  console.log(`[LAUNCHER] Starting Store 1 (ENV_FILE=.env) on local port 2753...`);
+  const {
+    publicPort: PORT,
+    store1Port: STORE1_PORT,
+    store2Port: STORE2_PORT,
+  } = resolveLauncherPorts(process.env);
+
+  console.log(`[LAUNCHER] Starting Store 1 (ENV_FILE=.env) on local port ${STORE1_PORT}...`);
   const child1 = fork(__filename, [], {
-    env: { ...process.env, IS_CHILD_BOT: 'true', ENV_FILE: '.env', HTTP_PORT: '2753' }
+    env: {
+      ...process.env,
+      IS_CHILD_BOT: 'true',
+      ENV_FILE: '.env',
+      INTERNAL_HTTP_PORT: String(STORE1_PORT),
+    }
   });
   child1.on('error', (err) => {
     console.error('[LAUNCHER] Store 1 fork error:', err);
@@ -77,9 +88,14 @@ if (process.env.IS_CHILD_BOT === 'true') {
     console.log(`[LAUNCHER] Store 1 exited with code ${code} and signal ${signal}`);
   });
 
-  console.log(`[LAUNCHER] Starting Store 2 (ENV_FILE=.env.store2) on local port 8080...`);
+  console.log(`[LAUNCHER] Starting Store 2 (ENV_FILE=.env.store2) on local port ${STORE2_PORT}...`);
   const child2 = fork(__filename, [], {
-    env: { ...process.env, IS_CHILD_BOT: 'true', ENV_FILE: '.env.store2', HTTP_PORT: '8080' }
+    env: {
+      ...process.env,
+      IS_CHILD_BOT: 'true',
+      ENV_FILE: '.env.store2',
+      INTERNAL_HTTP_PORT: String(STORE2_PORT),
+    }
   });
   child2.on('error', (err) => {
     console.error('[LAUNCHER] Store 2 fork error:', err);
@@ -107,8 +123,7 @@ if (process.env.IS_CHILD_BOT === 'true') {
     // Expose deploy/diagnostics logs with authorization
     if (req.url.startsWith('/api/public/logs/')) {
       try {
-        const urlParams = new URL(req.url, `http://${req.headers.host || 'localhost'}`).searchParams;
-        const providedKey = req.headers['x-bot-api-key'] || urlParams.get('api_key');
+        const providedKey = req.headers['x-bot-api-key'];
         const expectedKey = process.env.BOT_API_KEY;
         if (!safeKeyMatch(providedKey, expectedKey)) {
           res.writeHead(401, { 'Content-Type': 'application/json' });
@@ -137,87 +152,6 @@ if (process.env.IS_CHILD_BOT === 'true') {
       return;
     }
 
-    // Intercept deployment endpoint directly in the launcher to allow deploying even when child bot processes are crashed
-    if (req.url.startsWith('/api/public/deploy')) {
-      try {
-        const urlParams = new URL(req.url, `http://${req.headers.host || 'localhost'}`).searchParams;
-        const providedKey = req.headers['x-bot-api-key'] || req.headers['x-github-deploy-secret'] || urlParams.get('api_key');
-        const expectedKey = process.env.BOT_API_KEY;
-        if (!safeKeyMatch(providedKey, expectedKey)) {
-          res.writeHead(401, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ ok: false, error: 'Unauthorized' }));
-          return;
-        }
-
-        console.log('[DEPLOY-LAUNCHER] Intercepted deployment trigger. Updating code...');
-        res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: true, message: 'Deployment triggered successfully on launcher. Updating and restarting bot...' }));
-
-        const { exec } = await import('child_process');
-        const { existsSync } = await import('fs');
-        const { join } = await import('path');
-
-        const cwd = process.cwd();
-        const gitDir = join(cwd, '.git');
-        const REPO_URL = process.env.GITHUB_REPO_URL || 'https://github.com/TranNhan09082003/Cream-Store-Bot.git';
-
-        let cmd;
-        if (!existsSync(gitDir)) {
-          cmd = [
-            `git init`,
-            `git remote add origin ${REPO_URL}`,
-            `git fetch origin main`,
-            `git reset --hard origin/main`,
-            `npm install --omit=dev --prefer-offline`,
-            `(node scripts/fix-products.js || echo "migration failed")`,
-            `(node scripts/cleanup-price-channel.js && node scripts/send-price-panel.js > send_price_log.txt 2>&1 || echo "send price failed")`,
-            `mkdir -p tmp`,
-            `touch tmp/restart.txt`
-          ].join(' && ');
-        } else {
-          cmd = `git remote set-url origin ${REPO_URL} && git fetch origin main && git reset --hard origin/main && npm install --omit=dev --prefer-offline && (node scripts/fix-products.js || echo "migration failed") && (node scripts/cleanup-price-channel.js && node scripts/send-price-panel.js > send_price_log.txt 2>&1 || echo "send price failed") && mkdir -p tmp && touch tmp/restart.txt`;
-        }
-
-
-
-
-        exec(cmd, { cwd }, (err, stdout, stderr) => {
-          if (err) {
-            console.error('[DEPLOY-LAUNCHER] Git pull/install failed:', err.message);
-            console.error(stderr);
-          } else {
-            console.log('[DEPLOY-LAUNCHER] Git pull and npm install succeeded. Triggering cPanel process optimization...');
-            
-            const apiKey = process.env.BOT_API_KEY || '';
-            const websiteUrl = `https://cenarstore.xyz/optimize.php?token=${encodeURIComponent(apiKey)}`;
-            
-            import('https').then(https => {
-              https.get(websiteUrl, (cleanRes) => {
-                console.log(`[DEPLOY-LAUNCHER] cPanel process optimization returned HTTP ${cleanRes.statusCode}`);
-                child1.kill();
-                child2.kill();
-                process.exit(0);
-              }).on('error', (cleanErr) => {
-                console.error('[DEPLOY-LAUNCHER] cPanel process optimization fetch failed:', cleanErr.message);
-                child1.kill();
-                child2.kill();
-                process.exit(0);
-              });
-            }).catch(e => {
-              console.error('[DEPLOY-LAUNCHER] Failed to load https module:', e.message);
-              child1.kill();
-              child2.kill();
-              process.exit(0);
-            });
-          }
-        });
-      } catch (err) {
-        res.writeHead(500, { 'Content-Type': 'text/plain' });
-        res.end(`Deploy Error: ${err.message}`);
-      }
-      return;
-    }
-
     // 1. Redirect /store2/dashboard to /store2/dashboard/ (to load relative assets correctly)
     if (req.url === '/store2/dashboard') {
       res.writeHead(301, { 'Location': '/store2/dashboard/' });
@@ -225,15 +159,15 @@ if (process.env.IS_CHILD_BOT === 'true') {
       return;
     }
 
-    let targetPort = 2753; // Default to Store 1
+    let targetPort = STORE1_PORT; // Default to Store 1
     let targetUrl = req.url;
 
     // 2. Strip /store2 prefix for Store 2 routing
     if (req.url.startsWith('/store2/')) {
-      targetPort = 8080;
+      targetPort = STORE2_PORT;
       targetUrl = req.url.slice(7); // Remove '/store2'
     } else if (req.url.startsWith('/webhooks/payos-store2')) {
-      targetPort = 8080;
+      targetPort = STORE2_PORT;
     }
 
     if (targetUrl.startsWith('/webhooks/payos')) {
@@ -262,7 +196,7 @@ if (process.env.IS_CHILD_BOT === 'true') {
 
       // Chỉ dò định tuyến khi URL chưa xác định rõ store (URL /webhooks/payos-store2
       // đã được ép targetPort=8080 ở trên — không cần tra DB nữa).
-      if (targetPort !== 8080) {
+      if (targetPort !== STORE2_PORT) {
         try {
           const payload = JSON.parse(bodyData);
           const payosOrderCode = payload?.data?.orderCode;
@@ -273,8 +207,8 @@ if (process.env.IS_CHILD_BOT === 'true') {
             // Tra CẢ HAI database: order nằm ở DB nào thì route về đúng store đó.
             // (Trước đây chỉ tra DB Store 1 nên order Store 2 dùng chung URL bị route nhầm.)
             const dbFiles = [
-              { path: path.join(process.cwd(), 'data', 'shopbot.sqlite'), port: 2753 },
-              { path: path.join(process.cwd(), 'data', 'shopbot-store2.sqlite'), port: 8080 },
+              { path: path.join(process.cwd(), 'data', 'shopbot.sqlite'), port: STORE1_PORT },
+              { path: path.join(process.cwd(), 'data', 'shopbot-store2.sqlite'), port: STORE2_PORT },
             ];
 
             for (const { path: dbPath, port } of dbFiles) {
@@ -350,7 +284,7 @@ if (process.env.IS_CHILD_BOT === 'true') {
                       pathname.includes('store2') || 
                       referer.includes('/store2/');
 
-    const targetPort = isStore2 ? 8080 : 2753;
+    const targetPort = isStore2 ? STORE2_PORT : STORE1_PORT;
     const targetUrl = req.url.replace('/ws/dashboard-store2', '/ws/dashboard')
                              .replace('/store2/ws/dashboard', '/ws/dashboard');
 

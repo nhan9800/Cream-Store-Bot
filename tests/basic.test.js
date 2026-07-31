@@ -1,6 +1,5 @@
-import test from 'node:test';
-import assert from 'node:assert';
+import { expect, test } from 'vitest';
 
-test('Smoke test - CI runner', (t) => {
-  assert.strictEqual(1, 1);
+test('Smoke test - CI runner', () => {
+  expect(1).toBe(1);
 });

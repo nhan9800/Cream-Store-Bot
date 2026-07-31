@@ -1,9 +1,15 @@
 node_modules
 .env
+.env.*
+!.env.example
+!.env.store2.example
 
 # Bot data - KHÔNG được commit lên GitHub
 /data/
 data/
+*.sqlite
+*.sqlite-*
+*.db
 backups/
 logs/
 
@@ -21,6 +27,10 @@ Thumbs.db
 
 # Temp / zip files
 *.zip
+REVISION
+.previous-revision
+.deployments/
+.deploy.lock
 
 # Gemini workspace
 .gemini/
@@ -36,19 +46,19 @@ scripts/*
 !scripts/setup-sale-channels.js
 !scripts/apply-role-icons.js
 !scripts/backfill-payment-codes.js
+!scripts/backup-production.js
+!scripts/verify-backup.js
 !scripts/backup-gdrive.sh
 !scripts/check-env.js
 !scripts/confirm-payos-webhook.js
 !scripts/deploy-cloudfly.sh
+!scripts/deploy-production.sh
 !scripts/encrypt-existing-credentials.js
 !scripts/reorganize-roles.js
 !scripts/resyncCustomerStats.js
+!scripts/rollback-production.sh
 !scripts/send-announcement.js
 !scripts/smoke-test.js
 !scripts/send-combo-announcement.js
 !scripts/send-service-panel.js
 !scripts/setup-dev-channels.js
-
-.github/workflows/deploy-cpanel.yml
-
-.github/workflows/deploy-cpanel.yml

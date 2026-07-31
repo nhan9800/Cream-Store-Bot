@@ -37,12 +37,6 @@ export function createRateLimiter(opts = {}) {
   }, 5 * 60 * 1000);
 
   return (req, res, next) => {
-    // Bypass rate limiting for trusted server-to-server requests using BOT_API_KEY
-    const botApiKey = req.headers['x-bot-api-key'] || req.headers['X-Bot-Api-Key'] || req.headers['x-api-key'];
-    if (botApiKey && process.env.BOT_API_KEY && botApiKey === process.env.BOT_API_KEY) {
-      return next();
-    }
-
     const key = keyGenerator(req);
     const now = Date.now();
 

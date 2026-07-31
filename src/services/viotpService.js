@@ -1,6 +1,6 @@
 
 
-const VIOTP_TOKEN = process.env.VIOTP_TOKEN || 'f352811c1a8441b6a7e730e5498ccfb8';
+const VIOTP_TOKEN = process.env.VIOTP_TOKEN;
 const API_BASE = 'https://api.viotp.com';
 
 async function callApi(endpoint, params = {}) {

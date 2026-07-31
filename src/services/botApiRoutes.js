@@ -18,6 +18,7 @@ import { getAiKnowledge } from './aiKnowledgeService.js';
 import { applyCors } from '../utils/cors.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { safeEqual } from '../utils/crypto.js';
+import { runtimeCommitSha } from '../utils/revision.js';
 
 /**
  * Middleware xác thực API key
@@ -37,6 +38,13 @@ function requireApiKey(req, res, next) {
     }
 
     next();
+}
+
+function canAccessCustomerResource(req, customerId) {
+    const role = String(req.header('x-user-role') || '').trim().toLowerCase();
+    if (role === 'admin' || role === 'staff') return true;
+    const discordId = String(req.header('x-discord-id') || '').trim();
+    return Boolean(discordId && customerId && discordId === String(customerId));
 }
 
 /**
@@ -64,9 +72,13 @@ export function registerBotApiRoutes(app) {
 
     // ── HEALTH (PUBLIC & BOT) ───────────────────────────────────
     app.get(['/api/health', '/api/bot/health'], (req, res) => {
-        res.json({
-            ok: true,
-            service: 'cream-bot',
+        const discordReady = Boolean(req.app.locals.discordClient?.isReady?.());
+        res.set('Cache-Control', 'no-store');
+        res.status(discordReady ? 200 : 503).json({
+            ok: discordReady,
+            service: 'cenar-store-bot',
+            commitSha: runtimeCommitSha,
+            discordReady,
             uptime: Math.floor(process.uptime()),
             timestamp: Date.now(),
         });
@@ -481,6 +493,9 @@ export function registerBotApiRoutes(app) {
     // ── WALLET API — Ví điện tử ───────────────
     app.get('/api/bot/wallet/:customerId', async (req, res) => {
         const customerId = req.params.customerId;
+        if (!canAccessCustomerResource(req, customerId)) {
+            return res.status(403).json({ ok: false, error: 'Forbidden' });
+        }
         const guildId = config.guildId;
         try {
             const { getWalletBalance, getWalletTransactions } = await import('./walletService.js');
@@ -494,9 +509,13 @@ export function registerBotApiRoutes(app) {
     });
 
     app.post('/api/bot/wallet/topup', async (req, res) => {
-        const { customerId, amount } = req.body;
-        if (!customerId || !amount || amount < 10000) {
-            return res.status(400).json({ ok: false, error: 'Số tiền tối thiểu 10,000đ' });
+        const customerId = String(req.body?.customerId || '').trim();
+        const amount = Number(req.body?.amount);
+        if (!canAccessCustomerResource(req, customerId)) {
+            return res.status(403).json({ ok: false, error: 'Forbidden' });
+        }
+        if (!customerId || !Number.isSafeInteger(amount) || amount < 10000 || amount > 100000000) {
+            return res.status(400).json({ ok: false, error: 'Số tiền phải từ 10.000đ đến 100.000.000đ' });
         }
         const guildId = config.guildId;
         try {
@@ -511,15 +530,58 @@ export function registerBotApiRoutes(app) {
 
     // ── WEB ORDERS — nhận đơn hàng từ website ──────────────
     app.post('/api/bot/web-orders', async (req, res) => {
+        if (process.env.WEB_CHECKOUT_ENABLED !== 'true') {
+            return res.status(503).json({
+                ok: false,
+                code: 'CHECKOUT_MAINTENANCE',
+                error: 'Web checkout đang tạm khóa để hoàn tất kiểm tra giá và thanh toán.',
+            });
+        }
         try {
-            const { items, contact, note, discord_id, source } = req.body;
-            if (!items || items.length === 0) return res.status(400).json({ ok: false, error: 'Giỏ hàng trống' });
+            const { items } = req.body;
+            if (!Array.isArray(items) || items.length !== 1) {
+                return res.status(400).json({ ok: false, error: 'Mỗi lần checkout chỉ hỗ trợ một sản phẩm.' });
+            }
+
+            const customerId = String(req.header('x-discord-id') || '').trim();
+            if (!/^\d{15,22}$/.test(customerId)) {
+                return res.status(401).json({ ok: false, error: 'Discord login is required.' });
+            }
+
+            const requestedProductId = String(items[0]?.id || items[0]?.product_id || '').trim();
+            const quantity = Number(items[0]?.quantity ?? items[0]?.qty);
+            if (!requestedProductId || !Number.isSafeInteger(quantity) || quantity < 1 || quantity > 10) {
+                return res.status(400).json({ ok: false, error: 'Sản phẩm hoặc số lượng không hợp lệ.' });
+            }
+
+            const catalogProduct = db.prepare(`
+                SELECT id, name, price, duration_months
+                FROM product_catalog
+                WHERE id = ? AND is_active = 1
+                LIMIT 1
+            `).get(requestedProductId);
+            const unitPrice = Number(catalogProduct?.price);
+            if (!catalogProduct || !Number.isFinite(unitPrice) || unitPrice <= 0) {
+                return res.status(400).json({ ok: false, error: 'Sản phẩm không thể checkout trực tuyến.' });
+            }
+
+            const totalAmount = unitPrice * quantity;
+            if (!Number.isSafeInteger(totalAmount) || totalAmount <= 0) {
+                return res.status(400).json({ ok: false, error: 'Tổng tiền không hợp lệ.' });
+            }
+
+            const requestedProvider = String(req.body.paymentProvider || 'VIETQR').trim().toUpperCase();
+            if (requestedProvider !== 'VIETQR' && requestedProvider !== 'PAYOS') {
+                return res.status(400).json({ ok: false, error: 'Phương thức thanh toán chưa được hỗ trợ.' });
+            }
+            const paymentProvider = requestedProvider;
+            const contact = typeof req.body.contact === 'string' ? req.body.contact.trim().slice(0, 100) : '';
+            const note = typeof req.body.note === 'string' ? req.body.note.trim().slice(0, 1_000) : '';
             
             // Lấy db helpers và orderService
             const { generateUniqueOrderCode, createOrder, saveOrderLogMessage } = await import('./orderService.js');
             
-            const firstItem = items[0];
-            const totalAmount = items.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+            const firstItem = catalogProduct;
             const orderCode = generateUniqueOrderCode();
             
             // Xử lý duration_months, tránh undefined/null
@@ -531,8 +593,6 @@ export function registerBotApiRoutes(app) {
             }
             
             const guildId = config.guildId;
-            const customerId = discord_id || 'web_user';
-            const paymentProvider = req.body.paymentProvider || 'vietqr'; // Lấy từ request nếu có, vd: 'WALLET'
 
             // Let's create the ticket channel first
             let channelId = `web-${orderCode.toLowerCase().replace('_', '-')}`;
@@ -628,8 +688,8 @@ export function registerBotApiRoutes(app) {
                 ticketId,
                 ticketChannelId: channelId,
                 customerId,
-                productName: firstItem.product_name || firstItem.name || 'Sản phẩm Web',
-                quantity: items.reduce((sum, item) => sum + item.quantity, 0),
+                productName: firstItem.name,
+                quantity,
                 totalAmount: totalAmount,
                 durationMonths: durationMonths,
                 note: note || '',
@@ -776,6 +836,10 @@ export function registerBotApiRoutes(app) {
                 return res.status(404).json({ ok: false, error: 'Không tìm thấy đơn hàng' });
             }
 
+            if (!canAccessCustomerResource(req, order.customer_id)) {
+                return res.status(403).json({ ok: false, error: 'Forbidden' });
+            }
+
             // Proxy check to route to the correct bot process
             if (order.guild_id && order.guild_id !== config.guildId) {
                 const targetPort = order.guild_id === '1070676180103086132' ? 8080 : 5000;
@@ -783,7 +847,9 @@ export function registerBotApiRoutes(app) {
                     const response = await fetch(`http://127.0.0.1:${targetPort}${req.originalUrl || req.url}`, {
                         method: 'GET',
                         headers: {
-                            'X-Bot-Api-Key': req.header('X-Bot-Api-Key') || ''
+                            'X-Bot-Api-Key': req.header('X-Bot-Api-Key') || '',
+                            'x-discord-id': req.header('x-discord-id') || '',
+                            'x-user-role': req.header('x-user-role') || ''
                         }
                     });
                     const data = await response.json();
@@ -872,12 +938,18 @@ export function registerBotApiRoutes(app) {
     app.post('/api/bot/orders/:code/chat', async (req, res) => {
         try {
             const code = String(req.params.code || '').toUpperCase();
-            const { content } = req.body;
-            if (!content) return res.status(400).json({ ok: false, error: 'Tin nhắn không được để trống' });
+            const content = typeof req.body?.content === 'string' ? req.body.content.trim() : '';
+            if (!content || content.length > 2000) {
+                return res.status(400).json({ ok: false, error: 'Tin nhắn phải dài từ 1 đến 2.000 ký tự' });
+            }
 
             const order = db.prepare(`SELECT * FROM orders WHERE order_code = ?`).get(code);
             if (!order) {
                 return res.status(404).json({ ok: false, error: 'Không tìm thấy đơn hàng' });
+            }
+
+            if (!canAccessCustomerResource(req, order.customer_id)) {
+                return res.status(403).json({ ok: false, error: 'Forbidden' });
             }
 
             // Proxy check to route to the correct bot process
@@ -888,7 +960,9 @@ export function registerBotApiRoutes(app) {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json',
-                            'X-Bot-Api-Key': req.header('X-Bot-Api-Key') || ''
+                            'X-Bot-Api-Key': req.header('X-Bot-Api-Key') || '',
+                            'x-discord-id': req.header('x-discord-id') || '',
+                            'x-user-role': req.header('x-user-role') || ''
                         },
                         body: JSON.stringify(req.body)
                     });
@@ -976,11 +1050,17 @@ export function registerBotApiRoutes(app) {
     // ── GENERAL TICKETS — tạo ticket hỗ trợ trực tuyến ─────────
     app.post('/api/bot/tickets/start', async (req, res) => {
         try {
-            const { contact, discord_id } = req.body;
+            const contact = typeof req.body?.contact === 'string'
+                ? req.body.contact.trim().slice(0, 100)
+                : '';
+            const authenticatedDiscordId = String(req.header('x-discord-id') || '').trim();
+            if (!authenticatedDiscordId) {
+                return res.status(401).json({ ok: false, error: 'Discord login is required' });
+            }
             if (!contact) return res.status(400).json({ ok: false, error: 'Thiếu thông tin liên hệ (tên/SĐT)' });
 
             const guildId = config.guildId;
-            const customerId = discord_id || 'web_user';
+            const customerId = authenticatedDiscordId;
             
             let channelId = `live-${contact.toLowerCase().replace(/[^a-z0-9]/g, '-') || 'guest'}-${Math.random().toString().slice(2, 6)}`;
             let ticketId = 0;
@@ -1084,6 +1164,10 @@ export function registerBotApiRoutes(app) {
                 return res.status(404).json({ ok: false, error: 'Không tìm thấy ticket' });
             }
 
+            if (!canAccessCustomerResource(req, ticket.customer_id)) {
+                return res.status(403).json({ ok: false, error: 'Forbidden' });
+            }
+
             const ticketStatus = ticket.status; // OPEN, CLOSED, etc.
             const channelId = ticket.channel_id;
             if (!channelId || channelId === 'web' || channelId.startsWith('live-')) {
@@ -1169,12 +1253,18 @@ export function registerBotApiRoutes(app) {
     app.post('/api/bot/tickets/:code/chat', async (req, res) => {
         try {
             const code = String(req.params.code || '').toUpperCase();
-            const { content } = req.body;
-            if (!content) return res.status(400).json({ ok: false, error: 'Tin nhắn không được để trống' });
+            const content = typeof req.body?.content === 'string' ? req.body.content.trim() : '';
+            if (!content || content.length > 2000) {
+                return res.status(400).json({ ok: false, error: 'Tin nhắn phải dài từ 1 đến 2.000 ký tự' });
+            }
 
             const ticket = db.prepare(`SELECT * FROM tickets WHERE ticket_code = ?`).get(code);
             if (!ticket) {
                 return res.status(404).json({ ok: false, error: 'Không tìm thấy ticket' });
+            }
+
+            if (!canAccessCustomerResource(req, ticket.customer_id)) {
+                return res.status(403).json({ ok: false, error: 'Forbidden' });
             }
 
             if (ticket.status === 'CLOSED') {
@@ -1263,17 +1353,5 @@ export function registerBotApiRoutes(app) {
     });
 
     // Deploy slash commands — gọi từ GitHub Actions sau mỗi lần deploy
-    app.post('/api/bot/deploy-commands', requireApiKey, async (req, res) => {
-        try {
-            const { deployCommands } = await import('../bootstrap.js');
-            const total = await deployCommands();
-            console.log(`[BOT_API] Deployed ${total} slash commands via API`);
-            res.json({ ok: true, total, message: `Đã đăng ký ${total} slash commands` });
-        } catch (e) {
-            console.error('[BOT_API] deploy-commands error:', e.message);
-            res.status(500).json({ ok: false, error: e.message });
-        }
-    });
-
     console.log('[BOT_API] Registered /api/bot/* routes');
 }

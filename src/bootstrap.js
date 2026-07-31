@@ -9,7 +9,6 @@ import { startOtpAutoCheck } from './services/otpAutoCheckService.js';
 
 import { initErrorLogger } from './services/errorLogService.js';
 import { autoSetupDiscountBoard } from './services/autoSetupDiscountBoardService.js';
-import { runTempKeySetup } from './services/tempKeySetup.js';
 
 export async function buildClient() {
   initDatabase();
@@ -22,7 +21,6 @@ export async function buildClient() {
   registerInteractionHandler(client, commands);
 
   client.once(Events.ClientReady, async (readyClient) => {
-    runTempKeySetup(readyClient);
     console.log(`[READY] Logged in as ${readyClient.user.tag}`);
     console.log(`[READY] Loaded ${commands.size} slash commands`);
 

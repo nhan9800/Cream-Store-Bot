@@ -11,7 +11,7 @@
     "smoke": "node scripts/smoke-test.js",
     "check:env": "node scripts/check-env.js",
     "confirm:webhook": "node scripts/confirm-payos-webhook.js",
-    "backup": "node scripts/backup-db.js",
+    "backup": "node scripts/backup-production.js",
     "verify:backup": "node scripts/verify-backup.js",
     "test": "vitest run"
   },
@@ -19,12 +19,12 @@
     "node": ">=22.12.0"
   },
   "dependencies": {
-    "@google/genai": "^1.50.1",
-    "better-sqlite3": "^12.9.0",
-    "discord.js": "14.25.1",
-    "dotenv": "^16.4.5",
-    "express": "^4.21.2",
-    "qrcode": "^1.5.4"
+    "@google/genai": "1.52.0",
+    "better-sqlite3": "12.11.1",
+    "discord.js": "14.27.0",
+    "dotenv": "16.6.1",
+    "express": "4.22.2",
+    "qrcode": "1.5.4"
   },
   "devDependencies": {
     "vitest": "^4.1.10"

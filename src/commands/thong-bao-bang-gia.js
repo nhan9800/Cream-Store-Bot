@@ -44,7 +44,7 @@ export async function execute(interaction) {
   // Header
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(
-      `@everyone\n# ${E('icon_gem', '💎')} **BẢNG GIÁ KHUYẾN MÃI ĐỘC QUYỀN CENAR STORE** ${E('icon_gem', '💎')}\n` +
+      `# ${E('icon_gem')} **BẢNG GIÁ KHUYẾN MÃI ĐỘC QUYỀN CENAR STORE** ${E('icon_gem')}\n` +
       `> Cập nhật giá siêu rẻ tháng 7/2026. Deal cực hời, chốt đơn ngay để thăng hạng trải nghiệm số!`
     )
   );
@@ -55,18 +55,18 @@ export async function execute(interaction) {
   // Nitro
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(
-      `## 🚀 **Nitro Boost Login (Gia Hạn)**\n` +
+      `## ${E('brand_nitro')} **Nitro Boost Login (Gia Hạn)**\n` +
       `- 2 Tháng: **99k**\n` +
       `- 4 Tháng: **250k**\n` +
       `- 6 Tháng: **380k**\n` +
       `- 8 Tháng: **450k**\n` +
       `- 12 Tháng: **590k**\n\n` +
-      `## 🚀 **Nitro Boost Login (Mua Thẳng)**\n` +
+      `## ${E('brand_nitro')} **Nitro Boost Login (Mua Thẳng)**\n` +
       `- 1 Tháng: **90k**\n` +
       `- 12 Tháng: **850k**\n\n` +
-      `## 💫 **Nitro Trial**\n` +
+      `## ${E('icon_star')} **Nitro Trial**\n` +
       `- 3 Tháng: **45k**\n\n` +
-      `## 🔮 **Nâng Cấp Máy Chủ (Boost Server)**\n` +
+      `## ${E('brand_boost')} **Nâng Cấp Máy Chủ (Boost Server)**\n` +
       `- 1 Tháng: **150k**\n` +
       `- 3 Tháng: **320k**\n\n` +
       `> **Lưu ý Trial:**\n` +
@@ -81,11 +81,11 @@ export async function execute(interaction) {
   // Entertainment
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(
-      `## 🎵 **Spotify Premium (Add Family)**\n` +
+      `## ${E('brand_spotify')} **Spotify Premium (Add Family)**\n` +
       `- 3 Tháng: **120k** | 6 Tháng: **230k** | 12 Tháng: **300k**\n\n` +
-      `## ✂️ **Capcut Pro (Chính Chủ)**\n` +
+      `## ${E('brand_capcut')} **Capcut Pro (Chính Chủ)**\n` +
       `- 1 Tháng: **85k** | 6 Tháng: **450k**\n\n` +
-      `## 🎨 **Adobe Full App (Chính Chủ)**\n` +
+      `## ${E('brand_adobe')} **Adobe Full App (Chính Chủ)**\n` +
       `- 1 Tháng: **90k** | 2 Tháng: **130k**\n` +
       `- 3 Tháng: **250k** | 4 Tháng: **450k**`
     )
@@ -97,9 +97,9 @@ export async function execute(interaction) {
   // Youtube
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(
-      `## ▶️ **YouTube Premium (Chính Chủ - Ổn định lâu dài)**\n` +
+      `## ${E('brand_youtube')} **YouTube Premium (Chính Chủ - Ổn định lâu dài)**\n` +
       `- 3 Tháng: **190k** | 6 Tháng: **300k** | 12 Tháng: **550k**\n\n` +
-      `## ▶️ **YouTube Premium (Gia Hạn Hàng Tháng)**\n` +
+      `## ${E('brand_youtube')} **YouTube Premium (Gia Hạn Hàng Tháng)**\n` +
       `- 3 Tháng: **90k** | 6 Tháng: **180k** | 12 Tháng: **280k**`
     )
   );
@@ -110,11 +110,11 @@ export async function execute(interaction) {
   // Work & AI
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(
-      `## 🖌️ **Canva Pro (Chính Chủ)**\n` +
+      `## ${E('icon_crown')} **Canva Pro (Chính Chủ)**\n` +
       `- 1 Năm: **150k**\n\n` +
-      `## 📊 **Office 365 + Full Apps + 1TB OneDrive (Chính Chủ)**\n` +
+      `## ${E('brand_office')} **Office 365 + Full Apps + 1TB OneDrive (Chính Chủ)**\n` +
       `- 1 Năm: **250k**\n\n` +
-      `## 🤖 **Gemini Pro + 5TB Google One (Chính Chủ)**\n` +
+      `## ${E('brand_gemini')} **Gemini Pro + 5TB Google One (Chính Chủ)**\n` +
       `- 12 Tháng: **250k**\n` +
       `- 18 Tháng: **280k** *(Chỉ còn 20 Slot!)*`
     )
@@ -126,7 +126,7 @@ export async function execute(interaction) {
   // Gaming
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(
-      `## 🧊 **Tài Khoản Minecraft**\n` +
+      `## ${E('icon_fire')} **Tài Khoản Minecraft**\n` +
       `**Bedrock Edition: 190k**\n` +
       `- Chơi Online trên tài khoản Xbox/Microsoft cá nhân\n` +
       `- Phiên bản Bedrock full update mọi tính năng\n` +
@@ -158,7 +158,7 @@ export async function execute(interaction) {
     new ButtonBuilder()
       .setLabel('Hỗ Trợ & Mua Hàng')
       .setStyle(ButtonStyle.Primary)
-      .setEmoji(E.component('icon_shop') || '🛒')
+      .setEmoji(E.component('icon_shop') || { name: '🛒' })
       .setCustomId('announce_dummy_1')
       .setDisabled(true)
   );
@@ -167,7 +167,6 @@ export async function execute(interaction) {
     const messagePayload = {
       components: [container, row],
       flags: MessageFlags.IsComponentsV2,
-      allowedMentions: { parse: ['everyone'] },
     };
     if (attachment) {
       messagePayload.files = [attachment];

@@ -1,33 +1,20 @@
-# Rollback Procedures - Cenar Store
+# Bot rollback v2
 
-## Website Rollback (`cenar-website-main`)
-1. In cPanel / Production server, revert to the previous known stable Git commit tag or sha:
-   ```bash
-   git checkout <stable-commit-sha>
-   npm ci
-   npm run build
-   pm2 restart cenar-website
-   ```
-2. Check `/api/health` to confirm the storefront is active.
+The production workflow automatically rolls back when deployment or exact-SHA health checks
+fail. Rollback state is scoped to the failed SHA, so an SSH failure before activation cannot
+roll a healthy deployment back an extra version.
 
-## Bot & Database Rollback (`Cream-Store-Bot-main`)
-1. **Revert Application Code**:
-   ```bash
-   git checkout <stable-commit-sha>
-   npm ci
-   pm2 restart storebot
-   ```
-2. **Database Rollback** (If a schema migration or corruption occurred):
-   - Locate the most recent backup in `backups/`:
-   ```bash
-   ls -lat backups/
-   ```
-   - Restore using the provided script:
-   ```bash
-   ./scripts/restore-database.sh backups/shopbot_2026-07-26_140000.sqlite
-   ```
-3. Verify Bot API and SQLite schema health:
-   ```bash
-   ./scripts/verify-backup.sh
-   curl http://localhost:5000/api/health
-   ```
+For a manual emergency rollback, use GitHub Actions `workflow_dispatch` with the full SHA of
+a known-good commit that is already reachable from `main`. Do not use `git checkout` or edit
+the live worktree by hand; doing so breaks revision and rollback tracking.
+
+After rollback, verify both configured health URLs show:
+
+- HTTP 200
+- `ok: true`
+- `discordReady: true`
+- the same expected 40-character `commitSha`
+
+If a database migration caused the incident, stop both stores and restore only a verified
+SQLite backup from `backups/deploy/` under an incident-specific recovery plan. Never replace
+a live SQLite file while either bot process is writing to it.

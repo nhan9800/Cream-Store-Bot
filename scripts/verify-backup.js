@@ -1,29 +1,26 @@
-import Database from 'better-sqlite3';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import fs from 'node:fs';
+import path from 'node:path';
+import Database from 'better-sqlite3';
+import { config, environmentInfo } from '../src/config.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const dataDir = path.resolve(__dirname, '../data');
-const dbPath = path.join(dataDir, 'database.sqlite');
+const projectRoot = path.resolve(environmentInfo.projectRoot);
+const requestedPath = process.argv[2];
+const databasePath = requestedPath
+  ? path.resolve(projectRoot, requestedPath)
+  : path.resolve(projectRoot, config.databasePath);
 
-if (!fs.existsSync(dbPath)) {
-  console.log('Không tìm thấy database.sqlite, bỏ qua verify.');
-  process.exit(0);
+if (!fs.existsSync(databasePath)) {
+  throw new Error(`Database does not exist: ${databasePath}`);
 }
 
+const database = new Database(databasePath, { readonly: true, fileMustExist: true });
 try {
-  const db = new Database(dbPath, { readonly: true });
-  const result = db.pragma('integrity_check');
-  
-  if (result.length > 0 && result[0].integrity_check === 'ok') {
-    console.log('✅ Integrity check passed: Database is healthy.');
-    process.exit(0);
-  } else {
-    console.error('❌ Integrity check failed:', result);
-    process.exit(1);
+  const integrity = database.pragma('integrity_check', { simple: true });
+  if (integrity !== 'ok') {
+    throw new Error(`SQLite integrity check failed: ${integrity}`);
   }
-} catch (error) {
-  console.error('❌ Lỗi kiểm tra database:', error.message);
-  process.exit(1);
+} finally {
+  database.close();
 }
+
+console.log(`[backup] Integrity check passed: ${databasePath}`);

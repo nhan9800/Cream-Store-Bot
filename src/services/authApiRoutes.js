@@ -192,7 +192,14 @@ export function registerAuthRoutes(app) {
 
   app.get('/api/bot/auth/user/:id', requireApiKey, (req, res) => {
     try {
-      const user = db.prepare('SELECT * FROM web_users WHERE id = ? OR discord_id = ?').get(req.params.id, req.params.id);
+      const callerId = String(req.header('x-user-id') || '').trim();
+      const callerRole = String(req.header('x-user-role') || '').trim().toLowerCase();
+      const requestedId = String(req.params.id || '').trim();
+      const isStaff = callerRole === 'admin' || callerRole === 'staff';
+      if (!callerId || (!isStaff && callerId !== requestedId)) {
+        return res.status(403).json({ ok: false, error: 'Forbidden' });
+      }
+      const user = db.prepare('SELECT * FROM web_users WHERE id = ? OR discord_id = ?').get(requestedId, requestedId);
       if (!user) return res.status(404).json({ ok: false, error: 'Không tìm thấy user' });
       
       const { password_hash, ...safeUser } = user;

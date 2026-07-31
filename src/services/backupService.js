@@ -12,8 +12,8 @@ const BACKUP_DIR = path.resolve(projectRoot, 'backups');
 // ─── Telegram Backup ──────────────────────────────────────────────────────────
 
 async function sendBackupToTelegram(filePath) {
-  const botToken = process.env.TELEGRAM_BACKUP_TOKEN || '7983484857:AAFQKOi_WpPKIhz8WWqjqMVKmMr0J3hKChk';
-  const chatId   = process.env.TELEGRAM_BACKUP_CHAT_ID || '6359798303';
+  const botToken = process.env.TELEGRAM_BACKUP_TOKEN;
+  const chatId = process.env.TELEGRAM_BACKUP_CHAT_ID;
   if (!botToken || !chatId) return;
 
   const fileName   = path.basename(filePath);

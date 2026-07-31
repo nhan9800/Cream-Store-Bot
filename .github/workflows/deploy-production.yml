@@ -1,74 +1,235 @@
-name: Production Deploy - Bot & API Services
+name: Bot Production - Verify, Deploy Exact SHA, Roll Back
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
+    inputs:
+      sha:
+        description: Full commit SHA from main (blank uses the triggering SHA)
+        required: false
+        type: string
+      confirm_production:
+        description: Deploy this revision while automatic deployment is disabled
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
 
 concurrency:
-  group: deploy-bot-production
-  cancel-in-progress: true
+  group: production-bot
+  cancel-in-progress: false
 
 jobs:
-  test:
-    name: Validate Tests Before Deploy
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: 20
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Run Vitest Unit Tests
-        run: npm test -- --run
-
-  deploy:
-    name: Deploy to Production & Health Check
-    needs: test
+  verify:
+    name: Test exact source revision
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      sha: ${{ steps.revision.outputs.sha }}
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
+      - name: Validate requested SHA format
+        env:
+          REQUESTED_SHA: ${{ inputs.sha || github.sha }}
+        run: '[[ "$REQUESTED_SHA" =~ ^[a-f0-9]{40}$ ]]'
 
-      - name: Trigger Production Deployment Webhook
+      - name: Checkout exact revision
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: ${{ inputs.sha || github.sha }}
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Validate and resolve immutable revision
+        id: revision
+        env:
+          REQUESTED_SHA: ${{ inputs.sha || github.sha }}
         run: |
-          echo "Sending deployment request to production server..."
-          RESPONSE=$(curl -s -w "\n%{http_code}" -X POST \
-            "http://hcm3.vibehost.vn:20022/api/public/deploy" \
-            -H "x-bot-api-key: ${{ secrets.BOT_API_KEY }}" \
-            -H "Content-Type: application/json" \
-            --max-time 30 || echo -e "Error\n500")
+          set -Eeuo pipefail
+          [[ "$REQUESTED_SHA" =~ ^[a-f0-9]{40}$ ]]
+          actual_sha="$(git rev-parse HEAD)"
+          [[ "$actual_sha" == "$REQUESTED_SHA" ]]
+          git show-ref --verify --quiet refs/remotes/origin/main
+          git merge-base --is-ancestor "$actual_sha" origin/main
+          echo "sha=$actual_sha" >> "$GITHUB_OUTPUT"
 
-          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
-          BODY=$(echo "$RESPONSE" | head -1)
-          echo "HTTP Status: $HTTP_CODE"
-          echo "Response: $BODY"
+      - name: Setup Node.js
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: 22.12.0
+          cache: npm
 
-          if [ "$HTTP_CODE" = "200" ]; then
-            echo "Deploy triggered successfully!"
-          else
-            echo "Deploy trigger returned status $HTTP_CODE (proceeding with health check)"
-          fi
+      - name: Install locked dependencies
+        run: npm ci
 
-      - name: Wait for service restart
-        run: sleep 20
+      - name: Run unit tests
+        run: npm test
+        env:
+          NODE_ENV: test
 
-      - name: Perform Automated Health Check
+  deploy:
+    name: Deploy and verify production SHA
+    needs: verify
+    if: >-
+      vars.PRODUCTION_DEPLOY_ENABLED == 'true' ||
+      (github.event_name == 'workflow_dispatch' && inputs.confirm_production == true)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment:
+      name: bot-production
+      url: ${{ vars.BOT_HEALTH_URL }}
+    env:
+      TARGET_SHA: ${{ needs.verify.outputs.sha }}
+    steps:
+      - name: Checkout deployment scripts
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+
+      - name: Validate deployment configuration
+        env:
+          SSH_HOST: ${{ secrets.BOT_SSH_HOST }}
+          SSH_USER: ${{ secrets.BOT_SSH_USER }}
+          SSH_KEY: ${{ secrets.BOT_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.BOT_SSH_KNOWN_HOSTS }}
+          APP_ROOT: ${{ vars.BOT_APP_ROOT }}
+          HEALTH_URL: ${{ vars.BOT_HEALTH_URL }}
+          HEALTH_URL_STORE2: ${{ vars.BOT_HEALTH_URL_STORE2 }}
+          RUNTIME: ${{ vars.BOT_RUNTIME }}
         run: |
-          echo "Verifying bot health endpoint..."
-          HEALTH=$(curl -s --max-time 10 "http://hcm3.vibehost.vn:20022/api/bot/health" || echo "{}")
-          echo "Health response: $HEALTH"
-          if echo "$HEALTH" | grep -q '"ok":true'; then
-            echo "Health check passed!"
-          else
-            echo "Health check verification failed or timed out."
-          fi
+          set -Eeuo pipefail
+          test -n "$SSH_HOST"
+          test -n "$SSH_USER"
+          test -n "$SSH_KEY"
+          test -n "$SSH_KNOWN_HOSTS"
+          test -n "$APP_ROOT"
+          test -n "$HEALTH_URL"
+          test -n "$HEALTH_URL_STORE2"
+          test -n "$RUNTIME"
+          [[ "$APP_ROOT" == /* && "$APP_ROOT" != "/" ]]
+          [[ "$HEALTH_URL" == https://* ]]
+          [[ "$HEALTH_URL_STORE2" == https://* ]]
+          [[ "$RUNTIME" == "pm2" || "$RUNTIME" == "passenger" ]]
+
+      - name: Configure verified SSH host
+        env:
+          SSH_KEY: ${{ secrets.BOT_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.BOT_SSH_KNOWN_HOSTS }}
+        run: |
+          set -Eeuo pipefail
+          install -m 700 -d ~/.ssh
+          printf '%s\n' "$SSH_KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          printf '%s\n' "$SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Pull and activate exact bot commit
+        id: deploy
+        continue-on-error: true
+        env:
+          SSH_HOST: ${{ secrets.BOT_SSH_HOST }}
+          SSH_PORT: ${{ vars.BOT_SSH_PORT || '22' }}
+          SSH_USER: ${{ secrets.BOT_SSH_USER }}
+          APP_ROOT: ${{ vars.BOT_APP_ROOT }}
+          RUNTIME: ${{ vars.BOT_RUNTIME }}
+        run: |
+          set -Eeuo pipefail
+          printf -v remote_command 'bash -s -- %q %q %q' "$TARGET_SHA" "$APP_ROOT" "$RUNTIME"
+          ssh -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 \
+            -o ServerAliveCountMax=3 -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "$remote_command" \
+            < scripts/deploy-production.sh
+
+      - name: Verify bot restarted on exact commit
+        id: health
+        if: steps.deploy.outcome == 'success'
+        continue-on-error: true
+        env:
+          HEALTH_URL: ${{ vars.BOT_HEALTH_URL }}
+          HEALTH_URL_STORE2: ${{ vars.BOT_HEALTH_URL_STORE2 }}
+        run: |
+          set -Eeuo pipefail
+          for attempt in $(seq 1 36); do
+            response_store1="$(curl --proto '=https' --fail --silent --show-error \
+              --max-time 10 --header 'Cache-Control: no-cache' \
+              "$HEALTH_URL" 2>/dev/null || true)"
+            response_store2="$(curl --proto '=https' --fail --silent --show-error \
+              --max-time 10 --header 'Cache-Control: no-cache' \
+              "$HEALTH_URL_STORE2" 2>/dev/null || true)"
+            sha_store1="$(jq -r '.commitSha // empty' <<<"$response_store1" 2>/dev/null || true)"
+            sha_store2="$(jq -r '.commitSha // empty' <<<"$response_store2" 2>/dev/null || true)"
+            ready_store1="$(jq -r '.ok // false' <<<"$response_store1" 2>/dev/null || true)"
+            ready_store2="$(jq -r '.ok // false' <<<"$response_store2" 2>/dev/null || true)"
+            if [[ "$ready_store1" == "true" && "$ready_store2" == "true" \
+              && "$sha_store1" == "$TARGET_SHA" && "$sha_store2" == "$TARGET_SHA" ]]; then
+              echo "Both stores are healthy on $TARGET_SHA"
+              exit 0
+            fi
+            echo "Attempt $attempt/36: waiting for $TARGET_SHA"
+            sleep 5
+          done
+          echo "Production did not report the expected healthy revision" >&2
+          exit 1
+
+      - name: Roll back failed deployment
+        id: rollback
+        if: always() && (steps.deploy.outcome == 'failure' || steps.health.outcome == 'failure')
+        env:
+          SSH_HOST: ${{ secrets.BOT_SSH_HOST }}
+          SSH_PORT: ${{ vars.BOT_SSH_PORT || '22' }}
+          SSH_USER: ${{ secrets.BOT_SSH_USER }}
+          APP_ROOT: ${{ vars.BOT_APP_ROOT }}
+          RUNTIME: ${{ vars.BOT_RUNTIME }}
+        run: |
+          set -Eeuo pipefail
+          printf -v remote_command 'bash -s -- %q %q %q' "$APP_ROOT" "$TARGET_SHA" "$RUNTIME"
+          rollback_output="$(ssh -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 \
+            -o ServerAliveCountMax=3 -p "$SSH_PORT" "$SSH_USER@$SSH_HOST" "$remote_command" \
+            < scripts/rollback-production.sh)"
+          printf '%s\n' "$rollback_output"
+          rollback_sha="$(sed -n 's/^ROLLBACK_SHA=//p' <<<"$rollback_output" | tail -n 1)"
+          [[ "$rollback_sha" =~ ^[a-f0-9]{40}$ ]]
+          echo "sha=$rollback_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Verify rollback is healthy
+        if: always() && steps.rollback.outcome == 'success'
+        env:
+          HEALTH_URL: ${{ vars.BOT_HEALTH_URL }}
+          HEALTH_URL_STORE2: ${{ vars.BOT_HEALTH_URL_STORE2 }}
+          ROLLBACK_SHA: ${{ steps.rollback.outputs.sha }}
+        run: |
+          set -Eeuo pipefail
+          for attempt in $(seq 1 24); do
+            response_store1="$(curl --proto '=https' --fail --silent --show-error --max-time 10 \
+              --header 'Cache-Control: no-cache' "$HEALTH_URL" 2>/dev/null || true)"
+            response_store2="$(curl --proto '=https' --fail --silent --show-error --max-time 10 \
+              --header 'Cache-Control: no-cache' "$HEALTH_URL_STORE2" 2>/dev/null || true)"
+            sha_store1="$(jq -r '.commitSha // empty' <<<"$response_store1" 2>/dev/null || true)"
+            sha_store2="$(jq -r '.commitSha // empty' <<<"$response_store2" 2>/dev/null || true)"
+            ready_store1="$(jq -r '.ok // false' <<<"$response_store1" 2>/dev/null || true)"
+            ready_store2="$(jq -r '.ok // false' <<<"$response_store2" 2>/dev/null || true)"
+            [[ "$ready_store1" == "true" && "$ready_store2" == "true" \
+              && "$sha_store1" == "$ROLLBACK_SHA" && "$sha_store2" == "$ROLLBACK_SHA" ]] && exit 0
+            sleep 5
+          done
+          echo "Rollback revision did not become healthy" >&2
+          exit 1
+
+      - name: Mark deployment failed after rollback
+        if: always() && (steps.deploy.outcome == 'failure' || steps.health.outcome == 'failure')
+        run: exit 1
+
+  deployment-disabled:
+    name: Deployment is intentionally disabled
+    needs: verify
+    if: >-
+      needs.verify.result == 'success' &&
+      vars.PRODUCTION_DEPLOY_ENABLED != 'true' &&
+      !(github.event_name == 'workflow_dispatch' && inputs.confirm_production == true)
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo '## Deployment not executed' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Set repository variable `PRODUCTION_DEPLOY_ENABLED=true` only after completing the security cutover runbook.' >> "$GITHUB_STEP_SUMMARY"

@@ -9,6 +9,7 @@ import { applyCors } from '../utils/cors.js';
 import { awardOrderPoints } from './loyaltyService.js';
 import { orderLookupLimiter } from './rateLimitMiddleware.js';
 import { anonymizeCustomerEmail } from '../utils/productFormatting.js';
+import { config } from '../config.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -255,7 +256,7 @@ export function registerDashboardRoutes(app) {
       }
 
       // Forward request to internal botApiRoutes web-orders endpoint
-      const botResponse = await fetch(`http://127.0.0.1:${process.env.HTTP_PORT || 2753}/api/bot/web-orders`, {
+      const botResponse = await fetch(`http://127.0.0.1:${config.httpPort}/api/bot/web-orders`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -285,70 +286,6 @@ export function registerDashboardRoutes(app) {
     } catch (e) {
       console.error('[PUBLIC API] Error creating order:', e);
       res.status(500).json({ ok: false, error: 'Lỗi máy chủ khi tạo đơn hàng.' });
-    }
-  });
-
-  // --- Debug API to check SQLite products ---
-  app.get('/api/public/list-db', async (req, res) => {
-    try {
-      const providedKey = req.headers['x-bot-api-key'] || req.query.api_key;
-      const expectedKey = process.env.BOT_API_KEY;
-      if (!expectedKey || !providedKey || !safeEqual(providedKey, expectedKey)) {
-        return res.status(401).json({ ok: false, error: 'Unauthorized' });
-      }
-      const { db } = await import('../database/db.js');
-      const rows = db.prepare('SELECT id, name, price, service_type FROM product_catalog').all();
-      res.json({ ok: true, products: rows });
-    } catch (e) {
-      res.status(500).json({ ok: false, error: e.message });
-    }
-  });
-
-
-  app.get('/api/public/vps-debug', async (req, res) => {
-    try {
-      const providedKey = req.headers['x-bot-api-key'] || req.query.api_key;
-      const expectedKey = process.env.BOT_API_KEY;
-      if (!expectedKey || !providedKey || !safeEqual(providedKey, expectedKey)) {
-        return res.status(401).json({ ok: false, error: 'Unauthorized' });
-      }
-
-      const { db } = await import('../database/db.js');
-      const fs = await import('fs');
-      const path = await import('path');
-
-      const info = {
-        cwd: process.cwd(),
-        databasePath: config.databasePath,
-        resolvedDbPath: path.resolve(process.cwd(), config.databasePath),
-        env: {
-          GUILD_ID: process.env.GUILD_ID,
-          DATABASE_PATH: process.env.DATABASE_PATH,
-          ENV_FILE: process.env.ENV_FILE,
-          HTTP_PORT: process.env.HTTP_PORT,
-        },
-        db_tables: db.prepare("SELECT name FROM sqlite_master WHERE type='table'").all(),
-      };
-
-      try {
-        info.product_count = db.prepare('SELECT COUNT(*) as cnt FROM product_catalog').get().cnt;
-        info.active_products = db.prepare('SELECT id, name, guild_id, service_type, is_active FROM product_catalog WHERE is_active = 1').all();
-      } catch (dbErr) {
-        info.db_error = dbErr.message;
-      }
-
-      try {
-        if (fs.existsSync('send_price_log.txt')) {
-          info.send_price_log = fs.readFileSync('send_price_log.txt', 'utf8').slice(-2000);
-        }
-      } catch (logErr) {
-        info.log_error = logErr.message;
-      }
-
-      res.json({ ok: true, info });
-    } catch (e) {
-      console.error('[VPS-DEBUG]', e);
-      res.status(500).json({ ok: false, error: e.message });
     }
   });
 

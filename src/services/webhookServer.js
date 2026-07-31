@@ -9,6 +9,7 @@ import { registerOauthRoutes } from './oauthBackupRoutes.js';
 import { securityHeaders, generalLimiter, webhookLimiter } from './rateLimitMiddleware.js';
 import { applyCors } from '../utils/cors.js';
 import { handleCardSwapCallback } from './cardSwapService.js';
+import { config } from '../config.js';
 
 let httpServer = null;
 let appInstance = null;
@@ -137,7 +138,7 @@ export async function startWebhookServer(client = null) {
   registerOauthRoutes(app);
   registerAdminRoutes(app);
 
-  const port = Number(process.env.HTTP_PORT ?? 3000);
+  const port = config.httpPort;
 
   httpServer = await new Promise((resolve, reject) => {
     const server = app.listen(port, '0.0.0.0', () => resolve(server));
