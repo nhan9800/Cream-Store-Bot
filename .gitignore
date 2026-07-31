@@ -31,6 +31,7 @@ REVISION
 .previous-revision
 .deployments/
 .deploy.lock
+.vibehost/
 
 # Gemini workspace
 .gemini/
@@ -58,3 +59,4 @@ scripts/*
 !scripts/send-combo-announcement.js
 !scripts/send-service-panel.js
 !scripts/setup-dev-channels.js
+!scripts/vibehost-supervisor.sh

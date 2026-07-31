@@ -1,4 +1,4 @@
-name: Bot Production - Verify VibeHost Source
+name: Bot Production - Verify and Promote
 
 on:
   push:
@@ -9,12 +9,12 @@ permissions:
   contents: read
 
 concurrency:
-  group: bot-production-verification
+  group: bot-production-promotion
   cancel-in-progress: true
 
 jobs:
   verify:
-    name: Test source before VibeHost deployment
+    name: Test exact source revision
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -32,6 +32,9 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
 
+      - name: Validate VibeHost supervisor
+        run: bash -n scripts/vibehost-supervisor.sh
+
       - name: Run unit tests
         run: npm test
         env:
@@ -42,7 +45,25 @@ jobs:
         env:
           NODE_ENV: test
 
-      - name: Deployment safety notice
+  promote:
+    name: Promote verified SHA to bot-production
+    needs: verify
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout verified revision
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: ${{ github.sha }}
+          fetch-depth: 0
+
+      - name: Promote without creating a new commit
+        env:
+          VERIFIED_SHA: ${{ github.sha }}
         run: |
-          echo "Source is verified for VibeHost."
-          echo "Automatic production upload/restart remains disabled until VibeHost's official restart API is verified."
+          set -Eeuo pipefail
+          test "$(git rev-parse HEAD)" = "$VERIFIED_SHA"
+          git push origin "$VERIFIED_SHA:refs/heads/bot-production"

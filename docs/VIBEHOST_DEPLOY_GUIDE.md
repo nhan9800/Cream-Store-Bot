@@ -70,11 +70,11 @@ ENV_FILE=.env.store2 npm run check:env
 Trong trang Startup, dùng lệnh khởi động:
 
 ```bash
-npm start
+npm run start:vibehost
 ```
 
-Sau đó bấm Restart trên panel và theo dõi Console. Launcher phải tải cả Store 1 và Store 2; không tạo hai
-Startup process độc lập.
+Supervisor sẽ chạy launcher, kiểm tra nhánh `bot-production` mỗi 60 giây và tự restart khi GitHub Actions đã
+promote một commit mới. Launcher phải tải cả Store 1 và Store 2; không tạo hai Startup process độc lập.
 
 ## 5. Kiểm tra sau khi chạy
 
@@ -90,7 +90,21 @@ Kiểm tra thêm:
 - Website gọi API bằng `BOT_API_KEY` mới và không dùng IP/provider cũ.
 - File SQLite vẫn nằm trong `/home/container/data` và có thời gian cập nhật hợp lý.
 
-## 6. Cập nhật source thủ công an toàn
+## 6. Đồng bộ source tự động
+
+Mỗi push/merge vào `main` chạy workflow `Bot Production - Verify and Promote`:
+
+1. Cài dependency từ lockfile.
+2. Kiểm tra cú pháp supervisor.
+3. Chạy unit test và smoke test.
+4. Chỉ khi tất cả thành công mới cập nhật nhánh `bot-production` tới đúng SHA đã kiểm thử.
+5. Supervisor trên VibeHost phát hiện SHA mới, backup hai SQLite, dừng bot, reset source, chạy `npm ci`, kiểm tra
+   cả hai file môi trường rồi start lại.
+
+Không cần lưu mật khẩu SFTP trong GitHub Actions. Nếu revision mới cài đặt thất bại, supervisor rollback source
+về revision trước và không thử lại SHA lỗi cho đến khi có revision mới hơn.
+
+## 7. Cập nhật source thủ công an toàn
 
 1. GitHub Actions phải xanh cho commit cần triển khai.
 2. Backup và kiểm tra integrity hai database.
@@ -102,8 +116,18 @@ Kiểm tra thêm:
 Nếu bản mới lỗi, dừng server, upload lại source của commit tốt gần nhất, chạy lại `npm ci` rồi Restart. Không
 khôi phục SQLite chỉ vì rollback code.
 
-## 7. Trạng thái CI/CD
+## 8. Bootstrap Git lần đầu
 
-Workflow hiện tại tự động kiểm thử mọi source mới trên `main`, nhưng chưa tự upload hoặc restart production.
-Không bật deploy tự động bằng endpoint HTTP tự chế. Chỉ thêm bước SFTP sau khi đã có credential mới trong
-GitHub Environment và xác minh được API/webhook restart chính thức của VibeHost.
+Nếu `/home/container` chưa phải Git clone, dừng server và chạy trong Console:
+
+```bash
+cd /home/container
+git init
+git remote add origin https://github.com/nhan9800/Cream-Store-Bot.git
+git fetch origin bot-production
+git reset --hard origin/bot-production
+npm ci --omit=dev --no-audit --no-fund
+```
+
+Các file `.env`, `.env.store2` và thư mục `data/` không thuộc Git nên được giữ nguyên. Sau đó đặt Startup Command
+thành `npm run start:vibehost` và bấm Start.
