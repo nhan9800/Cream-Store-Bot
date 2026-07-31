@@ -6,6 +6,7 @@ import { config, environmentInfo } from '../src/config.js';
 const projectRoot = path.resolve(environmentInfo.projectRoot);
 const databasePath = path.resolve(projectRoot, config.databasePath);
 const backupRoot = path.resolve(projectRoot, 'backups', 'deploy');
+const backupRetention = Math.max(1, Number(process.env.BACKUP_RETENTION ?? 1));
 const envTag = String(process.env.ENV_FILE || '.env')
   .replace(/^\.+/, '')
   .replace(/[^a-zA-Z0-9_-]+/g, '-') || 'store1';
@@ -36,7 +37,7 @@ const oldBackups = fs.readdirSync(backupRoot)
   .filter((name) => name.startsWith(prefix) && name.endsWith('.sqlite'))
   .sort()
   .reverse()
-  .slice(20);
+  .slice(backupRetention);
 for (const name of oldBackups) {
   fs.unlinkSync(path.join(backupRoot, name));
 }

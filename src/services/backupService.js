@@ -8,6 +8,13 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const projectRoot = path.resolve(__dirname, '..', '..');
 const BACKUP_DIR = path.resolve(projectRoot, 'backups');
+const BACKUP_RETENTION = 1;
+
+function getBackupPrefix() {
+  return String(process.env.ENV_FILE || '.env').includes('store2')
+    ? 'shopbot-store2'
+    : 'shopbot-store1';
+}
 
 // ─── Telegram Backup ──────────────────────────────────────────────────────────
 
@@ -129,12 +136,13 @@ export async function backupDatabase() {
 
       const todayStr   = new Date().toLocaleDateString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
       const dateStr    = new Date().toISOString().replace(/[:.]/g, '-').split('T')[0];
-      const backupPath = path.join(BACKUP_DIR, `shopbot-${dateStr}.sqlite`);
+      const backupPrefix = getBackupPrefix();
+      const backupPath = path.join(BACKUP_DIR, `${backupPrefix}-${dateStr}.sqlite`);
 
       db.backup(backupPath)
         .then(async () => {
           console.log(`[BACKUP] Sao lưu database thành công (Cục bộ): ${backupPath}`);
-          cleanOldBackups(14);
+          cleanOldBackups(backupPrefix, BACKUP_RETENTION);
 
           // 1. Telegram backup — chỉ gửi 1 lần/ngày
           const alreadySentToday = lastTelegramSentDate === todayStr;
@@ -181,10 +189,10 @@ export async function backupDatabase() {
 
 // ─── Cleanup ──────────────────────────────────────────────────────────────────
 
-function cleanOldBackups(maxKeep) {
+function cleanOldBackups(prefix, maxKeep) {
   try {
     const files = fs.readdirSync(BACKUP_DIR)
-      .filter(f => f.endsWith('.sqlite'))
+      .filter(f => f.startsWith(`${prefix}-`) && f.endsWith('.sqlite'))
       .map(f => ({ name: f, time: fs.statSync(path.join(BACKUP_DIR, f)).mtime.getTime() }))
       .sort((a, b) => b.time - a.time);
 
