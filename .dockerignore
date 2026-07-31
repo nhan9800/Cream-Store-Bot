@@ -1,0 +1,25 @@
+# Git
+.git
+.gitignore
+
+# Environment variables
+.env*
+!.env.example
+
+# Data and Persistence
+data/
+backups/
+logs/
+transcripts/
+
+# Caches and Runtime
+caches/
+scratch/
+tmp/
+node_modules/
+.npm/
+
+# Others
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
