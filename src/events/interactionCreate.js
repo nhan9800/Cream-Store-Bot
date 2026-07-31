@@ -2296,7 +2296,7 @@ export function registerInteractionHandler(client, commands) {
           const E_pr = createEmojiResolver(interaction.guildId);
           await interaction.editReply(`${E_pr('status_check')} Đã tạo hoá đơn mới! Quét mã QR mới trong ticket để thanh toán nhé.`);
         } catch (err) {
-          console.error('[PAYMENT REGEN]', err);
+          console.error('[PAYMENT REGEN]', err.message);
           const E_pr = createEmojiResolver(interaction.guildId);
           await interaction.editReply(`${E_pr('status_warn')} Không tạo được hoá đơn mới: ${err.message}`).catch(() => null);
         }
