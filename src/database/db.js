@@ -488,6 +488,7 @@ export function initDatabase() {
   ensureColumn('orders', 'expiry_notice_3d_sent_at', 'TEXT');
   ensureColumn('orders', 'expiry_notice_2d_sent_at', 'TEXT');
   ensureColumn('orders', 'expiry_notice_1d_sent_at', 'TEXT');
+  ensureColumn('orders', 'expiry_notice_expired_sent_at', 'TEXT');
   ensureColumn('orders', 'credential_profile', 'TEXT');
   ensureColumn('orders', 'credential_pin', 'TEXT');
   ensureColumn('orders', 'delivery_login_url', 'TEXT');

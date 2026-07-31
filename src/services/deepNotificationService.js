@@ -175,7 +175,7 @@ function buildExpiredSubscriptionAlertV2(order, ownerId) {
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(
       `${pingText}\n` +
-      `# <a:Dotyellow:1481134440725090315> **BÁO ĐỘNG: GÓI ${serviceName} ĐÃ HẾT HẠN** <a:Dotyellow:1481134440725090315>\n` +
+      `# ${E('status_warn')} **BÁO ĐỘNG: GÓI ${serviceName} ĐÃ HẾT HẠN** ${E('status_warn')}\n` +
       `> Đã phát hiện khách hàng hết hạn gói mua. Cần xử lý ngay để tránh lỗ gia hạn!`
     )
   );
@@ -186,11 +186,11 @@ function buildExpiredSubscriptionAlertV2(order, ownerId) {
 
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(
-      `> 🔥 **Tài khoản (Email):** \`${order.credential_email || 'Không có Email'}\`\n` +
-      `> 🎁 **Sản phẩm:** ${order.product_name}\n` +
-      `> 🛒 **Đơn hàng gốc:** \`${order.order_code}\`\n` +
-      `> 💙 **Khách hàng:** <@${order.customer_id}>\n` +
-      `> ⏰ **Ngày hết hạn:** <t:${expiryTs}:d> (<t:${expiryTs}:R>)`
+      `> ${E('icon_fire')} **Tài khoản (Email):** \`${order.credential_email || 'Không có Email'}\`\n` +
+      `> ${E('icon_gift')} **Sản phẩm:** ${order.product_name}\n` +
+      `> ${E('icon_cart')} **Đơn hàng gốc:** \`${order.order_code}\`\n` +
+      `> ${E('icon_heart')} **Khách hàng:** <@${order.customer_id}>\n` +
+      `> ${E('icon_clock')} **Ngày hết hạn:** <t:${expiryTs}:d> (<t:${expiryTs}:R>)`
     )
   );
 
@@ -200,7 +200,7 @@ function buildExpiredSubscriptionAlertV2(order, ownerId) {
 
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(
-      `<:Diamond:1485905790903783465> *Vui lòng truy cập trang quản lý để Kick/Huỷ gói này hoặc yêu cầu khách gia hạn!*`
+      `${E('icon_gem')} *Vui lòng truy cập trang quản lý để Kick/Huỷ gói này hoặc yêu cầu khách gia hạn!*`
     )
   );
 
@@ -228,6 +228,7 @@ export async function checkExpiredSubscriptionOrders(client) {
       const ch = getReminderChannel(client, order.guild_id);
       if (ch) {
         await ch.send(buildExpiredSubscriptionAlertV2(order, ch.guild.ownerId));
+        markExpiryNoticeRaw(order.order_code, 'expiry_notice_expired_sent_at');
         alerted++;
       }
     } catch (e) {

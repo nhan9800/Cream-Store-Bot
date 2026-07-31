@@ -164,6 +164,7 @@ export function getExpiredSubscriptionOrdersRaw() {
       AND datetime(expiry_at) <= datetime('now')
       AND status NOT IN ('CANCELED', 'REFUNDED')
       AND (claim_notes IS NULL OR claim_notes != 'KICKED')
+      AND expiry_notice_expired_sent_at IS NULL
       AND (${likeClauses})
   `).all();
 }
@@ -177,7 +178,7 @@ export function markOrderKickedRaw(orderCode) {
 }
 
 export function markExpiryNoticeRaw(orderCode, fieldName) {
-  const allowed = new Set(['expiry_notice_3d_sent_at', 'expiry_notice_2d_sent_at', 'expiry_notice_1d_sent_at']);
+  const allowed = new Set(['expiry_notice_3d_sent_at', 'expiry_notice_2d_sent_at', 'expiry_notice_1d_sent_at', 'expiry_notice_expired_sent_at']);
   if (!allowed.has(fieldName)) throw new Error('Field reminder không hợp lệ.');
 
   db.prepare(`
