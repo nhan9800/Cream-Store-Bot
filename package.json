@@ -29,5 +29,10 @@
   },
   "devDependencies": {
     "vitest": "^4.1.10"
+  },
+  "allowScripts": {
+    "@google/genai": true,
+    "better-sqlite3": true,
+    "protobufjs": true
   }
 }
