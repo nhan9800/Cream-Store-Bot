@@ -8,6 +8,7 @@ async function main() {
   for (const [name] of commands) {
     console.log(`[SMOKE] /${name}`);
   }
+  process.exit(0);
 }
 
 main().catch((error) => {
