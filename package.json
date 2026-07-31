@@ -8,8 +8,14 @@
     "start": "node src/index.js",
     "dev": "node --watch src/index.js",
     "deploy": "node src/deploy-commands.js",
-    "smoke": "node scripts/smoke-test.js",
+    "check:syntax": "node scripts/check-syntax.js",
+    "check:imports": "node scripts/check-imports.js",
+    "check:commands": "node scripts/check-commands.js",
     "check:env": "node scripts/check-env.js",
+    "test:unit": "node --test tests/**/*.test.js",
+    "test:integration": "node --test tests/**/*.integration.js",
+    "test:migrations": "echo \"Migration tests will be added\"",
+    "test:ci": "npm run test:unit",
     "confirm:webhook": "node scripts/confirm-payos-webhook.js"
   },
   "engines": {
