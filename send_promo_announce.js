@@ -1,6 +1,7 @@
 import { Client, Events, GatewayIntentBits, ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, SeparatorSpacingSize, MessageFlags, ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder } from 'discord.js';
 import dotenv from 'dotenv';
 import fs from 'node:fs';
+import path from 'node:path';
 
 dotenv.config();
 
@@ -138,7 +139,7 @@ client.once(Events.ClientReady, async (readyClient) => {
       )
     );
     
-    const bannerPath = 'C:\\Users\\ivano\\.gemini\\antigravity\\brain\\c4e3be19-10c9-4e5f-97c0-d300f69212cf\\cenar_store_promo_banner_1785486211696.jpg';
+    const bannerPath = path.join(process.cwd(), 'assets', 'promo_banner.jpg');
     let attachment = null;
     if (fs.existsSync(bannerPath)) {
       attachment = new AttachmentBuilder(fs.readFileSync(bannerPath), { name: 'banner.jpg' });
