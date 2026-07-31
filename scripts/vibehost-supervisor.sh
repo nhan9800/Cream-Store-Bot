@@ -210,6 +210,11 @@ if ! git remote get-url "$GIT_REMOTE" >/dev/null 2>&1; then
   exit 1
 fi
 
+if [[ -f "$FAILED_REVISION_FILE" ]]; then
+  log "Clearing the previous failure marker for one supervised retry"
+  rm -f "$FAILED_REVISION_FILE"
+fi
+
 log "Watching ${GIT_REMOTE}/${GIT_BRANCH} every ${POLL_SECONDS}s"
 
 while [[ "$STOPPING" == false ]]; do
