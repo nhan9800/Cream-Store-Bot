@@ -45,3 +45,9 @@ export function assertStaffCapability(member, guildConfig, capability) {
       return isSupport(member, guildConfig);
   }
 }
+
+import { config } from '../config.js';
+
+export function isBotDeveloper(userId) {
+  return config.adminDiscordIds.includes(String(userId));
+}

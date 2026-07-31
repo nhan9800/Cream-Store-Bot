@@ -1,104 +1,31 @@
-// ═══════════════════════════════════════════════
-// Rate Limiter Middleware (In-Memory)
-// ═══════════════════════════════════════════════
+import rateLimit from 'express-rate-limit';
 
-const stores = new Map(); // key → { hits: Map<ip, {count, resetAt}> }
-
-/**
- * Create a rate limiter middleware
- * @param {object} opts
- * @param {string} opts.name       - Unique name for this limiter
- * @param {number} opts.windowMs   - Time window in ms (default 15 min)
- * @param {number} opts.max        - Max requests per window (default 100)
- * @param {string} [opts.message]  - Response message on limit
- * @param {boolean} [opts.skipSuccessfulRequests] - Only count failed requests
- * @param {function} [opts.keyGenerator] - Custom key generator (req) => string
- */
-export function createRateLimiter(opts = {}) {
-  const {
-    name = 'default',
-    windowMs = 15 * 60 * 1000,
-    max = 100,
-    message = 'Quá nhiều yêu cầu, vui lòng thử lại sau.',
-    keyGenerator = (req) => req.ip || req.connection?.remoteAddress || 'unknown',
-  } = opts;
-
-  if (!stores.has(name)) {
-    stores.set(name, new Map());
-  }
-  const store = stores.get(name);
-
-  // Cleanup expired entries every 5 minutes
-  setInterval(() => {
-    const now = Date.now();
-    for (const [key, entry] of store) {
-      if (now > entry.resetAt) store.delete(key);
-    }
-  }, 5 * 60 * 1000);
-
-  return (req, res, next) => {
-    const key = keyGenerator(req);
-    const now = Date.now();
-
-    let entry = store.get(key);
-    if (!entry || now > entry.resetAt) {
-      entry = { count: 0, resetAt: now + windowMs };
-      store.set(key, entry);
-    }
-
-    entry.count++;
-
-    // Set rate limit headers
-    const remaining = Math.max(0, max - entry.count);
-    const resetSeconds = Math.ceil((entry.resetAt - now) / 1000);
-    res.setHeader('X-RateLimit-Limit', max);
-    res.setHeader('X-RateLimit-Remaining', remaining);
-    res.setHeader('X-RateLimit-Reset', resetSeconds);
-
-    if (entry.count > max) {
-      res.setHeader('Retry-After', resetSeconds);
-      return res.status(429).json({
-        ok: false,
-        error: message,
-        retryAfter: resetSeconds,
-      });
-    }
-
-    next();
-  };
-}
-
-// ═══════════════════════════════════════════════
-// Pre-built Limiters
-// ═══════════════════════════════════════════════
-
-/** General API: 200 requests per 15 minutes */
-export const generalLimiter = createRateLimiter({
-  name: 'general',
+export const generalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 200,
+  message: { ok: false, error: 'Quá nhiều yêu cầu, vui lòng thử lại sau.' },
+  keyGenerator: (req) => req.ip || req.connection?.remoteAddress || 'unknown',
 });
 
-/** Auth API: 10 requests per 5 minutes (strict) */
-export const authLimiter = createRateLimiter({
-  name: 'auth',
+export const authLimiter = rateLimit({
   windowMs: 5 * 60 * 1000,
   max: 10,
-  message: 'Quá nhiều lần đăng nhập, vui lòng thử lại sau 5 phút.',
+  message: { ok: false, error: 'Quá nhiều lần đăng nhập, vui lòng thử lại sau 5 phút.' },
+  keyGenerator: (req) => req.ip || req.connection?.remoteAddress || 'unknown',
 });
 
-/** Webhook API: 500 requests per 15 minutes (high throughput) */
-export const webhookLimiter = createRateLimiter({
-  name: 'webhook',
+export const webhookLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 500,
+  message: { ok: false, error: 'Quá nhiều yêu cầu, vui lòng thử lại sau.' },
+  keyGenerator: (req) => req.ip || req.connection?.remoteAddress || 'unknown',
 });
 
-/** Dashboard API: 120 requests per 15 minutes */
-export const dashboardLimiter = createRateLimiter({
-  name: 'dashboard',
+export const dashboardLimiter = rateLimit({
   windowMs: 15 * 60 * 1000,
   max: 120,
+  message: { ok: false, error: 'Quá nhiều yêu cầu, vui lòng thử lại sau.' },
+  keyGenerator: (req) => req.ip || req.connection?.remoteAddress || 'unknown',
 });
 
 // ═══════════════════════════════════════════════
