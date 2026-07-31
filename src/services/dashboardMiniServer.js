@@ -84,7 +84,7 @@ function getDashboardSnapshotRaw() {
 function isDashboardAuthorized(req) {
   const token = String(process.env.DASHBOARD_TOKEN ?? '').trim();
   if (!token) return true;
-  const provided = req.headers['x-dashboard-token'] || req.query.token;
+  const provided = req.headers['x-dashboard-token'];
   return provided === token;
 }
 
