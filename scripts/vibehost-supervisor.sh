@@ -97,6 +97,7 @@ install_revision() {
   local current_sha
   local installed_sha
   local failed_sha
+  local dependencies_installed=false
 
   current_sha="$(git rev-parse HEAD 2>/dev/null)" || return 1
   installed_sha="$(read_marker "$INSTALLED_REVISION_FILE")"
@@ -115,6 +116,14 @@ install_revision() {
   # first-run case the source is already at target, but the database still needs
   # a verified backup before dependencies and runtime validation can proceed.
   if [[ "$target_sha" != "$current_sha" || -z "$installed_sha" ]]; then
+    log "Installing dependencies before first verified backup"
+    if ! install_dependencies; then
+      fail "Dependency installation failed; refusing to continue"
+      write_marker "$FAILED_REVISION_FILE" "$target_sha"
+      return 1
+    fi
+    dependencies_installed=true
+
     if ! backup_databases "$current_sha"; then
       write_marker "$FAILED_REVISION_FILE" "$target_sha"
       return 1
@@ -123,7 +132,7 @@ install_revision() {
 
   log "Installing verified revision ${target_sha}"
   if ! git reset --hard "$target_sha" \
-    || ! install_dependencies \
+    || { [[ "$dependencies_installed" == true ]] || install_dependencies; } \
     || ! validate_environment; then
     log "Revision ${target_sha} failed installation"
 
