@@ -1,7 +1,8 @@
 import express from 'express';
 import path from 'node:path';
 import { registerDashboardRoutes, registerWebSocketUpgrade } from './dashboardMiniServer.js';
-import { handlePayOSWebhook } from './paymentService.js';
+import { handlePayOSWebhook, verifyPayOSWebhookSignature } from './paymentService.js';
+import { db, nowIso } from '../database/db.js';
 import { handleSepayWebhook } from './sepayService.js';
 import { registerBotApiRoutes } from './botApiRoutes.js';
 import { registerAuthRoutes } from './authApiRoutes.js';
@@ -77,6 +78,7 @@ export function registerPaymentRoutes(app) {
 
   app.post(getWebhookPath(), async (req, res) => {
     try {
+  // Đã kiểm tra signature ở middleware ngoài cùng
       const result = await handlePayOSWebhook({
         client: req.app.locals.discordClient,
         body: req.body,
@@ -136,6 +138,33 @@ export async function startWebhookServer(client = null) {
     next();
   });
 
+  // Middleware kiểm tra signature PayOS trước (có raw body)
+  app.use(getWebhookPath(), express.json({
+    limit: '2mb',
+    verify: (req, res, buf) => { req.rawBody = buf; }
+  }), (req, res, next) => {
+    if (req.method === 'POST') {
+      const payload = req.body;
+      const signature = payload?.signature;
+      const data = payload?.data;
+      if (!signature || !data || !verifyPayOSWebhookSignature(data, signature)) {
+        console.error('[WEBHOOK] Invalid PayOS signature');
+        try {
+          db.prepare('INSERT INTO payment_events (provider, transaction_id, content, raw_payload, created_at) VALUES (?, ?, ?, ?, ?)').run(
+            'PAYOS_FAILED', 
+            Date.now().toString(), 
+            'Invalid Signature', 
+            req.rawBody ? req.rawBody.toString() : JSON.stringify(req.body), 
+            nowIso()
+          );
+        } catch (e) { console.error('Failed to log invalid webhook', e); }
+        return res.status(400).json({ ok: false, message: 'Invalid PayOS signature' });
+      }
+    }
+    next();
+  });
+
+  // Body parser mặc định cho các route khác
   app.use(express.json({ limit: '2mb' }));
   app.use(express.urlencoded({ extended: true }));
 

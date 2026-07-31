@@ -69,7 +69,7 @@ function convertObjToQueryStr(object) {
     .join('&');
 }
 
-function verifyPayOSWebhookSignature(data, signature) {
+export function verifyPayOSWebhookSignature(data, signature) {
   if (!config.payosChecksumKey || !signature || !data) return false;
   const sortedData = sortObjDataByKey(data);
   const queryString = convertObjToQueryStr(sortedData);
@@ -450,9 +450,6 @@ async function finalizePaidOrder(client, order, paymentData, transactionId, tran
 
 export async function handlePayOSWebhook({ client, body }) {
   const payload = normalizePayOSWebhookBody(body);
-  if (!verifyPayOSWebhookSignature(payload.data, payload.signature)) {
-    return { ok: false, status: 400, body: { ok: false, message: 'Invalid PayOS signature' } };
-  }
 
   const payosOrderCode = Number(payload.data.orderCode);
   

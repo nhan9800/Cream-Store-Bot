@@ -84,10 +84,16 @@ export function createOrder({ guildId, ticketId, ticketChannelId, customerId, pr
   const safeDurationMonths = Math.max(1, Number.parseInt(String(durationMonths ?? config.defaultOrderDurationMonths), 10) || config.defaultOrderDurationMonths);
   const serviceType = detectServiceType(productName);
 
-  const result = createOrderStmt().run(finalOrderCode,guildId,ticketId,ticketChannelId,customerId,productName,quantity,note ?? null,safeAmount,safeAmount > 0 ? 0 : safeAmount,config.paymentProvider,paymentCode,payosOrderCode,paymentStatus,status,timestamp,queueGroup,priorityRank,safeDurationMonths,orderLogChannelId,createdById,timestamp,timestamp,serviceType);
-  syncCustomerStats(guildId, customerId);
+  let resultId;
+  const transaction = db.transaction(() => {
+    const result = createOrderStmt().run(finalOrderCode,guildId,ticketId,ticketChannelId,customerId,productName,quantity,note ?? null,safeAmount,safeAmount > 0 ? 0 : safeAmount,config.paymentProvider,paymentCode,payosOrderCode,paymentStatus,status,timestamp,queueGroup,priorityRank,safeDurationMonths,orderLogChannelId,createdById,timestamp,timestamp,serviceType);
+    resultId = result.lastInsertRowid;
+    syncCustomerStats(guildId, customerId);
+  });
+  
+  transaction();
   broadcastDashboardEvent('order_update', `Đơn hàng mới: ${finalOrderCode}`);
-  return getOrderById(Number(result.lastInsertRowid));
+  return getOrderById(Number(resultId));
 }
 
 export const getOrderByCode = (orderCode) => getOrderByCodeStmt().get(orderCode) ?? null;
