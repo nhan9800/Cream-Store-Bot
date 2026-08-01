@@ -2,14 +2,13 @@ import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { config, environmentInfo } from '../src/config.js';
+import { backupTagForEnvironment } from '../src/utils/backupNaming.js';
 
 const projectRoot = path.resolve(environmentInfo.projectRoot);
 const databasePath = path.resolve(projectRoot, config.databasePath);
 const backupRoot = path.resolve(projectRoot, 'backups', 'deploy');
 const backupRetention = Math.max(1, Number(process.env.BACKUP_RETENTION ?? 1));
-const envTag = String(process.env.ENV_FILE || '.env')
-  .replace(/^\.+/, '')
-  .replace(/[^a-zA-Z0-9_-]+/g, '-') || 'store1';
+const envTag = backupTagForEnvironment(process.env.ENV_FILE);
 const revision = String(process.env.DEPLOY_REVISION || 'manual')
   .toLowerCase()
   .replace(/[^a-f0-9]+/g, '')
