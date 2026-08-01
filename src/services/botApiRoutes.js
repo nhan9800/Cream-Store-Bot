@@ -305,56 +305,87 @@ export function registerBotApiRoutes(app) {
     // ── FEEDBACKS — lấy review của customer hoặc all ────────
     app.get('/api/bot/feedbacks', async (req, res) => {
         try {
-            const { customer_id, limit = 20, min_stars } = req.query;
+            const { customer_id, limit = 20, min_stars, offset = 0, q = '' } = req.query;
             const lim = Math.min(100, Math.max(1, parseInt(limit, 10) || 20));
+            const off = Math.min(10_000, Math.max(0, parseInt(offset, 10) || 0));
+            const minStars = min_stars
+                ? Math.min(5, Math.max(1, parseInt(min_stars, 10) || 1))
+                : null;
+            const search = String(q || '').trim().slice(0, 80);
 
-            let sql = `
-                SELECT id, guild_id, order_code, customer_id, stars, content, created_at
-                FROM feedbacks WHERE 1=1
-            `;
+            let whereSql = 'WHERE 1=1';
             const params = {};
-            if (customer_id) { sql += ` AND customer_id = @customer_id`; params.customer_id = String(customer_id); }
-            if (min_stars) { sql += ` AND stars >= @min_stars`; params.min_stars = parseInt(min_stars, 10) || 1; }
-            sql += ` ORDER BY created_at DESC LIMIT @lim`;
+            if (customer_id) {
+                whereSql += ' AND customer_id = @customer_id';
+                params.customer_id = String(customer_id);
+            }
+            if (minStars) {
+                whereSql += ' AND stars >= @min_stars';
+                params.min_stars = minStars;
+            }
+            if (search) {
+                whereSql += ' AND (content LIKE @search OR order_code LIKE @search OR customer_id LIKE @search)';
+                params.search = `%${search}%`;
+            }
+
+            const total = db.prepare(`SELECT COUNT(*) AS total FROM feedbacks ${whereSql}`).get(params)?.total ?? 0;
+            const sql = `
+                SELECT id, guild_id, order_code, customer_id, stars, content, created_at
+                FROM feedbacks ${whereSql}
+                ORDER BY created_at DESC
+                LIMIT @lim OFFSET @offset
+            `;
             params.lim = lim;
-            
+            params.offset = off;
             const feedbacks = db.prepare(sql).all(params);
 
             const client = req.app.locals.discordClient;
             const guildId = config.guildId;
-            let guild = null;
-            if (client) {
-                guild = await client.guilds.fetch(guildId).catch(() => null);
+            const guild = client?.guilds?.cache?.get(guildId) || null;
+            const customerIds = [...new Set(feedbacks.map((feedback) => feedback.customer_id))];
+            const webUsers = new Map();
+            const oauthUsers = new Map();
+
+            if (customerIds.length > 0) {
+                const placeholders = customerIds.map(() => '?').join(',');
+                for (const row of db.prepare(`
+                    SELECT discord_id, discord_username, discord_avatar
+                    FROM web_users
+                    WHERE discord_id IN (${placeholders})
+                `).all(...customerIds)) {
+                    webUsers.set(row.discord_id, row);
+                }
+                for (const row of db.prepare(`
+                    SELECT discord_id, username, avatar
+                    FROM oauth_backups
+                    WHERE guild_id IN (?, '') AND discord_id IN (${placeholders})
+                    ORDER BY CASE WHEN guild_id = ? THEN 0 ELSE 1 END
+                `).all(guildId, ...customerIds, guildId)) {
+                    if (!oauthUsers.has(row.discord_id)) oauthUsers.set(row.discord_id, row);
+                }
             }
 
-            const richFeedbacks = await Promise.all(feedbacks.map(async (fb) => {
+            const richFeedbacks = feedbacks.map((fb) => {
                 let displayName = `Khách #${fb.customer_id.slice(-4)}`;
                 let avatar = null;
+                const member = guild?.members?.cache?.get(fb.customer_id) || null;
+                const cachedUser = member?.user || client?.users?.cache?.get(fb.customer_id) || null;
+                const webUser = webUsers.get(fb.customer_id);
+                const oauthUser = oauthUsers.get(fb.customer_id);
 
-                if (client) {
-                    try {
-                        if (guild) {
-                            const member = await guild.members.fetch(fb.customer_id).catch(() => null);
-                            if (member) {
-                                displayName = member.displayName || member.user.username;
-                                avatar = member.user.displayAvatarURL({ size: 128 });
-                            } else {
-                                const user = await client.users.fetch(fb.customer_id).catch(() => null);
-                                if (user) {
-                                    displayName = user.username;
-                                    avatar = user.displayAvatarURL({ size: 128 });
-                                }
-                            }
-                        } else {
-                            const user = await client.users.fetch(fb.customer_id).catch(() => null);
-                            if (user) {
-                                displayName = user.username;
-                                avatar = user.displayAvatarURL({ size: 128 });
-                            }
-                        }
-                    } catch (e) {
-                        console.error(`Error fetching user for feedback ${fb.customer_id}:`, e);
-                    }
+                displayName = member?.displayName
+                    || cachedUser?.username
+                    || webUser?.discord_username
+                    || oauthUser?.username
+                    || displayName;
+                avatar = cachedUser?.displayAvatarURL?.({ size: 128 })
+                    || webUser?.discord_avatar
+                    || (oauthUser?.avatar
+                        ? `https://cdn.discordapp.com/avatars/${fb.customer_id}/${oauthUser.avatar}.webp?size=128`
+                        : null);
+
+                if (avatar && !/^https:\/\//i.test(avatar)) {
+                    avatar = null;
                 }
 
                 return {
@@ -368,9 +399,9 @@ export function registerBotApiRoutes(app) {
                     customer_name: displayName,
                     customer_avatar: avatar
                 };
-            }));
+            });
 
-            res.json({ ok: true, data: richFeedbacks });
+            res.json({ ok: true, data: richFeedbacks, total, limit: lim, offset: off });
         } catch (error) {
             console.error('[BOT_API] Feedbacks error:', error);
             res.status(500).json({ ok: false, error: error.message });
