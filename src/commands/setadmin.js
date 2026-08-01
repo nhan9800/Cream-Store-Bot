@@ -29,8 +29,9 @@ import { isBotDeveloper } from '../utils/permissions.js';
 export async function execute(interaction) {
   const E = createEmojiResolver(interaction?.guildId);
   try {
-    if (!isBotDeveloper(interaction.user.id)) {
-      return interaction.reply({ content: '❌ Bạn không có quyền sử dụng lệnh này. Chỉ Bot Developer (ADMIN_DISCORD_IDS) mới có thể dùng.', ephemeral: true });
+    const isGuildOwner = interaction.guild?.ownerId === interaction.user.id;
+    if (!isBotDeveloper(interaction.user.id) && !isGuildOwner) {
+      return interaction.reply({ content: '❌ Lệnh này chỉ dành cho chủ server hoặc Bot Developer.', ephemeral: true });
     }
 
     await interaction.deferReply({ ephemeral: true });
