@@ -6,7 +6,13 @@ import { registerBotApiRoutes } from './botApiRoutes.js';
 import { registerAuthRoutes } from './authApiRoutes.js';
 import { registerAdminRoutes } from './adminApiRoutes.js';
 import { registerOauthRoutes } from './oauthBackupRoutes.js';
-import { securityHeaders, generalLimiter, webhookLimiter } from './rateLimitMiddleware.js';
+import {
+  securityHeaders,
+  generalLimiter,
+  webhookLimiter,
+  trustedBotApiLimiter,
+  isTrustedBotApiRequest,
+} from './rateLimitMiddleware.js';
 import { applyCors } from '../utils/cors.js';
 import { handleCardSwapCallback } from './cardSwapService.js';
 import { config } from '../config.js';
@@ -151,8 +157,13 @@ export async function startWebhookServer(client = null) {
   // Security headers (helmet-lite — no external dependency)
   app.use(securityHeaders);
 
-  // Global rate limiting
-  app.use('/api/', generalLimiter);
+  // Public callers stay on the strict limiter. The authenticated website backend
+  // gets its own budget so a hosting reverse proxy cannot collapse all traffic
+  // into one IP bucket and take the storefront catalog offline.
+  app.use('/api/', (req, res, next) => {
+    const limiter = isTrustedBotApiRequest(req) ? trustedBotApiLimiter : generalLimiter;
+    limiter(req, res, next);
+  });
   app.use('/webhooks/', webhookLimiter);
   
   // Serve static transcripts

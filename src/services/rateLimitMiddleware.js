@@ -2,6 +2,8 @@
 // Rate Limiter Middleware (In-Memory)
 // ═══════════════════════════════════════════════
 
+import { safeEqual } from '../utils/crypto.js';
+
 const stores = new Map(); // key → { hits: Map<ip, {count, resetAt}> }
 
 /**
@@ -29,12 +31,13 @@ export function createRateLimiter(opts = {}) {
   const store = stores.get(name);
 
   // Cleanup expired entries every 5 minutes
-  setInterval(() => {
+  const cleanupTimer = setInterval(() => {
     const now = Date.now();
     for (const [key, entry] of store) {
       if (now > entry.resetAt) store.delete(key);
     }
   }, 5 * 60 * 1000);
+  cleanupTimer.unref?.();
 
   return (req, res, next) => {
     const key = keyGenerator(req);
@@ -78,6 +81,24 @@ export const generalLimiter = createRateLimiter({
   windowMs: 15 * 60 * 1000,
   max: 200,
 });
+
+/** Website backend đã xác thực: cho phép lưu lượng catalog/đơn hàng ổn định. */
+export const trustedBotApiLimiter = createRateLimiter({
+  name: 'trustedBotApi',
+  windowMs: 60 * 1000,
+  max: 600,
+  keyGenerator: () => 'trusted-web-backend',
+});
+
+export function isTrustedBotApiRequest(req) {
+  const requestUrl = String(req.originalUrl || req.url || '').split('?')[0];
+  const isBotApi = requestUrl === '/api/bot' || requestUrl.startsWith('/api/bot/');
+  if (!isBotApi) return false;
+
+  const expectedKey = String(process.env.BOT_API_KEY || '').trim();
+  const providedKey = String(req.header?.('x-bot-api-key') || '').trim();
+  return Boolean(expectedKey && providedKey && safeEqual(providedKey, expectedKey));
+}
 
 /** Auth API: 10 requests per 5 minutes (strict) */
 export const authLimiter = createRateLimiter({
