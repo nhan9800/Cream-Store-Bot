@@ -19,6 +19,8 @@ import { applyCors } from '../utils/cors.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { safeEqual } from '../utils/crypto.js';
 import { runtimeCommitSha } from '../utils/revision.js';
+import { discordCollectibleUrl, getDiscordCollectibleShopPrice } from './discordCollectiblePricing.js';
+import { getCustomerMembershipProgress } from './roleService.js';
 
 let storeInviteCache = { url: '', expiresAt: 0 };
 
@@ -269,6 +271,9 @@ export function registerBotApiRoutes(app) {
     app.get('/api/bot/customer/:discord_id', (req, res) => {
         const discordId = String(req.params.discord_id || '').trim();
         if (!discordId) return res.status(400).json({ ok: false, error: 'Thiếu discord_id' });
+        if (!canAccessCustomerResource(req, discordId)) {
+            return res.status(403).json({ ok: false, error: 'Forbidden' });
+        }
 
         const result = safeQuery(() => {
             const profiles = db.prepare(`
@@ -297,7 +302,11 @@ export function registerBotApiRoutes(app) {
                 FROM orders WHERE customer_id = ?
             `).get(discordId);
 
-            return { discord_id: discordId, profiles, flags, recentOrders, stats };
+            const membership = getCustomerMembershipProgress({
+                total_spent: stats?.total_spent || 0,
+                total_completed_orders: stats?.completed || 0,
+            });
+            return { discord_id: discordId, profiles, flags, recentOrders, stats, membership };
         });
         res.json(result);
     });
@@ -643,18 +652,53 @@ export function registerBotApiRoutes(app) {
                 return res.status(401).json({ ok: false, error: 'Discord login is required.' });
             }
 
-            const requestedProductId = String(items[0]?.id || items[0]?.product_id || '').trim();
+            const requestedItem = items[0] || {};
+            const requestedProductId = String(requestedItem.id || requestedItem.product_id || '').trim();
             const quantity = Number(items[0]?.quantity ?? items[0]?.qty);
             if (!requestedProductId || !Number.isSafeInteger(quantity) || quantity < 1 || quantity > 10) {
                 return res.status(400).json({ ok: false, error: 'Sản phẩm hoặc số lượng không hợp lệ.' });
             }
 
-            const catalogProduct = db.prepare(`
-                SELECT id, name, price, duration_months
-                FROM product_catalog
-                WHERE id = ? AND is_active = 1
-                LIMIT 1
-            `).get(requestedProductId);
+            const isDiscordCollectible = String(requestedItem.kind || '').toUpperCase() === 'DISCORD_COLLECTIBLE';
+            let catalogProduct;
+            let collectibleMetadata = null;
+            if (isDiscordCollectible) {
+                const label = String(requestedItem.label || '').trim().replace(/[\r\n<>]/g, ' ').slice(0, 100);
+                const collectibleType = String(requestedItem.collectibleType || '').trim().toLowerCase();
+                const originalPrice = Number(requestedItem.discordOriginalPrice);
+                const nitroEligible = requestedItem.nitroEligible === true;
+                const unitPrice = getDiscordCollectibleShopPrice(originalPrice, nitroEligible);
+                if (!/^\d{15,22}$/.test(requestedProductId) || !label || !['decorations', 'effects', 'nameplates', 'frames', 'bundles'].includes(collectibleType)) {
+                    return res.status(400).json({ ok: false, error: 'Collectible Discord không hợp lệ.' });
+                }
+                if (quantity !== 1) {
+                    return res.status(400).json({ ok: false, error: 'Mỗi đơn Decor chỉ hỗ trợ một collectible.' });
+                }
+                if (!unitPrice) {
+                    return res.status(409).json({ ok: false, code: 'DECOR_PRICE_UNAVAILABLE', error: 'Bậc giá Decor này chưa được cấu hình.' });
+                }
+                const productUrl = discordCollectibleUrl(requestedProductId);
+                catalogProduct = {
+                    id: requestedProductId,
+                    name: `Discord Decor - ${label}`,
+                    price: unitPrice,
+                    duration_months: 120,
+                };
+                collectibleMetadata = {
+                    skuId: requestedProductId,
+                    productUrl,
+                    originalPrice,
+                    nitroEligible,
+                    collectibleType,
+                };
+            } else {
+                catalogProduct = db.prepare(`
+                    SELECT id, name, price, duration_months
+                    FROM product_catalog
+                    WHERE id = ? AND is_active = 1
+                    LIMIT 1
+                `).get(requestedProductId);
+            }
             const unitPrice = Number(catalogProduct?.price);
             if (!catalogProduct || !Number.isFinite(unitPrice) || unitPrice <= 0) {
                 return res.status(400).json({ ok: false, error: 'Sản phẩm không thể checkout trực tuyến.' });
@@ -671,7 +715,17 @@ export function registerBotApiRoutes(app) {
             }
             const paymentProvider = requestedProvider;
             const contact = typeof req.body.contact === 'string' ? req.body.contact.trim().slice(0, 100) : '';
-            const note = typeof req.body.note === 'string' ? req.body.note.trim().slice(0, 1_000) : '';
+            const customerNote = typeof req.body.note === 'string' ? req.body.note.trim().slice(0, 1_000) : '';
+            const note = collectibleMetadata
+                ? [
+                    customerNote,
+                    `Discord SKU: ${collectibleMetadata.skuId}`,
+                    `Link Discord: ${collectibleMetadata.productUrl}`,
+                    `Giá Discord: ${collectibleMetadata.originalPrice.toLocaleString('vi-VN')}đ`,
+                    `Giá Cenar: ${unitPrice.toLocaleString('vi-VN')}đ`,
+                    `Nitro Boost: ${collectibleMetadata.nitroEligible ? 'Có' : 'Không'}`,
+                  ].filter(Boolean).join('\n').slice(0, 1_000)
+                : customerNote;
             
             // Lấy db helpers và orderService
             const { generateUniqueOrderCode, createOrder, saveOrderLogMessage } = await import('./orderService.js');
@@ -789,7 +843,11 @@ export function registerBotApiRoutes(app) {
                 durationMonths: durationMonths,
                 note: note || '',
                 orderLogChannelId,
-                createdById: customerId
+                createdById: customerId,
+                discordSkuId: collectibleMetadata?.skuId || null,
+                discordProductUrl: collectibleMetadata?.productUrl || null,
+                discordOriginalPrice: collectibleMetadata?.originalPrice || null,
+                discordNitroEligible: collectibleMetadata?.nitroEligible || false,
             };
             
             const order = createOrder(orderPayload);
@@ -900,7 +958,10 @@ export function registerBotApiRoutes(app) {
                                 container.addTextDisplayComponents(
                                     new TextDisplayBuilder().setContent(
                                         `> **Khách hàng Web** — Contact: ${contact || 'Không có'} · Discord: <@${customerId}>\n` +
-                                        `> **Ghi chú:** ${note || 'Không có'}`
+                                        `> **Ghi chú:** ${customerNote || 'Không có'}` +
+                                        (collectibleMetadata
+                                            ? `\n> **Decor Discord:** [Mở đúng sản phẩm trong Discord](${collectibleMetadata.productUrl}) · SKU \`${collectibleMetadata.skuId}\``
+                                            : '')
                                     )
                                 );
 

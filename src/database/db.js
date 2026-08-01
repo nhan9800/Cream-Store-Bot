@@ -514,6 +514,10 @@ export function initDatabase() {
   ensureColumn('orders', 'discord_payment_gmail', 'TEXT');
   ensureColumn('orders', 'discord_renewal_cycle', 'INTEGER');
   ensureColumn('orders', 'history_json', 'TEXT');
+  ensureColumn('orders', 'discord_sku_id', 'TEXT');
+  ensureColumn('orders', 'discord_product_url', 'TEXT');
+  ensureColumn('orders', 'discord_original_price', 'INTEGER');
+  ensureColumn('orders', 'discord_nitro_eligible', 'INTEGER DEFAULT 0');
 
   // Guild settings — category riêng theo loại ticket
   ensureColumn('guild_settings', 'support_category_id', 'TEXT');

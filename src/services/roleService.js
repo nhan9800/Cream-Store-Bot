@@ -11,6 +11,48 @@ const VIP_TIERS = [
   { id: '1282637103045279820', name: '🛒 ｜ Active Customer', minSpent: 0, requireOrder: true } 
 ];
 
+export const CUSTOMER_MEMBERSHIP_TIERS = [
+  { key: 'active', label: 'Active Customer', minSpent: 0, requireOrder: true },
+  { key: 'vip', label: 'VIP Client', minSpent: 1_000_000 },
+  { key: 'elite', label: 'Elite VIP', minSpent: 3_000_000 },
+  { key: 'diamond', label: 'Diamond Client', minSpent: 5_000_000 },
+  { key: 'ruby', label: 'Ruby Client', minSpent: 8_000_000 },
+];
+
+export function getCustomerMembershipProgress(profile = {}) {
+  const spent = Math.max(0, Number(profile.total_spent || 0));
+  const completedOrders = Math.max(0, Number(profile.total_completed_orders || 0));
+  const achieved = CUSTOMER_MEMBERSHIP_TIERS.filter((tier) => (
+    tier.requireOrder ? completedOrders > 0 || spent > 0 : spent >= tier.minSpent
+  ));
+  const current = achieved[achieved.length - 1] || { key: 'explorer', label: 'Explorer', minSpent: 0 };
+  const next = CUSTOMER_MEMBERSHIP_TIERS.find((tier) => !achieved.some((entry) => entry.key === tier.key)) || null;
+  const currentFloor = Number(current.minSpent || 0);
+  const nextTarget = Number(next?.minSpent || 0);
+  const progressPercent = next
+    ? next.requireOrder
+      ? 0
+      : Math.max(0, Math.min(100, Math.round(((spent - currentFloor) / Math.max(1, nextTarget - currentFloor)) * 100)))
+    : 100;
+
+  return {
+    totalSpent: spent,
+    completedOrders,
+    current: { key: current.key, label: current.label, minSpent: currentFloor },
+    next: next ? { key: next.key, label: next.label, minSpent: nextTarget, requireOrder: Boolean(next.requireOrder) } : null,
+    remaining: next ? Math.max(0, nextTarget - spent) : 0,
+    progressPercent,
+    achievedCount: achieved.length,
+    tiers: CUSTOMER_MEMBERSHIP_TIERS.map((tier) => ({
+      key: tier.key,
+      label: tier.label,
+      minSpent: tier.minSpent,
+      requireOrder: Boolean(tier.requireOrder),
+      achieved: achieved.some((entry) => entry.key === tier.key),
+    })),
+  };
+}
+
 export async function applyCustomerRoles(guild, customerId) {
   const guildConfig = getGuildConfig(guild.id);
   if (!guildConfig) return { applied: [] };
