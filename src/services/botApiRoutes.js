@@ -416,11 +416,20 @@ export function registerBotApiRoutes(app) {
     app.get('/api/bot/products', (req, res) => {
         const result = safeQuery(() =>
             db.prepare(`
-                SELECT id, guild_id, name, description, price, duration_months,
-                       service_type, emoji, is_active, sort_order, original_price
-                FROM product_catalog
-                WHERE is_active = 1
-                ORDER BY sort_order ASC, name ASC
+                SELECT pc.id, pc.guild_id, pc.name, pc.description, pc.price, pc.duration_months,
+                       pc.service_type, pc.emoji, pc.is_active, pc.sort_order, pc.original_price,
+                       (
+                         SELECT COUNT(*)
+                         FROM account_stock stock
+                         WHERE stock.status = 'AVAILABLE'
+                           AND (
+                             LOWER(stock.service_type) = LOWER(pc.name)
+                             OR LOWER(stock.service_type) = LOWER(pc.service_type)
+                           )
+                       ) AS stock_count
+                FROM product_catalog pc
+                WHERE pc.is_active = 1
+                ORDER BY pc.sort_order ASC, pc.name ASC
             `).all()
         );
         res.json(result);
@@ -431,10 +440,19 @@ export function registerBotApiRoutes(app) {
         const query = String(req.params.slugOrId || '').trim();
         const result = safeQuery(() => {
             const allProducts = db.prepare(`
-                SELECT id, guild_id, name, description, price, duration_months,
-                       service_type, emoji, is_active, sort_order, original_price
-                FROM product_catalog
-                WHERE is_active = 1
+                SELECT pc.id, pc.guild_id, pc.name, pc.description, pc.price, pc.duration_months,
+                       pc.service_type, pc.emoji, pc.is_active, pc.sort_order, pc.original_price,
+                       (
+                         SELECT COUNT(*)
+                         FROM account_stock stock
+                         WHERE stock.status = 'AVAILABLE'
+                           AND (
+                             LOWER(stock.service_type) = LOWER(pc.name)
+                             OR LOWER(stock.service_type) = LOWER(pc.service_type)
+                           )
+                       ) AS stock_count
+                FROM product_catalog pc
+                WHERE pc.is_active = 1
             `).all();
             const norm = query.toLowerCase();
             const match = allProducts.find(p =>
@@ -571,7 +589,7 @@ export function registerBotApiRoutes(app) {
             }
 
             const requestedProvider = String(req.body.paymentProvider || 'VIETQR').trim().toUpperCase();
-            if (requestedProvider !== 'VIETQR' && requestedProvider !== 'PAYOS') {
+            if (!['VIETQR', 'PAYOS', 'WALLET'].includes(requestedProvider)) {
                 return res.status(400).json({ ok: false, error: 'Phương thức thanh toán chưa được hỗ trợ.' });
             }
             const paymentProvider = requestedProvider;
