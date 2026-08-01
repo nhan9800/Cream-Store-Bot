@@ -20,6 +20,44 @@ import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { safeEqual } from '../utils/crypto.js';
 import { runtimeCommitSha } from '../utils/revision.js';
 
+let storeInviteCache = { url: '', expiresAt: 0 };
+
+async function resolveStoreOneInvite(client, configuredUrl) {
+    const explicit = String(configuredUrl || process.env.DISCORD_INVITE_URL || '').trim();
+    if (/^https:\/\/(discord\.gg|discord\.com\/invite)\/[\w-]+/i.test(explicit)) return explicit;
+    if (storeInviteCache.url && storeInviteCache.expiresAt > Date.now()) return storeInviteCache.url;
+
+    const cachedGuild = client?.guilds?.cache?.get(config.guildId);
+    const fetchedGuild = !cachedGuild && client?.guilds?.fetch
+        ? await client.guilds.fetch(config.guildId).catch(() => null)
+        : null;
+    const guild = cachedGuild || fetchedGuild;
+    if (!guild) return '';
+
+    const vanity = guild.vanityURLCode
+        || (guild.fetchVanityData
+            ? (await guild.fetchVanityData().catch(() => null))?.code
+            : null);
+    if (vanity) {
+        storeInviteCache = { url: `https://discord.gg/${vanity}`, expiresAt: Date.now() + 15 * 60_000 };
+        return storeInviteCache.url;
+    }
+
+    const invites = guild.invites?.fetch
+        ? await guild.invites.fetch().catch(() => null)
+        : null;
+    const existing = invites
+        ? [...invites.values()]
+            .filter((invite) => !invite.temporary && (!invite.maxAge || invite.maxAge === 0) && (!invite.maxUses || invite.maxUses === 0))
+            .sort((left, right) => Number(right.uses || 0) - Number(left.uses || 0))[0]
+        : null;
+    if (existing?.url) {
+        storeInviteCache = { url: existing.url, expiresAt: Date.now() + 15 * 60_000 };
+        return existing.url;
+    }
+    return '';
+}
+
 /**
  * Middleware xác thực API key
  */
@@ -88,7 +126,7 @@ export function registerBotApiRoutes(app) {
     app.use('/api/bot', corsHandler, requireApiKey);
 
     // ── PUBLIC SETTINGS ──────────────────────────────────────────
-    app.get('/api/bot/settings', (req, res) => {
+    app.get('/api/bot/settings', async (req, res) => {
         const result = safeQuery(() => {
             const rows = db.prepare('SELECT * FROM system_settings').all();
             const settings = {};
@@ -103,6 +141,14 @@ export function registerBotApiRoutes(app) {
             });
             return settings;
         });
+        if (result.ok) {
+            const client = req.app.locals.discordClient;
+            const guild = client?.guilds?.cache?.get(config.guildId);
+            result.data.discord_link = await resolveStoreOneInvite(client, result.data.discord_link);
+            result.data.guild_id = config.guildId;
+            result.data.guild_name = guild?.name || config.storeName || 'Cenar Store';
+            result.data.store = 'STORE_1';
+        }
         res.json(result);
     });
 

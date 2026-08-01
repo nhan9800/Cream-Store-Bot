@@ -10,6 +10,7 @@ import { securityHeaders, generalLimiter, webhookLimiter } from './rateLimitMidd
 import { applyCors } from '../utils/cors.js';
 import { handleCardSwapCallback } from './cardSwapService.js';
 import { config } from '../config.js';
+import { db } from '../database/db.js';
 
 let httpServer = null;
 let appInstance = null;
@@ -59,12 +60,38 @@ export function registerPaymentRoutes(app) {
 
   app.get(getReturnPath(), (req, res) => {
     const webUrl = process.env.WEBSITE_URL || 'https://cenarstore.xyz';
-    res.redirect(`${webUrl}/payment?status=success`);
+    const payosOrderCode = Number(req.query.orderCode);
+    const order = Number.isSafeInteger(payosOrderCode)
+      ? db.prepare('SELECT order_code FROM orders WHERE payos_order_code = ?').get(payosOrderCode)
+      : null;
+    if (order?.order_code) {
+      return res.redirect(`${webUrl}/orders/${encodeURIComponent(order.order_code)}?payment=success`);
+    }
+    const topup = Number.isSafeInteger(payosOrderCode)
+      ? db.prepare('SELECT topup_code FROM wallet_topup_orders WHERE payos_order_code = ?').get(payosOrderCode)
+      : null;
+    if (topup?.topup_code) {
+      return res.redirect(`${webUrl}/account/wallet?payment=success&topup=${encodeURIComponent(topup.topup_code)}`);
+    }
+    return res.redirect(`${webUrl}/payment?status=success`);
   });
 
   app.get(getCancelPath(), (req, res) => {
     const webUrl = process.env.WEBSITE_URL || 'https://cenarstore.xyz';
-    res.redirect(`${webUrl}/payment?status=cancel`);
+    const payosOrderCode = Number(req.query.orderCode);
+    const order = Number.isSafeInteger(payosOrderCode)
+      ? db.prepare('SELECT order_code FROM orders WHERE payos_order_code = ?').get(payosOrderCode)
+      : null;
+    if (order?.order_code) {
+      return res.redirect(`${webUrl}/orders/${encodeURIComponent(order.order_code)}?payment=cancel`);
+    }
+    const topup = Number.isSafeInteger(payosOrderCode)
+      ? db.prepare('SELECT topup_code FROM wallet_topup_orders WHERE payos_order_code = ?').get(payosOrderCode)
+      : null;
+    if (topup?.topup_code) {
+      return res.redirect(`${webUrl}/account/wallet?payment=cancel&topup=${encodeURIComponent(topup.topup_code)}`);
+    }
+    return res.redirect(`${webUrl}/payment?status=cancel`);
   });
 
   app.get(getWebhookPath(), (req, res) => {
