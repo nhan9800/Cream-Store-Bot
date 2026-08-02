@@ -564,11 +564,11 @@ export function buildOrderCreatedV2(order, orderChannelId) {
   // Header — mention khách ngay trong header (gộp tin thừa, chống spam)
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(joinLines(
-      `## ${E('order_created')} Đơn Hàng ${fmt.code(order.order_code)} Đã Được Tạo`,
+      `## ${E('order_created', '🧾')} Đơn Hàng ${fmt.code(order.order_code)} Đã Được Tạo`,
       `> ${fmt.user(order.customer_id)} — đơn của bạn đã được tạo!`,
       hasPay
-        ? `> ${E('payment_payos')} Vui lòng ${fmt.b('chọn phương thức thanh toán')} để đơn được xử lý`
-        : `> ${E('icon_gift')} Đơn không cần thanh toán — đưa vào hàng xử lý ngay!`,
+        ? `> ${E('payment_payos', '💳')} Vui lòng ${fmt.b('chọn phương thức thanh toán')} để đơn được xử lý`
+        : `> ${E('icon_gift', '🎁')} Đơn không cần thanh toán — đưa vào hàng xử lý ngay!`,
     ))
   );
 
@@ -579,11 +579,11 @@ export function buildOrderCreatedV2(order, orderChannelId) {
   // Order details — table-like layout
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(joinLines(
-      `${E('order_product')} ${fmt.b('Sản phẩm:')} ${formatOrderProduct(order.quantity, order.product_name)}`,
-      `${E('payment_money')} ${fmt.b('Số tiền:')} ${hasPay ? fmt.b(formatCurrency(order.total_amount)) : `${fmt.i('Miễn phí')}`}`,
-      `${E('icon_chart')} ${fmt.b('Trạng thái:')} ${getOrderStatusLabel(order.status)}`,
-      `${E('icon_clock')} ${fmt.b('Tạo lúc:')} ${T.rel(order.created_at || new Date())}`,
-      `${E('icon_clipboard')} ${fmt.b('Theo dõi tại:')} ${fmt.channel(orderChannelId)}`,
+      `${E('order_product', '📦')} ${fmt.b('Sản phẩm:')} ${formatOrderProduct(order.quantity, order.product_name)}`,
+      `${E('payment_money', '💰')} ${fmt.b('Số tiền:')} ${hasPay ? fmt.b(formatCurrency(order.total_amount)) : `${fmt.i('Miễn phí')}`}`,
+      `${E('icon_chart', '📊')} ${fmt.b('Trạng thái:')} ${getOrderStatusLabel(order.status)}`,
+      `${E('icon_clock', '🕒')} ${fmt.b('Tạo lúc:')} ${T.rel(order.created_at || new Date())}`,
+      `${E('icon_clipboard', '🔗')} ${fmt.b('Theo dõi tại:')} ${fmt.channel(orderChannelId)}`,
     ))
   );
 
@@ -689,9 +689,9 @@ export function buildQueuePositionV2(order, position, totalInQueue) {
 
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(
-      `## ${E('order_queue')} Vị Trí Xếp Hàng\n` +
-      `> ${E('icon_tag')} Mã đơn: \`${order.order_code}\`\n` +
-      `> ${E('order_product')} Nhóm: \`${groupName}\``
+      `## ${E('order_queue', '🏅')} Vị Trí Xếp Hàng\n` +
+      `> ${E('icon_tag', '🏷️')} Mã đơn: \`${order.order_code}\`\n` +
+      `> ${E('order_product', '📦')} Nhóm: \`${groupName}\``
     )
   );
 
@@ -701,9 +701,9 @@ export function buildQueuePositionV2(order, position, totalInQueue) {
 
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(
-      `${E('order_pending')} **Vị trí:** \`${position} / ${totalInQueue}\`\n` +
-      `${E('icon_folder')} **Nhóm xử lý:** \`${groupName}\`\n` +
-      `${E('status_info')} _Thứ tự xử lý theo ưu tiên và thời gian đặt hàng._`
+      `${E('order_pending', '⏳')} **Vị trí:** \`${position} / ${totalInQueue}\`\n` +
+      `${E('icon_folder', '🗂️')} **Nhóm xử lý:** \`${groupName}\`\n` +
+      `${E('status_info', 'ℹ️')} _Thứ tự xử lý theo ưu tiên và thời gian đặt hàng._`
     )
   );
 

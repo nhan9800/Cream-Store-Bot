@@ -572,6 +572,7 @@ export function initDatabase() {
   ensureColumn('product_catalog', 'product_key', 'TEXT');
   ensureColumn('product_catalog', 'is_featured', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn('product_catalog', 'virtual_purchase_count', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn('product_catalog', 'image_url', 'TEXT');
   ensureColumn('feedbacks', 'product_id', 'INTEGER');
   ensureColumn('feedbacks', 'product_name', 'TEXT');
   ensureColumn('feedbacks', 'is_visible', 'INTEGER NOT NULL DEFAULT 1');

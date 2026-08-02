@@ -15,6 +15,7 @@ import * as subService from './subscriptionService.js';
 import { getAiKnowledge, updateAiKnowledge } from './aiKnowledgeService.js';
 import { transitionOrderStatus } from './orderStateMachine.js';
 import { encrypt, decrypt } from '../utils/crypto.js';
+import { sendCompletedFlow, updateOrderLogMessage } from './notificationService.js';
 
 function catalogKey(value) {
   return String(value || '')
@@ -130,15 +131,15 @@ export function registerAdminRoutes(app) {
 
   app.post('/api/bot/admin/products', requireAdminRole, (req, res) => {
     try {
-      const { name, description, price, duration_months, service_type, emoji, is_active, is_featured, virtual_purchase_count, sort_order, require_email, require_phone, original_price } = req.body;
+      const { name, description, price, duration_months, service_type, emoji, is_active, is_featured, virtual_purchase_count, sort_order, require_email, require_phone, original_price, image_url } = req.body;
       const safeName = sanitizeString(name, 180).trim();
       if (!safeName) return errorResponse(res, 400, 'Tên sản phẩm không được để trống.');
       const duplicate = db.prepare(`SELECT id FROM product_catalog WHERE guild_id = 'WEB' AND LOWER(TRIM(name)) = LOWER(TRIM(?)) AND duration_months = ? LIMIT 1`).get(safeName, Number(duration_months) || 1);
       if (duplicate) return errorResponse(res, 409, 'Sản phẩm cùng tên và thời hạn đã tồn tại.');
       const result = db.prepare(`
-        INSERT INTO product_catalog (guild_id, name, description, price, duration_months, service_type, emoji, is_active, is_featured, virtual_purchase_count, sort_order, require_email, require_phone, original_price, product_key)
-        VALUES ('WEB', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(safeName, sanitizeString(description, 2000), Math.max(0, Number(price) || 0), Math.max(1, Number(duration_months) || 1), sanitizeString(service_type, 40) || 'other', sanitizeString(emoji, 80) || '📦', is_active ? 1 : 0, is_featured ? 1 : 0, Math.max(0, Number(virtual_purchase_count) || 0), Number(sort_order) || 0, require_email ? 1 : 0, require_phone ? 1 : 0, Math.max(0, Number(original_price) || 0), catalogKey(safeName));
+        INSERT INTO product_catalog (guild_id, name, description, price, duration_months, service_type, emoji, is_active, is_featured, virtual_purchase_count, sort_order, require_email, require_phone, original_price, product_key, image_url)
+        VALUES ('WEB', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(safeName, sanitizeString(description, 2000), Math.max(0, Number(price) || 0), Math.max(1, Number(duration_months) || 1), sanitizeString(service_type, 40) || 'other', sanitizeString(emoji, 80) || '📦', is_active ? 1 : 0, is_featured ? 1 : 0, Math.max(0, Number(virtual_purchase_count) || 0), Number(sort_order) || 0, require_email ? 1 : 0, require_phone ? 1 : 0, Math.max(0, Number(original_price) || 0), catalogKey(safeName), sanitizeString(image_url, 500) || null);
       
       res.json({ ok: true, id: result.lastInsertRowid });
     } catch (e) {
@@ -148,20 +149,49 @@ export function registerAdminRoutes(app) {
 
   app.put('/api/bot/admin/products/:id', requireAdminRole, (req, res) => {
     try {
-      const { name, description, price, duration_months, service_type, emoji, is_active, is_featured, virtual_purchase_count, sort_order, require_email, require_phone, original_price } = req.body;
+      const { name, description, price, duration_months, service_type, emoji, is_active, is_featured, virtual_purchase_count, sort_order, require_email, require_phone, original_price, image_url } = req.body;
       const safeName = sanitizeString(name, 180).trim();
       if (!safeName) return errorResponse(res, 400, 'Tên sản phẩm không được để trống.');
       const duplicate = db.prepare(`SELECT id FROM product_catalog WHERE guild_id = 'WEB' AND id != ? AND LOWER(TRIM(name)) = LOWER(TRIM(?)) AND duration_months = ? LIMIT 1`).get(req.params.id, safeName, Number(duration_months) || 1);
       if (duplicate) return errorResponse(res, 409, 'Sản phẩm cùng tên và thời hạn đã tồn tại.');
       db.prepare(`
         UPDATE product_catalog 
-        SET name = ?, description = ?, price = ?, duration_months = ?, service_type = ?, emoji = ?, is_active = ?, is_featured = ?, virtual_purchase_count = ?, sort_order = ?, require_email = ?, require_phone = ?, original_price = ?, updated_at = CURRENT_TIMESTAMP
+        SET name = ?, description = ?, price = ?, duration_months = ?, service_type = ?, emoji = ?, is_active = ?, is_featured = ?, virtual_purchase_count = ?, sort_order = ?, require_email = ?, require_phone = ?, original_price = ?, image_url = ?, updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
-      `).run(safeName, sanitizeString(description, 2000), Math.max(0, Number(price) || 0), Math.max(1, Number(duration_months) || 1), sanitizeString(service_type, 40) || 'other', sanitizeString(emoji, 80) || '📦', is_active ? 1 : 0, is_featured ? 1 : 0, Math.max(0, Number(virtual_purchase_count) || 0), Number(sort_order) || 0, require_email ? 1 : 0, require_phone ? 1 : 0, Math.max(0, Number(original_price) || 0), req.params.id);
+      `).run(safeName, sanitizeString(description, 2000), Math.max(0, Number(price) || 0), Math.max(1, Number(duration_months) || 1), sanitizeString(service_type, 40) || 'other', sanitizeString(emoji, 80) || '📦', is_active ? 1 : 0, is_featured ? 1 : 0, Math.max(0, Number(virtual_purchase_count) || 0), Number(sort_order) || 0, require_email ? 1 : 0, require_phone ? 1 : 0, Math.max(0, Number(original_price) || 0), sanitizeString(image_url, 500) || null, req.params.id);
       
       res.json({ ok: true });
     } catch (e) {
       console.error('[ADMIN]', e); res.status(500).json({ ok: false, error: 'Lỗi máy chủ nội bộ.' });
+    }
+  });
+
+  app.post('/api/bot/admin/product-images', requireAdminRole, (req, res) => {
+    try {
+      const dataUrl = String(req.body?.data_url || '');
+      const match = dataUrl.match(/^data:image\/(png|jpeg|jpg|webp);base64,([A-Za-z0-9+/=]+)$/);
+      if (!match) return errorResponse(res, 400, 'Định dạng ảnh không hợp lệ.');
+      const buffer = Buffer.from(match[2], 'base64');
+      if (buffer.length < 100 || buffer.length > 800_000) {
+        return errorResponse(res, 400, 'Ảnh sau khi tối ưu phải nhỏ hơn 800 KB.');
+      }
+      const extension = match[1] === 'jpeg' ? 'jpg' : match[1];
+      const filename = `${crypto.createHash('sha256').update(buffer).digest('hex')}.${extension}`;
+      const imageDir = path.resolve(path.dirname(db.name), 'product-images');
+      fs.mkdirSync(imageDir, { recursive: true });
+      fs.writeFileSync(path.join(imageDir, filename), buffer, { flag: 'wx' });
+      return res.json({ ok: true, data: { url: `/api/product-images/${filename}` } });
+    } catch (error) {
+      if (error?.code === 'EEXIST') {
+        const dataUrl = String(req.body?.data_url || '');
+        const match = dataUrl.match(/^data:image\/(png|jpeg|jpg|webp);base64,([A-Za-z0-9+/=]+)$/);
+        const buffer = match ? Buffer.from(match[2], 'base64') : null;
+        const extension = match?.[1] === 'jpeg' ? 'jpg' : match?.[1];
+        const filename = buffer ? `${crypto.createHash('sha256').update(buffer).digest('hex')}.${extension}` : '';
+        return res.json({ ok: true, data: { url: `/api/product-images/${filename}` } });
+      }
+      console.error('[ADMIN] product image upload', error);
+      return res.status(500).json({ ok: false, error: 'Không thể lưu ảnh sản phẩm.' });
     }
   });
 
@@ -170,7 +200,8 @@ export function registerAdminRoutes(app) {
     try {
       const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 100));
       const reviews = db.prepare(`
-        SELECT f.*, COALESCE(u.discord_username, u.display_name, 'Khách #' || SUBSTR(f.customer_id, -4)) AS customer_name
+        SELECT f.*, COALESCE(u.discord_username, u.display_name, 'Khách #' || SUBSTR(f.customer_id, -4)) AS customer_name,
+               u.discord_avatar AS customer_avatar
         FROM feedbacks f
         LEFT JOIN web_users u ON u.discord_id = f.customer_id
         ORDER BY f.created_at DESC LIMIT ?
@@ -207,19 +238,47 @@ export function registerAdminRoutes(app) {
   app.get('/api/bot/admin/orders', requireAdminRole, (req, res) => {
     try {
       const limit = Number(req.query.limit) || 50;
-      const orders = db.prepare('SELECT * FROM orders ORDER BY created_at DESC LIMIT ?').all(limit);
+      const orders = db.prepare(`
+        SELECT o.*, COALESCE(u.discord_username, u.display_name, 'Khách #' || SUBSTR(o.customer_id, -4)) AS customer_name,
+               u.discord_avatar AS customer_avatar
+        FROM orders o
+        LEFT JOIN web_users u ON u.discord_id = o.customer_id
+        ORDER BY o.created_at DESC LIMIT ?
+      `).all(limit);
       res.json({ ok: true, data: orders });
     } catch (e) {
       console.error('[ADMIN]', e); res.status(500).json({ ok: false, error: 'Lỗi máy chủ nội bộ.' });
     }
   });
 
-  app.put('/api/bot/admin/orders/:code/status', requireAdminRole, (req, res) => {
+  app.put('/api/bot/admin/orders/:code/status', requireAdminRole, async (req, res) => {
     try {
       const { status } = req.body;
       const result = transitionOrderStatus(req.params.code, status, { changedBy: req.user?.email || 'ADMIN', reason: 'Admin dashboard manual update', dbInstance: db });
       if (!result.success) {
         return res.status(400).json({ ok: false, error: result.error });
+      }
+      if (result.changed) {
+        const client = req.app.locals.discordClient;
+        const guild = client?.guilds?.cache?.get(result.order.guild_id)
+          || await client?.guilds?.fetch?.(result.order.guild_id).catch(() => null);
+        if (guild) {
+          await updateOrderLogMessage(guild, result.order).catch(() => null);
+          const actorId = String(req.header('x-discord-id') || client.user?.id || 'SYSTEM');
+          if (result.order.status === 'COMPLETED') {
+            await sendCompletedFlow({ guild, order: result.order, actorId, supportId: actorId }).catch((error) => {
+              console.error('[ADMIN] completion notification', error);
+            });
+          } else if (/^\d{15,22}$/.test(String(result.order.ticket_channel_id || ''))) {
+            const channel = await guild.channels.fetch(result.order.ticket_channel_id).catch(() => null);
+            if (channel?.isTextBased()) {
+              await channel.send({
+                content: `### 🔄 Trạng thái đơn \`${result.order.order_code}\` đã cập nhật\n> **Trạng thái mới:** \`${result.order.status}\`\n> Thao tác từ Cenar Control Center.`,
+                allowedMentions: { parse: [] },
+              }).catch(() => null);
+            }
+          }
+        }
       }
       res.json({ ok: true, data: result.order });
     } catch (e) {
@@ -231,7 +290,7 @@ export function registerAdminRoutes(app) {
   app.get('/api/bot/admin/users', requireAdminRole, (req, res) => {
     try {
       const users = db.prepare(`
-        SELECT u.id, u.email, u.display_name, u.auth_provider, u.role, u.created_at, u.discord_id, u.discord_username, u.google_email,
+        SELECT u.id, u.email, u.display_name, u.auth_provider, u.role, u.created_at, u.discord_id, u.discord_username, u.discord_avatar, u.google_email,
                COALESCE(cp.wallet_balance, 0) AS wallet_balance,
                COALESCE(cf.is_blacklisted, 0) AS is_blacklisted,
                cf.blacklist_reason
@@ -322,13 +381,13 @@ export function registerAdminRoutes(app) {
     }
   });
 
-  // Edit user info (display_name)
+  // Edit user profile. Discord ID linkage stays immutable from Admin UI.
   app.put('/api/bot/admin/users/:id', requireAdminRole, (req, res) => {
     try {
       if (req.adminRole !== 'admin') {
         return errorResponse(res, 403, 'Chỉ Admin mới có quyền chỉnh sửa người dùng.');
       }
-      const { displayName } = req.body;
+      const { displayName, role, discordUsername, discordAvatar } = req.body;
       const userId = sanitizeString(req.params.id, 100);
       const actorId = req.header('x-user-id');
       if (userId === actorId) return errorResponse(res, 403, 'Không thể tự chỉnh sửa chính mình.');
@@ -338,6 +397,21 @@ export function registerAdminRoutes(app) {
       if (displayName !== undefined) {
         updates.push('display_name = ?');
         params.push(sanitizeString(displayName, 100));
+      }
+      if (role !== undefined) {
+        if (!isValidRole(role)) return errorResponse(res, 400, 'Phân quyền không hợp lệ.');
+        updates.push('role = ?');
+        params.push(role);
+      }
+      if (discordUsername !== undefined) {
+        updates.push('discord_username = ?');
+        params.push(sanitizeString(discordUsername, 100) || null);
+      }
+      if (discordAvatar !== undefined) {
+        const avatar = sanitizeString(discordAvatar, 500).trim();
+        if (avatar && !/^https:\/\//i.test(avatar)) return errorResponse(res, 400, 'URL avatar phải dùng HTTPS.');
+        updates.push('discord_avatar = ?');
+        params.push(avatar || null);
       }
       if (updates.length === 0) return errorResponse(res, 400, 'Không có thay đổi nào.');
       params.push(userId);

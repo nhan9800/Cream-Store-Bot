@@ -22,6 +22,8 @@ import { runtimeCommitSha } from '../utils/revision.js';
 import { discordCollectibleUrl, getDiscordCollectibleShopPrice } from './discordCollectiblePricing.js';
 import { getCustomerMembershipProgress } from './roleService.js';
 import { getDiscordNitroEligibility } from '../utils/discordNitro.js';
+import fs from 'node:fs';
+import path from 'node:path';
 
 let storeInviteCache = { url: '', expiresAt: 0 };
 
@@ -104,7 +106,7 @@ function safeQuery(fn) {
 const PUBLIC_PRODUCT_COLUMNS = `
     pc.id, pc.guild_id, pc.name, pc.description, pc.price, pc.duration_months,
     pc.service_type, pc.emoji, pc.is_active, pc.sort_order, pc.original_price,
-    pc.product_key, pc.is_featured, pc.virtual_purchase_count,
+    pc.product_key, pc.is_featured, pc.virtual_purchase_count, pc.image_url,
     (
       SELECT COUNT(*)
       FROM account_stock stock
@@ -215,6 +217,50 @@ export function registerBotApiRoutes(app) {
             result.data.store = 'STORE_1';
         }
         res.json(result);
+    });
+
+    // ── STORE OWNER PROFILE — dữ liệu công khai, lấy qua kết nối bot ──
+    app.get('/api/bot/owner-profile/:discordId', async (req, res) => {
+        const discordId = String(req.params.discordId || '').trim();
+        const configuredOwners = new Set([
+            '1138315103821889566',
+            ...String(process.env.ADMIN_DISCORD_IDS || '').split(','),
+            ...String(process.env.OWNER_DISCORD_IDS || '').split(','),
+        ].map((value) => value.trim()).filter(Boolean));
+
+        if (!/^\d{15,22}$/.test(discordId) || !configuredOwners.has(discordId)) {
+            return res.status(404).json({ ok: false, error: 'Không tìm thấy hồ sơ chủ shop.' });
+        }
+
+        try {
+            const client = req.app.locals.discordClient;
+            const user = await client?.users?.fetch(discordId, { force: true }).catch(() => null);
+            if (!user) return res.status(503).json({ ok: false, error: 'Discord tạm thời không phản hồi.' });
+
+            const guild = client.guilds?.cache?.get(config.guildId)
+                || await client.guilds?.fetch?.(config.guildId).catch(() => null);
+            const member = guild
+                ? await guild.members?.fetch?.(discordId).catch(() => null)
+                : null;
+
+            return res.json({
+                ok: true,
+                data: {
+                    id: user.id,
+                    username: user.username,
+                    display_name: member?.displayName || user.globalName || user.username,
+                    avatar_url: user.displayAvatarURL({ size: 512, extension: 'webp' }),
+                    banner_url: user.bannerURL?.({ size: 1024, extension: 'webp' }) || null,
+                    account_created_at: user.createdAt?.toISOString?.() || null,
+                    server_joined_at: member?.joinedAt?.toISOString?.() || null,
+                    role_count: member?.roles?.cache?.filter?.((role) => role.id !== guild?.id)?.size || 0,
+                    store_name: guild?.name || config.storeName || 'Cenar Store',
+                },
+            });
+        } catch (error) {
+            console.error('[BOT_API] Owner profile error:', error);
+            return res.status(500).json({ ok: false, error: 'Không thể tải hồ sơ chủ shop.' });
+        }
     });
 
     // ── AI KNOWLEDGE (read-only) — web AI chat đọc tài liệu huấn luyện ──
@@ -540,38 +586,23 @@ export function registerBotApiRoutes(app) {
             const guildId = config.guildId;
             let guild = null;
             if (client) {
-                guild = await client.guilds.fetch(guildId).catch(() => null);
+                guild = client.guilds?.cache?.get(guildId)
+                    || await client.guilds.fetch(guildId).catch(() => null);
             }
 
-            const richRows = await Promise.all(rows.map(async (row) => {
+            const webUsers = rows.length
+                ? new Map(db.prepare(`SELECT discord_id, discord_username, display_name, discord_avatar FROM web_users WHERE discord_id IN (${rows.map(() => '?').join(',')})`).all(...rows.map((row) => row.customer_id)).map((user) => [user.discord_id, user]))
+                : new Map();
+
+            const richRows = rows.map((row) => {
                 let displayName = `Khách #${row.customer_id.slice(-4)}`;
                 let avatar = null;
-
-                if (client) {
-                    try {
-                        if (guild) {
-                            const member = await guild.members.fetch(row.customer_id).catch(() => null);
-                            if (member) {
-                                displayName = member.displayName || member.user.username;
-                                avatar = member.user.displayAvatarURL({ size: 128 });
-                            } else {
-                                const user = await client.users.fetch(row.customer_id).catch(() => null);
-                                if (user) {
-                                    displayName = user.username;
-                                    avatar = user.displayAvatarURL({ size: 128 });
-                                }
-                            }
-                        } else {
-                            const user = await client.users.fetch(row.customer_id).catch(() => null);
-                            if (user) {
-                                displayName = user.username;
-                                avatar = user.displayAvatarURL({ size: 128 });
-                            }
-                        }
-                    } catch (e) {
-                        console.error(`Error fetching user ${row.customer_id}:`, e);
-                    }
-                }
+                const member = guild?.members?.cache?.get(row.customer_id) || null;
+                const cachedUser = member?.user || client?.users?.cache?.get(row.customer_id) || null;
+                const webUser = webUsers.get(row.customer_id);
+                displayName = member?.displayName || cachedUser?.username || webUser?.discord_username || webUser?.display_name || displayName;
+                avatar = cachedUser?.displayAvatarURL?.({ size: 128 })
+                    || (/^https:\/\//i.test(webUser?.discord_avatar || '') ? webUser.discord_avatar : null);
 
                 return {
                     customer_id: row.customer_id,
@@ -581,7 +612,7 @@ export function registerBotApiRoutes(app) {
                     customer_name: displayName,
                     customer_avatar: avatar
                 };
-            }));
+            });
 
             res.json({ ok: true, data: richRows });
         } catch (error) {
@@ -595,6 +626,20 @@ export function registerBotApiRoutes(app) {
     app.get('/api/bot/products', (req, res) => {
         const result = safeQuery(listPublicProducts);
         res.json(result);
+    });
+
+    app.get('/api/bot/product-images/:filename', (req, res) => {
+        const filename = String(req.params.filename || '');
+        if (!/^[a-f0-9]{64}\.(?:png|jpe?g|webp)$/i.test(filename)) {
+            return res.status(404).end();
+        }
+        const imageDir = path.resolve(path.dirname(db.name), 'product-images');
+        const filePath = path.resolve(imageDir, filename);
+        if (!filePath.startsWith(`${imageDir}${path.sep}`) || !fs.existsSync(filePath)) {
+            return res.status(404).end();
+        }
+        res.set('Cache-Control', 'public, max-age=31536000, immutable');
+        return res.sendFile(filePath);
     });
 
     app.get('/api/bot/products/:slugOrId/reviews', (req, res) => {
