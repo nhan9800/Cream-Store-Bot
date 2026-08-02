@@ -12,6 +12,15 @@ import { db } from '../database/db.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { getWalletBalance, addWalletBalance } from './walletService.js'; // To be used for Wallet rewards
 
+function transitionGiveawayStatus(messageId, fromStatus, toStatus) {
+  const result = db.prepare(`
+    UPDATE giveaways
+    SET status = ?
+    WHERE message_id = ? AND status = ?
+  `).run(toStatus, messageId, fromStatus);
+  return result.changes === 1;
+}
+
 /**
  * Tạo một Giveaway mới
  */
@@ -128,8 +137,8 @@ export async function endGiveaway(client, messageId) {
   const giveaway = db.prepare('SELECT * FROM giveaways WHERE message_id = ? AND status = ?').get(messageId, 'ACTIVE');
   if (!giveaway) return null;
 
-  // Mark as ended
-  db.prepare('UPDATE giveaways SET status = ? WHERE message_id = ?').run('ENDED', messageId);
+  // Only one process may claim this transition. Other workers stop here.
+  if (!transitionGiveawayStatus(messageId, 'ACTIVE', 'ENDED')) return null;
 
   const channel = await client.channels.fetch(giveaway.channel_id).catch(() => null);
   if (!channel) return null;
@@ -231,6 +240,39 @@ export async function rerollGiveaway(client, messageId) {
   }
 
   return true;
+}
+
+/**
+ * Cancel and remove giveaways that were created automatically by the bot.
+ * Manually-created giveaways use a human host ID and are left untouched.
+ */
+export async function cancelBotHostedGiveaways(client) {
+  const botId = String(client.user?.id || '').trim();
+  if (!botId) return { cancelled: 0, deleted: 0 };
+
+  const active = db.prepare(`
+    SELECT message_id, channel_id
+    FROM giveaways
+    WHERE status = 'ACTIVE' AND host_id = ?
+  `).all(botId);
+
+  let cancelled = 0;
+  let deleted = 0;
+  for (const giveaway of active) {
+    if (!transitionGiveawayStatus(giveaway.message_id, 'ACTIVE', 'CANCELLED')) continue;
+    cancelled += 1;
+
+    const channel = await client.channels.fetch(giveaway.channel_id).catch(() => null);
+    const message = channel
+      ? await channel.messages.fetch(giveaway.message_id).catch(() => null)
+      : null;
+    if (message && await message.delete().then(() => true).catch(() => false)) deleted += 1;
+  }
+
+  if (cancelled > 0) {
+    console.log(`[GIVEAWAY] Cancelled ${cancelled} bot-hosted giveaway(s); deleted ${deleted} message(s).`);
+  }
+  return { cancelled, deleted };
 }
 
 /**

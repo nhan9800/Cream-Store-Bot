@@ -72,12 +72,12 @@ export async function buildClient() {
       readyClient.on('inviteDelete', invite => handleInviteDelete(invite));
     }).catch(err => console.error('Failed to import inviteTrackerService', err));
 
-    // Tự động setup kênh Giveaway (chỉ chạy 1 lần nếu chưa có)
-    import('./services/autoSetupGiveawayService.js').then(({ autoSetupGiveawayChannel }) => {
-      autoSetupGiveawayChannel(readyClient).catch(err => {
-        console.log(`[AUTO-SETUP-GIVEAWAY] Lỗi chạy setup giveaway: ${err.message}`);
+    // Remove legacy auto-created giveaways. Manual /giveaway events are preserved.
+    import('./services/giveawayService.js').then(({ cancelBotHostedGiveaways }) => {
+      cancelBotHostedGiveaways(readyClient).catch(err => {
+        console.log(`[GIVEAWAY] Failed to cancel legacy automatic giveaway: ${err.message}`);
       });
-    }).catch(err => console.error('Failed to import autoSetupGiveawayService', err));
+    }).catch(err => console.error('Failed to import giveawayService', err));
 
     // Tự động setup Premium Products (Đã setup xong, tắt auto-run mỗi lần restart để tránh lặp panel)
     /*
