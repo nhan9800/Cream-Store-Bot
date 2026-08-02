@@ -7,24 +7,24 @@ import { resolveProductEmoji } from './emojiService.js';
 
 export function getActiveProducts(guildId) {
   let products = db.prepare(
-    'SELECT * FROM product_catalog WHERE guild_id = ? AND is_active = 1 ORDER BY sort_order ASC, id ASC'
-  ).all(guildId);
+    "SELECT * FROM product_catalog WHERE guild_id = 'WEB' AND is_active = 1 ORDER BY is_featured DESC, sort_order ASC, id ASC"
+  ).all();
   if (!products || products.length === 0) {
     products = db.prepare(
-      'SELECT * FROM product_catalog WHERE guild_id = \'WEB\' AND is_active = 1 ORDER BY sort_order ASC, id ASC'
-    ).all();
+      'SELECT * FROM product_catalog WHERE guild_id = ? AND is_active = 1 ORDER BY sort_order ASC, id ASC'
+    ).all(guildId);
   }
   return products;
 }
 
 export function getAllProducts(guildId) {
   let products = db.prepare(
-    'SELECT * FROM product_catalog WHERE guild_id = ? ORDER BY sort_order ASC, id ASC'
-  ).all(guildId);
+    "SELECT * FROM product_catalog WHERE guild_id = 'WEB' ORDER BY sort_order ASC, id ASC"
+  ).all();
   if (!products || products.length === 0) {
     products = db.prepare(
-      'SELECT * FROM product_catalog WHERE guild_id = \'WEB\' ORDER BY sort_order ASC, id ASC'
-    ).all();
+      'SELECT * FROM product_catalog WHERE guild_id = ? ORDER BY sort_order ASC, id ASC'
+    ).all(guildId);
   }
   return products;
 }
@@ -35,25 +35,29 @@ export function getProductById(productId) {
 
 export function getProductByName(guildId, name) {
   let product = db.prepare(
-    'SELECT * FROM product_catalog WHERE guild_id = ? AND LOWER(name) = LOWER(?) LIMIT 1'
-  ).get(guildId, name) ?? null;
+    "SELECT * FROM product_catalog WHERE guild_id = 'WEB' AND LOWER(name) = LOWER(?) LIMIT 1"
+  ).get(name) ?? null;
   if (!product) {
     product = db.prepare(
-      'SELECT * FROM product_catalog WHERE guild_id = \'WEB\' AND LOWER(name) = LOWER(?) LIMIT 1'
-    ).get(name) ?? null;
+      'SELECT * FROM product_catalog WHERE guild_id = ? AND LOWER(name) = LOWER(?) LIMIT 1'
+    ).get(guildId, name) ?? null;
   }
   return product;
 }
 
 export function addProduct({ guildId, name, description, price, durationMonths = 1, serviceType = 'other', emoji = 'order_product' }) {
   const timestamp = nowIso();
-  const maxSort = db.prepare('SELECT MAX(sort_order) AS mx FROM product_catalog WHERE guild_id = ?').get(guildId);
+  const catalogGuildId = 'WEB';
+  const duplicate = db.prepare(`SELECT * FROM product_catalog WHERE guild_id = ? AND LOWER(TRIM(name)) = LOWER(TRIM(?)) AND duration_months = ? LIMIT 1`).get(catalogGuildId, name, durationMonths);
+  if (duplicate) return duplicate;
+  const key = String(name || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/gi, 'd').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 120);
+  const maxSort = db.prepare('SELECT MAX(sort_order) AS mx FROM product_catalog WHERE guild_id = ?').get(catalogGuildId);
   const sortOrder = (maxSort?.mx ?? 0) + 1;
 
   const result = db.prepare(`
-    INSERT INTO product_catalog (guild_id, name, description, price, duration_months, service_type, emoji, sort_order, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(guildId, name, description ?? null, Math.max(0, Number(price) || 0), durationMonths, serviceType, emoji, sortOrder, timestamp, timestamp);
+    INSERT INTO product_catalog (guild_id, name, description, price, duration_months, service_type, emoji, sort_order, product_key, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(catalogGuildId, name, description ?? null, Math.max(0, Number(price) || 0), durationMonths, serviceType, emoji, sortOrder, key, timestamp, timestamp);
 
   return getProductById(Number(result.lastInsertRowid));
 }
@@ -101,8 +105,8 @@ export function saveStockMessage(guildId, channelId, messageId) {
   // Lưu channel/message ID cho mỗi guild để có thể update panel sau
   db.prepare(`
     UPDATE product_catalog SET stock_channel_id = ?, stock_message_id = ?, updated_at = ?
-    WHERE guild_id = ? AND is_active = 1
-  `).run(channelId, messageId, nowIso(), guildId);
+    WHERE guild_id = 'WEB' AND is_active = 1
+  `).run(channelId, messageId, nowIso());
 }
 
 // ═══════════════════════════════════════════════

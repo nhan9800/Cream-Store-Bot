@@ -101,6 +101,68 @@ function safeQuery(fn) {
     }
 }
 
+const PUBLIC_PRODUCT_COLUMNS = `
+    pc.id, pc.guild_id, pc.name, pc.description, pc.price, pc.duration_months,
+    pc.service_type, pc.emoji, pc.is_active, pc.sort_order, pc.original_price,
+    pc.product_key, pc.is_featured, pc.virtual_purchase_count,
+    (
+      SELECT COUNT(*)
+      FROM account_stock stock
+      WHERE stock.status = 'AVAILABLE'
+        AND (LOWER(stock.service_type) = LOWER(pc.name) OR LOWER(stock.service_type) = LOWER(pc.service_type))
+    ) AS stock_count,
+    COALESCE(pc.virtual_purchase_count, 0) + COALESCE((
+      SELECT SUM(COALESCE(o.quantity, 1))
+      FROM orders o
+      WHERE o.status != 'CANCELLED'
+        AND o.payment_status IN ('PAID', 'FREE')
+        AND LOWER(TRIM(o.product_name)) = LOWER(TRIM(pc.name))
+    ), 0) AS purchase_count,
+    COALESCE((
+      SELECT COUNT(*) FROM feedbacks f
+      WHERE f.is_visible = 1
+        AND (f.product_id = pc.id OR LOWER(TRIM(f.product_name)) = LOWER(TRIM(pc.name)))
+    ), 0) AS review_count,
+    COALESCE((
+      SELECT ROUND(AVG(f.stars), 1) FROM feedbacks f
+      WHERE f.is_visible = 1
+        AND (f.product_id = pc.id OR LOWER(TRIM(f.product_name)) = LOWER(TRIM(pc.name)))
+    ), 0) AS average_rating
+`;
+
+function listPublicProducts() {
+    return db.prepare(`
+        SELECT ${PUBLIC_PRODUCT_COLUMNS}
+        FROM product_catalog pc
+        WHERE pc.is_active = 1 AND pc.guild_id = 'WEB'
+        ORDER BY pc.is_featured DESC, pc.sort_order ASC, pc.name ASC
+    `).all();
+}
+
+function findPublicProduct(query) {
+    const normalized = String(query || '').trim().toLowerCase();
+    return listPublicProducts().find((product) => (
+        String(product.id) === normalized
+        || String(product.product_key || '').toLowerCase() === normalized
+        || String(product.name || '').toLowerCase() === normalized
+        || String(product.name || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/gi, 'd').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') === normalized
+    )) || null;
+}
+
+function normalizeProductName(value) {
+    return String(value || '').trim().toLocaleLowerCase('vi');
+}
+
+function enrichFeedbackAuthor(feedback, req) {
+    const client = req.app.locals.discordClient;
+    const member = client?.guilds?.cache?.get(config.guildId)?.members?.cache?.get(feedback.customer_id) || null;
+    const cachedUser = member?.user || client?.users?.cache?.get(feedback.customer_id) || null;
+    const webUser = db.prepare('SELECT display_name, discord_username, discord_avatar FROM web_users WHERE discord_id = ? LIMIT 1').get(feedback.customer_id);
+    const customerName = member?.displayName || cachedUser?.username || webUser?.discord_username || webUser?.display_name || `Khách #${String(feedback.customer_id).slice(-4)}`;
+    const customerAvatar = cachedUser?.displayAvatarURL?.({ size: 128 }) || (/^https:\/\//i.test(webUser?.discord_avatar || '') ? webUser.discord_avatar : null);
+    return { ...feedback, customer_name: customerName, customer_avatar: customerAvatar };
+}
+
 /**
  * Register all /api/bot/* routes lên app Express
  */
@@ -200,8 +262,8 @@ export function registerBotApiRoutes(app) {
                 // Doanh thu: chỉ tính đơn đã PAID + không bị hủy
                 total_revenue: db.prepare("SELECT COALESCE(SUM(amount_paid), 0) as s FROM orders WHERE payment_status = 'PAID' AND status != 'CANCELLED'").get()?.s ?? 0,
                 total_customers: db.prepare("SELECT COUNT(DISTINCT customer_id) as c FROM customer_profiles").get()?.c ?? 0,
-                total_feedbacks: db.prepare("SELECT COUNT(*) as c FROM feedbacks").get()?.c ?? 0,
-                avg_rating: db.prepare("SELECT ROUND(AVG(stars), 2) as r FROM feedbacks").get()?.r ?? null,
+                total_feedbacks: db.prepare("SELECT COUNT(*) as c FROM feedbacks WHERE is_visible = 1").get()?.c ?? 0,
+                avg_rating: db.prepare("SELECT ROUND(AVG(stars), 2) as r FROM feedbacks WHERE is_visible = 1").get()?.r ?? null,
                 today_orders: db.prepare(`
                     SELECT COUNT(*) as c FROM orders
                     WHERE date(created_at) = date('now', 'localtime')
@@ -351,7 +413,7 @@ export function registerBotApiRoutes(app) {
                 : null;
             const search = String(q || '').trim().slice(0, 80);
 
-            let whereSql = 'WHERE 1=1';
+            let whereSql = 'WHERE is_visible = 1';
             const params = {};
             if (customer_id) {
                 whereSql += ' AND customer_id = @customer_id';
@@ -362,13 +424,13 @@ export function registerBotApiRoutes(app) {
                 params.min_stars = minStars;
             }
             if (search) {
-                whereSql += ' AND (content LIKE @search OR order_code LIKE @search OR customer_id LIKE @search)';
+                whereSql += ' AND (content LIKE @search OR order_code LIKE @search OR customer_id LIKE @search OR product_name LIKE @search)';
                 params.search = `%${search}%`;
             }
 
             const total = db.prepare(`SELECT COUNT(*) AS total FROM feedbacks ${whereSql}`).get(params)?.total ?? 0;
             const sql = `
-                SELECT id, guild_id, order_code, customer_id, stars, content, created_at
+                SELECT id, guild_id, order_code, customer_id, product_id, product_name, stars, content, created_at, updated_at
                 FROM feedbacks ${whereSql}
                 ORDER BY created_at DESC
                 LIMIT @lim OFFSET @offset
@@ -432,6 +494,8 @@ export function registerBotApiRoutes(app) {
                     order_code: fb.order_code,
                     customer_id: fb.customer_id,
                     stars: fb.stars,
+                    product_id: fb.product_id,
+                    product_name: fb.product_name,
                     content: fb.content,
                     created_at: fb.created_at,
                     customer_name: displayName,
@@ -529,58 +593,90 @@ export function registerBotApiRoutes(app) {
 
     // ── PRODUCTS — bảng giá sản phẩm bot bán ───────────────
     app.get('/api/bot/products', (req, res) => {
-        const result = safeQuery(() =>
-            db.prepare(`
-                SELECT pc.id, pc.guild_id, pc.name, pc.description, pc.price, pc.duration_months,
-                       pc.service_type, pc.emoji, pc.is_active, pc.sort_order, pc.original_price,
-                       (
-                         SELECT COUNT(*)
-                         FROM account_stock stock
-                         WHERE stock.status = 'AVAILABLE'
-                           AND (
-                             LOWER(stock.service_type) = LOWER(pc.name)
-                             OR LOWER(stock.service_type) = LOWER(pc.service_type)
-                           )
-                       ) AS stock_count
-                FROM product_catalog pc
-                WHERE pc.is_active = 1
-                ORDER BY pc.sort_order ASC, pc.name ASC
-            `).all()
-        );
+        const result = safeQuery(listPublicProducts);
         res.json(result);
+    });
+
+    app.get('/api/bot/products/:slugOrId/reviews', (req, res) => {
+        try {
+            const product = findPublicProduct(req.params.slugOrId);
+            if (!product) return res.status(404).json({ ok: false, error: 'Sản phẩm không tồn tại' });
+            const limit = Math.min(50, Math.max(1, Number(req.query.limit) || 20));
+            const reviews = db.prepare(`
+                SELECT id, guild_id, order_code, customer_id, product_id, product_name, stars, content, created_at, updated_at
+                FROM feedbacks
+                WHERE is_visible = 1
+                  AND (product_id = ? OR LOWER(TRIM(product_name)) = LOWER(TRIM(?)))
+                ORDER BY created_at DESC
+                LIMIT ?
+            `).all(product.id, product.name, limit).map((review) => enrichFeedbackAuthor(review, req));
+            return res.json({ ok: true, data: reviews });
+        } catch (error) {
+            console.error('[BOT_API] Product reviews error:', error);
+            return res.status(500).json({ ok: false, error: 'Không thể tải đánh giá sản phẩm.' });
+        }
+    });
+
+    app.post('/api/bot/products/:slugOrId/reviews', (req, res) => {
+        try {
+            const customerId = String(req.header('x-discord-id') || '').trim();
+            if (!/^\d{15,22}$/.test(customerId)) {
+                return res.status(401).json({ ok: false, error: 'Vui lòng đăng nhập và liên kết Discord để đánh giá.' });
+            }
+            const product = findPublicProduct(req.params.slugOrId);
+            if (!product) return res.status(404).json({ ok: false, error: 'Sản phẩm không tồn tại' });
+
+            const stars = Number(req.body?.stars);
+            const content = String(req.body?.content || '').trim();
+            const requestedOrderCode = String(req.body?.order_code || '').trim().toUpperCase();
+            if (!Number.isInteger(stars) || stars < 1 || stars > 5) {
+                return res.status(400).json({ ok: false, error: 'Số sao phải từ 1 đến 5.' });
+            }
+            if (content.length < 10 || content.length > 1000) {
+                return res.status(400).json({ ok: false, error: 'Nội dung đánh giá cần từ 10 đến 1000 ký tự.' });
+            }
+
+            const order = requestedOrderCode
+                ? db.prepare(`SELECT * FROM orders WHERE order_code = ? AND customer_id = ? AND status = 'COMPLETED' LIMIT 1`).get(requestedOrderCode, customerId)
+                : db.prepare(`
+                    SELECT o.* FROM orders o
+                    WHERE o.customer_id = ? AND o.status = 'COMPLETED'
+                      AND LOWER(TRIM(o.product_name)) = LOWER(TRIM(?))
+                      AND NOT EXISTS (SELECT 1 FROM feedbacks f WHERE f.order_id = o.id)
+                    ORDER BY COALESCE(o.completed_at, o.created_at) DESC LIMIT 1
+                  `).get(customerId, product.name);
+            if (!order || normalizeProductName(order.product_name) !== normalizeProductName(product.name)) {
+                return res.status(403).json({ ok: false, error: 'Bạn cần một đơn hoàn thành của sản phẩm này để gửi đánh giá.' });
+            }
+            if (db.prepare('SELECT 1 FROM feedbacks WHERE order_id = ? LIMIT 1').get(order.id)) {
+                return res.status(409).json({ ok: false, error: 'Đơn hàng này đã được đánh giá.' });
+            }
+
+            const timestamp = nowIso();
+            const result = db.prepare(`
+                INSERT INTO feedbacks (
+                  guild_id, order_id, order_code, ticket_id, ticket_code, customer_id,
+                  stars, content, feedback_channel_id, product_id, product_name, is_visible, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, 'WEB', ?, ?, 1, ?, ?)
+            `).run(order.guild_id, order.id, order.order_code, order.ticket_id, customerId, stars, content, product.id, product.name, timestamp, timestamp);
+            db.prepare('UPDATE orders SET feedback_submitted_at = ?, updated_at = ? WHERE id = ?').run(timestamp, timestamp, order.id);
+            const review = db.prepare('SELECT * FROM feedbacks WHERE id = ?').get(result.lastInsertRowid);
+            return res.status(201).json({ ok: true, data: enrichFeedbackAuthor(review, req) });
+        } catch (error) {
+            console.error('[BOT_API] Product review submit error:', error);
+            return res.status(500).json({ ok: false, error: 'Không thể lưu đánh giá lúc này.' });
+        }
     });
 
     // ── PRODUCT DETAIL BY SLUG OR ID ─────────────────────────
     app.get('/api/bot/products/:slugOrId', (req, res) => {
         const query = String(req.params.slugOrId || '').trim();
-        const result = safeQuery(() => {
-            const allProducts = db.prepare(`
-                SELECT pc.id, pc.guild_id, pc.name, pc.description, pc.price, pc.duration_months,
-                       pc.service_type, pc.emoji, pc.is_active, pc.sort_order, pc.original_price,
-                       (
-                         SELECT COUNT(*)
-                         FROM account_stock stock
-                         WHERE stock.status = 'AVAILABLE'
-                           AND (
-                             LOWER(stock.service_type) = LOWER(pc.name)
-                             OR LOWER(stock.service_type) = LOWER(pc.service_type)
-                           )
-                       ) AS stock_count
-                FROM product_catalog pc
-                WHERE pc.is_active = 1
-            `).all();
-            const norm = query.toLowerCase();
-            const match = allProducts.find(p =>
-                String(p.id) === norm ||
-                String(p.name || '').toLowerCase() === norm ||
-                String(p.name || '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') === norm
-            );
-            return match || null;
-        });
-        if (!result) {
+        const result = safeQuery(() => findPublicProduct(query));
+        if (!result.ok) return res.status(500).json(result);
+        if (!result.data) {
             return res.status(404).json({ ok: false, error: 'Sản phẩm không tồn tại' });
         }
-        res.json({ ok: true, data: result });
+        res.json({ ok: true, data: result.data });
     });
 
     // ── TOP CUSTOMERS — top N khách mua nhiều ─────────────

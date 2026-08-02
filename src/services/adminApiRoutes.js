@@ -16,6 +16,17 @@ import { getAiKnowledge, updateAiKnowledge } from './aiKnowledgeService.js';
 import { transitionOrderStatus } from './orderStateMachine.js';
 import { encrypt, decrypt } from '../utils/crypto.js';
 
+function catalogKey(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/gi, 'd')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 120);
+}
+
 export function registerAdminRoutes(app) {
   function safeEqual(a, b) {
     const bufA = Buffer.from(String(a ?? ''), 'utf8');
@@ -110,7 +121,7 @@ export function registerAdminRoutes(app) {
   // ==== 2. PRODUCTS ====
   app.get('/api/bot/admin/products', requireAdminRole, (req, res) => {
     try {
-      const products = db.prepare('SELECT * FROM product_catalog ORDER BY sort_order ASC, id DESC').all();
+      const products = db.prepare("SELECT * FROM product_catalog WHERE guild_id = 'WEB' ORDER BY sort_order ASC, id DESC").all();
       res.json({ ok: true, data: products });
     } catch (e) {
       console.error('[ADMIN]', e); res.status(500).json({ ok: false, error: 'Lỗi máy chủ nội bộ.' });
@@ -119,11 +130,15 @@ export function registerAdminRoutes(app) {
 
   app.post('/api/bot/admin/products', requireAdminRole, (req, res) => {
     try {
-      const { name, description, price, duration_months, service_type, is_active, sort_order, require_email, require_phone, original_price } = req.body;
+      const { name, description, price, duration_months, service_type, emoji, is_active, is_featured, virtual_purchase_count, sort_order, require_email, require_phone, original_price } = req.body;
+      const safeName = sanitizeString(name, 180).trim();
+      if (!safeName) return errorResponse(res, 400, 'Tên sản phẩm không được để trống.');
+      const duplicate = db.prepare(`SELECT id FROM product_catalog WHERE guild_id = 'WEB' AND LOWER(TRIM(name)) = LOWER(TRIM(?)) AND duration_months = ? LIMIT 1`).get(safeName, Number(duration_months) || 1);
+      if (duplicate) return errorResponse(res, 409, 'Sản phẩm cùng tên và thời hạn đã tồn tại.');
       const result = db.prepare(`
-        INSERT INTO product_catalog (guild_id, name, description, price, duration_months, service_type, is_active, sort_order, require_email, require_phone, original_price)
-        VALUES ('WEB', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(name, description, price, duration_months || 1, service_type || 'other', is_active ? 1 : 0, sort_order || 0, require_email ? 1 : 0, require_phone ? 1 : 0, original_price || 0);
+        INSERT INTO product_catalog (guild_id, name, description, price, duration_months, service_type, emoji, is_active, is_featured, virtual_purchase_count, sort_order, require_email, require_phone, original_price, product_key)
+        VALUES ('WEB', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(safeName, sanitizeString(description, 2000), Math.max(0, Number(price) || 0), Math.max(1, Number(duration_months) || 1), sanitizeString(service_type, 40) || 'other', sanitizeString(emoji, 80) || '📦', is_active ? 1 : 0, is_featured ? 1 : 0, Math.max(0, Number(virtual_purchase_count) || 0), Number(sort_order) || 0, require_email ? 1 : 0, require_phone ? 1 : 0, Math.max(0, Number(original_price) || 0), catalogKey(safeName));
       
       res.json({ ok: true, id: result.lastInsertRowid });
     } catch (e) {
@@ -133,16 +148,58 @@ export function registerAdminRoutes(app) {
 
   app.put('/api/bot/admin/products/:id', requireAdminRole, (req, res) => {
     try {
-      const { name, description, price, duration_months, service_type, is_active, sort_order, require_email, require_phone, original_price } = req.body;
+      const { name, description, price, duration_months, service_type, emoji, is_active, is_featured, virtual_purchase_count, sort_order, require_email, require_phone, original_price } = req.body;
+      const safeName = sanitizeString(name, 180).trim();
+      if (!safeName) return errorResponse(res, 400, 'Tên sản phẩm không được để trống.');
+      const duplicate = db.prepare(`SELECT id FROM product_catalog WHERE guild_id = 'WEB' AND id != ? AND LOWER(TRIM(name)) = LOWER(TRIM(?)) AND duration_months = ? LIMIT 1`).get(req.params.id, safeName, Number(duration_months) || 1);
+      if (duplicate) return errorResponse(res, 409, 'Sản phẩm cùng tên và thời hạn đã tồn tại.');
       db.prepare(`
         UPDATE product_catalog 
-        SET name = ?, description = ?, price = ?, duration_months = ?, service_type = ?, is_active = ?, sort_order = ?, require_email = ?, require_phone = ?, original_price = ?, updated_at = CURRENT_TIMESTAMP
+        SET name = ?, description = ?, price = ?, duration_months = ?, service_type = ?, emoji = ?, is_active = ?, is_featured = ?, virtual_purchase_count = ?, sort_order = ?, require_email = ?, require_phone = ?, original_price = ?, updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
-      `).run(name, description, price, duration_months, service_type, is_active ? 1 : 0, sort_order, require_email ? 1 : 0, require_phone ? 1 : 0, original_price || 0, req.params.id);
+      `).run(safeName, sanitizeString(description, 2000), Math.max(0, Number(price) || 0), Math.max(1, Number(duration_months) || 1), sanitizeString(service_type, 40) || 'other', sanitizeString(emoji, 80) || '📦', is_active ? 1 : 0, is_featured ? 1 : 0, Math.max(0, Number(virtual_purchase_count) || 0), Number(sort_order) || 0, require_email ? 1 : 0, require_phone ? 1 : 0, Math.max(0, Number(original_price) || 0), req.params.id);
       
       res.json({ ok: true });
     } catch (e) {
       console.error('[ADMIN]', e); res.status(500).json({ ok: false, error: 'Lỗi máy chủ nội bộ.' });
+    }
+  });
+
+  // ==== 2.1 PRODUCT REVIEWS ====
+  app.get('/api/bot/admin/reviews', requireAdminRole, (req, res) => {
+    try {
+      const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 100));
+      const reviews = db.prepare(`
+        SELECT f.*, COALESCE(u.discord_username, u.display_name, 'Khách #' || SUBSTR(f.customer_id, -4)) AS customer_name
+        FROM feedbacks f
+        LEFT JOIN web_users u ON u.discord_id = f.customer_id
+        ORDER BY f.created_at DESC LIMIT ?
+      `).all(limit);
+      return res.json({ ok: true, data: reviews });
+    } catch (e) {
+      console.error('[ADMIN] reviews', e);
+      return res.status(500).json({ ok: false, error: 'Không thể tải danh sách đánh giá.' });
+    }
+  });
+
+  app.put('/api/bot/admin/reviews/:id', requireAdminRole, (req, res) => {
+    try {
+      const stars = Math.min(5, Math.max(1, Number(req.body?.stars) || 5));
+      const content = sanitizeString(req.body?.content, 1000).trim();
+      const productId = req.body?.product_id ? Number(req.body.product_id) : null;
+      const isVisible = req.body?.is_visible ? 1 : 0;
+      if (content.length < 3) return errorResponse(res, 400, 'Nội dung đánh giá quá ngắn.');
+      const product = productId ? db.prepare('SELECT id, name FROM product_catalog WHERE id = ?').get(productId) : null;
+      const result = db.prepare(`
+        UPDATE feedbacks
+        SET stars = ?, content = ?, product_id = ?, product_name = COALESCE(?, product_name), is_visible = ?, updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?
+      `).run(stars, content, product?.id || null, product?.name || null, isVisible, req.params.id);
+      if (!result.changes) return errorResponse(res, 404, 'Không tìm thấy đánh giá.');
+      return successResponse(res, null, 'Đã cập nhật đánh giá.');
+    } catch (e) {
+      console.error('[ADMIN] review update', e);
+      return res.status(500).json({ ok: false, error: 'Không thể cập nhật đánh giá.' });
     }
   });
 

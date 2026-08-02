@@ -569,6 +569,28 @@ export function initDatabase() {
   ensureColumn('product_catalog', 'warranty_policy', 'TEXT');
   ensureColumn('product_catalog', 'delivery_instructions', 'TEXT');
   ensureColumn('product_catalog', 'estimated_delivery_time', 'TEXT');
+  ensureColumn('product_catalog', 'product_key', 'TEXT');
+  ensureColumn('product_catalog', 'is_featured', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn('product_catalog', 'virtual_purchase_count', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn('feedbacks', 'product_id', 'INTEGER');
+  ensureColumn('feedbacks', 'product_name', 'TEXT');
+  ensureColumn('feedbacks', 'is_visible', 'INTEGER NOT NULL DEFAULT 1');
+  ensureColumn('feedbacks', 'updated_at', 'TEXT');
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_product_catalog_key ON product_catalog (guild_id, product_key);
+    CREATE INDEX IF NOT EXISTS idx_feedbacks_product ON feedbacks (product_id, is_visible, created_at);
+  `);
+
+  db.prepare(`
+    UPDATE feedbacks
+    SET product_name = COALESCE(
+      product_name,
+      (SELECT product_name FROM orders WHERE orders.id = feedbacks.order_id),
+      (SELECT product_name FROM orders WHERE orders.order_code = feedbacks.order_code)
+    )
+    WHERE product_name IS NULL
+  `).run();
   // ─── Boost Server Live ───────────────────────────────────────────────────
   db.exec(`
     CREATE TABLE IF NOT EXISTS boost_server_orders (
@@ -905,15 +927,16 @@ export function seedProductCatalog(dbInstance) {
     // AI & Phần Mềm
     { name: 'Gemini Advanced & 5 TB Google One (1 Năm - Full BH)', description: 'Đăng ký sử dụng gói cước 1 năm, hỗ trợ bảo hành toàn diện từ shop.', price: 200000, duration_months: 12, service_type: 'AI', emoji: 'brand_gemini', original_price: 350000 },
     { name: 'Gemini Advanced & 5 TB Google One (1 Năm - Không BH)', description: 'Đăng ký sử dụng gói cước 1 năm, không đi kèm chính sách bảo hành.', price: 120000, duration_months: 12, service_type: 'AI', emoji: 'brand_gemini', original_price: 0 },
-    { name: 'Claude Pro Add Team 1 Tháng (Full BH)', description: 'Thêm vào Team Claude Pro trong 1 tháng. Bảo hành trọn gói.', price: 390000, duration_months: 1, service_type: 'AI', emoji: 'brand_claude', original_price: 490000 },
+    { product_key: 'claude-pro-1-month', name: 'Claude Pro 1 Tháng (Full BH)', aliases: ['Claude Pro Add Team 1 Tháng (Full BH)'], description: 'Claude Pro trong 1 tháng, bảo hành trọn gói tại Cenar Store.', price: 460000, duration_months: 1, service_type: 'AI', emoji: 'brand_claude', original_price: 490000, is_featured: 1, virtual_purchase_count: 126 },
     { name: 'ChatGPT Plus 1 Tháng (Cấp Tài Khoản)', description: 'Nhận tài khoản ChatGPT Plus đã kích hoạt sẵn trong 1 tháng.', price: 280000, duration_months: 1, service_type: 'AI', emoji: 'brand_chatgpt', original_price: 350000 },
     { name: 'ChatGPT Plus 1 Tháng (Chính Chủ - Full BH)', description: 'Nâng cấp chính chủ tài khoản ChatGPT của bạn trong 1 tháng.', price: 390000, duration_months: 1, service_type: 'AI', emoji: 'brand_chatgpt', original_price: 490000 },
     { name: 'Chat GPT Plus Cấp Acc FULL bảo Hành 1 tháng', description: 'Tài khoản ChatGPT Plus cấp sẵn FULL bảo hành 1 tháng.', price: 230000, duration_months: 1, service_type: 'AI', emoji: 'brand_chatgpt', original_price: 0 },
     { name: 'Gemini Pro + 5TB Google Driver (12 Tháng)', description: 'Gói Gemini Pro đi kèm dung lượng 5TB Google Drive trong 12 tháng.', price: 250000, duration_months: 12, service_type: 'AI', emoji: 'brand_gemini', original_price: 0 },
-    { name: 'Office 365 + 1 TB One Driver (12 Tháng)', description: 'Tài khoản Office 365 đi kèm 1 TB dung lượng lưu trữ OneDrive trong 12 tháng.', price: 250000, duration_months: 12, service_type: 'AI', emoji: 'brand_office', original_price: 0 },
-    { name: 'Adobe Creative Cloud All Apps (1 Tháng - 2 Thiết Bị)', description: 'Kích hoạt bộ công cụ Adobe All Apps dùng cho 2 thiết bị trong 1 tháng.', price: 80000, duration_months: 1, service_type: 'AI', emoji: 'brand_adobe', original_price: 120000 },
+    { product_key: 'adobe-creative-cloud-1-month', name: 'Adobe Creative Cloud 1 Tháng', aliases: ['Adobe Creative Cloud All Apps (1 Tháng - 2 Thiết Bị)'], description: 'Adobe Creative Cloud All Apps trong 1 tháng, phù hợp cho thiết kế, dựng phim và sáng tạo nội dung.', price: 120000, duration_months: 1, service_type: 'AI', emoji: 'brand_adobe', original_price: 150000, is_featured: 1, virtual_purchase_count: 214 },
+    { product_key: 'adobe-creative-cloud-trial-3-months', name: 'Adobe Creative Cloud Trial 3 Tháng', description: 'Gói Adobe Creative Cloud Trial 3 tháng, đầy đủ bộ công cụ sáng tạo phổ biến.', price: 250000, duration_months: 3, service_type: 'AI', emoji: 'brand_adobe', original_price: 320000, is_featured: 1, virtual_purchase_count: 87 },
+    { product_key: 'adobe-creative-cloud-trial-4-months', name: 'Adobe Creative Cloud Trial 4 Tháng', description: 'Gói Adobe Creative Cloud Trial 4 tháng, tối ưu chi phí cho nhu cầu sử dụng dài hơn.', price: 350000, duration_months: 4, service_type: 'AI', emoji: 'brand_adobe', original_price: 450000, is_featured: 1, virtual_purchase_count: 63 },
     { name: 'Adobe Creative Cloud All Apps (2 Tháng - 2 Thiết Bị)', description: 'Kích hoạt bộ công cụ Adobe All Apps dùng cho 2 thiết bị trong 2 tháng.', price: 180000, duration_months: 2, service_type: 'AI', emoji: 'brand_adobe', original_price: 240000 },
-    { name: 'Office 365 & 1 TB OneDrive (12 Tháng)', description: 'Tài khoản bản quyền Office 365 + 1 TB lưu trữ OneDrive trong 1 năm.', price: 200000, duration_months: 12, service_type: 'AI', emoji: 'brand_office', original_price: 300000 },
+    { product_key: 'office-365-onedrive-12-months', name: 'Office 365 & 1 TB OneDrive (12 Tháng)', aliases: ['Office 365 + 1 TB One Driver (12 Tháng)'], description: 'Tài khoản bản quyền Office 365 + 1 TB lưu trữ OneDrive trong 1 năm.', price: 200000, duration_months: 12, service_type: 'AI', emoji: 'brand_office', original_price: 300000 },
     { name: 'CapCut Pro 1 Tháng (2 Thiết Bị - Cấp Acc)', description: 'Sử dụng CapCut Pro trong 1 tháng, cấp tài khoản riêng dùng tối đa 2 thiết bị.', price: 100000, duration_months: 1, service_type: 'AI', emoji: 'brand_capcut', original_price: 0 },
     { name: 'CapCut Pro 7 Ngày (2 Thiết Bị - Cấp Acc)', description: 'Sử dụng CapCut Pro trong 7 ngày, cấp tài khoản riêng dùng tối đa 2 thiết bị.', price: 20000, duration_months: 1, service_type: 'AI', emoji: 'brand_capcut', original_price: 0 },
     { name: 'CapCut Pro 12 Tháng (3 Thiết Bị - Chính Chủ)', description: 'Nâng cấp chính chủ tài khoản CapCut Pro của bạn trong 12 tháng, dùng cho 3 thiết bị.', price: 1250000, duration_months: 12, service_type: 'AI', emoji: 'brand_capcut', original_price: 0 },
@@ -942,43 +965,77 @@ export function seedProductCatalog(dbInstance) {
     { name: 'Locket Gold — 1 năm', description: 'Nâng cấp trải nghiệm Locket với nhiều tính năng cá nhân hóa, kết nối bạn bè và chia sẻ khoảnh khắc tiện lợi hơn.', price: 150000, duration_months: 12, service_type: 'premium', emoji: 'locket_gold', original_price: 0, base_price: 150000, activation_method: 'USERNAME', username_required: 1, login_required: 0 }
   ];
 
+  const productKey = (product) => String(product.product_key || product.name)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/gi, 'd')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 120);
+
   const insertStmt = dbInstance.prepare(`
     INSERT INTO product_catalog (
       guild_id, name, description, price, duration_months, service_type, emoji, is_active, sort_order, original_price,
-      base_price, base_duration_days, additional_day_price, minimum_days, maximum_days, quota_value, quota_unit, activation_method, username_required, login_required
+      base_price, base_duration_days, additional_day_price, minimum_days, maximum_days, quota_value, quota_unit, activation_method, username_required, login_required,
+      product_key, is_featured, virtual_purchase_count
     )
-    VALUES ('WEB', ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES ('WEB', ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const updateStmt = dbInstance.prepare(`
     UPDATE product_catalog
-    SET description = ?, price = ?, service_type = ?, emoji = ?, original_price = ?,
-        base_price = ?, base_duration_days = ?, additional_day_price = ?, minimum_days = ?, maximum_days = ?, quota_value = ?, quota_unit = ?, activation_method = ?, username_required = ?, login_required = ?
-    WHERE name = ? AND duration_months = ? AND guild_id = 'WEB'
+    SET name = ?, description = ?, price = ?, duration_months = ?, service_type = ?, emoji = ?, original_price = ?,
+        base_price = ?, base_duration_days = ?, additional_day_price = ?, minimum_days = ?, maximum_days = ?, quota_value = ?, quota_unit = ?, activation_method = ?, username_required = ?, login_required = ?,
+        is_featured = CASE WHEN product_key IS NULL THEN ? ELSE is_featured END,
+        virtual_purchase_count = CASE WHEN product_key IS NULL AND virtual_purchase_count = 0 THEN ? ELSE virtual_purchase_count END,
+        product_key = ?,
+        is_active = 1, updated_at = CURRENT_TIMESTAMP
+    WHERE id = ?
   `);
 
-  const existsStmt = dbInstance.prepare(`
-    SELECT id FROM product_catalog WHERE name = ? AND duration_months = ? AND guild_id = 'WEB'
-  `);
+  const findByKeyStmt = dbInstance.prepare(`SELECT id FROM product_catalog WHERE guild_id = 'WEB' AND product_key = ? ORDER BY id LIMIT 1`);
+  const findByNameStmt = dbInstance.prepare(`SELECT id FROM product_catalog WHERE guild_id = 'WEB' AND LOWER(TRIM(name)) = LOWER(TRIM(?)) AND duration_months = ? ORDER BY id LIMIT 1`);
+  const deactivateDuplicatesStmt = dbInstance.prepare(`UPDATE product_catalog SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE guild_id = 'WEB' AND id != ? AND (product_key = ? OR (LOWER(TRIM(name)) IN (SELECT LOWER(TRIM(value)) FROM json_each(?)) AND duration_months = ?))`);
 
   let currentSort = 100;
   
   dbInstance.transaction(() => {
     for (const p of products) {
-      const existing = existsStmt.get(p.name, p.duration_months);
+      const key = productKey(p);
+      const names = [p.name, ...(p.aliases || [])];
+      const existing = findByKeyStmt.get(key)
+        || names.map((name) => findByNameStmt.get(name, p.duration_months)).find(Boolean);
       if (existing) {
         updateStmt.run(
-          p.description, p.price, p.service_type, p.emoji, p.original_price,
+          p.name, p.description, p.price, p.duration_months, p.service_type, p.emoji, p.original_price,
           p.base_price || null, p.base_duration_days || null, p.additional_day_price || null, p.minimum_days || null, p.maximum_days || null, p.quota_value || null, p.quota_unit || null, p.activation_method || null, p.username_required || 0, p.login_required || 0,
-          p.name, p.duration_months
+          p.is_featured ? 1 : 0, Math.max(0, Number(p.virtual_purchase_count || 0)), key, existing.id
         );
+        deactivateDuplicatesStmt.run(existing.id, key, JSON.stringify(names), p.duration_months);
       } else {
         insertStmt.run(
           p.name, p.description, p.price, p.duration_months, p.service_type, p.emoji, currentSort++, p.original_price,
-          p.base_price || null, p.base_duration_days || null, p.additional_day_price || null, p.minimum_days || null, p.maximum_days || null, p.quota_value || null, p.quota_unit || null, p.activation_method || null, p.username_required || 0, p.login_required || 0
+          p.base_price || null, p.base_duration_days || null, p.additional_day_price || null, p.minimum_days || null, p.maximum_days || null, p.quota_value || null, p.quota_unit || null, p.activation_method || null, p.username_required || 0, p.login_required || 0,
+          key, p.is_featured ? 1 : 0, Math.max(0, Number(p.virtual_purchase_count || 0))
         );
       }
     }
+
+    dbInstance.prepare(`
+      UPDATE product_catalog
+      SET is_active = 0, updated_at = CURRENT_TIMESTAMP
+      WHERE id IN (
+        SELECT newer.id
+        FROM product_catalog newer
+        JOIN product_catalog keeper
+          ON keeper.guild_id = newer.guild_id
+         AND LOWER(TRIM(keeper.name)) = LOWER(TRIM(newer.name))
+         AND keeper.duration_months = newer.duration_months
+         AND keeper.id < newer.id
+        WHERE newer.is_active = 1 AND keeper.is_active = 1
+      )
+    `).run();
   })();
   console.log('🌱 Successfully seeded/updated ' + products.length + ' products in catalog!');
 }

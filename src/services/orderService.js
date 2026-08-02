@@ -34,7 +34,7 @@ function completeOrderStmt(){return db.prepare(`UPDATE orders SET status='COMPLE
 function cancelOrderStmt(){return db.prepare(`UPDATE orders SET status='CANCELLED', status_changed_at=?, payment_status = CASE WHEN payment_status IN ('PAID','FREE') THEN payment_status ELSE 'CANCELLED' END, payment_cancel_reason=COALESCE(?, payment_cancel_reason), updated_at=? WHERE order_code=?`);}
 function saveDeliveryStmt(){return db.prepare(`UPDATE orders SET delivered_by_id=?, delivered_at=?, credential_email=?, credential_password=?, credential_profile=?, credential_pin=?, delivery_login_url=?, claim_notes=?, delivery_dm_channel_id=?, delivery_dm_message_id=?, updated_at=? WHERE order_code=?`);}
 function markFeedbackSubmittedStmt(){return db.prepare(`UPDATE orders SET feedback_submitted_at=?, updated_at=? WHERE order_code=?`);}
-function insertFeedbackStmt(){return db.prepare(`INSERT INTO feedbacks (guild_id,order_id,order_code,ticket_id,ticket_code,customer_id,stars,content,feedback_channel_id,feedback_message_id,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?)`);}
+function insertFeedbackStmt(){return db.prepare(`INSERT INTO feedbacks (guild_id,order_id,order_code,ticket_id,ticket_code,customer_id,stars,content,feedback_channel_id,feedback_message_id,product_id,product_name,is_visible,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1,?,?)`);}
 function findLatestPendingFeedbackOrderStmt(){return db.prepare(`SELECT * FROM orders WHERE guild_id=? AND customer_id=? AND status='COMPLETED' AND feedback_submitted_at IS NULL ORDER BY completed_at DESC, id DESC LIMIT 1`);}
 function getOverdueOrdersStmt(){return db.prepare(`SELECT * FROM orders WHERE status='COMPLETED' AND feedback_due_at IS NOT NULL AND feedback_submitted_at IS NULL AND non_legit_assigned_at IS NULL AND feedback_due_at <= ? ORDER BY id ASC LIMIT ?`);}
 function markNonLegitAssignedStmt(){return db.prepare('UPDATE orders SET non_legit_assigned_at=?, updated_at=? WHERE order_code=?');}
@@ -183,7 +183,17 @@ export function submitFeedback({ orderCode, customerId, stars, content, feedback
   if (order.status !== 'COMPLETED') throw new Error('Chỉ có thể feedback cho đơn đã hoàn thành.');
   if (order.feedback_submitted_at) throw new Error('Đơn này đã feedback rồi.');
   const timestamp = nowIso();
-  insertFeedbackStmt().run(order.guild_id, order.id, order.order_code, order.ticket_id, null, customerId, stars, content, feedbackChannelId, feedbackMessageId, timestamp);
+  const product = db.prepare(`
+    SELECT id, name FROM product_catalog
+    WHERE LOWER(TRIM(name)) = LOWER(TRIM(?))
+    ORDER BY CASE WHEN guild_id = ? THEN 0 WHEN guild_id = 'WEB' THEN 1 ELSE 2 END, id
+    LIMIT 1
+  `).get(order.product_name, order.guild_id);
+  insertFeedbackStmt().run(
+    order.guild_id, order.id, order.order_code, order.ticket_id, null, customerId,
+    stars, content, feedbackChannelId, feedbackMessageId,
+    product?.id || null, product?.name || order.product_name, timestamp, timestamp
+  );
   markFeedbackSubmittedStmt().run(timestamp, timestamp, orderCode); clearNonLegitAssignedStmt().run(timestamp, orderCode);
   syncCustomerStats(order.guild_id, order.customer_id); return getOrderByCode(orderCode);
 }
