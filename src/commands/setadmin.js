@@ -24,14 +24,15 @@ export const data = new SlashCommandBuilder()
       )
   );
 
-import { isBotDeveloper } from '../utils/permissions.js';
+import { hasConfiguredOwnerRole, isBotDeveloper } from '../utils/permissions.js';
 
 export async function execute(interaction) {
   const E = createEmojiResolver(interaction?.guildId);
   try {
     const isGuildOwner = interaction.guild?.ownerId === interaction.user.id;
-    if (!isBotDeveloper(interaction.user.id) && !isGuildOwner) {
-      return interaction.reply({ content: '❌ Lệnh này chỉ dành cho chủ server hoặc Bot Developer.', ephemeral: true });
+    const hasOwnerRole = hasConfiguredOwnerRole(interaction.member);
+    if (!isBotDeveloper(interaction.user.id) && !isGuildOwner && !hasOwnerRole) {
+      return interaction.reply({ content: '❌ Lệnh này chỉ dành cho chủ server, role Owner hoặc Bot Developer.', ephemeral: true });
     }
 
     await interaction.deferReply({ ephemeral: true });

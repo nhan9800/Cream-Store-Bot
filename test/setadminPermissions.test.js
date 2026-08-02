@@ -11,6 +11,7 @@ vi.mock('../src/database/db.js', () => ({
 
 vi.mock('../src/utils/permissions.js', () => ({
   isBotDeveloper: vi.fn(() => false),
+  hasConfiguredOwnerRole: vi.fn(() => false),
 }));
 
 vi.mock('../src/utils/emojiHelper.js', () => ({
@@ -18,7 +19,7 @@ vi.mock('../src/utils/emojiHelper.js', () => ({
 }));
 
 import { execute } from '../src/commands/setadmin.js';
-import { isBotDeveloper } from '../src/utils/permissions.js';
+import { hasConfiguredOwnerRole, isBotDeveloper } from '../src/utils/permissions.js';
 
 function interaction({ userId = 'owner', ownerId = 'owner' } = {}) {
   return {
@@ -38,6 +39,7 @@ describe('/setadmin permissions', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     isBotDeveloper.mockReturnValue(false);
+    hasConfiguredOwnerRole.mockReturnValue(false);
   });
 
   it('allows the Discord server owner through the permission gate', async () => {
@@ -56,5 +58,15 @@ describe('/setadmin permissions', () => {
 
     expect(mockInteraction.reply).toHaveBeenCalledWith(expect.objectContaining({ ephemeral: true }));
     expect(mockInteraction.deferReply).not.toHaveBeenCalled();
+  });
+
+  it('allows a member with a configured Owner role', async () => {
+    const mockInteraction = interaction({ userId: 'role-owner', ownerId: 'server-owner' });
+    hasConfiguredOwnerRole.mockReturnValue(true);
+
+    await execute(mockInteraction);
+
+    expect(mockInteraction.reply).not.toHaveBeenCalled();
+    expect(mockInteraction.deferReply).toHaveBeenCalledWith({ ephemeral: true });
   });
 });

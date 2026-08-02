@@ -51,3 +51,8 @@ import { config } from '../config.js';
 export function isBotDeveloper(userId) {
   return config.adminDiscordIds.includes(String(userId));
 }
+
+export function hasConfiguredOwnerRole(member) {
+  if (!member?.roles?.cache) return false;
+  return config.ownerRoleIds.some((roleId) => member.roles.cache.has(String(roleId)));
+}
