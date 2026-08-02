@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { getMemberNitroEligibility } from '../src/utils/discordNitro.js';
+import { getDiscordNitroEligibility, getMemberNitroEligibility } from '../src/utils/discordNitro.js';
 
 function member({ premiumSince = null, roles = [] } = {}) {
   const cache = new Map(roles.map((role) => [role.id, role]));
@@ -27,5 +27,13 @@ describe('Discord Nitro member eligibility', () => {
       hasNitroBoost: false,
       source: 'none',
     });
+  });
+
+  it('accepts a verified Nitro user override', () => {
+    expect(getDiscordNitroEligibility({
+      member: member(),
+      userId: '1138315103821889566',
+      configuredUserIds: ['1138315103821889566'],
+    })).toEqual({ hasNitroBoost: true, source: 'configured-user' });
   });
 });

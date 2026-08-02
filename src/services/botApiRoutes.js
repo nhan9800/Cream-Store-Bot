@@ -21,7 +21,7 @@ import { safeEqual } from '../utils/crypto.js';
 import { runtimeCommitSha } from '../utils/revision.js';
 import { discordCollectibleUrl, getDiscordCollectibleShopPrice } from './discordCollectiblePricing.js';
 import { getCustomerMembershipProgress } from './roleService.js';
-import { getMemberNitroEligibility } from '../utils/discordNitro.js';
+import { getDiscordNitroEligibility } from '../utils/discordNitro.js';
 
 let storeInviteCache = { url: '', expiresAt: 0 };
 
@@ -174,7 +174,12 @@ export function registerBotApiRoutes(app) {
             || (guild.members?.fetch ? await guild.members.fetch(discordId).catch(() => null) : null);
         if (!member) return res.status(404).json({ ok: false, error: 'Discord member not found' });
 
-        const eligibility = getMemberNitroEligibility(member, config.nitroRoleIds);
+        const eligibility = getDiscordNitroEligibility({
+            member,
+            userId: discordId,
+            configuredRoleIds: config.nitroRoleIds,
+            configuredUserIds: config.nitroUserIds,
+        });
         res.set('Cache-Control', 'private, max-age=120');
         return res.json({ ok: true, data: { discordId, ...eligibility } });
     });

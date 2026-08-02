@@ -15,3 +15,15 @@ export function getMemberNitroEligibility(member, configuredRoleIds = []) {
     ? { hasNitroBoost: true, source: 'named-role' }
     : { hasNitroBoost: false, source: 'none' };
 }
+
+export function getDiscordNitroEligibility({
+  member,
+  userId,
+  configuredRoleIds = [],
+  configuredUserIds = [],
+}) {
+  if (configuredUserIds.includes(String(userId))) {
+    return { hasNitroBoost: true, source: 'configured-user' };
+  }
+  return getMemberNitroEligibility(member, configuredRoleIds);
+}
