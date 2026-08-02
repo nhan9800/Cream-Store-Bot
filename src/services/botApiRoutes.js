@@ -21,6 +21,7 @@ import { safeEqual } from '../utils/crypto.js';
 import { runtimeCommitSha } from '../utils/revision.js';
 import { discordCollectibleUrl, getDiscordCollectibleShopPrice } from './discordCollectiblePricing.js';
 import { getCustomerMembershipProgress } from './roleService.js';
+import { getMemberNitroEligibility } from '../utils/discordNitro.js';
 
 let storeInviteCache = { url: '', expiresAt: 0 };
 
@@ -155,6 +156,29 @@ export function registerBotApiRoutes(app) {
     });
 
     // ── AI KNOWLEDGE (read-only) — web AI chat đọc tài liệu huấn luyện ──
+    app.get('/api/bot/discord-entitlement/:discordId', async (req, res) => {
+        const discordId = String(req.params.discordId || '').trim();
+        if (!/^\d{15,22}$/.test(discordId)) {
+            return res.status(400).json({ ok: false, error: 'Invalid Discord ID' });
+        }
+        if (!canAccessCustomerResource(req, discordId)) {
+            return res.status(403).json({ ok: false, error: 'Forbidden' });
+        }
+
+        const client = req.app.locals.discordClient;
+        const guild = client?.guilds?.cache?.get(config.guildId)
+            || (client?.guilds?.fetch ? await client.guilds.fetch(config.guildId).catch(() => null) : null);
+        if (!guild) return res.status(503).json({ ok: false, error: 'Discord guild unavailable' });
+
+        const member = guild.members?.cache?.get(discordId)
+            || (guild.members?.fetch ? await guild.members.fetch(discordId).catch(() => null) : null);
+        if (!member) return res.status(404).json({ ok: false, error: 'Discord member not found' });
+
+        const eligibility = getMemberNitroEligibility(member, config.nitroRoleIds);
+        res.set('Cache-Control', 'private, max-age=120');
+        return res.json({ ok: true, data: { discordId, ...eligibility } });
+    });
+
     app.get('/api/bot/ai-knowledge', (req, res) => {
         const result = safeQuery(() => ({ content: getAiKnowledge('WEB') }));
         res.json(result);
