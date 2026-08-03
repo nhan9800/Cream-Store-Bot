@@ -22,6 +22,13 @@ import { runtimeCommitSha } from '../utils/revision.js';
 import { discordCollectibleUrl, getDiscordCollectibleShopPrice } from './discordCollectiblePricing.js';
 import { getCustomerMembershipProgress } from './roleService.js';
 import { getDiscordNitroEligibility } from '../utils/discordNitro.js';
+import { recordStaffLog } from './staffLogService.js';
+import {
+    parseWebsiteRelay,
+    presentSupportMessage,
+    SUPPORT_TEAM_NAME,
+    websiteRelayPrefix,
+} from './supportIdentity.js';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -1316,6 +1323,7 @@ export function registerBotApiRoutes(app) {
                 return res.json({ ok: true, messages: [] });
             }
 
+            const audienceRole = String(req.header('x-user-role') || '').toLowerCase();
             const formatted = Array.from(messages.values()).map(m => {
                 let authorType = 'staff';
                 let content = m.content || '';
@@ -1323,12 +1331,9 @@ export function registerBotApiRoutes(app) {
                 let authorAvatar = m.author ? m.author.displayAvatarURL() : null;
 
                 if (m.author?.bot) {
-                    if (content.startsWith('**[Khách từ Web]**:')) {
-                        authorType = 'customer';
-                        content = content.replace('**[Khách từ Web]**:', '').trim();
-                    } else if (content.startsWith('**[Khách hàng từ Web]**:')) {
-                        authorType = 'customer';
-                        content = content.replace('**[Khách hàng từ Web]**:', '').trim();
+                    const relay = parseWebsiteRelay(content);
+                    if (relay) {
+                        ({ authorType, authorName, content } = relay);
                     } else {
                         authorType = 'system';
                     }
@@ -1348,14 +1353,14 @@ export function registerBotApiRoutes(app) {
                     authorType = 'system';
                 }
 
-                return {
+                return presentSupportMessage({
                     id: m.id,
                     authorType,
                     authorName,
                     authorAvatar,
                     content,
                     timestamp: m.createdAt.toISOString()
-                };
+                }, audienceRole);
             }).reverse().filter(msg => msg.content || msg.authorType === 'system');
 
             res.json({ ok: true, messages: formatted });
@@ -1695,6 +1700,7 @@ export function registerBotApiRoutes(app) {
                 return res.json({ ok: true, messages: [], status: ticketStatus });
             }
 
+            const audienceRole = String(req.header('x-user-role') || '').toLowerCase();
             const formatted = Array.from(messages.values()).map(m => {
                 let authorType = 'staff';
                 let content = m.content || '';
@@ -1702,18 +1708,9 @@ export function registerBotApiRoutes(app) {
                 let authorAvatar = m.author ? m.author.displayAvatarURL() : null;
 
                 if (m.author?.bot) {
-                    if (content.startsWith('**[Khách từ Web]**:') || content.startsWith('**[Khách hàng từ Web]**:')) {
-                        authorType = 'customer';
-                        content = content.replace(/^\*\*\[Khách\s*(hàng\s*)?từ\s*Web\]\*\*:/i, '').trim();
-                    } else if (content.startsWith('**[Staff ') && content.includes('từ Web]**:')) {
-                        authorType = 'staff';
-                        const match = content.match(/^\*\*\[Staff\s+(.*?)\s+từ\s+Web\]\*\*:/i);
-                        authorName = match ? match[1] : 'Staff';
-                        content = content.replace(/^\*\*\[Staff\s+.*?\s+từ\s*Web\]\*\*:/i, '').trim();
-                    } else if (content.startsWith('**[Admin từ Web]**:')) {
-                        authorType = 'staff';
-                        authorName = 'Admin';
-                        content = content.replace('**[Admin từ Web]**:', '').trim();
+                    const relay = parseWebsiteRelay(content);
+                    if (relay) {
+                        ({ authorType, authorName, content } = relay);
                     } else {
                         authorType = 'system';
                     }
@@ -1733,14 +1730,14 @@ export function registerBotApiRoutes(app) {
                     authorType = 'system';
                 }
 
-                return {
+                return presentSupportMessage({
                     id: m.id,
                     authorType,
                     authorName,
                     authorAvatar,
                     content,
                     timestamp: m.createdAt.toISOString()
-                };
+                }, audienceRole);
             }).reverse().filter(msg => msg.content && msg.content.trim());
 
             res.json({ ok: true, messages: formatted, status: ticketStatus });
@@ -1847,15 +1844,29 @@ export function registerBotApiRoutes(app) {
 
             if (channel && channel.isTextBased()) {
                 const userId = req.header('x-user-id');
-                let prefix = '**[Khách từ Web]**';
+                let userRole = '';
                 if (userId) {
-                    const user = db.prepare('SELECT role, display_name FROM web_users WHERE id = ?').get(userId);
-                    if (user && (user.role === 'admin' || user.role === 'staff')) {
-                        prefix = `**[Staff ${user.display_name || 'Admin'} từ Web]**`;
-                    }
+                    const user = db.prepare('SELECT role FROM web_users WHERE id = ?').get(userId);
+                    userRole = String(user?.role || '').toLowerCase();
                 }
+                const prefix = websiteRelayPrefix(userRole);
                 await channel.send({ content: `${prefix}: ${content}` });
                 db.prepare('UPDATE tickets SET last_activity_at = ? WHERE id = ?').run(nowIso(), ticket.id);
+                if (userId && (userRole === 'admin' || userRole === 'staff')) {
+                    try {
+                        recordStaffLog({
+                            guildId: ticket.guild_id || 'WEB',
+                            actorId: userId,
+                            targetId: ticket.customer_id,
+                            action: 'WEB_SUPPORT_REPLY',
+                            detail: `Replied publicly as ${SUPPORT_TEAM_NAME}`,
+                            relatedOrderCode: ticket.related_order_code || null,
+                            relatedTicketCode: ticket.ticket_code,
+                        });
+                    } catch (auditError) {
+                        console.warn(`[WEB-SUPPORT] Failed to record reply audit for ${ticket.ticket_code}:`, auditError.message);
+                    }
+                }
                 return res.json({ ok: true });
             } else {
                 return res.status(503).json({ ok: false, error: 'Không thể kết nối với hỗ trợ Discord lúc này' });
