@@ -760,7 +760,14 @@ const fetchWithTimeout = (promise, ms) => {
   app.get('/api/bot/admin/tickets', requireAdminRole, async (req, res) => {
     try {
       // Limit to 150 to prevent crash/timeout on large database
-      const tickets = db.prepare("SELECT * FROM tickets ORDER BY status ASC, created_at DESC LIMIT 150").all();
+      const tickets = db.prepare(`
+        SELECT *
+        FROM tickets
+        ORDER BY
+          CASE WHEN status = 'OPEN' THEN 0 ELSE 1 END,
+          COALESCE(last_activity_at, created_at) DESC
+        LIMIT 150
+      `).all();
       const client = req.app.locals.discordClient;
 
       const mapped = await Promise.all(tickets.map(async (t) => {
@@ -799,10 +806,18 @@ const fetchWithTimeout = (promise, ms) => {
           }
         }
 
+        const supportSource = t.support_source
+          || (t.channel_id?.startsWith('web-') || t.channel_id?.startsWith('live-')
+            ? (t.ticket_type === 'ORDER' ? 'WEBSITE_ORDER' : 'WEBSITE_AI')
+            : (['ORDER', 'WARRANTY'].includes(t.ticket_type) ? 'DISCORD_ORDER' : 'DISCORD_SUPPORT'));
+
         return {
           ...t,
           customer_name: name,
-          customer_avatar: avatar
+          customer_avatar: avatar,
+          support_source: supportSource,
+          channel_connected: /^\d{15,22}$/.test(String(t.channel_id || '')),
+          last_activity_at: t.last_activity_at || t.created_at,
         };
       }));
 
@@ -826,7 +841,7 @@ const fetchWithTimeout = (promise, ms) => {
 
       // Thử đóng kênh Discord nếu có
       const client = req.app.locals.discordClient;
-      if (client && ticket.channel_id && ticket.channel_id !== 'web') {
+      if (client && /^\d{15,22}$/.test(String(ticket.channel_id || ''))) {
         const guild = await client.guilds.fetch(ticket.guild_id).catch(() => null);
         if (guild) {
           const channel = await guild.channels.fetch(ticket.channel_id).catch(() => null);

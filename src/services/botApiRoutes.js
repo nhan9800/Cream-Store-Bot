@@ -26,6 +26,109 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 let storeInviteCache = { url: '', expiresAt: 0 };
+const websiteSupportProvisioning = new Map();
+
+function isDiscordChannelId(value) {
+    return /^\d{15,22}$/.test(String(value || ''));
+}
+
+async function provisionWebsiteSupportChannel({ client, ticket, contact, context }) {
+    if (!client) throw new Error('Discord client is not ready');
+
+    const guild = await client.guilds.fetch(ticket.guild_id).catch(() => null);
+    if (!guild) throw new Error('Discord guild is unavailable');
+
+    if (isDiscordChannelId(ticket.channel_id)) {
+        const existingChannel = await guild.channels.fetch(ticket.channel_id).catch(() => null);
+        if (existingChannel?.isTextBased()) return existingChannel;
+    }
+
+    const { getGuildConfig } = await import('./guildConfigService.js');
+    const guildConfig = getGuildConfig(ticket.guild_id);
+    if (!guildConfig) throw new Error('Ticket configuration is missing');
+
+    const { ChannelType, PermissionFlagsBits } = await import('discord.js');
+    const { TICKET_MEMBER_PERMISSIONS } = await import('../utils/permissions.js');
+    const overwrites = [
+        { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
+        {
+            id: client.user.id,
+            allow: [
+                PermissionFlagsBits.ViewChannel,
+                PermissionFlagsBits.SendMessages,
+                PermissionFlagsBits.ReadMessageHistory,
+                PermissionFlagsBits.ManageChannels,
+            ],
+        },
+    ];
+    const staffRoleIds = [guildConfig.support_role_id, guildConfig.manager_role_id].filter(Boolean);
+    for (const roleId of staffRoleIds) {
+        overwrites.push({ id: roleId, allow: TICKET_MEMBER_PERMISSIONS });
+    }
+    const member = await guild.members.fetch(ticket.customer_id).catch(() => null);
+    if (member) overwrites.push({ id: ticket.customer_id, allow: TICKET_MEMBER_PERMISSIONS });
+
+    const channel = await guild.channels.create({
+        name: `web-${ticket.ticket_code.toLowerCase().replace('_', '-')}`,
+        type: ChannelType.GuildText,
+        parent: guildConfig.support_category_id || guildConfig.ticket_category_id,
+        permissionOverwrites: overwrites,
+        reason: `Website AI support ${ticket.ticket_code}`,
+    });
+
+    try {
+        db.prepare(`UPDATE tickets SET channel_id = ?, support_source = 'WEBSITE_AI', last_activity_at = ? WHERE id = ?`)
+            .run(channel.id, nowIso(), ticket.id);
+    } catch (error) {
+        await channel.delete('Rollback website support channel after database update failure').catch(() => null);
+        throw error;
+    }
+
+    const { buildTicketWelcomeV2, buildTicketControlComponents } = await import('../utils/embeds.js');
+    const { container, flags } = buildTicketWelcomeV2(
+        ticket.ticket_code,
+        ticket.customer_id,
+        'SUPPORT',
+        null,
+        null,
+        ticket.guild_id,
+    );
+    await channel.send({
+        components: [container, ...buildTicketControlComponents(ticket.id, ticket.customer_id)],
+        flags,
+    });
+
+    const staffMentions = staffRoleIds.map((roleId) => `<@&${roleId}>`).join(' ');
+    const contextLine = context ? `\n> Nội dung gần nhất: ${context}` : '';
+    await channel.send({
+        content: [
+            staffMentions,
+            '**YÊU CẦU HỖ TRỢ TỪ WEBSITE AI**',
+            `> Ticket: \`${ticket.ticket_code}\``,
+            `> Khách: <@${ticket.customer_id}>`,
+            `> Liên hệ: **${contact}**${contextLine}`,
+            '> Nguồn: Website / Cenar AI / Gặp Admin',
+        ].filter(Boolean).join('\n'),
+        allowedMentions: {
+            roles: staffRoleIds,
+            users: [ticket.customer_id],
+        },
+    });
+
+    console.log(`[WEB-SUPPORT] Discord notified for ${ticket.ticket_code} channel=${channel.id} roles=${staffRoleIds.length}`);
+    return channel;
+}
+
+async function ensureWebsiteSupportChannel(input) {
+    const key = Number(input.ticket.id);
+    let task = websiteSupportProvisioning.get(key);
+    if (!task) {
+        task = provisionWebsiteSupportChannel(input)
+            .finally(() => websiteSupportProvisioning.delete(key));
+        websiteSupportProvisioning.set(key, task);
+    }
+    return task;
+}
 
 async function resolveStoreOneInvite(client, configuredUrl) {
     const explicit = String(configuredUrl || process.env.DISCORD_INVITE_URL || '').trim();
@@ -982,7 +1085,8 @@ export function registerBotApiRoutes(app) {
                 customerId,
                 openedById: customerId,
                 ticketType: 'ORDER',
-                relatedOrderCode: orderCode
+                relatedOrderCode: orderCode,
+                supportSource: 'WEBSITE_ORDER',
             });
             ticketId = ticket.id;
 
@@ -1379,6 +1483,72 @@ export function registerBotApiRoutes(app) {
             const contact = typeof req.body?.contact === 'string'
                 ? req.body.contact.trim().slice(0, 100)
                 : '';
+            const clientRequestId = typeof req.body?.requestId === 'string'
+                ? req.body.requestId.trim().slice(0, 128)
+                : '';
+            const context = typeof req.body?.context === 'string'
+                ? req.body.context.replace(/\s+/g, ' ').trim().slice(0, 500)
+                : '';
+            const customerId = String(req.header('x-discord-id') || '').trim();
+            if (!customerId) {
+                return res.status(401).json({ ok: false, error: 'Discord login is required' });
+            }
+            if (!contact) {
+                return res.status(400).json({ ok: false, error: 'Contact information is required' });
+            }
+            if (clientRequestId && !/^[A-Za-z0-9_-]{12,128}$/.test(clientRequestId)) {
+                return res.status(400).json({ ok: false, error: 'Invalid request ID' });
+            }
+
+            const { reserveWebsiteSupportTicket } = await import('./ticketService.js');
+            const reservation = reserveWebsiteSupportTicket({
+                guildId: config.guildId,
+                customerId,
+                contact,
+                clientRequestId: clientRequestId || null,
+            });
+            const ticket = reservation.ticket;
+
+            try {
+                await ensureWebsiteSupportChannel({
+                    client: req.app.locals.discordClient,
+                    ticket,
+                    contact,
+                    context,
+                });
+            } catch (error) {
+                console.error(`[WEB-SUPPORT] Discord provisioning failed for ${ticket.ticket_code}:`, error.message);
+                return res.status(503).json({
+                    ok: false,
+                    error: 'Khong the ket noi kenh ho tro Discord luc nay. Vui long thu lai.',
+                    data: { ticket_code: ticket.ticket_code, reused: reservation.reused },
+                });
+            }
+
+            return res.json({
+                ok: true,
+                data: {
+                    ticket_code: ticket.ticket_code,
+                    reused: reservation.reused,
+                    source: 'WEBSITE_AI',
+                    discord_connected: true,
+                },
+            });
+        } catch (error) {
+            console.error('[WEB-SUPPORT] Start API error:', error);
+            return res.status(500).json({ ok: false, error: 'Internal support service error' });
+        }
+    });
+
+    app.all('/api/bot/tickets/start-legacy-disabled', (_req, res) => {
+        return res.status(410).json({ ok: false, error: 'Legacy support endpoint is disabled' });
+    });
+
+    app.post('/api/bot/tickets/start-legacy-disabled', async (req, res) => {
+        try {
+            const contact = typeof req.body?.contact === 'string'
+                ? req.body.contact.trim().slice(0, 100)
+                : '';
             const authenticatedDiscordId = String(req.header('x-discord-id') || '').trim();
             if (!authenticatedDiscordId) {
                 return res.status(401).json({ ok: false, error: 'Discord login is required' });
@@ -1668,6 +1838,7 @@ export function registerBotApiRoutes(app) {
                     }
                 }
                 await channel.send({ content: `${prefix}: ${content}` });
+                db.prepare('UPDATE tickets SET last_activity_at = ? WHERE id = ?').run(nowIso(), ticket.id);
                 return res.json({ ok: true });
             } else {
                 return res.status(503).json({ ok: false, error: 'Không thể kết nối với hỗ trợ Discord lúc này' });

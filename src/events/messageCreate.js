@@ -1,5 +1,5 @@
 import { Events, AttachmentBuilder, EmbedBuilder } from 'discord.js';
-import { getTicketByChannelId, updateTicketAiStatus, isTicketChannel } from '../services/ticketService.js';
+import { getTicketByChannelId, updateTicketAiStatus, isTicketChannel, touchTicket } from '../services/ticketService.js';
 import { processAiMessage } from '../services/aiService.js';
 import { getGuildConfig } from '../services/guildConfigService.js';
 import { moderateMessage } from '../services/aiModerationService.js';
@@ -42,6 +42,7 @@ export async function execute(message) {
   const E = createEmojiResolver(message.guildId);
 
   const ticket = getTicketByChannelId(message.channel.id);
+  if (ticket?.status === 'OPEN') touchTicket(ticket.id);
   const isStaff = message.member?.roles?.cache?.has(guildConfig.support_role_id) || 
                   message.member?.roles?.cache?.has(guildConfig.manager_role_id) || 
                   message.member?.permissions?.has('ManageGuild');

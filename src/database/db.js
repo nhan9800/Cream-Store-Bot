@@ -104,6 +104,9 @@ export function initDatabase() {
       ticket_type TEXT NOT NULL DEFAULT 'ORDER',
       related_order_code TEXT,
       ticket_subject TEXT,
+      support_source TEXT,
+      client_request_id TEXT,
+      last_activity_at TEXT,
       auto_close_at TEXT,
       keep_open_requested INTEGER NOT NULL DEFAULT 0,
       status TEXT NOT NULL DEFAULT 'OPEN',
@@ -465,6 +468,30 @@ export function initDatabase() {
   ensureColumn('tickets', 'auto_close_at', 'TEXT');
   ensureColumn('tickets', 'keep_open_requested', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn('tickets', 'ai_status', "TEXT NOT NULL DEFAULT 'ACTIVE'");
+  ensureColumn('tickets', 'support_source', 'TEXT');
+  ensureColumn('tickets', 'client_request_id', 'TEXT');
+  ensureColumn('tickets', 'last_activity_at', 'TEXT');
+
+  db.exec(`
+    UPDATE tickets
+    SET support_source = CASE
+      WHEN ticket_type = 'SUPPORT' AND (channel_id LIKE 'live-%' OR channel_id LIKE 'web-%') THEN 'WEBSITE_AI'
+      WHEN ticket_type = 'ORDER' AND channel_id LIKE 'web-%' THEN 'WEBSITE_ORDER'
+      WHEN ticket_type IN ('ORDER', 'WARRANTY') THEN 'DISCORD_ORDER'
+      ELSE 'DISCORD_SUPPORT'
+    END
+    WHERE support_source IS NULL OR support_source = '';
+
+    UPDATE tickets
+    SET last_activity_at = COALESCE(last_activity_at, created_at)
+    WHERE last_activity_at IS NULL;
+
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_tickets_client_request_id
+      ON tickets (client_request_id)
+      WHERE client_request_id IS NOT NULL;
+    CREATE INDEX IF NOT EXISTS idx_tickets_support_queue
+      ON tickets (support_source, status, last_activity_at);
+  `);
 
   ensureColumn('orders', 'total_amount', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn('orders', 'amount_paid', 'INTEGER NOT NULL DEFAULT 0');
