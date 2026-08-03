@@ -16,6 +16,7 @@ import { getAiKnowledge, updateAiKnowledge } from './aiKnowledgeService.js';
 import { transitionOrderStatus } from './orderStateMachine.js';
 import { encrypt, decrypt } from '../utils/crypto.js';
 import { sendCompletedFlow, updateOrderLogMessage } from './notificationService.js';
+import { syncPublishedFeedbackMessage } from './feedbackService.js';
 
 function catalogKey(value) {
   return String(value || '')
@@ -213,7 +214,7 @@ export function registerAdminRoutes(app) {
     }
   });
 
-  app.put('/api/bot/admin/reviews/:id', requireAdminRole, (req, res) => {
+  app.put('/api/bot/admin/reviews/:id', requireAdminRole, async (req, res) => {
     try {
       const stars = Math.min(5, Math.max(1, Number(req.body?.stars) || 5));
       const content = sanitizeString(req.body?.content, 1000).trim();
@@ -227,7 +228,21 @@ export function registerAdminRoutes(app) {
         WHERE id = ?
       `).run(stars, content, product?.id || null, product?.name || null, isVisible, req.params.id);
       if (!result.changes) return errorResponse(res, 404, 'Không tìm thấy đánh giá.');
-      return successResponse(res, null, 'Đã cập nhật đánh giá.');
+      const updatedReview = db.prepare('SELECT * FROM feedbacks WHERE id = ?').get(req.params.id);
+      let discordSync = { synced: false, reason: 'not_attempted' };
+      try {
+        discordSync = await syncPublishedFeedbackMessage({
+          client: req.app.locals.discordClient,
+          feedback: updatedReview,
+        });
+      } catch (syncError) {
+        console.error('[ADMIN] feedback Discord sync', syncError);
+        discordSync = { synced: false, reason: 'sync_failed' };
+      }
+      return successResponse(res, {
+        discord_synced: discordSync.synced,
+        discord_sync_reason: discordSync.reason || null,
+      }, discordSync.synced ? 'Đã cập nhật đánh giá và đồng bộ Discord.' : 'Đã cập nhật đánh giá trên website; Discord chưa đồng bộ được.');
     } catch (e) {
       console.error('[ADMIN] review update', e);
       return res.status(500).json({ ok: false, error: 'Không thể cập nhật đánh giá.' });

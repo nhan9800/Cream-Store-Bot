@@ -3,6 +3,40 @@ import { getOrderByCode, submitFeedback } from './orderService.js';
 import { syncCustomerStats } from './customerService.js';
 import { buildFeedbackV2 } from '../utils/embeds.js';
 
+/** Rebuild the Discord card after an admin edits the published feedback. */
+export async function syncPublishedFeedbackMessage({ client, feedback }) {
+  const channelId = String(feedback?.feedback_channel_id || '').trim();
+  const messageId = String(feedback?.feedback_message_id || '').trim();
+  if (!client || !channelId || !messageId) return { synced: false, reason: 'missing_message_reference' };
+
+  const guildId = String(feedback?.guild_id || '').trim();
+  const guild = (guildId && client.guilds?.cache?.get(guildId))
+    || (guildId ? await client.guilds?.fetch(guildId).catch(() => null) : null);
+  if (!guild) return { synced: false, reason: 'guild_unavailable' };
+
+  const channel = await guild.channels.fetch(channelId).catch(() => null);
+  if (!channel?.isTextBased()) return { synced: false, reason: 'channel_unavailable' };
+  const message = await channel.messages.fetch(messageId).catch(() => null);
+  if (!message) return { synced: false, reason: 'message_unavailable' };
+
+  const order = getOrderByCode(feedback.order_code) || {
+    order_code: feedback.order_code,
+    guild_id: feedback.guild_id,
+    customer_id: feedback.customer_id,
+    product_name: feedback.product_name,
+    quantity: 1,
+  };
+  const member = await guild.members.fetch(feedback.customer_id).catch(() => null);
+  const { container, flags } = buildFeedbackV2({
+    member: member || { id: feedback.customer_id },
+    order,
+    stars: feedback.stars,
+    content: feedback.content,
+  });
+  await message.edit({ components: [container], flags });
+  return { synced: true, channelId, messageId };
+}
+
 export async function publishFeedback({ guild, userId, orderCode, stars, content }) {
   const guildConfig = getGuildConfig(guild.id);
   if (!guildConfig) {
