@@ -19,12 +19,14 @@ export async function syncPublishedFeedbackMessage({ client, feedback }) {
   const message = await channel.messages.fetch(messageId).catch(() => null);
   if (!message) return { synced: false, reason: 'message_unavailable' };
 
-  const order = getOrderByCode(feedback.order_code) || {
-    order_code: feedback.order_code,
-    guild_id: feedback.guild_id,
-    customer_id: feedback.customer_id,
-    product_name: feedback.product_name,
-    quantity: 1,
+  const storedOrder = getOrderByCode(feedback.order_code) || {};
+  const order = {
+    ...storedOrder,
+    order_code: feedback.order_code || storedOrder.order_code,
+    guild_id: feedback.guild_id || storedOrder.guild_id,
+    customer_id: feedback.customer_id || storedOrder.customer_id,
+    product_name: feedback.product_name || storedOrder.product_name,
+    quantity: storedOrder.quantity || 1,
   };
   const member = await guild.members.fetch(feedback.customer_id).catch(() => null);
   const { container, flags } = buildFeedbackV2({
@@ -34,6 +36,7 @@ export async function syncPublishedFeedbackMessage({ client, feedback }) {
     content: feedback.content,
   });
   await message.edit({ components: [container], flags });
+  console.info(`[FEEDBACK-SYNC] Updated Discord message ${messageId} for order ${order.order_code}`);
   return { synced: true, channelId, messageId };
 }
 

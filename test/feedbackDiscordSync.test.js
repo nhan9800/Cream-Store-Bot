@@ -40,15 +40,16 @@ describe('feedback Discord synchronization', () => {
       guild_id: 'guild-1',
       customer_id: 'customer-1',
       order_code: 'CN_123456',
-      product_name: 'Discord Nitro',
+      product_name: 'YouTube Premium',
       stars: 4,
       content: 'Nội dung đã chỉnh sửa',
       feedback_channel_id: 'channel-1',
       feedback_message_id: 'message-1',
     };
-    const order = { order_code: feedback.order_code, guild_id: 'guild-1', product_name: 'Discord Nitro', quantity: 1 };
+    const storedOrder = { order_code: feedback.order_code, guild_id: 'guild-1', product_name: 'Discord Nitro', quantity: 1 };
+    const renderedOrder = { ...storedOrder, customer_id: 'customer-1', product_name: 'YouTube Premium' };
     const container = { type: 'feedback-card' };
-    getOrderByCode.mockReturnValue(order);
+    getOrderByCode.mockReturnValue(storedOrder);
     buildFeedbackV2.mockReturnValue({ container, flags: 32768 });
 
     const result = await syncPublishedFeedbackMessage({ client, feedback });
@@ -56,7 +57,7 @@ describe('feedback Discord synchronization', () => {
     expect(result).toEqual({ synced: true, channelId: 'channel-1', messageId: 'message-1' });
     expect(buildFeedbackV2).toHaveBeenCalledWith({
       member: { id: 'customer-1' },
-      order,
+      order: renderedOrder,
       stars: 4,
       content: 'Nội dung đã chỉnh sửa',
     });
