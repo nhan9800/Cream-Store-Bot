@@ -1509,21 +1509,24 @@ export function registerBotApiRoutes(app) {
             });
             const ticket = reservation.ticket;
 
-            try {
-                await ensureWebsiteSupportChannel({
-                    client: req.app.locals.discordClient,
-                    ticket,
-                    contact,
-                    context,
+            const provisioning = ensureWebsiteSupportChannel({
+                client: req.app.locals.discordClient,
+                ticket,
+                contact,
+                context,
+            })
+                .then(() => true)
+                .catch((error) => {
+                    console.error(`[WEB-SUPPORT] Discord provisioning failed for ${ticket.ticket_code}:`, error.message);
+                    return false;
                 });
-            } catch (error) {
-                console.error(`[WEB-SUPPORT] Discord provisioning failed for ${ticket.ticket_code}:`, error.message);
-                return res.status(503).json({
-                    ok: false,
-                    error: 'Khong the ket noi kenh ho tro Discord luc nay. Vui long thu lai.',
-                    data: { ticket_code: ticket.ticket_code, reused: reservation.reused },
-                });
-            }
+
+            // Channel creation can take several seconds. Return the reserved ticket
+            // promptly so a slow Discord request never looks like a failed handoff.
+            const discordConnected = await Promise.race([
+                provisioning,
+                new Promise((resolve) => setTimeout(() => resolve(false), 1_200)),
+            ]);
 
             return res.json({
                 ok: true,
@@ -1531,7 +1534,8 @@ export function registerBotApiRoutes(app) {
                     ticket_code: ticket.ticket_code,
                     reused: reservation.reused,
                     source: 'WEBSITE_AI',
-                    discord_connected: true,
+                    discord_connected: discordConnected,
+                    provisioning: discordConnected ? 'CONNECTED' : 'IN_PROGRESS',
                 },
             });
         } catch (error) {
@@ -1771,7 +1775,20 @@ export function registerBotApiRoutes(app) {
             const client = req.app.locals.discordClient;
             let channel = null;
 
-            if (client) {
+            if (ticket.support_source === 'WEBSITE_AI' && !isDiscordChannelId(channelId)) {
+                channel = await ensureWebsiteSupportChannel({
+                    client,
+                    ticket,
+                    contact: ticket.ticket_subject || `Discord ${ticket.customer_id}`,
+                    context: '',
+                }).catch((error) => {
+                    console.error(`[WEB-SUPPORT] Message provisioning failed for ${ticket.ticket_code}:`, error.message);
+                    return null;
+                });
+                channelId = channel?.id || channelId;
+            }
+
+            if (!channel && client) {
                 const guild = await client.guilds.fetch(ticket.guild_id).catch(() => null);
                 if (guild) {
                     if (!channelId || channelId.startsWith('live-')) {
