@@ -151,14 +151,16 @@ export function buildWarrantyLogV2({ order, ticket, channel, formData, actorId, 
   const btnApprove = new ButtonBuilder()
     .setCustomId(`ytb:approve:${ticket.id}`)
     .setLabel('Duyệt Bảo Hành')
-    .setStyle(ButtonStyle.Success)
-    .setEmoji(E('status_check') ? (E('status_check').match(/\d+/)?.[0] || '✅') : '✅');
+    .setStyle(ButtonStyle.Success);
+  const approveEmoji = E('status_check')?.match(/^<a?:[^:]+:(\d+)>$/)?.[1];
+  if (approveEmoji) btnApprove.setEmoji(approveEmoji);
 
   const btnReject = new ButtonBuilder()
     .setCustomId(`ytb:reject:${ticket.id}`)
     .setLabel('Từ Chối Bảo Hành')
-    .setStyle(ButtonStyle.Danger)
-    .setEmoji(E('status_cross') ? (E('status_cross').match(/\d+/)?.[0] || '❌') : '❌');
+    .setStyle(ButtonStyle.Danger);
+  const rejectEmoji = E('status_cross')?.match(/^<a?:[^:]+:(\d+)>$/)?.[1];
+  if (rejectEmoji) btnReject.setEmoji(rejectEmoji);
 
   const row = new ActionRowBuilder().addComponents(btnApprove, btnReject);
 

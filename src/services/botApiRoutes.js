@@ -23,6 +23,7 @@ import { discordCollectibleUrl, getDiscordCollectibleShopPrice } from './discord
 import { getCustomerMembershipProgress } from './roleService.js';
 import { getDiscordNitroEligibility } from '../utils/discordNitro.js';
 import { recordStaffLog } from './staffLogService.js';
+import { getLeaderboardRows } from './leaderboardService.js';
 import {
     parseWebsiteRelay,
     presentSupportMessage,
@@ -671,26 +672,8 @@ export function registerBotApiRoutes(app) {
         try {
             const period = req.query.period || 'weekly'; // weekly or monthly
             const limit = Math.min(50, Math.max(1, parseInt(req.query.limit, 10) || 10));
-            
-            let timeFilter = "datetime('now', '-7 days')";
-            if (period === 'monthly') {
-                timeFilter = "datetime('now', '-30 days')";
-            }
-
-            const sql = `
-                SELECT customer_id,
-                       COUNT(*) as orders,
-                       COALESCE(SUM(amount_paid), 0) as total_spent,
-                       MAX(created_at) as last_order_at
-                FROM orders
-                WHERE payment_status = 'PAID'
-                  AND status != 'CANCELLED'
-                  AND created_at >= ${timeFilter}
-                GROUP BY customer_id
-                ORDER BY total_spent DESC
-                LIMIT ?
-            `;
-            const rows = db.prepare(sql).all(limit);
+            const result = getLeaderboardRows(config.guildId, period, new Date(), limit);
+            const rows = result.rows;
 
             const client = req.app.locals.discordClient;
             const guildId = config.guildId;
@@ -724,7 +707,20 @@ export function registerBotApiRoutes(app) {
                 };
             });
 
-            res.json({ ok: true, data: richRows });
+            // no-store is also set by the website client; these fields make the
+            // active period visible in diagnostics instead of looking stale.
+            res.set('Cache-Control', 'no-store, max-age=0');
+            res.json({
+                ok: true,
+                data: richRows,
+                meta: {
+                    period: result.bounds.period,
+                    period_label: result.bounds.label,
+                    period_start: result.bounds.start,
+                    period_end: result.bounds.end,
+                    timezone: 'Asia/Ho_Chi_Minh',
+                },
+            });
         } catch (error) {
             console.error('[BOT_API] Leaderboard error:', error);
             res.status(500).json({ ok: false, error: error.message });

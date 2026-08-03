@@ -148,7 +148,8 @@ export function buildTicketPanelV2(customConfig = {}) {
   const btnAppeal = new ButtonBuilder().setCustomId('ytb:appeal:apply').setLabel('Kháng 12 Tháng YT').setStyle(ButtonStyle.Primary);
   const btnEdit = new ButtonBuilder().setCustomId('ticket:panel:edit').setLabel('Sửa Panel').setStyle(ButtonStyle.Secondary);
   const e5 = ec(em, 'panel_warranty'); if (e5) btnWarranty.setEmoji(e5);
-  btnAppeal.setEmoji('🛡️');
+  const appealEmoji = ec(em, 'ticket_claim');
+  if (appealEmoji) btnAppeal.setEmoji(appealEmoji);
   const e6 = ec(em, 'panel_edit'); if (e6) btnEdit.setEmoji(e6);
   const row2 = new ActionRowBuilder().addComponents(btnWarranty, btnAppeal, btnEdit);
 

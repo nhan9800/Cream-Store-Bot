@@ -250,10 +250,10 @@ export async function publishPremiumProductsForGuild(guild) {
     );
 
     const claudeRow = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('product:claude:buy').setLabel('Mua ngay').setStyle(ButtonStyle.Success).setEmoji(E.component('icon_cart') || '🛒'),
-      new ButtonBuilder().setCustomId('product:claude:pricing').setLabel('Tính giá').setStyle(ButtonStyle.Secondary).setEmoji(E.component('icon_price') || '💰'),
-      new ButtonBuilder().setCustomId('product:claude:models').setLabel('Models').setStyle(ButtonStyle.Secondary).setEmoji(E.component('brand_claude') || '🤖'),
-      new ButtonBuilder().setCustomId('product:claude:policy').setLabel('Điều khoản').setStyle(ButtonStyle.Secondary).setEmoji(E.component('icon_gem') || '📜')
+      new ButtonBuilder().setCustomId('product:claude:buy').setLabel('Mua ngay').setStyle(ButtonStyle.Success).setEmoji(E.component('icon_cart')),
+      new ButtonBuilder().setCustomId('product:claude:pricing').setLabel('Tính giá').setStyle(ButtonStyle.Secondary).setEmoji(E.component('icon_price')),
+      new ButtonBuilder().setCustomId('product:claude:models').setLabel('Models').setStyle(ButtonStyle.Secondary).setEmoji(E.component('brand_claude')),
+      new ButtonBuilder().setCustomId('product:claude:policy').setLabel('Điều khoản').setStyle(ButtonStyle.Secondary).setEmoji(E.component('icon_gem'))
     );
 
     const claudeAttachment = new AttachmentBuilder(claudeBannerPath);
@@ -353,9 +353,9 @@ export async function publishPremiumProductsForGuild(guild) {
     );
 
     const locketRow = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('product:locket:buy').setLabel('Mua ngay').setStyle(ButtonStyle.Success).setEmoji(E.component('icon_cart') || '🛒'),
-      new ButtonBuilder().setCustomId('product:locket:features').setLabel('Đặc quyền').setStyle(ButtonStyle.Secondary).setEmoji(E.component('icon_star') || '⭐'),
-      new ButtonBuilder().setCustomId('product:locket:policy').setLabel('Điều khoản').setStyle(ButtonStyle.Secondary).setEmoji(E.component('icon_gem') || '📜')
+      new ButtonBuilder().setCustomId('product:locket:buy').setLabel('Mua ngay').setStyle(ButtonStyle.Success).setEmoji(E.component('icon_cart')),
+      new ButtonBuilder().setCustomId('product:locket:features').setLabel('Đặc quyền').setStyle(ButtonStyle.Secondary).setEmoji(E.component('icon_star')),
+      new ButtonBuilder().setCustomId('product:locket:policy').setLabel('Điều khoản').setStyle(ButtonStyle.Secondary).setEmoji(E.component('icon_gem'))
     );
 
     const locketAttachment = new AttachmentBuilder(locketBannerPath);

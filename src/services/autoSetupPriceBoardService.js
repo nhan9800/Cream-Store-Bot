@@ -80,9 +80,13 @@ export function buildPricePortalPayload(guildId, guildConfig) {
       .addOptions(portalOptions)
   );
 
-  const buttonRow = new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId('price_list:admin:edit_portal').setLabel('Sửa bảng giá').setStyle(ButtonStyle.Secondary).setEmoji('✏️')
-  );
+  const editButton = new ButtonBuilder()
+    .setCustomId('price_list:admin:edit_portal')
+    .setLabel('Sửa bảng giá')
+    .setStyle(ButtonStyle.Secondary);
+  const editEmoji = E.component('icon_edit');
+  if (editEmoji) editButton.setEmoji(editEmoji);
+  const buttonRow = new ActionRowBuilder().addComponents(editButton);
 
   return { embeds: [portalEmbed], components: [selectRow, buttonRow] };
 }

@@ -347,21 +347,21 @@ export function buildBoostPanelRows(guildId) {
     .setLabel('Mua Boost Server')
     .setStyle(ButtonStyle.Primary);
   const buyEmo = E.component('brand_boost');
-  if (buyEmo) buyBtn.setEmoji(buyEmo); else buyBtn.setEmoji('🚀');
+  if (buyEmo) buyBtn.setEmoji(buyEmo);
 
   const checkBtn = new ButtonBuilder()
     .setCustomId('boost:check')
     .setLabel('Kiểm Tra Đơn')
     .setStyle(ButtonStyle.Secondary);
   const checkEmo = E.component('order_id');
-  if (checkEmo) checkBtn.setEmoji(checkEmo); else checkBtn.setEmoji('🎁');
+  if (checkEmo) checkBtn.setEmoji(checkEmo);
 
   const warrantyBtn = new ButtonBuilder()
     .setCustomId('boost:warranty')
     .setLabel('Báo Cáo Bảo Hành')
     .setStyle(ButtonStyle.Danger);
   const warEmo = E.component('ticket_claim');
-  if (warEmo) warrantyBtn.setEmoji(warEmo); else warrantyBtn.setEmoji('🛡️');
+  if (warEmo) warrantyBtn.setEmoji(warEmo);
 
   return [new ActionRowBuilder().addComponents(buyBtn, checkBtn, warrantyBtn)];
 }

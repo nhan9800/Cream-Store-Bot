@@ -335,7 +335,7 @@ export async function buildDiscountBoardComponents(guildId) {
     new ButtonBuilder()
       .setCustomId('cardswap:btn_refresh_discount')
       .setLabel('Cập Nhật Bảng Phí')
-      .setEmoji(E.component('icon_clock') || '🕒')
+      .setEmoji(E.component('icon_clock'))
       .setStyle(ButtonStyle.Secondary)
   );
   

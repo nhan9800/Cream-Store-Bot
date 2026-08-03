@@ -103,7 +103,10 @@ const fallbackEmojis = {
 export function createEmojiResolver(guildId) {
   const em = guildId ? getEmojiMap(guildId) : {};
   const fn = (slot, fallback = '') => {
-    return em[slot] || fallbackEmojis[slot] || fallback;
+    const candidate = em[slot] || fallbackEmojis[slot] || fallback;
+    // UI policy: only render Discord custom emoji. Existing callers may still
+    // pass a historical Unicode fallback; intentionally discard it here.
+    return /^<a?:[a-zA-Z0-9_]+:\d+>$/.test(candidate) ? candidate : '';
   };
   // Trả về object emoji cho ButtonBuilder.setEmoji() — nút không nhúng được
   // custom emoji vào label, phải gắn rời qua .setEmoji(). Slot trống → null.

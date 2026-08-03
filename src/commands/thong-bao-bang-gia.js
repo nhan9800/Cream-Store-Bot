@@ -158,7 +158,7 @@ export async function execute(interaction) {
     new ButtonBuilder()
       .setLabel('Hỗ Trợ & Mua Hàng')
       .setStyle(ButtonStyle.Primary)
-      .setEmoji(E.component('icon_shop') || { name: '🛒' })
+      .setEmoji(E.component('icon_store'))
       .setCustomId('announce_dummy_1')
       .setDisabled(true)
   );

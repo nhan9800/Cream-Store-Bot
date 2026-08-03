@@ -1,7 +1,18 @@
-import { ChannelType, ContainerBuilder, TextDisplayBuilder, MessageFlags } from 'discord.js';
+import {
+  ChannelType,
+  ContainerBuilder,
+  MessageFlags,
+  SeparatorBuilder,
+  SeparatorSpacingSize,
+  TextDisplayBuilder,
+} from 'discord.js';
 import { db } from '../database/db.js';
 import { config } from '../config.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
+import {
+  getLeaderboardPeriodBounds,
+  getLeaderboardRows as queryLeaderboardRows,
+} from './leaderboardService.js';
 
 // Huy hiệu top — slot custom emoji
 const MEDAL_SLOTS = ['icon_gold', 'icon_silver', 'icon_bronze', 'icon_num4', 'icon_num5', 'icon_num6', 'icon_num7', 'icon_num8', 'icon_num9', 'icon_num10'];
@@ -26,30 +37,6 @@ function formatOrderProduct(quantity, productName) {
   return `x${safeQty} ${safeName}`.replace(/\s+/g, ' ').trim();
 }
 
-function getLeaderboardRows(guildId, startIso, endIso = null) {
-  let query = `
-    SELECT customer_id,
-           COUNT(*)           AS orders,
-           SUM(total_amount)  AS total_spent
-    FROM orders
-    WHERE guild_id = ?
-      AND status = 'COMPLETED'
-      AND total_amount > 0
-      AND datetime(created_at) >= datetime(?)
-  `;
-  const params = [guildId, startIso];
-  if (endIso) {
-    query += ` AND datetime(created_at) < datetime(?)`;
-    params.push(endIso);
-  }
-  query += `
-    GROUP BY customer_id
-    ORDER BY total_spent DESC
-    LIMIT 10
-  `;
-  return db.prepare(query).all(params);
-}
-
 // Trả về { components, flags } — V2 để custom emoji hiển thị ở mọi vị trí
 function buildLeaderboardV2(title, subtitle, rows, guildId) {
   const E = createEmojiResolver(guildId);
@@ -72,8 +59,15 @@ function buildLeaderboardV2(title, subtitle, rows, guildId) {
   });
 
   container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
-    `## ${E('icon_trophy')} ${title}\n> ${subtitle}\n\n${lines.join('\n\n')}`
+    `## ${E('icon_trophy')} ${title}\n> ${subtitle}`
   ));
+  container.addSeparatorComponents(
+    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
+  );
+  container.addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join('\n\n')));
+  container.addSeparatorComponents(
+    new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small)
+  );
   container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
     `-# ${E('icon_heart_purple')} Cenar Store — Cảm ơn quý khách đã ủng hộ`
   ));
@@ -82,18 +76,15 @@ function buildLeaderboardV2(title, subtitle, rows, guildId) {
 
 export async function runAutoVinhDanh(client) {
   const now = new Date();
-  const currentYear = now.getUTCFullYear();
-  const currentMonth = now.getUTCMonth(); // 0-11
-
-  // Start of current month in UTC format YYYY-MM-DD HH:MM:SS
-  const currentMonthStart = `${currentYear}-${String(currentMonth + 1).padStart(2, '0')}-01 00:00:00`;
+  const currentPeriod = getLeaderboardPeriodBounds('monthly', now);
+  const [currentMonthLabel, currentYearLabel] = currentPeriod.label.split('/');
+  const currentMonth = Number(currentMonthLabel) - 1;
+  const currentYear = Number(currentYearLabel);
 
   // Start of previous month
   const prevMonthDate = new Date(Date.UTC(currentYear, currentMonth - 1, 1));
   const prevYear = prevMonthDate.getUTCFullYear();
   const prevMonth = prevMonthDate.getUTCMonth();
-  const prevMonthStart = `${prevYear}-${String(prevMonth + 1).padStart(2, '0')}-01 00:00:00`;
-  const prevMonthEnd = currentMonthStart;
 
   for (const [guildId, guild] of client.guilds.cache) {
     try {
@@ -111,7 +102,12 @@ export async function runAutoVinhDanh(client) {
 
       if (!hasPostedPrev) {
         // Query top 10 của tháng trước
-        const rowsPrev = getLeaderboardRows(guildId, prevMonthStart, prevMonthEnd);
+        const rowsPrev = queryLeaderboardRows(
+          guildId,
+          'monthly',
+          prevMonthDate,
+          10,
+        ).rows;
         if (rowsPrev.length > 0) {
           const titlePrev = `BẢNG VINH DANH THÁNG CHUNG CUỘC — THÁNG ${prevMonth + 1}/${prevYear}`;
           const subtitlePrev = `Danh sách vinh danh khách hàng tiêu biểu nhất trong toàn bộ **tháng ${prevMonth + 1}/${prevYear}**`;
@@ -131,7 +127,7 @@ export async function runAutoVinhDanh(client) {
       const liveMsgRow = db.prepare('SELECT value FROM system_settings WHERE key = ?').get(currentMonthKey);
       let liveMsgId = liveMsgRow?.value || null;
 
-      const rowsCurr = getLeaderboardRows(guildId, currentMonthStart);
+      const rowsCurr = queryLeaderboardRows(guildId, 'monthly', now, 10).rows;
       const titleCurr = `BẢNG XẾP HẠNG TIÊU DÙNG THÁNG ${currentMonth + 1}/${currentYear} (LIVE)`;
       const subtitleCurr = `Bảng xếp hạng cập nhật liên tục các khách hàng chi tiêu nhiều nhất trong **tháng ${currentMonth + 1}/${currentYear}**`;
       const payloadCurr = buildLeaderboardV2(titleCurr, subtitleCurr, rowsCurr, guildId);

@@ -1,117 +1,99 @@
 import {
-  PermissionFlagsBits, SlashCommandBuilder, AttachmentBuilder,
-  ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, SeparatorSpacingSize,
-  ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags,
+  AttachmentBuilder,
+  ContainerBuilder,
+  MessageFlags,
+  PermissionFlagsBits,
+  SeparatorBuilder,
+  SeparatorSpacingSize,
+  SlashCommandBuilder,
+  TextDisplayBuilder,
 } from 'discord.js';
-import { EMOJI_SLOTS, getEmojiMap } from '../services/emojiService.js';
+import {
+  EMOJI_SLOTS,
+  autoSyncGuildEmojis,
+  getEmojiMap,
+} from '../services/emojiService.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 
 export const data = new SlashCommandBuilder()
   .setName('emoji-export')
-  .setDescription('Xuất toàn bộ emoji đang được cấu hình — dùng để chia sẻ với AI để trang trí bot')
+  .setDescription('Xuất toàn bộ emoji custom và trạng thái slot giao diện')
   .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
 
+function formattedEmoji(emoji) {
+  return emoji.animated
+    ? `<a:${emoji.name}:${emoji.id}>`
+    : `<:${emoji.name}:${emoji.id}>`;
+}
+
 export async function execute(interaction) {
-  const E = createEmojiResolver(interaction.guildId);
   await interaction.deferReply({ ephemeral: true });
 
-  const em = getEmojiMap(interaction.guildId);
+  await interaction.guild.emojis.fetch().catch(() => null);
+  const syncResult = autoSyncGuildEmojis(interaction.guild);
+  const E = createEmojiResolver(interaction.guildId);
+  const map = getEmojiMap(interaction.guildId);
   const slots = Object.entries(EMOJI_SLOTS);
+  const configured = slots.filter(([slot]) => map[slot]);
+  const missing = slots.filter(([slot]) => !map[slot]);
+  const guildEmojis = [...interaction.guild.emojis.cache.values()]
+    .sort((a, b) => a.name.localeCompare(b.name, 'vi'));
 
-  const configured = slots.filter(([slot]) => em[slot]);
-  const missing    = slots.filter(([slot]) => !em[slot]);
-
-  // Nhóm theo category
-  const groups = {
-    'Panel Ticket': slots.filter(([s]) => s.startsWith('panel_')),
-    'Đơn hàng':    slots.filter(([s]) => s.startsWith('order_')),
-    'Thanh toán':  slots.filter(([s]) => s.startsWith('payment_')),
-    'Ticket':      slots.filter(([s]) => s.startsWith('ticket_')),
-    'Thương hiệu': slots.filter(([s]) => s.startsWith('brand_')),
-    'Icon':        slots.filter(([s]) => s.startsWith('icon_')),
-    'Trạng thái':  slots.filter(([s]) => s.startsWith('status_')),
-  };
-
-  // Tạo file text để đính kèm
   const lines = [
-    `# Emoji Export — ${interaction.guild.name}`,
-    `# Xuất lúc: ${new Date().toLocaleString('vi-VN')}`,
-    `# Tổng: ${slots.length} slot | Đã cấu hình: ${configured.length} | Chưa có: ${missing.length}`,
-    '#',
-    '# Format: SLOT_NAME = emoji_string | label (fallback mặc định)',
-    '# Emoji custom: <:name:id> hoặc <a:name:id>',
-    '# Emoji unicode: chính là ký tự unicode (fallback)',
-    '#',
+    `# Emoji Export - ${interaction.guild.name}`,
+    `# Thời điểm: ${new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}`,
+    `# Tổng emoji server: ${guildEmojis.length}`,
+    `# Slot đã cấu hình: ${configured.length}/${slots.length}`,
+    '# Chính sách: bot chỉ dùng custom emoji; không dùng Unicode emoji mặc định.',
+    '',
+    '## TOÀN BỘ EMOJI TRÊN SERVER',
+    ...guildEmojis.map((emoji) => `${emoji.name.padEnd(32)} = ${formattedEmoji(emoji)}`),
+    '',
+    '## SLOT GIAO DIỆN',
+    ...slots.map(([slot, meta]) => `${slot.padEnd(24)} = ${map[slot] || '[chưa gán]'} | ${meta.label}`),
   ];
 
-  for (const [group, entries] of Object.entries(groups)) {
-    lines.push(`\n## ${group}`);
-    for (const [slot, meta] of entries) {
-      const val = em[slot] || `[chưa cấu hình — default: ${meta.default}]`;
-      lines.push(`${slot.padEnd(22)} = ${val}  | ${meta.label}`);
-    }
-  }
+  const attachment = new AttachmentBuilder(
+    Buffer.from(lines.join('\n'), 'utf8'),
+    { name: `cenar-custom-emojis-${interaction.guildId}.txt` },
+  );
 
-  const fileContent = lines.join('\n');
-  const attachment = new AttachmentBuilder(Buffer.from(fileContent, 'utf-8'), {
-    name: `emoji-slots-${interaction.guildId}.txt`,
-  });
-
-  // Panel tóm tắt
   const container = new ContainerBuilder().setAccentColor(0x7C3AED);
-
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent([
-      `## ${E('icon_clipboard')} Xuất Danh Sách Emoji Slot`,
-      `> ${E('status_check')} **Đã cấu hình:** ${configured.length}/${slots.length} slot`,
-      `> ${E('status_warn')} **Chưa cấu hình:** ${missing.length} slot`,
-    ].join('\n'))
+      `## ${E('icon_clipboard')} Kho Emoji Custom Cenar Store`,
+      `> ${E('icon_store')} **Emoji trên server:** ${guildEmojis.length}`,
+      `> ${E('status_check')} **Slot đã cấu hình:** ${configured.length}/${slots.length}`,
+      `> ${E('status_info')} **Vừa tự đồng bộ:** ${syncResult.syncedCount} slot`,
+    ].join('\n')),
   );
-
   container.addSeparatorComponents(
-    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
+    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small),
   );
 
-  // Hiển thị preview top 20 slot có emoji custom
-  if (configured.length > 0) {
-    const preview = configured.slice(0, 20).map(([slot, meta]) => {
-      const emoji = em[slot];
-      return `${emoji} \`${slot}\` — ${meta.label}`;
-    }).join('\n');
-
+  if (configured.length) {
+    const preview = configured.slice(0, 20)
+      .map(([slot, meta]) => `${map[slot]} \`${slot}\` - ${meta.label}`)
+      .join('\n');
     container.addTextDisplayComponents(
-      new TextDisplayBuilder().setContent([
-        `### ${E('icon_sparkle')} Preview (${Math.min(20, configured.length)} slot đầu):`,
-        preview,
-        configured.length > 20 ? `\n*... và ${configured.length - 20} slot khác trong file đính kèm*` : '',
-      ].join('\n'))
+      new TextDisplayBuilder().setContent(`### ${E('icon_sparkle')} Slot đang hoạt động\n${preview}`),
     );
   }
 
-  if (missing.length > 0) {
+  if (missing.length) {
     container.addSeparatorComponents(
-      new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
+      new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small),
     );
     container.addTextDisplayComponents(
-      new TextDisplayBuilder().setContent([
-        `### ${E('status_warn')} Slot chưa cấu hình (${missing.length}):`,
-        missing.map(([slot]) => `\`${slot}\``).join(' • '),
-      ].join('\n'))
+      new TextDisplayBuilder().setContent(
+        `-# ${E('status_warn')} ${missing.length} slot chưa có emoji trùng tên/alias; xem file để đổi tên hoặc dùng /emoji-setup.`,
+      ),
     );
   }
-
-  container.addSeparatorComponents(
-    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
-  );
-  container.addTextDisplayComponents(
-    new TextDisplayBuilder().setContent(
-      `-# ${E('icon_tip')} Chia sẻ file .txt này với AI để bot tự nhận diện và áp emoji đúng slot vào mọi thông báo.`
-    )
-  );
 
   await interaction.editReply({
     components: [container],
-    flags: MessageFlags.IsComponentsV2,
     files: [attachment],
+    flags: MessageFlags.IsComponentsV2,
   });
 }

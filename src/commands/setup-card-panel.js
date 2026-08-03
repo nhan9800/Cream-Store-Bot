@@ -18,22 +18,22 @@ export async function execute(interaction) {
     new ButtonBuilder()
       .setCustomId('cardswap:btn_charge')
       .setLabel('Đổi Thẻ Cào')
-      .setEmoji(E.component('icon_wallet') || '💳')
+      .setEmoji(E.component('icon_wallet'))
       .setStyle(ButtonStyle.Success),
     new ButtonBuilder()
       .setCustomId('cardswap:btn_buy')
       .setLabel('Mua Thẻ Cào')
-      .setEmoji(E.component('icon_cart') || '🛒')
+      .setEmoji(E.component('icon_cart'))
       .setStyle(ButtonStyle.Primary),
     new ButtonBuilder()
       .setCustomId('cardswap:btn_fees')
       .setLabel('Xem Bảng Phí')
-      .setEmoji(E.component('payment_money') || '💸')
+      .setEmoji(E.component('payment_money'))
       .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
       .setCustomId('cardswap:btn_balance')
       .setLabel('Kiểm Tra Số Dư')
-      .setEmoji(E.component('icon_wallet') || '💰')
+      .setEmoji(E.component('icon_wallet'))
       .setStyle(ButtonStyle.Secondary)
   );
 

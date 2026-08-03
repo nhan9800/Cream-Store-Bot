@@ -1,9 +1,14 @@
 import {
   SlashCommandBuilder, PermissionFlagsBits, ChannelType,
   ContainerBuilder, TextDisplayBuilder, MessageFlags,
+  SeparatorBuilder, SeparatorSpacingSize,
 } from 'discord.js';
 import { db } from '../database/db.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
+import {
+  getLeaderboardPeriodBounds,
+  getLeaderboardRows,
+} from '../services/leaderboardService.js';
 
 export const data = new SlashCommandBuilder()
   .setName('vinh-danh')
@@ -66,8 +71,15 @@ function buildLeaderboardV2(title, subtitle, rows, guildId) {
   });
 
   container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
-    `## ${E('icon_trophy')} ${title}\n> ${subtitle}\n\n${lines.join('\n\n')}`
+    `## ${E('icon_trophy')} ${title}\n> ${subtitle}`
   ));
+  container.addSeparatorComponents(
+    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
+  );
+  container.addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join('\n\n')));
+  container.addSeparatorComponents(
+    new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small)
+  );
   container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
     `-# ${E('icon_heart_purple')} Cenar Store — Cảm ơn quý khách đã ủng hộ`
   ));
@@ -80,34 +92,22 @@ export async function execute(interaction) {
   const E = createEmojiResolver(guildId);
 
   const now = new Date();
-  const firstOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).toISOString();
-
   if (sub === 'thang-nay' || sub === 'tat-ca' || sub === 'dang-len-kenh') {
     const loai = sub === 'dang-len-kenh'
       ? interaction.options.getString('loai')
       : (sub === 'thang-nay' ? 'month' : 'all');
 
     const isMonth = loai === 'month';
+    const period = getLeaderboardPeriodBounds('monthly', now);
+    const [monthLabel, yearLabel] = period.label.split('/');
     const title = isMonth
-      ? `VINH DANH THÁNG ${now.getMonth()+1}/${now.getFullYear()}`
+      ? `VINH DANH THÁNG ${monthLabel}/${yearLabel}`
       : 'VINH DANH MỌI THỜI ĐẠI';
     const subtitle = isMonth
-      ? `Top khách hàng chi tiêu nhiều nhất trong **tháng ${now.getMonth()+1}/${now.getFullYear()}**`
+      ? `Top khách hàng chi tiêu nhiều nhất trong **tháng ${monthLabel}/${yearLabel}**`
       : 'Top khách hàng chi tiêu nhiều nhất từ trước đến nay';
 
-    const rows = db.prepare(`
-      SELECT customer_id,
-             COUNT(*)           AS orders,
-             SUM(total_amount)  AS total_spent
-      FROM orders
-      WHERE guild_id = ?
-        AND status = 'COMPLETED'
-        AND total_amount > 0
-        ${isMonth ? "AND created_at >= ?" : ""}
-      GROUP BY customer_id
-      ORDER BY total_spent DESC
-      LIMIT 10
-    `).all(isMonth ? [guildId, firstOfMonth] : [guildId]);
+    const rows = getLeaderboardRows(guildId, isMonth ? 'monthly' : 'all', now, 10).rows;
 
     const payload = buildLeaderboardV2(title, subtitle, rows, guildId);
 
