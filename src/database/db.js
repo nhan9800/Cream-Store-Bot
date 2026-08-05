@@ -881,6 +881,9 @@ export function initDatabase() {
   ensureColumn('guild_settings', 'cardswap_domain', "TEXT DEFAULT 'card2k.com'");
   ensureColumn('guild_settings', 'cardswap_charging_fee_add', "REAL DEFAULT 5.0");
   ensureColumn('guild_settings', 'cardswap_buy_profit_add', "INTEGER DEFAULT 3000");
+  ensureColumn('card_charging_orders', 'source', "TEXT NOT NULL DEFAULT 'DISCORD'");
+  ensureColumn('card_charging_orders', 'fee_percent', 'REAL');
+  ensureColumn('card_charging_orders', 'credited_amount', 'INTEGER');
 
   // --- DISCOUNT BOARD ---
   ensureColumn('guild_settings', 'discount_board_channel_id', 'TEXT DEFAULT NULL');

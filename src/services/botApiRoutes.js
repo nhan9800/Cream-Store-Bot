@@ -25,6 +25,13 @@ import { getDiscordNitroEligibility } from '../utils/discordNitro.js';
 import { recordStaffLog } from './staffLogService.js';
 import { getLeaderboardRows } from './leaderboardService.js';
 import {
+    CARD_TOPUP_FEE_PERCENT,
+    calculateCardTopupCredit,
+    getCardTopupOptions,
+    getChargingOrder,
+    submitChargingCard,
+} from './cardSwapService.js';
+import {
     parseWebsiteRelay,
     presentSupportMessage,
     SUPPORT_TEAM_NAME,
@@ -199,6 +206,28 @@ function canAccessCustomerResource(req, customerId) {
     if (role === 'admin' || role === 'staff') return true;
     const discordId = String(req.header('x-discord-id') || '').trim();
     return Boolean(discordId && customerId && discordId === String(customerId));
+}
+
+function presentCardTopupOrder(order) {
+    if (!order) return null;
+    const cardValue = Number(order.value) || Number(order.declared_value) || 0;
+    const feePercent = order.fee_percent === null || order.fee_percent === undefined
+        ? CARD_TOPUP_FEE_PERCENT
+        : Number(order.fee_percent);
+    return {
+        request_id: order.request_id,
+        telco: order.telco,
+        declared_value: Number(order.declared_value) || 0,
+        card_value: Number(order.value) || null,
+        fee_percent: feePercent,
+        expected_amount: calculateCardTopupCredit(cardValue, feePercent),
+        credited_amount: Number(order.credited_amount) || null,
+        status: order.status,
+        message: order.message || null,
+        source: order.source || 'DISCORD',
+        created_at: order.created_at,
+        updated_at: order.updated_at,
+    };
 }
 
 /**
@@ -906,6 +935,73 @@ export function registerBotApiRoutes(app) {
             console.error('[WALLET TOPUP]', e);
             res.status(500).json({ ok: false, error: 'Lỗi tạo đơn nạp tiền PayOS' });
         }
+    });
+
+    // ── CARD TOP-UP — đồng bộ provider và ví với Discord bot ──
+    app.get('/api/bot/card-topup/options', async (req, res) => {
+        try {
+            const data = await getCardTopupOptions(config.guildId);
+            res.set('Cache-Control', 'no-store, max-age=0');
+            return res.json({ ok: true, data });
+        } catch (error) {
+            console.error('[CARD TOPUP OPTIONS]', error.message);
+            return res.status(503).json({ ok: false, error: 'Bảng mệnh giá đang tạm thời gián đoạn.' });
+        }
+    });
+
+    app.post('/api/bot/card-topup', async (req, res) => {
+        const customerId = String(req.body?.customerId || '').trim();
+        const telco = String(req.body?.telco || '').trim().toUpperCase();
+        const code = String(req.body?.code || '').trim();
+        const serial = String(req.body?.serial || '').trim();
+        const declaredValue = Number(req.body?.declaredValue);
+        if (!canAccessCustomerResource(req, customerId)) {
+            return res.status(403).json({ ok: false, error: 'Forbidden' });
+        }
+        if (!/^\d{15,22}$/.test(customerId)) {
+            return res.status(400).json({ ok: false, error: 'Tài khoản chưa liên kết Discord.' });
+        }
+
+        try {
+            const options = await getCardTopupOptions(config.guildId);
+            const telcoOption = options.telcos.find((item) => item.code === telco);
+            const denomination = telcoOption?.denominations.find((item) => item.value === declaredValue);
+            if (!denomination) {
+                return res.status(400).json({ ok: false, error: 'Nhà mạng hoặc mệnh giá không được hỗ trợ.' });
+            }
+
+            const result = await submitChargingCard(
+                config.guildId,
+                customerId,
+                telco,
+                code,
+                serial,
+                declaredValue,
+                { source: 'WEBSITE', feePercent: CARD_TOPUP_FEE_PERCENT },
+            );
+            const order = getChargingOrder(result.request_id);
+            res.set('Cache-Control', 'no-store, max-age=0');
+            return res.status(202).json({ ok: true, data: presentCardTopupOrder(order) });
+        } catch (error) {
+            const message = String(error?.message || 'Không thể gửi thẻ lúc này.');
+            const duplicate = message.includes('đã được gửi');
+            console.error('[CARD TOPUP SUBMIT]', message);
+            return res.status(duplicate ? 409 : 400).json({ ok: false, error: message });
+        }
+    });
+
+    app.get('/api/bot/card-topup/:requestId', (req, res) => {
+        const requestId = String(req.params.requestId || '').trim();
+        if (!/^[a-f0-9]{20}$/i.test(requestId)) {
+            return res.status(400).json({ ok: false, error: 'Mã giao dịch không hợp lệ.' });
+        }
+        const order = getChargingOrder(requestId);
+        if (!order) return res.status(404).json({ ok: false, error: 'Không tìm thấy giao dịch.' });
+        if (!canAccessCustomerResource(req, order.customer_id)) {
+            return res.status(403).json({ ok: false, error: 'Forbidden' });
+        }
+        res.set('Cache-Control', 'no-store, max-age=0');
+        return res.json({ ok: true, data: presentCardTopupOrder(order) });
     });
 
     // ── WEB ORDERS — nhận đơn hàng từ website ──────────────

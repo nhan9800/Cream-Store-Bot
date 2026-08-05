@@ -4,6 +4,48 @@ import { addWalletBalance } from './walletService.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { ContainerBuilder, TextDisplayBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } from 'discord.js';
 
+export const CARD_TOPUP_FEE_PERCENT = 20;
+export const CARD_TOPUP_TELCOS = ['VIETTEL', 'VINAPHONE', 'MOBIFONE', 'ZING', 'GARENA'];
+
+const CARD_TOPUP_LABELS = {
+  VIETTEL: 'Viettel',
+  VINAPHONE: 'VinaPhone',
+  MOBIFONE: 'MobiFone',
+  ZING: 'Zing',
+  GARENA: 'Garena',
+};
+
+export function calculateCardTopupCredit(value, feePercent = CARD_TOPUP_FEE_PERCENT) {
+  const safeValue = Math.max(0, Math.floor(Number(value) || 0));
+  const safeFee = Math.min(100, Math.max(0, Number(feePercent) || 0));
+  return Math.floor(safeValue * (100 - safeFee) / 100);
+}
+
+export function buildCardTopupCatalog(fees, feePercent = CARD_TOPUP_FEE_PERCENT) {
+  const grouped = new Map(CARD_TOPUP_TELCOS.map((telco) => [telco, new Set()]));
+  for (const item of Array.isArray(fees) ? fees : []) {
+    const telco = String(item?.telco || '').trim().toUpperCase();
+    const value = Math.floor(Number(item?.value) || 0);
+    if (!grouped.has(telco) || value < 10_000 || value > 10_000_000) continue;
+    grouped.get(telco).add(value);
+  }
+
+  return {
+    fee_percent: feePercent,
+    telcos: CARD_TOPUP_TELCOS.map((code) => ({
+      code,
+      label: CARD_TOPUP_LABELS[code],
+      denominations: [...grouped.get(code)]
+        .sort((left, right) => left - right)
+        .map((value) => ({
+          value,
+          received_amount: calculateCardTopupCredit(value, feePercent),
+        })),
+    })).filter((telco) => telco.denominations.length > 0),
+    updated_at: nowIso(),
+  };
+}
+
 export function getCardSwapConfig(guildId) {
   const row = db.prepare('SELECT cardswap_partner_id, cardswap_partner_key, cardswap_buy_partner_id, cardswap_buy_partner_key, cardswap_domain, cardswap_charging_fee_add, cardswap_buy_profit_add FROM guild_settings WHERE guild_id = ?').get(guildId);
   if (!row) return null;
@@ -56,20 +98,49 @@ export async function getChargingFees(guildId) {
   return data;
 }
 
-export async function submitChargingCard(guildId, customerId, telco, code, serial, declared_value) {
+export async function submitChargingCard(
+  guildId,
+  customerId,
+  telco,
+  code,
+  serial,
+  declared_value,
+  { source = 'DISCORD', feePercent = CARD_TOPUP_FEE_PERCENT } = {},
+) {
   const config = getCardSwapConfig(guildId);
   if (!config || !config.cardswap_partner_id) throw new Error('Chưa cấu hình CardSwap API');
+
+  const normalizedTelco = String(telco || '').trim().toUpperCase();
+  const normalizedCode = String(code || '').trim();
+  const normalizedSerial = String(serial || '').trim();
+  const normalizedValue = Math.floor(Number(declared_value) || 0);
+  const normalizedFee = Math.min(100, Math.max(0, Number(feePercent) || CARD_TOPUP_FEE_PERCENT));
+  if (!CARD_TOPUP_TELCOS.includes(normalizedTelco)) throw new Error('Nhà mạng không được hỗ trợ');
+  if (!/^[A-Za-z0-9]{6,32}$/.test(normalizedCode) || !/^[A-Za-z0-9]{6,32}$/.test(normalizedSerial)) {
+    throw new Error('Mã thẻ hoặc số serial không hợp lệ');
+  }
+  if (!Number.isSafeInteger(normalizedValue) || normalizedValue < 10_000 || normalizedValue > 10_000_000) {
+    throw new Error('Mệnh giá thẻ không hợp lệ');
+  }
+
+  const duplicate = db.prepare(`
+    SELECT request_id FROM card_charging_orders
+    WHERE guild_id = ? AND telco = ? AND code = ? AND serial = ?
+      AND status IN ('PENDING', 'PROCESSING', 'COMPLETED')
+    LIMIT 1
+  `).get(guildId, normalizedTelco, normalizedCode, normalizedSerial);
+  if (duplicate) throw new Error('Thẻ này đã được gửi trước đó');
   
   const domain = config.cardswap_domain || 'card2k.com';
   const requestId = crypto.randomUUID().replace(/-/g, '').substring(0, 20);
   
-  const sign = md5(config.cardswap_partner_key + code + serial);
+  const sign = md5(config.cardswap_partner_key + normalizedCode + normalizedSerial);
   
   const body = new URLSearchParams({
-    telco: telco,
-    code: code,
-    serial: serial,
-    amount: declared_value.toString(),
+    telco: normalizedTelco,
+    code: normalizedCode,
+    serial: normalizedSerial,
+    amount: normalizedValue.toString(),
     request_id: requestId,
     partner_id: config.cardswap_partner_id,
     sign: sign,
@@ -78,17 +149,38 @@ export async function submitChargingCard(guildId, customerId, telco, code, seria
 
   // Lưu database trước khi gửi
   db.prepare(`
-    INSERT INTO card_charging_orders (request_id, guild_id, customer_id, telco, code, serial, declared_value, status, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?)
-  `).run(requestId, guildId, customerId, telco, code, serial, declared_value, nowIso(), nowIso());
+    INSERT INTO card_charging_orders (
+      request_id, guild_id, customer_id, telco, code, serial, declared_value,
+      status, source, fee_percent, created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?)
+  `).run(
+    requestId,
+    guildId,
+    customerId,
+    normalizedTelco,
+    normalizedCode,
+    normalizedSerial,
+    normalizedValue,
+    String(source || 'DISCORD').toUpperCase(),
+    normalizedFee,
+    nowIso(),
+    nowIso(),
+  );
 
-  const res = await fetch(`https://${domain}/chargingws/v2`, {
-    method: 'POST',
-    headers: { 'Accept': 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: body.toString()
-  });
-  
-  const data = await res.json();
+  let data;
+  try {
+    const res = await fetch(`https://${domain}/chargingws/v2`, {
+      method: 'POST',
+      headers: { 'Accept': 'application/json', 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: body.toString(),
+      signal: AbortSignal.timeout(12_000),
+    });
+    data = await res.json();
+  } catch {
+    db.prepare("UPDATE card_charging_orders SET status = 'FAILED', message = ?, updated_at = ? WHERE request_id = ?")
+      .run('Không thể kết nối nhà cung cấp', nowIso(), requestId);
+    throw new Error('Nhà cung cấp thẻ đang tạm thời gián đoạn');
+  }
   
   // Update order status if immediate failure
   if (data.status === 100) {
@@ -113,9 +205,13 @@ export function getChargingOrder(requestId) {
 export function updateChargingOrder(requestId, data) {
   db.prepare(`
     UPDATE card_charging_orders
-    SET status = ?, value = ?, amount = ?, trans_id = ?, message = ?, updated_at = ?
+    SET status = ?, value = ?, amount = ?, credited_amount = ?, trans_id = ?, message = ?, updated_at = ?
     WHERE request_id = ?
-  `).run(data.status, data.value, data.amount, data.trans_id, data.message, nowIso(), requestId);
+  `).run(data.status, data.value, data.amount, data.creditedAmount ?? null, data.trans_id, data.message, nowIso(), requestId);
+}
+
+export async function getCardTopupOptions(guildId) {
+  return buildCardTopupCatalog(await getChargingFees(guildId));
 }
 
 // Mua Thẻ
@@ -209,17 +305,48 @@ export async function handleCardSwapCallback(query, discordClient) {
     // 1 = Thành công, 2 = Sai mệnh giá
     const actualAmount = Number(amount);
     
-    updateChargingOrder(request_id, {
-      status: 'COMPLETED',
-      value: card_value,
-      amount: actualAmount,
-      trans_id: trans_id,
-      message: message || (statusNum === 1 ? 'Thành công' : 'Sai mệnh giá')
-    });
+    const actualCardValue = Number(card_value) || Number(declared_value) || order.declared_value;
+    const lockedFeePercent = order.fee_percent !== null
+      && order.fee_percent !== undefined
+      && Number.isFinite(Number(order.fee_percent))
+      ? Number(order.fee_percent)
+      : null;
+    const configuredCredit = lockedFeePercent === null
+      ? null
+      : calculateCardTopupCredit(actualCardValue, lockedFeePercent);
+    const declaredNum = Number(declared_value) || order.declared_value || 0;
+    const adminFeeAmount = Math.floor(declaredNum * (config.cardswap_charging_fee_add || 0) / 100);
+    const userReceives = configuredCredit ?? Math.max(0, actualAmount - adminFeeAmount);
+
+    const completionMessage = message || (statusNum === 1 ? 'Thành công' : 'Sai mệnh giá');
+
+    // Update the order and wallet in one SQLite transaction. The status check
+    // makes repeated provider callbacks idempotent.
+    const finalized = db.transaction(() => {
+      const current = getChargingOrder(request_id);
+      if (!current || current.status !== 'PENDING') return false;
+      updateChargingOrder(request_id, {
+        status: 'COMPLETED',
+        value: card_value,
+        amount: actualAmount,
+        creditedAmount: userReceives,
+        trans_id: trans_id,
+        message: completionMessage,
+      });
+      addWalletBalance(
+        order.guild_id,
+        order.customer_id,
+        userReceives,
+        'TOPUP_CARD',
+        'Đổi thẻ cào thành công',
+        request_id,
+      );
+      return true;
+    })();
+    if (!finalized) return;
 
     const E = createEmojiResolver(order.guild_id);
-    
-    // Add wallet balance to customer
+
     // User needs to get the actualAmount (which is the money received by admin).
     // The admin wants to make a profit.
     // actualAmount is what Card2k pays admin.
@@ -231,19 +358,6 @@ export async function handleCardSwapCallback(query, discordClient) {
     // We can deduce Card2K_Fee = ((declared_value - actualAmount) / declared_value) * 100.
     // So user receives = actualAmount - (declared_value * config.cardswap_charging_fee_add / 100).
     // Let's ensure it doesn't go below 0.
-    const declaredNum = Number(declared_value) || 0;
-    const adminFeeAmount = Math.floor(declaredNum * (config.cardswap_charging_fee_add || 0) / 100);
-    const userReceives = Math.max(0, actualAmount - adminFeeAmount);
-
-    addWalletBalance(
-      order.guild_id, 
-      order.customer_id, 
-      userReceives, 
-      'TOPUP_CARD', 
-      'Đổi thẻ cào thành công', 
-      request_id
-    );
-
     // Gửi tin nhắn
     if (discordClient) {
       try {
@@ -261,13 +375,20 @@ export async function handleCardSwapCallback(query, discordClient) {
     }
   } else if (statusNum === 3 || statusNum === 100) {
     // 3 = Thẻ lỗi, 100 = Gửi thẻ thất bại
-    updateChargingOrder(request_id, {
-      status: 'FAILED',
-      value: card_value,
-      amount: 0,
-      trans_id: trans_id,
-      message: message || 'Thẻ lỗi'
-    });
+    const failed = db.transaction(() => {
+      const current = getChargingOrder(request_id);
+      if (!current || current.status !== 'PENDING') return false;
+      updateChargingOrder(request_id, {
+        status: 'FAILED',
+        value: card_value,
+        amount: 0,
+        creditedAmount: 0,
+        trans_id: trans_id,
+        message: message || 'Thẻ lỗi',
+      });
+      return true;
+    })();
+    if (!failed) return;
 
     const E = createEmojiResolver(order.guild_id);
     if (discordClient) {
@@ -291,31 +412,17 @@ export async function handleCardSwapCallback(query, discordClient) {
 
 export async function buildDiscountBoardMarkdown(guildId) {
   const fees = await getChargingFees(guildId);
-  const config = getCardSwapConfig(guildId);
-  const feeAdd = config?.cardswap_charging_fee_add || 5.0;
+  const catalog = buildCardTopupCatalog(fees);
   const E = createEmojiResolver(guildId);
-  
-  const telcoMap = {};
-  for (const item of fees) {
-    if (!telcoMap[item.telco]) telcoMap[item.telco] = [];
-    const val = parseInt(item.value, 10);
-    const finalFee = parseFloat(item.fees) + feeAdd;
-    telcoMap[item.telco].push({ ...item, numericValue: val, finalFee });
-  }
   
   const dateStr = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
   let markdown = `### ${E('payment_money') || '💸'} BẢNG CHIẾT KHẤU ĐỔI THẺ (TỰ ĐỘNG)\n`;
-  markdown += `*Cập nhật lần cuối: **${dateStr}***\n*Phí gạch thẻ đã bao gồm chiết khấu hệ thống. Phí này sẽ bị trừ vào mệnh giá thực nhận.*\n\n`;
-  
-  const targetTelcos = ['VIETTEL', 'VINAPHONE', 'MOBIFONE', 'ZING', 'GARENA'];
-  
-  for (const [telco, items] of Object.entries(telcoMap)) {
-    if (!targetTelcos.includes(telco)) continue;
-    markdown += `**${E('icon_star') || '⭐'} Dành cho nhà mạng ${telco}**\n`;
-    items.sort((a,b) => a.numericValue - b.numericValue);
-    for (const item of items) {
-      const receiveStr = (item.numericValue - (item.numericValue * item.finalFee / 100)).toLocaleString('vi-VN');
-      markdown += `- Mệnh giá ${item.numericValue.toLocaleString('vi-VN')}đ: Phí **${item.finalFee}%** (Thực nhận: ${receiveStr}đ)\n`;
+  markdown += `*Cập nhật lần cuối: **${dateStr}***\n*Chiết khấu cố định **${catalog.fee_percent}%**; ví nhận **80%** mệnh giá thẻ hợp lệ.*\n\n`;
+
+  for (const telco of catalog.telcos) {
+    markdown += `**${E('icon_star') || '⭐'} Nhà mạng ${telco.label}**\n`;
+    for (const item of telco.denominations) {
+      markdown += `- Mệnh giá ${item.value.toLocaleString('vi-VN')}đ → ví nhận **${item.received_amount.toLocaleString('vi-VN')}đ**\n`;
     }
     markdown += `\n`;
   }
