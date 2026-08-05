@@ -37,11 +37,16 @@ export async function handleCardSwapInteractions(interaction) {
     const chargingFeeAdd = parseFloat(interaction.fields.getTextInputValue('cardswap:charging_fee_add'));
     const buyProfitAdd = parseInt(interaction.fields.getTextInputValue('cardswap:buy_profit_add'));
 
+    if (!Number.isFinite(chargingFeeAdd) || chargingFeeAdd < 2 || chargingFeeAdd > 3) {
+      await interaction.reply({ content: 'Biên lợi nhuận đổi thẻ phải nằm trong khoảng từ 2% đến 3%.', ephemeral: true });
+      return true;
+    }
+
     saveCardSwapConfig(interaction.guild.id, {
       cardswap_domain: domain,
       cardswap_partner_id: partnerId,
       cardswap_partner_key: partnerKey,
-      cardswap_charging_fee_add: isNaN(chargingFeeAdd) ? 5.0 : chargingFeeAdd,
+      cardswap_charging_fee_add: chargingFeeAdd,
       cardswap_buy_profit_add: isNaN(buyProfitAdd) ? 3000 : buyProfitAdd
     });
 

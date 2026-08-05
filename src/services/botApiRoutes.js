@@ -25,7 +25,7 @@ import { getDiscordNitroEligibility } from '../utils/discordNitro.js';
 import { recordStaffLog } from './staffLogService.js';
 import { getLeaderboardRows } from './leaderboardService.js';
 import {
-    CARD_TOPUP_FEE_PERCENT,
+    CARD_TOPUP_LEGACY_FEE_PERCENT,
     calculateCardTopupCredit,
     getCardTopupOptions,
     getChargingOrder,
@@ -212,7 +212,7 @@ function presentCardTopupOrder(order) {
     if (!order) return null;
     const cardValue = Number(order.value) || Number(order.declared_value) || 0;
     const feePercent = order.fee_percent === null || order.fee_percent === undefined
-        ? CARD_TOPUP_FEE_PERCENT
+        ? CARD_TOPUP_LEGACY_FEE_PERCENT
         : Number(order.fee_percent);
     return {
         request_id: order.request_id,
@@ -977,7 +977,7 @@ export function registerBotApiRoutes(app) {
                 code,
                 serial,
                 declaredValue,
-                { source: 'WEBSITE', feePercent: CARD_TOPUP_FEE_PERCENT },
+                { source: 'WEBSITE', feePercent: denomination.fee_percent },
             );
             const order = getChargingOrder(result.request_id);
             res.set('Cache-Control', 'no-store, max-age=0');

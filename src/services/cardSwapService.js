@@ -4,7 +4,10 @@ import { addWalletBalance } from './walletService.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { ContainerBuilder, TextDisplayBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } from 'discord.js';
 
-export const CARD_TOPUP_FEE_PERCENT = 20;
+export const CARD_TOPUP_PROFIT_MARGIN_PERCENT = 3;
+export const CARD_TOPUP_MIN_PROFIT_MARGIN_PERCENT = 2;
+export const CARD_TOPUP_MAX_PROFIT_MARGIN_PERCENT = 3;
+export const CARD_TOPUP_LEGACY_FEE_PERCENT = 20;
 export const CARD_TOPUP_TELCOS = ['VIETTEL', 'VINAPHONE', 'MOBIFONE', 'ZING', 'GARENA'];
 
 const CARD_TOPUP_LABELS = {
@@ -15,33 +18,74 @@ const CARD_TOPUP_LABELS = {
   GARENA: 'Garena',
 };
 
-export function calculateCardTopupCredit(value, feePercent = CARD_TOPUP_FEE_PERCENT) {
+export function calculateCardTopupCredit(value, feePercent) {
   const safeValue = Math.max(0, Math.floor(Number(value) || 0));
   const safeFee = Math.min(100, Math.max(0, Number(feePercent) || 0));
   return Math.floor(safeValue * (100 - safeFee) / 100);
 }
 
-export function buildCardTopupCatalog(fees, feePercent = CARD_TOPUP_FEE_PERCENT) {
-  const grouped = new Map(CARD_TOPUP_TELCOS.map((telco) => [telco, new Set()]));
+export function normalizeCardTopupProfitMargin(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return CARD_TOPUP_PROFIT_MARGIN_PERCENT;
+  return Math.min(
+    CARD_TOPUP_MAX_PROFIT_MARGIN_PERCENT,
+    Math.max(CARD_TOPUP_MIN_PROFIT_MARGIN_PERCENT, parsed),
+  );
+}
+
+function parseProviderFeePercent(item) {
+  const raw = item?.fees ?? item?.fee ?? item?.fee_percent ?? item?.discount;
+  if (raw === null || raw === undefined || String(raw).trim() === '') return null;
+  const parsed = Number(String(raw).replace(',', '.').replace('%', '').trim());
+  if (!Number.isFinite(parsed) || parsed < 0 || parsed >= 100) return null;
+  return parsed;
+}
+
+export function buildCardTopupCatalog(fees, profitMarginPercent = CARD_TOPUP_PROFIT_MARGIN_PERCENT) {
+  const margin = normalizeCardTopupProfitMargin(profitMarginPercent);
+  const grouped = new Map(CARD_TOPUP_TELCOS.map((telco) => [telco, new Map()]));
   for (const item of Array.isArray(fees) ? fees : []) {
     const telco = String(item?.telco || '').trim().toUpperCase();
     const value = Math.floor(Number(item?.value) || 0);
-    if (!grouped.has(telco) || value < 10_000 || value > 10_000_000) continue;
-    grouped.get(telco).add(value);
+    const providerFeePercent = parseProviderFeePercent(item);
+    if (
+      !grouped.has(telco)
+      || value < 10_000
+      || value > 10_000_000
+      || providerFeePercent === null
+    ) continue;
+
+    // Nếu API trả trùng mệnh giá, dùng mức phí cao hơn để không báo giá thấp hơn
+    // số tiền nhà cung cấp thực tế khấu trừ.
+    const currentFee = grouped.get(telco).get(value);
+    grouped.get(telco).set(value, Math.max(currentFee ?? 0, providerFeePercent));
   }
 
-  return {
-    fee_percent: feePercent,
-    telcos: CARD_TOPUP_TELCOS.map((code) => ({
-      code,
-      label: CARD_TOPUP_LABELS[code],
-      denominations: [...grouped.get(code)]
-        .sort((left, right) => left - right)
-        .map((value) => ({
+  const telcos = CARD_TOPUP_TELCOS.map((code) => ({
+    code,
+    label: CARD_TOPUP_LABELS[code],
+    denominations: [...grouped.get(code).entries()]
+      .sort(([left], [right]) => left - right)
+      .map(([value, providerFeePercent]) => {
+        const feePercent = Number((providerFeePercent + margin).toFixed(2));
+        return {
           value,
+          provider_fee_percent: providerFeePercent,
+          profit_margin_percent: margin,
+          fee_percent: feePercent,
           received_amount: calculateCardTopupCredit(value, feePercent),
-        })),
-    })).filter((telco) => telco.denominations.length > 0),
+        };
+      }),
+  })).filter((telco) => telco.denominations.length > 0);
+  const allFees = telcos.flatMap((telco) => telco.denominations.map((item) => item.fee_percent));
+
+  return {
+    // Giữ fee_percent để client cũ vẫn có một mức phí bảo thủ trong lúc rolling deploy.
+    fee_percent: allFees.length ? Math.max(...allFees) : null,
+    fee_percent_min: allFees.length ? Math.min(...allFees) : null,
+    fee_percent_max: allFees.length ? Math.max(...allFees) : null,
+    profit_margin_percent: margin,
+    telcos,
     updated_at: nowIso(),
   };
 }
@@ -92,10 +136,22 @@ export async function getChargingFees(guildId) {
   const domain = config.cardswap_domain || 'card2k.com';
   const url = `https://${domain}/chargingws/v2/getfee?partner_id=${config.cardswap_partner_id}`;
   
-  const res = await fetch(url);
+  const res = await fetch(url, {
+    headers: { Accept: 'application/json' },
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!res.ok) throw new Error(`Nhà cung cấp trả về HTTP ${res.status}`);
   const data = await res.json();
   if (data.status === 100) throw new Error(data.message || 'Lỗi lấy phí');
-  return data;
+  const feeRows = Array.isArray(data)
+    ? data
+    : Array.isArray(data?.data)
+      ? data.data
+      : Array.isArray(data?.fees)
+        ? data.fees
+        : null;
+  if (!feeRows) throw new Error('Nhà cung cấp trả về bảng phí không hợp lệ');
+  return feeRows;
 }
 
 export async function submitChargingCard(
@@ -105,7 +161,7 @@ export async function submitChargingCard(
   code,
   serial,
   declared_value,
-  { source = 'DISCORD', feePercent = CARD_TOPUP_FEE_PERCENT } = {},
+  { source = 'DISCORD', feePercent = null } = {},
 ) {
   const config = getCardSwapConfig(guildId);
   if (!config || !config.cardswap_partner_id) throw new Error('Chưa cấu hình CardSwap API');
@@ -114,13 +170,25 @@ export async function submitChargingCard(
   const normalizedCode = String(code || '').trim();
   const normalizedSerial = String(serial || '').trim();
   const normalizedValue = Math.floor(Number(declared_value) || 0);
-  const normalizedFee = Math.min(100, Math.max(0, Number(feePercent) || CARD_TOPUP_FEE_PERCENT));
   if (!CARD_TOPUP_TELCOS.includes(normalizedTelco)) throw new Error('Nhà mạng không được hỗ trợ');
   if (!/^[A-Za-z0-9]{6,32}$/.test(normalizedCode) || !/^[A-Za-z0-9]{6,32}$/.test(normalizedSerial)) {
     throw new Error('Mã thẻ hoặc số serial không hợp lệ');
   }
   if (!Number.isSafeInteger(normalizedValue) || normalizedValue < 10_000 || normalizedValue > 10_000_000) {
     throw new Error('Mệnh giá thẻ không hợp lệ');
+  }
+
+  let normalizedFee = feePercent === null || feePercent === undefined ? Number.NaN : Number(feePercent);
+  if (!Number.isFinite(normalizedFee)) {
+    const options = await getCardTopupOptions(guildId);
+    const denomination = options.telcos
+      .find((item) => item.code === normalizedTelco)
+      ?.denominations.find((item) => item.value === normalizedValue);
+    if (!denomination) throw new Error('Nhà mạng hoặc mệnh giá không được hỗ trợ');
+    normalizedFee = denomination.fee_percent;
+  }
+  if (!Number.isFinite(normalizedFee) || normalizedFee < 0 || normalizedFee >= 100) {
+    throw new Error('Bảng phí nhà cung cấp không hợp lệ');
   }
 
   const duplicate = db.prepare(`
@@ -211,7 +279,13 @@ export function updateChargingOrder(requestId, data) {
 }
 
 export async function getCardTopupOptions(guildId) {
-  return buildCardTopupCatalog(await getChargingFees(guildId));
+  const config = getCardSwapConfig(guildId);
+  const catalog = buildCardTopupCatalog(
+    await getChargingFees(guildId),
+    config?.cardswap_charging_fee_add,
+  );
+  if (!catalog.telcos.length) throw new Error('Nhà cung cấp chưa trả về bảng phí hợp lệ');
+  return catalog;
 }
 
 // Mua Thẻ
@@ -347,17 +421,6 @@ export async function handleCardSwapCallback(query, discordClient) {
 
     const E = createEmojiResolver(order.guild_id);
 
-    // User needs to get the actualAmount (which is the money received by admin).
-    // The admin wants to make a profit.
-    // actualAmount is what Card2k pays admin.
-    // Original formula: user gets = actualAmount, admin gets nothing.
-    // Profit margin: admin wants to keep X% of the card value.
-    // Wait, Card2k fee is e.g. 15%. actualAmount = 85k (for 100k card).
-    // Admin configures cardswap_charging_fee_add = 5%. Total fee = 20%. User gets 80k.
-    // So user receives = declared_value * (100 - (Card2K_Fee + Admin_Fee)) / 100.
-    // We can deduce Card2K_Fee = ((declared_value - actualAmount) / declared_value) * 100.
-    // So user receives = actualAmount - (declared_value * config.cardswap_charging_fee_add / 100).
-    // Let's ensure it doesn't go below 0.
     // Gửi tin nhắn
     if (discordClient) {
       try {
@@ -411,18 +474,18 @@ export async function handleCardSwapCallback(query, discordClient) {
 // --- Hỗ trợ render Discount Board ---
 
 export async function buildDiscountBoardMarkdown(guildId) {
-  const fees = await getChargingFees(guildId);
-  const catalog = buildCardTopupCatalog(fees);
+  const catalog = await getCardTopupOptions(guildId);
   const E = createEmojiResolver(guildId);
   
   const dateStr = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
   let markdown = `### ${E('payment_money') || '💸'} BẢNG CHIẾT KHẤU ĐỔI THẺ (TỰ ĐỘNG)\n`;
-  markdown += `*Cập nhật lần cuối: **${dateStr}***\n*Chiết khấu cố định **${catalog.fee_percent}%**; ví nhận **80%** mệnh giá thẻ hợp lệ.*\n\n`;
+  markdown += `*Cập nhật lần cuối: **${dateStr}***\n`;
+  markdown += `*Phí được đồng bộ từ đối tác và đã gồm **${catalog.profit_margin_percent}%** phí vận hành Cenar.*\n\n`;
 
   for (const telco of catalog.telcos) {
     markdown += `**${E('icon_star') || '⭐'} Nhà mạng ${telco.label}**\n`;
     for (const item of telco.denominations) {
-      markdown += `- Mệnh giá ${item.value.toLocaleString('vi-VN')}đ → ví nhận **${item.received_amount.toLocaleString('vi-VN')}đ**\n`;
+      markdown += `- ${item.value.toLocaleString('vi-VN')}đ · phí **${item.fee_percent}%** → ví nhận **${item.received_amount.toLocaleString('vi-VN')}đ**\n`;
     }
     markdown += `\n`;
   }

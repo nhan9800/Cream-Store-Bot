@@ -8,10 +8,6 @@ export async function autoSetupCardChannel(client) {
 
   const guildId = guildRow.guild_id;
 
-  // Set the 15% margin
-  db.prepare(`UPDATE guild_settings SET cardswap_charging_fee_add = 15 WHERE guild_id = ?`).run(guildId);
-  console.log('[AUTO-SETUP-CARD] Updated cardswap_charging_fee_add to 15%.');
-
   const guild = await client.guilds.fetch(guildId).catch(() => null);
   if (!guild) return;
 

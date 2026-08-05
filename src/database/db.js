@@ -879,11 +879,18 @@ export function initDatabase() {
   ensureColumn('guild_settings', 'cardswap_buy_partner_id', 'TEXT DEFAULT NULL');
   ensureColumn('guild_settings', 'cardswap_buy_partner_key', 'TEXT DEFAULT NULL');
   ensureColumn('guild_settings', 'cardswap_domain', "TEXT DEFAULT 'card2k.com'");
-  ensureColumn('guild_settings', 'cardswap_charging_fee_add', "REAL DEFAULT 5.0");
+  ensureColumn('guild_settings', 'cardswap_charging_fee_add', "REAL DEFAULT 3.0");
   ensureColumn('guild_settings', 'cardswap_buy_profit_add', "INTEGER DEFAULT 3000");
   ensureColumn('card_charging_orders', 'source', "TEXT NOT NULL DEFAULT 'DISCORD'");
   ensureColumn('card_charging_orders', 'fee_percent', 'REAL');
   ensureColumn('card_charging_orders', 'credited_amount', 'INTEGER');
+  db.prepare(`
+    UPDATE guild_settings
+    SET cardswap_charging_fee_add = 3.0
+    WHERE cardswap_charging_fee_add IS NULL
+       OR cardswap_charging_fee_add < 2.0
+       OR cardswap_charging_fee_add > 3.0
+  `).run();
 
   // --- DISCOUNT BOARD ---
   ensureColumn('guild_settings', 'discount_board_channel_id', 'TEXT DEFAULT NULL');

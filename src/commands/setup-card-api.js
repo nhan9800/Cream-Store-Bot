@@ -31,10 +31,10 @@ export async function execute(interaction) {
 
   const inputChargingFeeAdd = new TextInputBuilder()
     .setCustomId('cardswap:charging_fee_add')
-    .setLabel('% Lời khi Đổi Thẻ (Gạch Thẻ)')
-    .setPlaceholder('VD: 5')
+    .setLabel('% Lời cộng trên phí API (2 đến 3)')
+    .setPlaceholder('VD: 3')
     .setStyle(TextInputStyle.Short)
-    .setValue('5.0')
+    .setValue('3')
     .setRequired(true);
 
   const inputBuyProfitAdd = new TextInputBuilder()
