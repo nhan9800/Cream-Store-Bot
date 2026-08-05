@@ -12,6 +12,7 @@
     "smoke": "node scripts/smoke-test.js",
     "check:env": "node scripts/check-env.js",
     "confirm:webhook": "node scripts/confirm-payos-webhook.js",
+    "publish:birthday-sale": "node scripts/publish-birthday-sale.js",
     "backup": "node scripts/backup-production.js",
     "verify:backup": "node scripts/verify-backup.js",
     "test": "vitest run"

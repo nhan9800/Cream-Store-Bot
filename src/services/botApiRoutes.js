@@ -243,23 +243,37 @@ function safeQuery(fn) {
     }
 }
 
-const PUBLIC_PRODUCT_COLUMNS = `
+export const PUBLIC_PRODUCT_COLUMNS = `
     pc.id, pc.guild_id, pc.name, pc.description, pc.price, pc.duration_months,
     pc.service_type, pc.emoji, pc.is_active, pc.sort_order, pc.original_price,
-    pc.product_key, pc.is_featured, pc.virtual_purchase_count, pc.image_url,
+    pc.product_key, pc.is_featured, pc.image_url,
     (
       SELECT COUNT(*)
       FROM account_stock stock
       WHERE stock.status = 'AVAILABLE'
         AND (LOWER(stock.service_type) = LOWER(pc.name) OR LOWER(stock.service_type) = LOWER(pc.service_type))
     ) AS stock_count,
-    COALESCE(pc.virtual_purchase_count, 0) + COALESCE((
+    COALESCE((
       SELECT SUM(COALESCE(o.quantity, 1))
       FROM orders o
       WHERE o.status != 'CANCELLED'
-        AND o.payment_status IN ('PAID', 'FREE')
+        AND o.payment_status = 'PAID'
         AND LOWER(TRIM(o.product_name)) = LOWER(TRIM(pc.name))
     ), 0) AS purchase_count,
+    COALESCE((
+      SELECT SUM(COALESCE(o.quantity, 1))
+      FROM orders o
+      WHERE o.status = 'COMPLETED'
+        AND o.payment_status = 'PAID'
+        AND LOWER(TRIM(o.product_name)) = LOWER(TRIM(pc.name))
+    ), 0) AS completed_purchase_count,
+    (
+      SELECT MAX(o.created_at)
+      FROM orders o
+      WHERE o.status != 'CANCELLED'
+        AND o.payment_status = 'PAID'
+        AND LOWER(TRIM(o.product_name)) = LOWER(TRIM(pc.name))
+    ) AS last_paid_at,
     COALESCE((
       SELECT COUNT(*) FROM feedbacks f
       WHERE f.is_visible = 1

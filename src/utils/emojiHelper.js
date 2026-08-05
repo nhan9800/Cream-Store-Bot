@@ -53,18 +53,18 @@ const fallbackEmojis = {
 
   // Brands
   brand_netflix:      '<:Netflix:1481133651319328789>',
-  brand_spotify:      '<:spotify2:1459181297288220704>',
+  brand_spotify:      '<:spotify:1459181297288220704>',
   brand_youtube:      '<:youtube:1373734824342327297>',
   brand_chatgpt:      '<:chatgopete:1481154927677014098>',
-  brand_nitro:        '<:10194purpleween:1384901794475282523>',
-  brand_boost:        '<:10194purpleween:1384901794475282523>',
-  brand_discord:      '<:10194purpleween:1384901794475282523>',
+  brand_nitro:        '<:discord_nitro:1384901794475282523>',
+  brand_boost:        '<:boost:1327543332171284532>',
+  brand_discord:      '<:discord_nitro:1384901794475282523>',
   brand_adobe:        '<:cr_adobe:1366632539032125470>',
   brand_capcut:       '<:capcut:1481152550521536615>',
-  brand_claude:       '<:cr_claude:1483324441076301824>',
-  brand_office:       '<:tsm_offices:1459180639390535836>',
+  brand_claude:       '<:claude:1483324441076301824>',
+  brand_office:       '<:office365:1459180639390535836>',
   brand_gearup:       '<:gearup:1515216203453432002>',
-  brand_gemini:       '<:tsm_gemini:1481157054210248864>',
+  brand_gemini:       '<:gemini:1481157054210248864>',
 
   // Misc
   icon_price:         '<:money:1442876095442714748>',

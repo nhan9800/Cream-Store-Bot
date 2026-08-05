@@ -123,7 +123,19 @@ export function registerAdminRoutes(app) {
   // ==== 2. PRODUCTS ====
   app.get('/api/bot/admin/products', requireAdminRole, (req, res) => {
     try {
-      const products = db.prepare("SELECT * FROM product_catalog WHERE guild_id = 'WEB' ORDER BY sort_order ASC, id DESC").all();
+      const products = db.prepare(`
+        SELECT pc.*,
+          COALESCE((
+            SELECT SUM(COALESCE(o.quantity, 1))
+            FROM orders o
+            WHERE o.status != 'CANCELLED'
+              AND o.payment_status = 'PAID'
+              AND LOWER(TRIM(o.product_name)) = LOWER(TRIM(pc.name))
+          ), 0) AS purchase_count
+        FROM product_catalog pc
+        WHERE pc.guild_id = 'WEB'
+        ORDER BY pc.sort_order ASC, pc.id DESC
+      `).all();
       res.json({ ok: true, data: products });
     } catch (e) {
       console.error('[ADMIN]', e); res.status(500).json({ ok: false, error: 'Lỗi máy chủ nội bộ.' });
@@ -132,15 +144,15 @@ export function registerAdminRoutes(app) {
 
   app.post('/api/bot/admin/products', requireAdminRole, (req, res) => {
     try {
-      const { name, description, price, duration_months, service_type, emoji, is_active, is_featured, virtual_purchase_count, sort_order, require_email, require_phone, original_price, image_url } = req.body;
+      const { name, description, price, duration_months, service_type, emoji, is_active, is_featured, sort_order, require_email, require_phone, original_price, image_url } = req.body;
       const safeName = sanitizeString(name, 180).trim();
       if (!safeName) return errorResponse(res, 400, 'Tên sản phẩm không được để trống.');
       const duplicate = db.prepare(`SELECT id FROM product_catalog WHERE guild_id = 'WEB' AND LOWER(TRIM(name)) = LOWER(TRIM(?)) AND duration_months = ? LIMIT 1`).get(safeName, Number(duration_months) || 1);
       if (duplicate) return errorResponse(res, 409, 'Sản phẩm cùng tên và thời hạn đã tồn tại.');
       const result = db.prepare(`
-        INSERT INTO product_catalog (guild_id, name, description, price, duration_months, service_type, emoji, is_active, is_featured, virtual_purchase_count, sort_order, require_email, require_phone, original_price, product_key, image_url)
-        VALUES ('WEB', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(safeName, sanitizeString(description, 2000), Math.max(0, Number(price) || 0), Math.max(1, Number(duration_months) || 1), sanitizeString(service_type, 40) || 'other', sanitizeString(emoji, 80) || '📦', is_active ? 1 : 0, is_featured ? 1 : 0, Math.max(0, Number(virtual_purchase_count) || 0), Number(sort_order) || 0, require_email ? 1 : 0, require_phone ? 1 : 0, Math.max(0, Number(original_price) || 0), catalogKey(safeName), sanitizeString(image_url, 500) || null);
+        INSERT INTO product_catalog (guild_id, name, description, price, duration_months, service_type, emoji, is_active, is_featured, sort_order, require_email, require_phone, original_price, product_key, image_url)
+        VALUES ('WEB', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(safeName, sanitizeString(description, 2000), Math.max(0, Number(price) || 0), Math.max(1, Number(duration_months) || 1), sanitizeString(service_type, 40) || 'other', sanitizeString(emoji, 80) || '📦', is_active ? 1 : 0, is_featured ? 1 : 0, Number(sort_order) || 0, require_email ? 1 : 0, require_phone ? 1 : 0, Math.max(0, Number(original_price) || 0), catalogKey(safeName), sanitizeString(image_url, 500) || null);
       
       res.json({ ok: true, id: result.lastInsertRowid });
     } catch (e) {
@@ -150,16 +162,16 @@ export function registerAdminRoutes(app) {
 
   app.put('/api/bot/admin/products/:id', requireAdminRole, (req, res) => {
     try {
-      const { name, description, price, duration_months, service_type, emoji, is_active, is_featured, virtual_purchase_count, sort_order, require_email, require_phone, original_price, image_url } = req.body;
+      const { name, description, price, duration_months, service_type, emoji, is_active, is_featured, sort_order, require_email, require_phone, original_price, image_url } = req.body;
       const safeName = sanitizeString(name, 180).trim();
       if (!safeName) return errorResponse(res, 400, 'Tên sản phẩm không được để trống.');
       const duplicate = db.prepare(`SELECT id FROM product_catalog WHERE guild_id = 'WEB' AND id != ? AND LOWER(TRIM(name)) = LOWER(TRIM(?)) AND duration_months = ? LIMIT 1`).get(req.params.id, safeName, Number(duration_months) || 1);
       if (duplicate) return errorResponse(res, 409, 'Sản phẩm cùng tên và thời hạn đã tồn tại.');
       db.prepare(`
         UPDATE product_catalog 
-        SET name = ?, description = ?, price = ?, duration_months = ?, service_type = ?, emoji = ?, is_active = ?, is_featured = ?, virtual_purchase_count = ?, sort_order = ?, require_email = ?, require_phone = ?, original_price = ?, image_url = ?, updated_at = CURRENT_TIMESTAMP
+        SET name = ?, description = ?, price = ?, duration_months = ?, service_type = ?, emoji = ?, is_active = ?, is_featured = ?, virtual_purchase_count = 0, sort_order = ?, require_email = ?, require_phone = ?, original_price = ?, image_url = ?, updated_at = CURRENT_TIMESTAMP
         WHERE id = ?
-      `).run(safeName, sanitizeString(description, 2000), Math.max(0, Number(price) || 0), Math.max(1, Number(duration_months) || 1), sanitizeString(service_type, 40) || 'other', sanitizeString(emoji, 80) || '📦', is_active ? 1 : 0, is_featured ? 1 : 0, Math.max(0, Number(virtual_purchase_count) || 0), Number(sort_order) || 0, require_email ? 1 : 0, require_phone ? 1 : 0, Math.max(0, Number(original_price) || 0), sanitizeString(image_url, 500) || null, req.params.id);
+      `).run(safeName, sanitizeString(description, 2000), Math.max(0, Number(price) || 0), Math.max(1, Number(duration_months) || 1), sanitizeString(service_type, 40) || 'other', sanitizeString(emoji, 80) || '📦', is_active ? 1 : 0, is_featured ? 1 : 0, Number(sort_order) || 0, require_email ? 1 : 0, require_phone ? 1 : 0, Math.max(0, Number(original_price) || 0), sanitizeString(image_url, 500) || null, req.params.id);
       
       res.json({ ok: true });
     } catch (e) {
