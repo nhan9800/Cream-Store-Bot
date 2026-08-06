@@ -12,11 +12,14 @@ describe('birthday sale campaign', () => {
 
     expect(BIRTHDAY_SALE.channelId).toBe('1515008584549797979');
     expect(payload).toContain(BIRTHDAY_SALE.marker);
-    expect(payload).toContain('2 tháng: **99.000đ**');
-    expect(payload).toContain('12 tháng: **520.000đ**');
-    expect(payload).toContain('Claude API 100M');
-    expect(payload).toContain('Codex API 120M');
+    expect(payload).toContain('`02 tháng` **99.000đ**');
+    expect(payload).toContain('`12 tháng` **520.000đ**');
+    expect(payload).toContain('**Claude API**');
+    expect(payload).toContain('`100M`');
+    expect(payload).toContain('**Codex API**');
+    expect(payload).toContain('`120M`');
     expect(payload).not.toMatch(/\p{Extended_Pictographic}/u);
+    expect(payload).toContain('<a:tickgreen:1384069022831874169>');
   });
 
   it('recognizes only the bot campaign message for idempotent publishing', () => {
@@ -25,4 +28,3 @@ describe('birthday sale campaign', () => {
     expect(isBirthdaySaleMessage({ author: { id: 'other' }, components }, 'bot')).toBe(false);
   });
 });
-
