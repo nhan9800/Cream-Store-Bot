@@ -11,6 +11,7 @@ import {
   TextDisplayBuilder,
 } from 'discord.js';
 import { db } from '../database/db.js';
+import { roleColorsFor } from '../config/roleColors.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { getPartnerSettings, upsertPartnerSettings } from './partnerService.js';
 import { getCtvSettings, upsertCtvSettings } from './ctvService.js';
@@ -104,10 +105,10 @@ async function setRoleIcon(role, url) {
   }
 }
 
-async function ensureRole(guild, client, id, { name, color, iconUrl, mentionable, legacyIds = [] }) {
+async function ensureRole(guild, client, id, { name, colors, iconUrl, mentionable, legacyIds = [] }) {
   let role = guild.roles.cache.get(id);
   if (!role) {
-    role = await guild.roles.create({ name, color, mentionable, reason: 'Cenar Partner/CTV workspace setup' });
+    role = await guild.roles.create({ name, colors, mentionable, reason: 'Cenar Partner/CTV workspace setup' });
   }
   if (!role.editable) return role;
   for (const legacyId of legacyIds) {
@@ -118,7 +119,7 @@ async function ensureRole(guild, client, id, { name, color, iconUrl, mentionable
     }
     await legacy.delete('Remove duplicate Cenar role').catch(() => null);
   }
-  await role.edit({ name, color, mentionable, reason: 'Cenar role naming standard' }).catch(() => null);
+  await role.edit({ name, colors, mentionable, reason: 'Cenar role naming and color standard' }).catch(() => null);
   if (!role.icon && iconUrl) await setRoleIcon(role, iconUrl);
   return role;
 }
@@ -212,12 +213,13 @@ export async function autoSetupPartnerAndCtv(client) {
     try {
       const settings = db.prepare('SELECT support_role_id, manager_role_id FROM guild_settings WHERE guild_id = ?').get(guild.id) || {};
       const staffRoles = [settings.support_role_id, settings.manager_role_id, '1282638119497109524'];
+      const enhancedRoleColors = guild.features.includes('ENHANCED_ROLE_COLORS');
       const partnerRole = await ensureRole(guild, client, IDS.partnerRole, {
-        name: 'Cenar Partner', color: '#7C5CFC', iconUrl: ROLE_ICON_URLS.partner, mentionable: false,
+        name: 'Cenar Partner', colors: roleColorsFor(IDS.partnerRole, { enhanced: enhancedRoleColors }), iconUrl: ROLE_ICON_URLS.partner, mentionable: false,
         legacyIds: ['1367138153735131176'],
       });
       const ctvRole = await ensureRole(guild, client, IDS.ctvRole, {
-        name: 'Cenar CTV', color: '#F59E72', iconUrl: ROLE_ICON_URLS.ctv, mentionable: false,
+        name: 'Cenar CTV', colors: roleColorsFor(IDS.ctvRole, { enhanced: enhancedRoleColors }), iconUrl: ROLE_ICON_URLS.ctv, mentionable: false,
         legacyIds: ['1514858684151369832'],
       });
 

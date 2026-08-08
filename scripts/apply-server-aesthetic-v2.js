@@ -1,33 +1,34 @@
 import { Client, Events, GatewayIntentBits } from 'discord.js';
 import { config } from '../src/config.js';
+import { roleColorsFor } from '../src/config/roleColors.js';
 import { initDatabase } from '../src/database/db.js';
 import { autoSetupPartnerAndCtv, PARTNER_CTV_IDS } from '../src/services/autoSetupService.js';
 
 const APPLY = process.argv.includes('--apply');
 
 const ROLE_DESIGN = Object.freeze({
-  '1348638945793019945': { name: 'Cenar Executive', emoji: 'cenar_admin', color: '#7C5CFC' },
-  '1282650552110678069': { name: 'Cenar Care', emoji: 'cenar_support', color: '#5FBFF9' },
-  '1348638944740376680': { name: 'Cenar Concierge', emoji: 'cenar_staff', color: '#73D2DE' },
-  '1513388521862336683': { name: 'CENAR · SIGNATURE', emoji: 'star', color: '#B8A1FF' },
-  '1489653862699897064': { name: 'Cenar Darling', emoji: '13221snoopyhearts', color: '#FF9EB5' },
-  '1406921057646018663': { name: 'Cenar Sugar', emoji: '68923neonheart', color: '#FFB6D9' },
-  '1483690185115046039': { name: 'Cenar Sister', emoji: '13221snoopysparkles', color: '#E4B7FF' },
-  '1282637901565399051': { name: 'Cenar Rose', emoji: 'purple_heart_glow', color: '#F28BA8' },
-  '1522844528237740066': { name: 'Cenar Partner', emoji: 'cenar_partner', color: '#8B74FF' },
-  '1522844530242748446': { name: 'Cenar CTV', emoji: 'cenar_ctv', color: '#F59E72' },
-  '1513388523590385714': { name: 'CENAR · CLIENT TIERS', emoji: 'Platinum', color: '#D7D9FF' },
-  '1282637775291551776': { name: 'Cenar Ruby · 8M+', emoji: 'radiant', color: '#FF5576' },
-  '1282637814571466808': { name: 'Cenar Diamond · 5M+', emoji: 'Diamond', color: '#75D9FF' },
-  '1282637470139420694': { name: 'Cenar Elite · 3M+', emoji: 'Ascendant', color: '#B581FF' },
-  '1282637168149532724': { name: 'Cenar Gold · 1M+', emoji: 'Gold', color: '#F7C65B' },
-  '1513388525121437736': { name: 'CENAR · COMMUNITY', emoji: 'cr_green', color: '#6EE7B7' },
-  '1282637103045279820': { name: 'Cenar Patron', emoji: 'cenar_wallet', color: '#74E0C1' },
-  '1282638730812854345': { name: 'Cenar Member', emoji: 'cenar_verified', color: '#A9B8D0' },
-  '1451978651162771596': { name: 'Cenar Feedback Pending', emoji: 'cenar_cooldown', color: '#F6C453' },
-  '1513388526312362108': { name: 'CENAR · SYSTEM', emoji: 'cr_blackbox', color: '#6B7280' },
-  '1282638601066123325': { name: 'Cenar Automations', emoji: 'chatgopete', color: '#64748B' },
-  '1468389308426616895': { name: 'Cenar Restricted', emoji: 'decu', color: '#4B5563' },
+  '1348638945793019945': { name: 'Cenar Executive', emoji: 'cenar_admin' },
+  '1282650552110678069': { name: 'Cenar Care', emoji: 'cenar_support' },
+  '1348638944740376680': { name: 'Cenar Concierge', emoji: 'cenar_staff' },
+  '1513388521862336683': { name: 'CENAR · SIGNATURE', emoji: 'star' },
+  '1489653862699897064': { name: 'Cenar Darling', emoji: '13221snoopyhearts' },
+  '1406921057646018663': { name: 'Cenar Sugar', emoji: '68923neonheart' },
+  '1483690185115046039': { name: 'Cenar Sister', emoji: '13221snoopysparkles' },
+  '1282637901565399051': { name: 'Cenar Rose', emoji: 'purple_heart_glow' },
+  '1522844528237740066': { name: 'Cenar Partner', emoji: 'cenar_partner' },
+  '1522844530242748446': { name: 'Cenar CTV', emoji: 'cenar_ctv' },
+  '1513388523590385714': { name: 'CENAR · CLIENT TIERS', emoji: 'Platinum' },
+  '1282637775291551776': { name: 'Cenar Ruby · 8M+', emoji: 'radiant' },
+  '1282637814571466808': { name: 'Cenar Diamond · 5M+', emoji: 'Diamond' },
+  '1282637470139420694': { name: 'Cenar Elite · 3M+', emoji: 'Ascendant' },
+  '1282637168149532724': { name: 'Cenar Gold · 1M+', emoji: 'Gold' },
+  '1513388525121437736': { name: 'CENAR · COMMUNITY', emoji: 'cr_green' },
+  '1282637103045279820': { name: 'Cenar Patron', emoji: 'cenar_wallet' },
+  '1282638730812854345': { name: 'Cenar Member', emoji: 'cenar_verified' },
+  '1451978651162771596': { name: 'Cenar Feedback Pending', emoji: 'cenar_cooldown' },
+  '1513388526312362108': { name: 'CENAR · SYSTEM', emoji: 'cr_blackbox' },
+  '1282638601066123325': { name: 'Cenar Automations', emoji: 'chatgopete' },
+  '1468389308426616895': { name: 'Cenar Restricted', emoji: 'decu' },
 });
 
 // Chỉ đổi icon đầu tên. Phần chữ sau icon được giữ nguyên theo cấu trúc server.
@@ -118,6 +119,7 @@ async function run() {
   await guild.roles.fetch();
   await guild.channels.fetch();
   await guild.emojis.fetch();
+  const enhancedRoleColors = guild.features.includes('ENHANCED_ROLE_COLORS');
   if (APPLY) {
     await guild.members.fetch().catch((error) => console.warn(`[MEMBER-FETCH] ${error.message}`));
     await autoSetupPartnerAndCtv(client);
@@ -135,9 +137,10 @@ async function run() {
       continue;
     }
     const emoji = guild.emojis.cache.find((item) => item.name === design.emoji);
-    console.log(`[ROLE] ${role.name} -> ${design.name} · icon=${design.emoji}`);
+    const colors = roleColorsFor(roleId, { enhanced: enhancedRoleColors });
+    console.log(`[ROLE] ${role.name} -> ${design.name} · icon=${design.emoji} · colors=${JSON.stringify(colors)}`);
     if (!APPLY || !role.editable) continue;
-    await role.edit({ name: design.name, color: design.color, mentionable: false, reason: 'Cenar aesthetic system v2' });
+    await role.edit({ name: design.name, colors, mentionable: false, reason: 'Cenar vivid role gradients' });
     if (emoji) {
       const icon = await emojiIconBuffer(emoji);
       await role.setIcon(icon, `Custom role icon :${emoji.name}:`).catch((error) => {
@@ -166,6 +169,7 @@ async function run() {
     apply: APPLY,
     guild: { id: guild.id, name: guild.name },
     roleIconsFeature: guild.features.includes('ROLE_ICONS'),
+    enhancedRoleColors,
     partnerRole: partnerRole ? { id: partnerRole.id, name: partnerRole.name, icon: Boolean(partnerRole.icon) } : null,
     ctvRole: ctvRole ? { id: ctvRole.id, name: ctvRole.name, icon: Boolean(ctvRole.icon) } : null,
   }, null, 2));
