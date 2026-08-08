@@ -869,8 +869,10 @@ export function registerInteractionHandler(client, commands) {
               productType: 'YouTube Premium',
               accountInfo: customerGmail,
               password: 'Chủ Family cũ: ' + familyOwnerGmail,
-              purchaseDate: 'N/A',
-              dateExpired: 'N/A'
+              // Warranty service derives these dates from paid/delivery/expiry
+              // metadata so the YouTube flow never prints a hard-coded N/A.
+              purchaseDate: null,
+              dateExpired: null
             }
           });
 

@@ -7,12 +7,15 @@ import { startWebhookServer } from './services/webhookServer.js';
 import { startPresenceRotation } from './services/presenceService.js';
 import { startOtpAutoCheck } from './services/otpAutoCheckService.js';
 import { backfillRecentDeliverySubscriptions } from './services/deliverySubscriptionService.js';
+import { cleanupExpiredTranscripts } from './services/transcriptService.js';
 
 import { initErrorLogger } from './services/errorLogService.js';
 import { autoSetupDiscountBoard } from './services/autoSetupDiscountBoardService.js';
 
 export async function buildClient() {
   initDatabase();
+  const transcriptCleanup = cleanupExpiredTranscripts();
+  console.log(`[TRANSCRIPT-CLEANUP] scanned=${transcriptCleanup.scanned} removed=${transcriptCleanup.removed}`);
   const subscriptionBackfill = backfillRecentDeliverySubscriptions({ lookbackDays: 14 });
   console.log(`[SUBSCRIPTION-SYNC] scanned=${subscriptionBackfill.scanned} created=${subscriptionBackfill.created} skipped=${subscriptionBackfill.skipped} failed=${subscriptionBackfill.failed.length}`);
   for (const failure of subscriptionBackfill.failed) {
@@ -35,6 +38,12 @@ export async function buildClient() {
     startWebhookServer(readyClient);
     startOtpAutoCheck(readyClient);
     autoSetupDiscountBoard(readyClient);
+
+    import('./services/roleService.js').then(({ syncCustomerActivityRoles }) => {
+      syncCustomerActivityRoles(readyClient)
+        .then((result) => console.log(`[PATRON-SYNC] scanned=${result.scanned} synced=${result.synced} skipped=${result.skipped}`))
+        .catch((error) => console.error('[PATRON-SYNC] Failed:', error));
+    }).catch((error) => console.error('[PATRON-SYNC] Failed to load role service:', error));
 
     // Tự động đồng bộ emoji cho tất cả các guild bot đang tham gia
     import('./services/emojiService.js').then(({ autoSyncGuildEmojis }) => {

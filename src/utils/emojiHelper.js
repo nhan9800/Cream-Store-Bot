@@ -13,6 +13,11 @@ const fallbackEmojis = {
   cenar_cooldown: '<:cenar_cooldown:1535637399596699688>',
   cenar_announce: '<:cenar_announce:1535637405820911698>',
   cenar_price: '<:cenar_price:1535637409759494185>',
+  warranty_shield: '<:cenar_warranty_shield:1535690283893784738>',
+  warranty_purchase: '<:cenar_purchase_date:1535690286427275336>',
+  warranty_expiry: '<:cenar_expiry_date:1535690288658518068>',
+  transcript_web: '<:cenar_transcript_web:1535690290684231700>',
+  customer_patron: '<:cenar_activity_search:1535690292420812962>',
 
   // Panel Ticket buttons
   panel_order:        '<:cr_muahang:1348622828152426528>',

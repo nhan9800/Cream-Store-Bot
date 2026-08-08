@@ -25,6 +25,7 @@ import {
 import { getCustomerProfile } from '../services/customerService.js';
 import { getWalletBalance, addWalletBalance, getWalletTransactions } from '../services/walletService.js';
 import { formatCurrency } from '../utils/formatters.js';
+import { applyCustomerRoles } from '../services/roleService.js';
 
 export async function handleCardSwapInteractions(interaction) {
   const E = createEmojiResolver(interaction.guild.id);
@@ -320,7 +321,7 @@ export async function handleCardSwapInteractions(interaction) {
     const currentBalance = getWalletBalance(interaction.guild.id, interaction.user.id);
     if (currentBalance < totalToPay) {
       return interaction.reply({ 
-        content: `❌ Số dư không đủ! Bạn cần **${totalToPay.toLocaleString('vi-VN')}đ** để mua ${qty} thẻ ${telco} ${amount.toLocaleString('vi-VN')}đ.\nSố dư hiện tại: **${currentBalance.toLocaleString('vi-VN')}đ**.`, 
+        content: `${E('status_cross')} Số dư không đủ! Bạn cần **${totalToPay.toLocaleString('vi-VN')}đ** để mua ${qty} thẻ ${telco} ${amount.toLocaleString('vi-VN')}đ.\nSố dư hiện tại: **${currentBalance.toLocaleString('vi-VN')}đ**.`,
         ephemeral: true 
       });
     }
@@ -340,6 +341,10 @@ export async function handleCardSwapInteractions(interaction) {
         `Mua ${qty} thẻ ${telco} ${amount.toLocaleString('vi-VN')}đ`, 
         null
       );
+
+      await applyCustomerRoles(interaction.guild, interaction.user.id).catch((error) => {
+        console.error('[PATRON] Không thể đồng bộ role sau khi mua thẻ:', error.message);
+      });
 
       // Gửi danh sách mã thẻ
       let cardsText = cards.map(c => `> **Serial:** \`${c.serial}\` | **Mã thẻ:** \`${c.code}\``).join('\n');

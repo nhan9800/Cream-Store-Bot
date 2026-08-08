@@ -1,4 +1,4 @@
-import { AttachmentBuilder, MessageFlags } from 'discord.js';
+import { MessageFlags } from 'discord.js';
 import { config, getTranscriptUrl } from '../config.js';
 import { getGuildConfig } from './guildConfigService.js';
 import { applyCustomerRoles } from './roleService.js';
@@ -9,9 +9,8 @@ import {
   buildPaymentSuccessDmEmbed,
   buildPaymentSuccessEmbed,
   buildQuickFeedbackComponents,
-  buildTranscriptCustomerEmbed,
-  buildTranscriptSummaryEmbed,
-  buildTranscriptLinkComponents,
+  buildTranscriptCustomerV2,
+  buildTranscriptSummaryV2,
   buildWarrantyActionComponents,
   buildPublicOrderLogEmbed,
   buildPublicOrderLogV2,
@@ -122,37 +121,38 @@ export async function deliverTranscript({ guild, ticket, transcriptResult, close
   const guildConfig = getGuildConfig(guild.id);
 
   const transcriptUrl = getTranscriptUrl(`/transcripts/${transcriptResult.htmlFileName}`);
-  const components = buildTranscriptLinkComponents(transcriptUrl);
+  if (!transcriptResult.savedToDisk || !transcriptUrl) {
+    const reason = !transcriptResult.savedToDisk
+      ? 'Không thể lưu transcript lên ổ đĩa.'
+      : 'Thiếu TRANSCRIPT_BASE_URL hoặc PUBLIC_BASE_URL.';
+    console.error(`[TRANSCRIPT] Không thể gửi liên kết cho ticket ${ticket.ticket_code}: ${reason}`);
+    return { delivered: false, reason };
+  }
 
   if (guildConfig?.transcript_channel_id) {
     const transcriptChannel = await guild.channels.fetch(guildConfig.transcript_channel_id).catch(() => null);
     if (transcriptChannel?.isTextBased()) {
-      // Luôn kèm file HTML (đã render đẹp như Discord) — bấm link xem ngay nếu domain
-      // đã trỏ proxy, không thì mở file vẫn xem được. Bản .txt để lưu trữ.
-      const payload = {
-        embeds: [buildTranscriptSummaryEmbed(ticket, closedById, transcriptResult.messageCount, transcriptUrl)],
-        components,
-        files: [
-          new AttachmentBuilder(transcriptResult.htmlBuffer, { name: transcriptResult.htmlFileName }),
-          new AttachmentBuilder(transcriptResult.textBuffer, { name: transcriptResult.textFileName }),
-        ],
-      };
-      await transcriptChannel.send(payload).catch(() => null);
+      await transcriptChannel.send(buildTranscriptSummaryV2({
+        ticket,
+        closedById,
+        messageCount: transcriptResult.messageCount,
+        transcriptUrl,
+        guildId: guild.id,
+      })).catch(() => null);
     }
   }
 
-  if (!config.sendTranscriptToCustomer) return;
+  if (!config.sendTranscriptToCustomer) return { delivered: true, customerSent: false, transcriptUrl };
 
   const customer = await guild.client.users.fetch(ticket.customer_id).catch(() => null);
-  if (!customer) return;
+  if (!customer) return { delivered: true, customerSent: false, transcriptUrl };
 
-  const customerPayload = {
-    embeds: [buildTranscriptCustomerEmbed(ticket, transcriptResult.messageCount, transcriptUrl)],
-    components,
-    files: [
-      new AttachmentBuilder(transcriptResult.htmlBuffer, { name: transcriptResult.htmlFileName }),
-    ],
-  };
+  const customerMessage = await customer.send(buildTranscriptCustomerV2({
+    ticket,
+    messageCount: transcriptResult.messageCount,
+    transcriptUrl,
+    guildId: guild.id,
+  })).catch(() => null);
 
-  await customer.send(customerPayload).catch(() => null);
+  return { delivered: true, customerSent: Boolean(customerMessage), transcriptUrl };
 }

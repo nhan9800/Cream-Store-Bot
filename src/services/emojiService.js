@@ -52,6 +52,13 @@ export const EMOJI_SLOTS = {
   icon_expire:        { label: 'Hết hạn',              default: '⏱️' },
   icon_history:       { label: 'Lịch sử',              default: '📜' },
 
+  // Bảo hành / lưu trữ — mỗi ý nghĩa dùng một asset riêng để tránh lặp hình
+  warranty_shield:    { label: 'Khiên bảo hành Cenar', default: '' },
+  warranty_purchase:  { label: 'Ngày mua bảo hành',   default: '' },
+  warranty_expiry:    { label: 'Ngày hết hạn',        default: '' },
+  transcript_web:     { label: 'Transcript trên web', default: '' },
+  customer_patron:    { label: 'Khách hàng Cenar',    default: '' },
+
   // Status
   status_check:       { label: 'Tích xanh',            default: '✅' },
   status_cross:       { label: 'Dấu X',                default: '❌' },
@@ -184,6 +191,11 @@ export const SLOT_ALIASES = {
   icon_calendar: ['calendar', 'lich', 'date'],
   icon_expire: ['expire', 'het_han'],
   icon_history: ['history', 'lich_su'],
+  warranty_shield: ['cenar_warranty_shield', 'warranty_shield'],
+  warranty_purchase: ['cenar_purchase_date', 'purchase_date'],
+  warranty_expiry: ['cenar_expiry_date', 'expiry_date'],
+  transcript_web: ['cenar_transcript_web', 'transcript_web'],
+  customer_patron: ['cenar_activity_search', 'customer_activity'],
 
   // Status
   status_check: ['check', 'tick', 'success', 'tich_xanh'],

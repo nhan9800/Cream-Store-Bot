@@ -21,6 +21,7 @@ import { safeEqual } from '../utils/crypto.js';
 import { runtimeCommitSha } from '../utils/revision.js';
 import { discordCollectibleUrl, getDiscordCollectibleShopPrice } from './discordCollectiblePricing.js';
 import { getCustomerMembershipProgress } from './roleService.js';
+import { getCustomerActivitySummary, getCustomerRecentActivities } from './customerActivityService.js';
 import { getDiscordNitroEligibility } from '../utils/discordNitro.js';
 import { recordStaffLog } from './staffLogService.js';
 import { getLeaderboardRows } from './leaderboardService.js';
@@ -593,11 +594,31 @@ export function registerBotApiRoutes(app) {
                 FROM orders WHERE customer_id = ?
             `).get(discordId);
 
+            const activitySummary = getCustomerActivitySummary(null, discordId);
+            const activities = getCustomerRecentActivities(discordId, 10);
+
             const membership = getCustomerMembershipProgress({
                 total_spent: stats?.total_spent || 0,
                 total_completed_orders: stats?.completed || 0,
+                service_spent: activitySummary.serviceSpent,
+                service_activity_count: activitySummary.activityCount,
             });
-            return { discord_id: discordId, profiles, flags, recentOrders, stats, membership };
+            return {
+                discord_id: discordId,
+                profiles,
+                flags,
+                recentOrders,
+                activities,
+                activitySummary,
+                stats: {
+                    ...stats,
+                    order_spent: Number(stats?.total_spent || 0),
+                    service_spent: activitySummary.serviceSpent,
+                    service_activity_count: activitySummary.activityCount,
+                    total_spent: membership.totalSpent,
+                },
+                membership,
+            };
         });
         res.json(result);
     });

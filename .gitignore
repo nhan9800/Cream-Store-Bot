@@ -57,6 +57,7 @@ scripts/*
 !scripts/resyncCustomerStats.js
 !scripts/send-announcement.js
 !scripts/audit-guild-emojis.js
+!scripts/sync-curated-emojis.js
 !scripts/smoke-test.js
 !scripts/send-combo-announcement.js
 !scripts/send-service-panel.js

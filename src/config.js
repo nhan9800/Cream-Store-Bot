@@ -128,6 +128,7 @@ export const config = {
   publicBaseUrl: getEnv('PUBLIC_BASE_URL', ''),
   // Domain cho link transcript — fallback về PUBLIC_BASE_URL nếu không set riêng
   transcriptBaseUrl: getEnv('TRANSCRIPT_BASE_URL', '') || getEnv('PUBLIC_BASE_URL', ''),
+  transcriptRetentionDays: Number.parseInt(getEnv('TRANSCRIPT_RETENTION_DAYS', '30'), 10),
   httpPort: Number.parseInt(getEnv('INTERNAL_HTTP_PORT', getEnv('HTTP_PORT', '3000')), 10),
   paymentProvider: (getEnv('PAYMENT_PROVIDER', 'PAYOS') ?? 'PAYOS').toUpperCase(),
   payosClientId: getEnv('PAYOS_CLIENT_ID', ''),

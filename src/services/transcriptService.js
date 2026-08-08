@@ -1,5 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import crypto from 'node:crypto';
+import { config } from '../config.js';
 
 function escapeHtml(input) {
   return String(input ?? '')
@@ -617,7 +619,34 @@ blockquote { margin: 2px 0; padding: 4px 0 4px 12px; border-left: 4px solid #4e5
 </html>`;
 }
 
-export async function exportTicketTranscript(channel) {
+export function cleanupExpiredTranscripts({
+  directory = path.join(process.cwd(), 'data', 'transcripts'),
+  retentionDays = config.transcriptRetentionDays,
+  now = Date.now(),
+} = {}) {
+  const days = Number(retentionDays);
+  if (!Number.isFinite(days) || days <= 0 || !fs.existsSync(directory)) {
+    return { scanned: 0, removed: 0 };
+  }
+
+  const cutoff = now - days * 86_400_000;
+  let scanned = 0;
+  let removed = 0;
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    if (!entry.isFile() || !entry.name.toLowerCase().endsWith('.html')) continue;
+    scanned++;
+    const filePath = path.join(directory, entry.name);
+    const stat = fs.statSync(filePath);
+    if (stat.mtimeMs >= cutoff) continue;
+    fs.rmSync(filePath);
+    removed++;
+  }
+  return { scanned, removed };
+}
+
+export async function exportTicketTranscript(channel, {
+  directory = path.join(process.cwd(), 'data', 'transcripts'),
+} = {}) {
   let lastId;
   const allMessages = [];
   let fetchCount = 0;
@@ -642,28 +671,27 @@ export async function exportTicketTranscript(channel) {
 
   allMessages.sort((a, b) => a.createdTimestamp - b.createdTimestamp);
 
-  // Plain-text transcript (archive)
-  const lines = allMessages.map(message => {
-    const attachments = [...message.attachments.values()].map(a => a.url).join(' | ');
-    const body = message.cleanContent || extractComponentsText(message) || '[không có nội dung]';
-    const contentParts = [body];
-    if (attachments) contentParts.push(`Attachments: ${attachments}`);
-    return `[${new Date(message.createdTimestamp).toISOString()}] ${message.author?.tag ?? 'Unknown'} (${message.author?.id ?? 'N/A'}): ${contentParts.join(' | ')}`;
-  });
-
-  const transcriptText = lines.join('\n');
   const transcriptHtml = renderTranscriptHtml(channel, allMessages);
 
-  const htmlFileName = `transcript_${channel.name}_${Date.now()}.html`;
-  const textFileName = `${channel.name}-transcript.txt`;
+  const safeChannelName = String(channel.name || 'ticket')
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48) || 'ticket';
+  const accessToken = crypto.randomBytes(12).toString('hex');
+  const htmlFileName = `transcript_${safeChannelName}_${accessToken}.html`;
 
-  // savedToDisk cho caller biết bản lưu trữ trên đĩa có ghi được không (buffer để
-  // gửi Discord vẫn luôn có, nhưng archive nội bộ có thể thất bại nếu đĩa lỗi).
+  // Chỉ lưu một bản HTML trên đĩa; Discord nhận URL nên không còn giữ thêm
+  // Buffer HTML/TXT trong payload hoặc nhân đôi dữ liệu lưu trữ.
   let savedToDisk = false;
   let savedHtmlPath = null;
   try {
-    const transcriptsDir = path.join(process.cwd(), 'data', 'transcripts');
+    const transcriptsDir = directory;
     if (!fs.existsSync(transcriptsDir)) fs.mkdirSync(transcriptsDir, { recursive: true });
+    const cleanup = cleanupExpiredTranscripts({ directory: transcriptsDir });
+    if (cleanup.removed) {
+      console.log(`[TRANSCRIPT] Đã xóa ${cleanup.removed}/${cleanup.scanned} bản lưu quá hạn.`);
+    }
     savedHtmlPath = path.join(transcriptsDir, htmlFileName);
     fs.writeFileSync(savedHtmlPath, transcriptHtml, 'utf8');
     savedToDisk = true;
@@ -673,12 +701,8 @@ export async function exportTicketTranscript(channel) {
   }
 
   return {
-    htmlBuffer: Buffer.from(transcriptHtml, 'utf8'),
-    textBuffer: Buffer.from(transcriptText, 'utf8'),
     htmlFileName,
-    textFileName,
     messageCount: allMessages.length,
-    // Cờ chẩn đoán: caller có thể phân biệt "xuất thành công" với "xuất được một phần".
     savedToDisk,
     savedHtmlPath,
     partial: fetchError !== null,

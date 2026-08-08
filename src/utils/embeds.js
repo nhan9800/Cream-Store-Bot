@@ -1429,45 +1429,61 @@ export function buildCredentialEmbeds(order) {
 // ═══════════════════════════════════════════════
 // Transcript
 // ═══════════════════════════════════════════════
-export function buildTranscriptSummaryEmbed(ticket, closedById, messageCount, transcriptUrl) {
-  const embed = applyBranding(
-    new EmbedBuilder()
-      .setTitle('Ticket Đã Đóng — Transcript')
-      .setColor(0x99aab5)
-      .addFields(
-        { name: 'Mã Ticket', value: `\`${ticket.ticket_code}\``, inline: true },
-        { name: 'Loại', value: ticket.ticket_type === 'WARRANTY' ? 'Bảo Hành' : ticket.ticket_type, inline: true },
-        { name: 'Khách', value: `<@${ticket.customer_id}>`, inline: true },
-        { name: 'Đóng Bởi', value: `<@${closedById}>`, inline: true },
-        { name: 'Tin Nhắn', value: `${messageCount}`, inline: true },
-      )
-      .setTimestamp()
-  );
-  if (transcriptUrl) embed.setDescription(`[Xem Transcript trên Web](${transcriptUrl})`);
-  return embed;
+function transcriptLinkRow(url, guildId) {
+  const E = createEmojiResolver(guildId);
+  const button = new ButtonBuilder()
+    .setLabel('Mở Transcript Trên Web')
+    .setStyle(ButtonStyle.Link)
+    .setURL(url);
+  const emoji = E.component('transcript_web');
+  if (emoji) button.setEmoji(emoji);
+  return new ActionRowBuilder().addComponents(button);
 }
 
-export function buildTranscriptCustomerEmbed(ticket, messageCount, transcriptUrl) {
-  const embed = applyBranding(
-    new EmbedBuilder()
-      .setColor(config.accentColorInfo)
-      .setTitle(`Transcript Ticket \`${ticket.ticket_code}\``)
-      .setDescription(`> Bot gửi lại transcript của ticket này cho bạn. (${messageCount} tin nhắn)`)
-      .setTimestamp()
+export function buildTranscriptSummaryV2({ ticket, closedById, messageCount, transcriptUrl, guildId }) {
+  const E = createEmojiResolver(guildId);
+  const container = new ContainerBuilder().setAccentColor(accentFor('info'));
+  container.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent([
+      `## ${E('transcript_web')} Transcript Đã Lưu`,
+      `> ${E('status_check')} Nội dung ticket được lưu thành một trang web gọn nhẹ; không còn gửi file HTML/TXT lặp lại.`,
+    ].join('\n')),
   );
-  if (transcriptUrl) {
-    embed.setDescription(embed.data.description + `\n**[Bấm vào đây để xem nội dung chat trên web](${transcriptUrl})**`);
-  }
-  return embed;
+  container.addSeparatorComponents(
+    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small),
+  );
+  container.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent([
+      `${E('icon_ticket')} **Mã ticket** — \`${ticket.ticket_code}\``,
+      `${E('ticket_user')} **Khách hàng** — <@${ticket.customer_id}>`,
+      `${E('ticket_staff')} **Đóng bởi** — <@${closedById}>`,
+      `${E('icon_doc')} **Tin nhắn lưu trữ** — \`${messageCount}\``,
+      `${E('icon_clock')} **Thời điểm** — ${T.rel(new Date())}`,
+    ].join('\n')),
+  );
+  return {
+    components: [container, transcriptLinkRow(transcriptUrl, guildId)],
+    flags: MessageFlags.IsComponentsV2,
+  };
 }
 
-export function buildTranscriptLinkComponents(url) {
-  if (!url) return [];
-  return [
-    new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setLabel('Xem Transcript trên Web').setStyle(ButtonStyle.Link).setURL(url)
-    )
-  ];
+export function buildTranscriptCustomerV2({ ticket, messageCount, transcriptUrl, guildId }) {
+  const E = createEmojiResolver(guildId);
+  const container = new ContainerBuilder().setAccentColor(accentFor('info'));
+  container.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent([
+      `## ${E('transcript_web')} Nội Dung Ticket Của Bạn`,
+      `> ${E('status_info')} Ticket \`${ticket.ticket_code}\` đã đóng. Bạn có thể xem lại toàn bộ cuộc trao đổi bằng nút bên dưới.`,
+      '',
+      `${E('icon_doc')} **Số tin nhắn** — \`${messageCount}\``,
+      `${E('warranty_shield')} **Quyền riêng tư** — Liên kết chỉ được gửi trực tiếp cho bạn và đội ngũ Cenar.`,
+      subtext(`${E('icon_clock')} Bản lưu tự động hết hạn sau ${config.transcriptRetentionDays} ngày để tối ưu dung lượng.`),
+    ].join('\n')),
+  );
+  return {
+    components: [container, transcriptLinkRow(transcriptUrl, guildId)],
+    flags: MessageFlags.IsComponentsV2,
+  };
 }
 
 // ═══════════════════════════════════════════════

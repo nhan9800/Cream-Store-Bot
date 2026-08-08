@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { db, nowIso } from '../database/db.js';
 import { addWalletBalance } from './walletService.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
+import { applyCustomerRoles } from './roleService.js';
 import { ContainerBuilder, TextDisplayBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } from 'discord.js';
 
 export const CARD_TOPUP_PROFIT_MARGIN_PERCENT = 3;
@@ -424,11 +425,19 @@ export async function handleCardSwapCallback(query, discordClient) {
     // Gửi tin nhắn
     if (discordClient) {
       try {
+        const guild = discordClient.guilds.cache.get(order.guild_id)
+          || await discordClient.guilds.fetch(order.guild_id).catch(() => null);
+        if (guild) {
+          await applyCustomerRoles(guild, order.customer_id).catch((error) => {
+            console.error('[PATRON] Không thể đồng bộ role sau khi gạch thẻ:', error.message);
+          });
+        }
+
         const user = await discordClient.users.fetch(order.customer_id);
         if (user) {
           const container = new ContainerBuilder().setAccentColor(0x2ECC71);
           container.addTextDisplayComponents(
-            new TextDisplayBuilder().setContent(`## ${E('tickgreen') || '✅'} ĐỔI THẺ THÀNH CÔNG!\n\nBạn đã đổi thẻ **${telco} ${Number(card_value).toLocaleString('vi-VN')}đ** thành công.\nBạn nhận được: **${userReceives.toLocaleString('vi-VN')}đ** vào ví.\n> ${E('status_check') || '✅'} Trạng thái: ${message}`)
+            new TextDisplayBuilder().setContent(`## ${E('status_check')} ĐỔI THẺ THÀNH CÔNG!\n\nBạn đã đổi thẻ **${telco} ${Number(card_value).toLocaleString('vi-VN')}đ** thành công.\nBạn nhận được: **${userReceives.toLocaleString('vi-VN')}đ** vào ví.\n> ${E('customer_patron')} Quyền khách hàng Cenar đã được đồng bộ tự động.\n> ${E('status_check')} Trạng thái: ${message}`)
           );
           await user.send({ components: [container], flags: MessageFlags.IsComponentsV2 });
         }
@@ -460,7 +469,7 @@ export async function handleCardSwapCallback(query, discordClient) {
         if (user) {
           const container = new ContainerBuilder().setAccentColor(0xE74C3C);
           container.addTextDisplayComponents(
-            new TextDisplayBuilder().setContent(`## ${E('cancel') || '❌'} ĐỔI THẺ THẤT BẠI!\n\nThẻ **${telco} ${Number(declared_value).toLocaleString('vi-VN')}đ** của bạn đã bị từ chối.\n> ${E('status_check') || '❌'} Lý do: ${message}`)
+            new TextDisplayBuilder().setContent(`## ${E('status_cross')} ĐỔI THẺ THẤT BẠI!\n\nThẻ **${telco} ${Number(declared_value).toLocaleString('vi-VN')}đ** của bạn đã bị từ chối.\n> ${E('status_cross')} Lý do: ${message}`)
           );
           await user.send({ components: [container], flags: MessageFlags.IsComponentsV2 });
         }
@@ -478,12 +487,12 @@ export async function buildDiscountBoardMarkdown(guildId) {
   const E = createEmojiResolver(guildId);
   
   const dateStr = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
-  let markdown = `### ${E('payment_money') || '💸'} BẢNG CHIẾT KHẤU ĐỔI THẺ (TỰ ĐỘNG)\n`;
+  let markdown = `### ${E('payment_money')} BẢNG CHIẾT KHẤU ĐỔI THẺ (TỰ ĐỘNG)\n`;
   markdown += `*Cập nhật lần cuối: **${dateStr}***\n`;
   markdown += `*Phí được đồng bộ từ đối tác và đã gồm **${catalog.profit_margin_percent}%** phí vận hành Cenar.*\n\n`;
 
   for (const telco of catalog.telcos) {
-    markdown += `**${E('icon_star') || '⭐'} Nhà mạng ${telco.label}**\n`;
+    markdown += `**${E('icon_star')} Nhà mạng ${telco.label}**\n`;
     for (const item of telco.denominations) {
       markdown += `- ${item.value.toLocaleString('vi-VN')}đ · phí **${item.fee_percent}%** → ví nhận **${item.received_amount.toLocaleString('vi-VN')}đ**\n`;
     }
