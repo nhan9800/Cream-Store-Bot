@@ -299,7 +299,7 @@ export async function handleCardSwapInteractions(interaction) {
       
     const container = new ContainerBuilder().setAccentColor(0x3498DB);
     container.addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(`### ${E('icon_cart')} MUA THẺ CÀO\nVui lòng chọn loại thẻ bạn muốn mua:`)
+      new TextDisplayBuilder().setContent(`### ${E('card_success')} MUA THẺ CÀO\n> Chọn nhà mạng để xem mệnh giá và mua mã thẻ riêng tư từ số dư Ví Cenar.`)
     );
       
     const row = new ActionRowBuilder().addComponents(selectMenu);
@@ -328,7 +328,7 @@ export async function handleCardSwapInteractions(interaction) {
       
     const container = new ContainerBuilder().setAccentColor(0x3498DB);
     container.addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(`### ${E('icon_cart')} MUA THẺ ${telco.toUpperCase()}\nVui lòng chọn mệnh giá:`)
+      new TextDisplayBuilder().setContent(`### ${E('card_success')} MUA THẺ ${telco.toUpperCase()}\n> Chọn mệnh giá cần mua. Mã thẻ chỉ hiển thị riêng cho bạn.`)
     );
       
     const row = new ActionRowBuilder().addComponents(selectMenu);
@@ -411,7 +411,7 @@ export async function handleCardSwapInteractions(interaction) {
       
       const container = new ContainerBuilder().setAccentColor(0x2ECC71);
       container.addTextDisplayComponents(
-        new TextDisplayBuilder().setContent(`### ${E('status_check')} GIAO DỊCH MUA THẺ THÀNH CÔNG\nBạn đã mua thành công **${qty} thẻ ${telco} ${amount.toLocaleString('vi-VN')}đ**.\nTổng thanh toán: **${totalToPay.toLocaleString('vi-VN')}đ**\n\n**THÔNG TIN THẺ:**\n${cardsText}`)
+        new TextDisplayBuilder().setContent(`### ${E('card_success')} GIAO DỊCH MUA THẺ THÀNH CÔNG\nBạn đã mua thành công **${qty} thẻ ${telco} ${amount.toLocaleString('vi-VN')}đ**.\nTổng thanh toán: **${totalToPay.toLocaleString('vi-VN')}đ**\n\n**THÔNG TIN THẺ:**\n${cardsText}`)
       );
 
       await interaction.editReply({ components: [container], flags: MessageFlags.IsComponentsV2 });

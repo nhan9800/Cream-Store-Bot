@@ -150,6 +150,7 @@ export const config = {
   processingReminderMinutes: Number.parseInt(getEnv('PROCESSING_REMINDER_MINUTES', '60'), 10),
   adminDiscordIds: (getEnv('ADMIN_DISCORD_IDS') || '').split(',').map(id => id.trim()).filter(Boolean),
   ownerRoleIds: (getEnv('OWNER_ROLE_IDS', '1282638119497109524') || '').split(',').map(id => id.trim()).filter(Boolean),
+  protectedOwnerId: getEnv('PROTECTED_OWNER_ID', '1138315103821889566'),
   nitroRoleIds: (getEnv('DISCORD_NITRO_ROLE_IDS') || '').split(',').map(id => id.trim()).filter(Boolean),
   nitroUserIds: (getEnv('DISCORD_NITRO_USER_IDS', '1138315103821889566') || '').split(',').map(id => id.trim()).filter(Boolean),
   groqApiKey: getEnv('GROQ_API_KEY', getEnv('OPENROUTER_API_KEY', '')), // Dùng chung biến để tiện cho user nếu họ nhác sửa

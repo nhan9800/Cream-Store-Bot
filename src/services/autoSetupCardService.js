@@ -42,7 +42,7 @@ export async function autoSetupCardChannel(client) {
       `${E('card_success') || E('payment_success')} Card2K xác nhận thành công rồi hệ thống mới cộng ví.`,
       `${E('status_warn')} Thẻ sai mệnh giá được tính theo giá trị thực tế nhà cung cấp trả về.`,
       '',
-      `### ${E('icon_cart')} Mua mã thẻ mới`,
+      `### ${E('card_success')} Mua mã thẻ mới`,
       `${E('cenar_verified')} Thanh toán trực tiếp từ ví Cenar, mã thẻ chỉ hiển thị riêng cho bạn.`,
       `${E('customer_patron')} Giao dịch hợp lệ tự động đồng bộ quyền Cenar Patron với website.`,
     ].join('\n'))

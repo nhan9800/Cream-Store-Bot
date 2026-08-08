@@ -159,9 +159,10 @@ export async function publishPremiumProducts(interaction) {
 }
 
 // ─── Core publish function (dùng cho cả manual và auto) ───
-export async function publishPremiumProductsForGuild(guild) {
+export async function publishPremiumProductsForGuild(guild, settingOverrides = {}) {
 
-  const settings = db.prepare('SELECT * FROM guild_settings WHERE guild_id = ?').get(guild.id);
+  const storedSettings = db.prepare('SELECT * FROM guild_settings WHERE guild_id = ?').get(guild.id) || {};
+  const settings = { ...storedSettings, ...settingOverrides };
   if (!settings?.claude_channel_id || !settings?.locket_channel_id) {
     console.log(`[PUBLISH-PREMIUM] Guild ${guild.name} chưa setup channels, bỏ qua.`);
     return;
@@ -188,7 +189,6 @@ export async function publishPremiumProductsForGuild(guild) {
 
     const container = new ContainerBuilder().setAccentColor(0xD97757);
 
-    // 🖼️ Banner hero ảnh TRƯỚC — full-width khi đứng đầu Container
     if (claudeHasBanner) {
       container.addMediaGalleryComponents(
         new MediaGalleryBuilder().addItems(
@@ -201,11 +201,10 @@ export async function publishPremiumProductsForGuild(guild) {
       new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small)
     );
 
-    // Header
     container.addTextDisplayComponents(
       new TextDisplayBuilder().setContent(
-        `## ${E('brand_claude', '🤖')} CLAUDE API 100M\n` +
-        `> ${E('icon_sparkle', '✨')} *Hệ sinh thái Claude mạnh mẽ — lập trình, phân tích, nghiên cứu và xử lý công việc chuyên sâu.*`
+        `## ${E('brand_claude')} CLAUDE API 100M\n` +
+        `> ${E('ctv_crystal')} Hạn mức rõ ràng · Giao nhanh · Bảo hành trọn thời gian sử dụng`
       )
     );
 
@@ -213,14 +212,14 @@ export async function publishPremiumProductsForGuild(guild) {
       new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
     );
 
-    // Thông tin gói
     container.addTextDisplayComponents(
       new TextDisplayBuilder().setContent(
-        `### ${E('icon_wallet', '💳')} THÔNG TIN GÓI\n` +
-        `${E('icon_price', '💰')} **Giá khởi điểm:** \`${claudeProduct.base_price.toLocaleString('vi-VN')}đ\`\n` +
-        `${E('icon_duration', '⏱️')} **Thời hạn:** \`${claudeProduct.base_duration_days} ngày\`\n` +
-        `${E('icon_gift', '🎁')} **Mua thêm:** \`+${claudeProduct.additional_day_price.toLocaleString('vi-VN')}đ / ngày\`\n` +
-        `${E('icon_chart', '📊')} **Hạn mức:** \`${claudeProduct.quota_value}${claudeProduct.quota_unit}\``
+        `### ${E('icon_wallet')} THÔNG TIN GÓI\n` +
+        `${E('payment_money')} **Giá khởi điểm** · \`${claudeProduct.base_price.toLocaleString('vi-VN')}đ\`\n` +
+        `${E('icon_duration')} **Thời hạn cơ bản** · \`${claudeProduct.base_duration_days} ngày\`\n` +
+        `${E('icon_gift')} **Gia hạn thêm** · \`+${claudeProduct.additional_day_price.toLocaleString('vi-VN')}đ/ngày\`\n` +
+        `${E('icon_chart')} **Hạn mức sử dụng** · \`${claudeProduct.quota_value}${claudeProduct.quota_unit}\`\n` +
+        `${E('icon_key')} **Hình thức kích hoạt** · \`Token/API riêng tư\``
       )
     );
 
@@ -228,14 +227,14 @@ export async function publishPremiumProductsForGuild(guild) {
       new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
     );
 
-    // Đặc điểm + Cam kết (gộp gọn)
     container.addTextDisplayComponents(
       new TextDisplayBuilder().setContent(
-        `### ${E('icon_crown', '👑')} ĐẶC ĐIỂM & CAM KẾT\n` +
-        `${E('status_check', '✅')} Truy cập các model Claude siêu việt từ hệ thống.\n` +
-        `${E('status_check', '✅')} Hỗ trợ lập trình, phân tích, nghiên cứu, xử lý tài liệu.\n` +
-        `${E('icon_gem', '💎')} Bảo hành full thời hạn · Không yêu cầu thông tin cá nhân.\n` +
-        `${E('status_warn', '⚠️')} *Model có thể thay đổi theo chính sách Anthropic.*`
+        `### ${E('icon_crown')} QUYỀN LỢI & CAM KẾT\n` +
+        `${E('cenar_verified')} Truy cập hệ thống model Claude phục vụ coding, phân tích và nghiên cứu.\n` +
+        `${E('icon_gem')} Không yêu cầu mật khẩu cá nhân; thông tin kích hoạt được gửi riêng trong ticket.\n` +
+        `${E('warranty_shield')} Bảo hành trong toàn bộ thời hạn gói và hỗ trợ khi token gặp sự cố.\n` +
+        `${E('cenar_staff')} Có nhân viên tiếp nhận đơn, kiểm tra thanh toán và cập nhật tiến độ rõ ràng.\n` +
+        `${E('status_warn')} *Danh sách model có thể thay đổi theo chính sách của nhà cung cấp.*`
       )
     );
 
@@ -243,16 +242,15 @@ export async function publishPremiumProductsForGuild(guild) {
       new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small)
     );
 
-    // Footer
     container.addTextDisplayComponents(
       new TextDisplayBuilder().setContent(
-        `-# ${E('icon_heart_purple', '💜')} Cenar Store — Uy Tín · Chất Lượng · Bảo Hành Trọn Gói`
+        `-# ${E('icon_heart_purple')} Cenar Store · Thanh toán an toàn · Giao trong ticket · Bảo hành trọn gói`
       )
     );
 
     const claudeRow = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('product:claude:buy').setLabel('Mua ngay').setStyle(ButtonStyle.Success).setEmoji(E.component('icon_cart')),
-      new ButtonBuilder().setCustomId('product:claude:pricing').setLabel('Tính giá').setStyle(ButtonStyle.Secondary).setEmoji(E.component('icon_price')),
+      new ButtonBuilder().setCustomId('product:claude:buy').setLabel('Mua ngay').setStyle(ButtonStyle.Success).setEmoji(E.component('card_success')),
+      new ButtonBuilder().setCustomId('product:claude:pricing').setLabel('Tính giá').setStyle(ButtonStyle.Secondary).setEmoji(E.component('payment_money')),
       new ButtonBuilder().setCustomId('product:claude:models').setLabel('Models').setStyle(ButtonStyle.Secondary).setEmoji(E.component('brand_claude')),
       new ButtonBuilder().setCustomId('product:claude:policy').setLabel('Điều khoản').setStyle(ButtonStyle.Secondary).setEmoji(E.component('icon_gem'))
     );
@@ -267,7 +265,7 @@ export async function publishPremiumProductsForGuild(guild) {
     if (settings.claude_product_message_id) {
       try {
         const msg = await claudeChannel.messages.fetch(settings.claude_product_message_id);
-        await msg.edit(claudePayload);
+        await msg.edit({ ...claudePayload, attachments: [] });
       } catch (e) {
         const msg = await claudeChannel.send(claudePayload);
         db.prepare('UPDATE guild_settings SET claude_product_message_id = ? WHERE guild_id = ?').run(msg.id, guild.id);
@@ -290,7 +288,6 @@ export async function publishPremiumProductsForGuild(guild) {
 
     const container = new ContainerBuilder().setAccentColor(0xFFD700);
 
-    // 🖼️ Banner hero ảnh TRƯỚC — full-width khi đứng đầu Container
     if (locketHasBanner) {
       container.addMediaGalleryComponents(
         new MediaGalleryBuilder().addItems(
@@ -303,11 +300,10 @@ export async function publishPremiumProductsForGuild(guild) {
       new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small)
     );
 
-    // Header
     container.addTextDisplayComponents(
       new TextDisplayBuilder().setContent(
-        `## ${E('icon_heart_purple', '💛')} LOCKET GOLD — 1 NĂM\n` +
-        `> ${E('icon_sparkle', '✨')} *Nâng cấp Locket với tính năng cá nhân hóa, kết nối bạn bè và chia sẻ khoảnh khắc tiện lợi hơn.*`
+        `## ${E('brand_locket')} LOCKET GOLD — 1 NĂM\n` +
+        `> ${E('icon_sparkle')} Nâng cấp chính chủ bằng Username · Không cần mật khẩu · Không cần OTP`
       )
     );
 
@@ -315,14 +311,13 @@ export async function publishPremiumProductsForGuild(guild) {
       new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
     );
 
-    // Thông tin gói
     container.addTextDisplayComponents(
       new TextDisplayBuilder().setContent(
-        `### ${E('icon_wallet', '💳')} THÔNG TIN GÓI\n` +
-        `${E('icon_price', '💰')} **Giá nâng cấp:** \`${locketProduct.base_price.toLocaleString('vi-VN')}đ\`\n` +
-        `${E('icon_duration', '⏱️')} **Thời hạn:** \`12 tháng\`\n` +
-        `${E('icon_id', '👤')} **Kích hoạt:** \`Bằng Username Locket\`\n` +
-        `${E('icon_key', '🔒')} **Bảo mật:** \`Không cần mật khẩu / OTP\``
+        `### ${E('icon_wallet')} THÔNG TIN NÂNG CẤP\n` +
+        `${E('payment_money')} **Giá trọn gói** · \`${locketProduct.base_price.toLocaleString('vi-VN')}đ\`\n` +
+        `${E('icon_duration')} **Thời hạn** · \`12 tháng\`\n` +
+        `${E('icon_id')} **Thông tin cần gửi** · \`Username Locket chính xác\`\n` +
+        `${E('icon_key')} **Bảo mật** · \`Không thu mật khẩu hoặc OTP\``
       )
     );
 
@@ -330,15 +325,14 @@ export async function publishPremiumProductsForGuild(guild) {
       new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
     );
 
-    // Đặc quyền + Hướng dẫn (gộp gọn)
     container.addTextDisplayComponents(
       new TextDisplayBuilder().setContent(
-        `### ${E('icon_crown', '🏆')} ĐẶC QUYỀN & HƯỚNG DẪN\n` +
-        `${E('status_check', '✅')} Thay đổi biểu tượng ứng dụng theo sở thích.\n` +
-        `${E('status_check', '✅')} Khôi phục streak dễ dàng khi bị gián đoạn.\n` +
-        `${E('status_check', '✅')} Trải nghiệm hoàn toàn không quảng cáo.\n` +
-        `${E('icon_fire', '🚀')} Bấm **Mua ngay** ➔ Nhập **Username** ➔ Thanh toán ➔ Hoàn tất!\n` +
-        `${E('status_warn', '⚠️')} *Kiểm tra kỹ username trước khi xác nhận thanh toán.*`
+        `### ${E('icon_crown')} ĐẶC QUYỀN & QUY TRÌNH\n` +
+        `${E('icon_star')} Mở khóa tùy biến biểu tượng ứng dụng và trải nghiệm không quảng cáo.\n` +
+        `${E('icon_fire')} Hỗ trợ khôi phục streak khi bị gián đoạn theo chính sách Locket.\n` +
+        `${E('cenar_verified')} Bấm **Mua ngay** · Nhập Username · Xác nhận giá · Thanh toán trong ticket.\n` +
+        `${E('cenar_staff')} Staff kiểm tra Username và thông báo ngay khi nâng cấp hoàn tất.\n` +
+        `${E('status_warn')} *Kiểm tra kỹ Username trước khi xác nhận; sai Username có thể làm chậm xử lý.*`
       )
     );
 
@@ -346,15 +340,14 @@ export async function publishPremiumProductsForGuild(guild) {
       new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small)
     );
 
-    // Footer
     container.addTextDisplayComponents(
       new TextDisplayBuilder().setContent(
-        `-# ${E('icon_heart_purple', '💜')} Cenar Store — Uy Tín · Chất Lượng · Bảo Hành Trọn Gói`
+        `-# ${E('icon_heart_purple')} Cenar Store · Nâng cấp an toàn · Theo dõi đơn trong ticket · Hỗ trợ rõ ràng`
       )
     );
 
     const locketRow = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('product:locket:buy').setLabel('Mua ngay').setStyle(ButtonStyle.Success).setEmoji(E.component('icon_cart')),
+      new ButtonBuilder().setCustomId('product:locket:buy').setLabel('Mua ngay').setStyle(ButtonStyle.Success).setEmoji(E.component('panel_order')),
       new ButtonBuilder().setCustomId('product:locket:features').setLabel('Đặc quyền').setStyle(ButtonStyle.Secondary).setEmoji(E.component('icon_star')),
       new ButtonBuilder().setCustomId('product:locket:policy').setLabel('Điều khoản').setStyle(ButtonStyle.Secondary).setEmoji(E.component('icon_gem'))
     );
@@ -369,7 +362,7 @@ export async function publishPremiumProductsForGuild(guild) {
     if (settings.locket_product_message_id) {
       try {
         const msg = await locketChannel.messages.fetch(settings.locket_product_message_id);
-        await msg.edit(locketPayload);
+        await msg.edit({ ...locketPayload, attachments: [] });
       } catch (e) {
         const msg = await locketChannel.send(locketPayload);
         db.prepare('UPDATE guild_settings SET locket_product_message_id = ? WHERE guild_id = ?').run(msg.id, guild.id);

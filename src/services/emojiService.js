@@ -80,6 +80,7 @@ export const EMOJI_SLOTS = {
   brand_adobe:        { label: 'Adobe CC',             default: '🎨' },
   brand_capcut:       { label: 'CapCut',               default: '🎬' },
   brand_claude:       { label: 'Claude AI',            default: '🤖' },
+  brand_locket:       { label: 'Locket Gold',          default: '' },
   brand_office:       { label: 'Office 365',           default: '📈' },
   brand_gearup:       { label: 'GearUP Booster',       default: '🎮' },
   brand_gemini:       { label: 'Gemini AI',            default: '✨' },
@@ -221,12 +222,13 @@ export const SLOT_ALIASES = {
   brand_adobe: ['adobe', 'cr_adobe', 'photoshop_cc_icon3'],
   brand_capcut: ['capcut', 'cr_capcut'],
   brand_claude: ['claude', 'cr_claude'],
+  brand_locket: ['tsm_locket', 'locket', 'locket_gold'],
   brand_office: ['office', 'office365', 'tsm_offices'],
   brand_gearup: ['gearup', 'gear_up'],
   brand_gemini: ['gemini', 'tsm_gemini'],
 
   // Misc
-  icon_price: ['price_tag', 'tag_gia'],
+  icon_price: ['price_tag', 'tag_gia', 'money', 'cenar_price'],
   icon_duration: ['duration', 'thoi_han'],
   icon_store: ['store', 'cua_hang'],
   icon_star: ['star', 'sao'],
@@ -234,12 +236,12 @@ export const SLOT_ALIASES = {
   icon_gem: ['gem', 'diamond', 'kim_cuong'],
   icon_gift: ['gift', 'qua'],
   icon_sparkle: ['sparkle', 'nhap_nhay'],
-  icon_crown: ['crown', 'vuong_mien'],
+  icon_crown: ['crown', 'vuong_mien', 'platinum'],
   icon_chart: ['chart', 'bieu_do'],
-  icon_id: ['id', 'icon_id'],
+  icon_id: ['id', 'icon_id', 'verified'],
   icon_location: ['location', 'dia_diem'],
   icon_settings: ['settings', 'cai_dat', 'cenar_admin'],
-  icon_key: ['key', 'chia_khoa'],
+  icon_key: ['key', 'chia_khoa', 'verifybadge'],
   icon_link: ['link', 'lien_ket']
 };
 

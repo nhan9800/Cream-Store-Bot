@@ -23,6 +23,7 @@ const fallbackEmojis = {
   otp_loading: '<a:cenar_otp_loading:1535705387024515082>',
   card_success: '<a:cenar_card_success:1535705389780439160>',
   ctv_crystal: '<a:cenar_ctv_crystal:1535705392674508833>',
+  brand_locket: '<:cenar_tsm_locket:1282651426459226155>',
 
   // Panel Ticket buttons
   panel_order:        '<:cr_muahang:1348622828152426528>',
@@ -65,7 +66,7 @@ const fallbackEmojis = {
   icon_history:       '<:cr_baohanh:1348625535512870965>',
   icon_duration:      '<a:redload:1459179959158571119>',
   icon_location:      '<:verifybadge:1481127479702847646>',
-  icon_heart_purple:  '<:purple_heart_glow:1327541911749263360>',
+  icon_heart_purple:  '<:cenar_tim:1535691544387002508>',
 
   // Status
   status_check:       '<a:tickgreen:1384069022831874169>',
@@ -90,7 +91,7 @@ const fallbackEmojis = {
   brand_gemini:       '<:gemini:1481157054210248864>',
 
   // Misc
-  icon_price:         '<:money:1442876095442714748>',
+  icon_price:         '<:cenar_money:1535691094585507930>',
   icon_duration:      '<a:redload:1459179959158571119>',
   icon_store:         '<:cr_shop:1392749981332541501>',
   icon_star:          '<a:sao:1481149556753305600>',
@@ -98,12 +99,12 @@ const fallbackEmojis = {
   icon_gem:           '<:Diamond:1485905790903783465>',
   icon_gift:          '<a:starxoay:1481141954346483845>',
   icon_sparkle:       '<a:starxoay:1481141954346483845>',
-  icon_crown:         '<:Platinum:1485905566130765908>',
+  icon_crown:         '<:cenar_platinum:1535690430329393153>',
   icon_chart:         '<a:starxoay:1481141954346483845>',
-  icon_id:            '<:verifybadge:1481127479702847646>',
+  icon_id:            '<:cenar_verified:1535618654358736926>',
   icon_location:      '<a:Dotyellow:1481134440725090315>',
   icon_settings:      '<:cenar_admin:1535618678853337149>',
-  icon_key:           '<:verifybadge:1481127479702847646>',
+  icon_key:           '<:cenar_verifybadge:1535690872551768164>',
   icon_link:          '<a:Arrow2:1367139234833498113>',
   icon_trophy:        '<a:starxoay:1481141954346483845>',
   icon_gold:          '<:Gold:1485905231199076412>',
@@ -112,7 +113,7 @@ const fallbackEmojis = {
   icon_clipboard:     '<:cr_shop:1392749981332541501>',
   icon_heart:         '<:purple_heart_glow:1327541911749263360>',
   icon_heart_purple:  '<:purple_heart_glow:1327541911749263360>',
-  icon_cart:          '<:cr_carttt:1348626032747614268>',
+  icon_cart:          '<:cenar_carttt:1535691821647405137>',
   icon_wallet:        '<:cenar_wallet:1535618682481545217>',
   icon_brain:         '<:chatgopete:1481154927677014098>',
   icon_announce:      '<a:Arrow2:1367139234833498113>',

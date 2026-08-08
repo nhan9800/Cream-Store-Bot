@@ -10,6 +10,13 @@ import { fileURLToPath } from 'node:url';
 import { db } from '../database/db.js';
 import { getPartnerSettings } from '../services/partnerService.js';
 import { accentFor, stripDiscordUnicode } from '../utils/uiKit.js';
+import { config } from '../config.js';
+import {
+  formatOwnerPingPenalty,
+  OWNER_PING_PENALTIES_MS,
+  registerOwnerPing,
+} from '../services/ownerPingGuardService.js';
+import { emitAutomationLog } from '../services/automationLogService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -23,6 +30,124 @@ export const once = false;
 // ═══════════════════════════════════════════════
 const processingChannels = new Set();
 const sentGmailGuides = new Set();
+
+function nextOwnerPingPenaltyLabel(penaltyLevel) {
+  const nextIndex = Math.min(Number(penaltyLevel) || 0, OWNER_PING_PENALTIES_MS.length - 1);
+  return formatOwnerPingPenalty(OWNER_PING_PENALTIES_MS[nextIndex]);
+}
+
+async function enforceProtectedOwnerPing(message, E, isStaff) {
+  const protectedOwnerId = String(config.protectedOwnerId || '').trim();
+  if (
+    !protectedOwnerId
+    || isStaff
+    || !message.member
+    || message.author.id === protectedOwnerId
+    || !message.mentions.users.has(protectedOwnerId)
+  ) return false;
+
+  const result = registerOwnerPing(message.guildId, message.author.id);
+  if (result.action === 'counted') return false;
+
+  if (result.action === 'warning') {
+    logAbuseEvent(
+      message.guildId,
+      message.author.id,
+      'OWNER_PING_WARNING',
+      `Ping Owner lần ${result.mentionCount} trong cửa sổ 24 giờ.`,
+    );
+
+    const warning = new ContainerBuilder().setAccentColor(accentFor('warning'))
+      .addTextDisplayComponents(new TextDisplayBuilder().setContent([
+        `## ${E('cenar_cooldown')} VUI LÒNG KHÔNG SPAM TAG OWNER`,
+        `${E('status_warn')} <@${message.author.id}>, bạn đã ping Owner **${result.mentionCount} lần trong 24 giờ**.`,
+        '',
+        `### ${E('order_processing')} Đơn hàng vẫn đang được tiến hành`,
+        `${E('cenar_staff')} Nếu đơn bị chậm, nguồn hàng hoặc nguyên liệu có thể đang gặp vấn đề. Cenar Store thành thật xin lỗi và mong bạn kiên nhẫn chờ xử lý.`,
+        `${E('cenar_verified')} Vui lòng tiếp tục theo dõi tại ticket/website; staff sẽ phản hồi ngay khi có cập nhật.`,
+        '',
+        `${E('status_cross')} **Cảnh báo cuối:** ping thêm một lần sẽ bị timeout **15 phút**. Tái phạm tiếp theo tăng lên **24 giờ**, sau đó **3–28 ngày**.`,
+        `-# ${E('icon_clock')} Bộ đếm tự làm mới sau 24 giờ · Cấp phạt giảm sau 30 ngày không vi phạm`,
+      ].join('\n')));
+
+    await message.channel.send({
+      components: [warning],
+      flags: MessageFlags.IsComponentsV2,
+      allowedMentions: { parse: [] },
+    }).catch(() => null);
+
+    await emitAutomationLog(message.client, {
+      guildId: message.guildId,
+      customerId: message.author.id,
+      action: 'OWNER_PING_WARNING',
+      title: 'CẢNH BÁO SPAM TAG OWNER',
+      summary: `Thành viên đã ping Owner ${result.mentionCount} lần trong 24 giờ.`,
+      reference: message.id,
+      status: 'warning',
+      fields: [
+        { label: 'Kênh', value: `#${message.channel.name || message.channel.id}`, emoji: 'cenar_staff' },
+        { label: 'Vi phạm kế tiếp', value: 'Timeout 15 phút', emoji: 'cenar_cooldown' },
+      ],
+    });
+    return true;
+  }
+
+  const durationLabel = formatOwnerPingPenalty(result.timeoutMs);
+  const nextDurationLabel = nextOwnerPingPenaltyLabel(result.penaltyLevel);
+  const reason = `Spam tag Owner Cenar Store · cấp phạt ${result.penaltyLevel}`;
+  let timeoutApplied = false;
+  if (message.member.moderatable) {
+    timeoutApplied = await message.member.timeout(result.timeoutMs, reason)
+      .then(() => true)
+      .catch((error) => {
+        console.error('[OWNER-PING-GUARD] Không thể timeout:', error.message);
+        return false;
+      });
+  }
+
+  await message.delete().catch(() => null);
+  logAbuseEvent(
+    message.guildId,
+    message.author.id,
+    timeoutApplied ? 'OWNER_PING_TIMEOUT' : 'OWNER_PING_TIMEOUT_FAILED',
+    `Cấp ${result.penaltyLevel} · ${durationLabel} · lần ping ${result.mentionCount}.`,
+  );
+
+  const penalty = new ContainerBuilder().setAccentColor(accentFor('danger'))
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent([
+      `## ${E('status_cross')} ${timeoutApplied ? 'ĐÃ ÁP DỤNG TIMEOUT' : 'KHÔNG THỂ ÁP DỤNG TIMEOUT'}`,
+      `${E('cenar_cooldown')} <@${message.author.id}> · Cấp phạt **${result.penaltyLevel}** · ${timeoutApplied ? `Tạm khóa chat **${durationLabel}**` : 'Đã chuyển log để quản trị viên xử lý'}`,
+      '',
+      `${E('order_processing')} Đơn hàng của bạn **vẫn đang được tiến hành**. Việc ping liên tục không làm đơn được xử lý nhanh hơn và gây gián đoạn hỗ trợ.`,
+      `${E('cenar_staff')} Nếu bị delay, nguyên nhân có thể đến từ nguồn hàng/nguyên liệu. Cenar Store thành thật xin lỗi và mong bạn chờ cập nhật tại ticket.`,
+      `${E('status_warn')} Vi phạm tiếp theo trong chu kỳ sẽ tăng lên **${nextDurationLabel}**; mức tối đa là **28 ngày** theo giới hạn Discord.`,
+      `-# ${E('icon_clock')} Hệ thống chống spam Owner · Ghi nhận tự động`,
+    ].join('\n')));
+
+  await message.channel.send({
+    components: [penalty],
+    flags: MessageFlags.IsComponentsV2,
+    allowedMentions: { parse: [] },
+  }).catch(() => null);
+
+  await emitAutomationLog(message.client, {
+    guildId: message.guildId,
+    customerId: message.author.id,
+    action: timeoutApplied ? 'OWNER_PING_TIMEOUT' : 'OWNER_PING_TIMEOUT_FAILED',
+    title: timeoutApplied ? 'ĐÃ PHẠT SPAM TAG OWNER' : 'CẦN ADMIN XỬ LÝ SPAM TAG OWNER',
+    summary: timeoutApplied
+      ? `Đã timeout ${durationLabel} do tiếp tục ping Owner sau cảnh báo.`
+      : 'Bot không đủ điều kiện timeout thành viên; cần quản trị viên kiểm tra role/quyền.',
+    reference: message.id,
+    status: timeoutApplied ? 'danger' : 'warning',
+    fields: [
+      { label: 'Số lần trong 24 giờ', value: String(result.mentionCount), emoji: 'status_warn' },
+      { label: 'Cấp phạt', value: String(result.penaltyLevel), emoji: 'cenar_cooldown' },
+      { label: 'Thời hạn', value: durationLabel, emoji: 'icon_clock' },
+    ],
+  });
+  return true;
+}
 
 async function withChannelLock(channelId, fn) {
   if (processingChannels.has(channelId)) return; // skip nếu đang xử lý
@@ -48,6 +173,8 @@ export async function execute(message) {
   const isStaff = message.member?.roles?.cache?.has(guildConfig.support_role_id) || 
                   message.member?.roles?.cache?.has(guildConfig.manager_role_id) || 
                   message.member?.permissions?.has('ManageGuild');
+
+  if (await enforceProtectedOwnerPing(message, E, isStaff)) return;
 
   const partnerSettings = getPartnerSettings(message.guildId);
   const isPartnerChannel = Boolean(partnerSettings.partner_channel_id === message.channel.id);

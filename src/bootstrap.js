@@ -63,6 +63,11 @@ export async function buildClient() {
 
       const { autoRefreshOtpPanel } = await import('./services/autoSetupOtpService.js');
       await autoRefreshOtpPanel(readyClient);
+
+      const { publishPremiumProductsForGuild } = await import('./services/premiumProductSetupService.js');
+      for (const guild of readyClient.guilds.cache.values()) {
+        await publishPremiumProductsForGuild(guild);
+      }
     } catch (error) {
       console.error('[AUTO-SETUP] Không thể đồng bộ emoji/panel:', error);
     }
@@ -87,17 +92,6 @@ export async function buildClient() {
         console.log(`[GIVEAWAY] Failed to cancel legacy automatic giveaway: ${err.message}`);
       });
     }).catch(err => console.error('Failed to import giveawayService', err));
-
-    // Tự động setup Premium Products (Đã setup xong, tắt auto-run mỗi lần restart để tránh lặp panel)
-    /*
-    import('./services/premiumProductSetupService.js').then(({ autoSetupAndPublishPremiumProducts }) => {
-      for (const guild of readyClient.guilds.cache.values()) {
-        autoSetupAndPublishPremiumProducts(guild).catch(err => {
-          console.log(`[AUTO-SETUP-PREMIUM] Lỗi chạy setup cho guild ${guild.name}: ${err.message}`);
-        });
-      }
-    }).catch(err => console.error('Failed to import premiumProductSetupService', err));
-    */
 
     // Gửi thông báo bảng giá (Đã gửi xong, tắt auto-run mỗi lần restart để tránh gửi lặp lại thông báo)
     /*

@@ -318,6 +318,18 @@ export function initDatabase() {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE IF NOT EXISTS owner_ping_enforcement (
+      guild_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      window_started_at TEXT NOT NULL,
+      mention_count INTEGER NOT NULL DEFAULT 0,
+      penalty_level INTEGER NOT NULL DEFAULT 0,
+      last_mention_at TEXT NOT NULL,
+      last_penalty_at TEXT,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (guild_id, user_id)
+    );
+
     CREATE TABLE IF NOT EXISTS ai_knowledge (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       guild_id TEXT NOT NULL,
@@ -412,6 +424,8 @@ export function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_orders_queue ON orders (guild_id, queue_group, priority_rank, status, created_at);
     CREATE INDEX IF NOT EXISTS idx_orders_expiry_at ON orders (expiry_at, status);
     CREATE INDEX IF NOT EXISTS idx_abuse_events ON abuse_events (guild_id, user_id, action, created_at);
+    CREATE INDEX IF NOT EXISTS idx_owner_ping_enforcement
+      ON owner_ping_enforcement (guild_id, last_mention_at);
     CREATE INDEX IF NOT EXISTS idx_product_catalog_guild ON product_catalog (guild_id, is_active, sort_order);
     CREATE INDEX IF NOT EXISTS idx_sub_accounts_guild_status ON subscription_accounts (guild_id, status, service_type);
     CREATE INDEX IF NOT EXISTS idx_sub_accounts_renewal ON subscription_accounts (next_renewal_at, status);
