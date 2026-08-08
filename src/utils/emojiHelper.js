@@ -7,12 +7,18 @@ const fallbackEmojis = {
   cenar_staff: '<:cenar_staff:1535618674885402684>',
   cenar_admin: '<:cenar_admin:1535618678853337149>',
   cenar_wallet: '<:cenar_wallet:1535618682481545217>',
+  cenar_partner: '<:cenar_partner:1535637391841173534>',
+  cenar_partner_ok: '<:cenar_partner_ok:1535637394207015003>',
+  cenar_ctv: '<:cenar_ctv:1535637396782317689>',
+  cenar_cooldown: '<:cenar_cooldown:1535637399596699688>',
+  cenar_announce: '<:cenar_announce:1535637405820911698>',
+  cenar_price: '<:cenar_price:1535637409759494185>',
 
   // Panel Ticket buttons
   panel_order:        '<:cr_muahang:1348622828152426528>',
   panel_support:      '<:cenar_support:1535618659010224129>',
   panel_complaint:    '<a:dot_red:1367140105248047114>',
-  panel_partnership:  '<:Partner:1367138825129955379>',
+  panel_partnership:  '<:cenar_partner:1535637391841173534>',
   panel_warranty:     '<:cenar_verified:1535618654358736926>',
   panel_edit:         '<:cenar_admin:1535618678853337149>',
 

@@ -1,462 +1,468 @@
-import { 
-  ModalBuilder, TextInputBuilder, TextInputStyle, ActionRowBuilder, 
-  ButtonBuilder, ButtonStyle, EmbedBuilder, ContainerBuilder, 
-  TextDisplayBuilder, SeparatorBuilder, SeparatorSpacingSize, MessageFlags 
+import {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  ContainerBuilder,
+  MessageFlags,
+  ModalBuilder,
+  PermissionFlagsBits,
+  SeparatorBuilder,
+  SeparatorSpacingSize,
+  TextDisplayBuilder,
+  TextInputBuilder,
+  TextInputStyle,
 } from 'discord.js';
 import { db } from '../database/db.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
-import { getPartnerSettings, addPartnerApplication, getPartnerById, updatePartnerStatus } from './partnerService.js';
-import { getCtvSettings, setCustomerCtvStatus, isCustomerCtv } from './ctvService.js';
-import { getPoints } from './loyaltyService.js';
-import { brandName, accentFor } from '../utils/uiKit.js';
+import {
+  addPartnerApplication,
+  getPartnerById,
+  getPartnerSettings,
+  updatePartnerStatus,
+} from './partnerService.js';
+import { getCtvSettings, isCustomerCtv, setCustomerCtvStatus } from './ctvService.js';
+import { accentFor, stripDiscordUnicode } from '../utils/uiKit.js';
 
-/**
- * Handle Partner Apply Button Click (Show Modal)
- */
+function cardPayload(guildId, { tone = 'primary', title, lines = [], ephemeral = false } = {}) {
+  const E = createEmojiResolver(guildId);
+  const icon = tone === 'danger'
+    ? E('status_cross')
+    : tone === 'warning'
+      ? E('cenar_cooldown')
+      : tone === 'success'
+        ? E('cenar_verified')
+        : E('cenar_partner');
+  const container = new ContainerBuilder().setAccentColor(accentFor(tone));
+  container.addTextDisplayComponents(new TextDisplayBuilder().setContent(`## ${icon} ${title}`));
+  if (lines.length) {
+    container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
+    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.filter(Boolean).join('\n')));
+  }
+  return {
+    components: [container],
+    flags: MessageFlags.IsComponentsV2 | (ephemeral ? MessageFlags.Ephemeral : 0),
+    allowedMentions: { parse: [] },
+  };
+}
+
+function addReviewButtons(container, E, approveId, rejectId, approveLabel) {
+  const approveButton = new ButtonBuilder()
+    .setCustomId(approveId)
+    .setLabel(approveLabel)
+    .setStyle(ButtonStyle.Success);
+  const approveEmoji = E.component('cenar_partner_ok');
+  if (approveEmoji) approveButton.setEmoji(approveEmoji);
+
+  const rejectButton = new ButtonBuilder()
+    .setCustomId(rejectId)
+    .setLabel('Từ chối')
+    .setStyle(ButtonStyle.Danger);
+  const rejectEmoji = E.component('status_cross');
+  if (rejectEmoji) rejectButton.setEmoji(rejectEmoji);
+  return [container, new ActionRowBuilder().addComponents(approveButton, rejectButton)];
+}
+
+function isReviewer(interaction) {
+  if (interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) return true;
+  const settings = db.prepare('SELECT support_role_id, manager_role_id FROM guild_settings WHERE guild_id = ?')
+    .get(interaction.guildId) || {};
+  return [settings.support_role_id, settings.manager_role_id]
+    .filter(Boolean)
+    .some((roleId) => interaction.member?.roles?.cache?.has(roleId));
+}
+
+async function reviewerGuard(interaction) {
+  if (isReviewer(interaction)) return true;
+  await interaction.reply(cardPayload(interaction.guildId, {
+    tone: 'danger',
+    title: 'Bạn không có quyền xét duyệt',
+    lines: [`${createEmojiResolver(interaction.guildId)('cenar_admin')} Chỉ Admin, Manager hoặc Support được xử lý hồ sơ.`],
+    ephemeral: true,
+  }));
+  return false;
+}
+
 export async function handlePartnerApplyStart(interaction) {
-  const E = createEmojiResolver(interaction.guildId);
   const settings = getPartnerSettings(interaction.guildId);
-
   if (!settings.approve_channel_id) {
-    return interaction.reply({
-      content: `${E('status_cross', '❌')} Hệ thống đối tác chưa được cấu hình hoàn thiện kênh duyệt đơn.`,
-      ephemeral: true
-    });
+    return interaction.reply(cardPayload(interaction.guildId, {
+      tone: 'danger',
+      title: 'Hệ thống Partner chưa sẵn sàng',
+      lines: ['Vui lòng báo Admin chạy lại thiết lập Partner.'],
+      ephemeral: true,
+    }));
   }
 
   const modal = new ModalBuilder()
     .setCustomId('partner:apply:modal')
-    .setTitle('Ứng Tuyển Đối Tác Liên Kết');
-
+    .setTitle('Đăng ký Cenar Partner');
   const inviteInput = new TextInputBuilder()
     .setCustomId('invite_link')
-    .setLabel('Link mời (Invite link) của server bạn')
+    .setLabel('Link mời Discord của server bạn')
     .setStyle(TextInputStyle.Short)
     .setRequired(true)
     .setMinLength(10)
-    .setPlaceholder('https://discord.gg/your-server-code');
-
+    .setMaxLength(150)
+    .setPlaceholder('https://discord.gg/your-server');
   modal.addComponents(new ActionRowBuilder().addComponents(inviteInput));
   await interaction.showModal(modal);
 }
 
-/**
- * Handle Partner Modal Submission
- */
 export async function handlePartnerApplyModal(interaction) {
   const E = createEmojiResolver(interaction.guildId);
-  const inviteLink = interaction.fields.getTextInputValue('invite_link');
+  const inviteLink = interaction.fields.getTextInputValue('invite_link').trim();
+  await interaction.deferReply({ flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral });
 
-  await interaction.deferReply({ ephemeral: true });
-
-  // Extract invite code
-  const inviteRegex = /(?:https?:\/\/)?(?:discord\.(?:gg|io|me|li)|discord(?:app)?\.com\/invite)\/([a-zA-Z0-9\-]+)/i;
-  const match = inviteLink.match(inviteRegex);
+  const match = inviteLink.match(/(?:https?:\/\/)?(?:discord\.(?:gg|io|me|li)|discord(?:app)?\.com\/invite)\/([a-zA-Z0-9-]+)/i);
   const inviteCode = match ? match[1] : inviteLink;
-
   try {
-    // Fetch invite details
-    console.log(`[PARTNER] Fetching invite code: ${inviteCode}`);
     const invite = await interaction.client.fetchInvite(inviteCode, { withCounts: true }).catch(() => null);
-
-    if (!invite || !invite.guild) {
-      return interaction.editReply({
-        content: `${E('status_cross', '❌')} Không tìm thấy máy chủ ứng tuyển. Vui lòng kiểm tra lại link mời (đảm bảo link không bị hết hạn và có dạng \`https://discord.gg/...\`).`
-      });
+    if (!invite?.guild) {
+      return interaction.editReply(cardPayload(interaction.guildId, {
+        tone: 'danger',
+        title: 'Link mời không hợp lệ',
+        lines: [`${E('cenar_support')} Hãy dùng link còn hạn dạng \`https://discord.gg/...\`.`],
+      }));
     }
 
     const partnerGuildId = invite.guild.id;
-    const partnerName = invite.guild.name;
-    const memberCount = invite.approximateMemberCount ?? 0;
-    const ownerId = invite.guild.ownerId || 'Unknown';
+    const partnerName = stripDiscordUnicode(invite.guild.name);
+    const memberCount = Number(invite.approximateMemberCount || 0);
     const applicantId = interaction.user.id;
-
-    // Check if already active partner
-    const existingActive = db.prepare("SELECT id FROM partners WHERE guild_id = ? AND partner_guild_id = ? AND status = 'ACTIVE'").get(interaction.guildId, partnerGuildId);
-    if (existingActive) {
-      return interaction.editReply({
-        content: `${E('status_cross', '❌')} Máy chủ **${partnerName}** đã là đối tác liên kết của chúng tôi rồi!`
-      });
+    const duplicate = db.prepare(`
+      SELECT id, status FROM partners
+      WHERE guild_id = ? AND partner_guild_id = ? AND status IN ('PENDING', 'ACTIVE')
+      ORDER BY id DESC LIMIT 1
+    `).get(interaction.guildId, partnerGuildId);
+    if (duplicate) {
+      return interaction.editReply(cardPayload(interaction.guildId, {
+        tone: 'warning',
+        title: duplicate.status === 'ACTIVE' ? 'Server đã là Partner' : 'Hồ sơ đang chờ duyệt',
+        lines: [`${E('cenar_partner')} Hồ sơ \`#${duplicate.id}\` không cần gửi lại.`],
+      }));
     }
 
-    // Yêu cầu tối thiểu 500 thành viên
-    const MIN_MEMBERS = 500;
-    if (memberCount < MIN_MEMBERS) {
-      return interaction.editReply({
-        content: `${E('status_cross', '❌')} Rất tiếc, máy chủ **${partnerName}** chỉ có **${memberCount}** thành viên. Yêu cầu tối thiểu của chúng tôi là **${MIN_MEMBERS}** thành viên trở lên.`
-      });
-    }
-
-    // Save PENDING application
-    const appId = addPartnerApplication(interaction.guildId, partnerGuildId, partnerName, inviteLink, memberCount, ownerId, applicantId);
-
-    // Send to approve logs channel
+    const reviewMode = memberCount < 500 ? 'MANUAL_SUPPORT' : 'STANDARD';
+    const appId = addPartnerApplication(
+      interaction.guildId,
+      partnerGuildId,
+      partnerName,
+      inviteLink,
+      memberCount,
+      invite.guild.ownerId || 'UNKNOWN',
+      applicantId,
+      reviewMode,
+    );
     const settings = getPartnerSettings(interaction.guildId);
     const approveChannel = await interaction.guild.channels.fetch(settings.approve_channel_id).catch(() => null);
+    if (!approveChannel?.isTextBased()) throw new Error('Không tìm thấy kênh duyệt Partner.');
 
-    if (approveChannel) {
-      const container = new ContainerBuilder().setAccentColor(accentFor('warning'));
-      container.addTextDisplayComponents(new TextDisplayBuilder().setContent(`## 📥 ĐƠN ĐĂNG KÝ ĐỐI TÁC MỚI (#${appId})`));
-      container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
-      container.addTextDisplayComponents(new TextDisplayBuilder().setContent([
-        `• **Người đăng ký:** <@${applicantId}> (ID: \`${applicantId}\`)`,
-        `• **Tên máy chủ đối tác:** \`${partnerName}\``,
-        `• **Guild ID đối tác:** \`${partnerGuildId}\``,
-        `• **Số lượng thành viên:** **${memberCount.toLocaleString('vi-VN')}**`,
-        `• **Đường dẫn mời:** [Bấm vào đây để tham quan](${inviteLink})`,
-      ].join('\n')));
-
-      const approveBtn = new ButtonBuilder()
-        .setCustomId(`partner:approve:${appId}`)
-        .setLabel('Duyệt Đối Tác')
-        .setStyle(ButtonStyle.Success);
-      const approveEmoji = E.component('status_check');
-      if (approveEmoji) approveBtn.setEmoji(approveEmoji);
-
-      const rejectBtn = new ButtonBuilder()
-        .setCustomId(`partner:reject:${appId}`)
-        .setLabel('Từ Chối')
-        .setStyle(ButtonStyle.Danger);
-      const rejectEmoji = E.component('status_cross');
-      if (rejectEmoji) rejectBtn.setEmoji(rejectEmoji);
-
-      const row = new ActionRowBuilder().addComponents(approveBtn, rejectBtn);
-
-      await approveChannel.send({
-        components: [container, row],
-        flags: MessageFlags.IsComponentsV2
-      });
-    }
-
-    await interaction.editReply({
-      content: `${E('status_check', '✅')} Đơn ứng tuyển đối tác cho máy chủ **${partnerName}** (${memberCount} mem) đã được gửi thành công và đang chờ xét duyệt.`
+    const reviewContainer = new ContainerBuilder().setAccentColor(accentFor(reviewMode === 'MANUAL_SUPPORT' ? 'warning' : 'info'));
+    reviewContainer.addTextDisplayComponents(new TextDisplayBuilder().setContent(
+      `## ${reviewMode === 'MANUAL_SUPPORT' ? E('cenar_cooldown') : E('cenar_partner')} Hồ sơ Partner #${appId}`,
+    ));
+    reviewContainer.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
+    reviewContainer.addTextDisplayComponents(new TextDisplayBuilder().setContent([
+      `${E('cenar_verified')} **Đại diện:** <@${applicantId}> · \`${applicantId}\``,
+      `${E('cenar_partner')} **Server:** ${partnerName} · \`${partnerGuildId}\``,
+      `${E('cenar_announce')} **Thành viên:** ${memberCount.toLocaleString('vi-VN')}`,
+      `${E('cenar_support')} **Chế độ:** ${reviewMode === 'MANUAL_SUPPORT' ? 'Duyệt thủ công · Hỗ trợ cộng đồng dưới 500 thành viên' : 'Xét duyệt tiêu chuẩn'}`,
+      `${E('cenar_partner_ok')} **Tham quan:** [Mở server ứng tuyển](${inviteLink})`,
+      `-# Bot không tự từ chối server nhỏ. Admin đánh giá nội dung, mức độ hoạt động và tiềm năng cộng đồng.`,
+    ].join('\n')));
+    await approveChannel.send({
+      components: addReviewButtons(
+        reviewContainer,
+        E,
+        `partner:approve:${appId}`,
+        `partner:reject:${appId}`,
+        reviewMode === 'MANUAL_SUPPORT' ? 'Duyệt hỗ trợ' : 'Duyệt Partner',
+      ),
+      flags: MessageFlags.IsComponentsV2,
+      allowedMentions: { parse: [] },
     });
 
-  } catch (err) {
-    console.error('[PARTNER_APPLY] Lỗi:', err);
-    await interaction.editReply({
-      content: `${E('status_cross', '❌')} Có lỗi xảy ra trong quá trình xử lý đơn: ${err.message}`
-    });
+    return interaction.editReply(cardPayload(interaction.guildId, {
+      tone: 'success',
+      title: 'Đã tiếp nhận hồ sơ Partner',
+      lines: [
+        `${E('cenar_partner')} Server **${partnerName}** · ${memberCount.toLocaleString('vi-VN')} thành viên`,
+        reviewMode === 'MANUAL_SUPPORT'
+          ? `${E('cenar_partner_ok')} Server dưới 500 thành viên đã được chuyển sang **duyệt thủ công**, không bị từ chối tự động.`
+          : `${E('cenar_verified')} Hồ sơ đã vào hàng chờ xét duyệt tiêu chuẩn.`,
+        `${E('cenar_cooldown')} Kết quả sẽ được thông báo trực tiếp sau khi Admin xử lý.`,
+      ],
+    }));
+  } catch (error) {
+    console.error('[PARTNER-APPLY]', error);
+    return interaction.editReply(cardPayload(interaction.guildId, {
+      tone: 'danger',
+      title: 'Không thể gửi hồ sơ Partner',
+      lines: [`${E('status_cross')} ${error.message}`],
+    }));
   }
 }
 
-/**
- * Handle Partner Approve Button Click
- */
 export async function handlePartnerApprove(interaction, appId) {
+  if (!await reviewerGuard(interaction)) return;
   const E = createEmojiResolver(interaction.guildId);
   const app = getPartnerById(appId);
-
-  if (!app) {
-    return interaction.reply({
-      content: `${E('status_cross', '❌')} Không tìm thấy thông tin đơn đối tác này.`,
-      ephemeral: true
-    });
+  if (!app || app.status !== 'PENDING') {
+    return interaction.reply(cardPayload(interaction.guildId, {
+      tone: 'warning',
+      title: app ? 'Hồ sơ đã được xử lý' : 'Không tìm thấy hồ sơ',
+      lines: [app ? `Trạng thái hiện tại: **${app.status}**.` : `Mã hồ sơ: \`#${appId}\`.`],
+      ephemeral: true,
+    }));
   }
-
-  if (app.status !== 'PENDING') {
-    return interaction.reply({
-      content: `${E('status_cross', '❌')} Đơn này đã được xử lý trước đó rồi.`,
-      ephemeral: true
-    });
-  }
-
   await interaction.deferUpdate();
-
-  // Update Status
-  updatePartnerStatus(appId, 'ACTIVE');
 
   const settings = getPartnerSettings(interaction.guildId);
-
-  // Grant role to applicant
-  if (settings.partner_role_id) {
-    const member = await interaction.guild.members.fetch(app.applicant_id).catch(() => null);
-    if (member) {
-      await member.roles.add(settings.partner_role_id).catch(e => console.error('[PARTNER] Cấp role lỗi:', e.message));
-    }
-  }
-
-  // Post to Directory Channel
-  if (settings.directory_channel_id) {
-    const dirChannel = await interaction.guild.channels.fetch(settings.directory_channel_id).catch(() => null);
-    if (dirChannel) {
-      const card = new ContainerBuilder().setAccentColor(accentFor('success'));
-      card.addTextDisplayComponents(new TextDisplayBuilder().setContent(`## ${E('icon_crown', '👑')} ĐỐI TÁC MỚI: ${app.partner_name.toUpperCase()}`));
-      card.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
-      card.addTextDisplayComponents(new TextDisplayBuilder().setContent([
-        `Chào mừng máy chủ **${app.partner_name}** chính thức đồng hành cùng Cenar Store!`,
-        `* ${E('icon_group', '👥')} **Số lượng thành viên:** ${app.member_count.toLocaleString('vi-VN')} thành viên`,
-        `* ${E('icon_ticket', '🎟️')} **Mã coupon ưu đãi đối tác:** \`PARTNER_${appId}\` (Nhập mã này giảm 10% tại cửa hàng)`,
-        `* ${E('icon_link', '🔗')} **Đường dẫn tham gia:** [Bấm vào đây để tham gia ngay](${app.invite_link})`,
-      ].join('\n')));
-
-      await dirChannel.send({
-        components: [card],
-        flags: MessageFlags.IsComponentsV2
+  const member = await interaction.guild.members.fetch(app.applicant_id).catch(() => null);
+  let roleGranted = false;
+  if (member && settings.partner_role_id) {
+    roleGranted = await member.roles.add(settings.partner_role_id, `Partner #${appId} approved by ${interaction.user.id}`)
+      .then(() => true)
+      .catch((error) => {
+        console.error('[PARTNER-ROLE]', error);
+        return false;
       });
-    }
+  }
+  updatePartnerStatus(appId, 'ACTIVE');
+
+  const directoryChannel = settings.directory_channel_id
+    ? await interaction.guild.channels.fetch(settings.directory_channel_id).catch(() => null)
+    : null;
+  if (directoryChannel?.isTextBased()) {
+    const directory = new ContainerBuilder().setAccentColor(accentFor('success'));
+    directory.addTextDisplayComponents(new TextDisplayBuilder().setContent(
+      `# ${E('cenar_partner_ok')} Cenar Partner | ${stripDiscordUnicode(app.partner_name)}`,
+    ));
+    directory.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
+    directory.addTextDisplayComponents(new TextDisplayBuilder().setContent([
+      `${E('cenar_verified')} **Trạng thái:** Đối tác đã xác minh`,
+      `${E('cenar_announce')} **Quy mô:** ${Number(app.member_count).toLocaleString('vi-VN')} thành viên`,
+      `${E('cenar_partner')} **Đại diện:** <@${app.applicant_id}>`,
+      `${E('cenar_support')} **Kết nối:** [Tham gia server đối tác](${app.invite_link})`,
+      `-# Cenar Store đồng hành cùng các cộng đồng minh bạch, an toàn và cùng phát triển.`,
+    ].join('\n')));
+    await directoryChannel.send({ components: [directory], flags: MessageFlags.IsComponentsV2, allowedMentions: { parse: [] } });
   }
 
-  // Update Staff Panel
-  const updatedContainer = new ContainerBuilder().setAccentColor(accentFor('success'));
-  updatedContainer.addTextDisplayComponents(new TextDisplayBuilder().setContent(`## ${E('status_check', '✅')} ĐƠN ĐỐI TÁC #${appId} ĐÃ DUYỆT`));
-  updatedContainer.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
-  updatedContainer.addTextDisplayComponents(new TextDisplayBuilder().setContent([
-    `• **Đại diện:** <@${app.applicant_id}>`,
-    `• **Server đối tác:** \`${app.partner_name}\` (ID: \`${app.partner_guild_id}\`)`,
-    `• **Quyết định bởi:** <@${interaction.user.id}>`,
-    `• **Trạng thái:** Đã duyệt và kích hoạt mã giảm giá \`PARTNER_${appId}\``,
-  ].join('\n')));
+  await interaction.editReply(cardPayload(interaction.guildId, {
+    tone: 'success',
+    title: `Đã duyệt Partner #${appId}`,
+    lines: [
+      `${E('cenar_partner')} **Server:** ${stripDiscordUnicode(app.partner_name)}`,
+      `${E('cenar_admin')} **Admin duyệt:** <@${interaction.user.id}>`,
+      `${roleGranted ? E('cenar_verified') : E('cenar_cooldown')} **Role Partner:** ${roleGranted ? 'Đã cấp tự động' : 'Chưa thể cấp · thành viên đã rời server hoặc role cao hơn bot'}`,
+      settings.partner_channel_id ? `${E('cenar_announce')} **Kênh Partner:** <#${settings.partner_channel_id}>` : null,
+    ],
+  }));
 
-  await interaction.editReply({
-    components: [updatedContainer],
-    flags: MessageFlags.IsComponentsV2
-  });
-
-  // DM Notify
-  const applicantUser = await interaction.client.users.fetch(app.applicant_id).catch(() => null);
-  if (applicantUser) {
-    await applicantUser.send({
-      content: `${E('icon_gift', '🎁')} **Chúc mừng!** Máy chủ **${app.partner_name}** của bạn đã được duyệt làm đối tác liên kết của Cenar Store.\n` +
-               `Bạn đã được cấp role đại diện đối tác và mã giảm giá 10% cho thành viên server của bạn là: \`PARTNER_${appId}\`!\n` +
-               `Cảm ơn sự đồng hành của bạn!`
-    }).catch(() => null);
+  const applicant = await interaction.client.users.fetch(app.applicant_id).catch(() => null);
+  if (applicant) {
+    await applicant.send(cardPayload(interaction.guildId, {
+      tone: 'success',
+      title: 'Chúc mừng, hồ sơ Partner đã được duyệt',
+      lines: [
+        `${E('cenar_partner_ok')} **${stripDiscordUnicode(app.partner_name)}** đã trở thành đối tác chính thức của Cenar Store.`,
+        roleGranted ? `${E('cenar_verified')} Role Partner đã được cấp tự động.` : `${E('cenar_cooldown')} Hãy vào lại server và liên hệ Admin để nhận role Partner.`,
+        settings.partner_channel_id ? `${E('cenar_announce')} Đăng truyền thông tại <#${settings.partner_channel_id}> bằng lệnh \`/partner-post send\`.` : null,
+        `${E('cenar_cooldown')} Hạn mức: role Partner 2 lần/24h · everyone 1 lần/24h.`,
+      ],
+    })).catch(() => null);
   }
 }
 
-/**
- * Handle Partner Reject Button Click
- */
 export async function handlePartnerReject(interaction, appId) {
+  if (!await reviewerGuard(interaction)) return;
   const E = createEmojiResolver(interaction.guildId);
   const app = getPartnerById(appId);
-
-  if (!app) {
-    return interaction.reply({
-      content: `${E('status_cross', '❌')} Không tìm thấy thông tin đơn đối tác này.`,
-      ephemeral: true
-    });
+  if (!app || app.status !== 'PENDING') {
+    return interaction.reply(cardPayload(interaction.guildId, {
+      tone: 'warning',
+      title: app ? 'Hồ sơ đã được xử lý' : 'Không tìm thấy hồ sơ',
+      lines: [`${E('cenar_support')} Vui lòng làm mới kênh duyệt.`],
+      ephemeral: true,
+    }));
   }
-
-  if (app.status !== 'PENDING') {
-    return interaction.reply({
-      content: `${E('status_cross', '❌')} Đơn này đã được xử lý trước đó rồi.`,
-      ephemeral: true
-    });
-  }
-
   await interaction.deferUpdate();
-
-  // Update Status
   updatePartnerStatus(appId, 'REJECTED');
-
-  // Update Staff Panel
-  const updatedContainer = new ContainerBuilder().setAccentColor(accentFor('danger'));
-  updatedContainer.addTextDisplayComponents(new TextDisplayBuilder().setContent(`## ❌ ĐƠN ĐỐI TÁC #${appId} ĐÃ TỪ CHỐI`));
-  updatedContainer.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
-  updatedContainer.addTextDisplayComponents(new TextDisplayBuilder().setContent([
-    `• **Đại diện:** <@${app.applicant_id}>`,
-    `• **Server đối tác:** \`${app.partner_name}\` (ID: \`${app.partner_guild_id}\`)`,
-    `• **Từ chối bởi:** <@${interaction.user.id}>`,
-    `• **Trạng thái:** Từ chối`,
-  ].join('\n')));
-
-  await interaction.editReply({
-    components: [updatedContainer],
-    flags: MessageFlags.IsComponentsV2
-  });
-
-  // DM Notify
-  const applicantUser = await interaction.client.users.fetch(app.applicant_id).catch(() => null);
-  if (applicantUser) {
-    await applicantUser.send({
-      content: `${E('status_cross', '❌')} **Thông báo:** Đơn ứng tuyển đối tác cho máy chủ **${app.partner_name}** đã bị từ chối bởi ban quản trị. Rất tiếc vì sự bất tiện này.`
-    }).catch(() => null);
+  await interaction.editReply(cardPayload(interaction.guildId, {
+    tone: 'danger',
+    title: `Đã từ chối Partner #${appId}`,
+    lines: [
+      `${E('cenar_partner')} **Server:** ${stripDiscordUnicode(app.partner_name)}`,
+      `${E('cenar_admin')} **Người xử lý:** <@${interaction.user.id}>`,
+      `${E('cenar_support')} Đại diện có thể liên hệ Admin để được giải thích hoặc gửi lại hồ sơ sau khi cải thiện server.`,
+    ],
+  }));
+  const applicant = await interaction.client.users.fetch(app.applicant_id).catch(() => null);
+  if (applicant) {
+    await applicant.send(cardPayload(interaction.guildId, {
+      tone: 'danger',
+      title: 'Hồ sơ Partner chưa được chấp thuận',
+      lines: [
+        `${E('cenar_partner')} Server **${stripDiscordUnicode(app.partner_name)}** chưa phù hợp tại thời điểm này.`,
+        `${E('cenar_support')} Bạn có thể liên hệ Admin để nhận góp ý và đăng ký lại sau.`,
+      ],
+    })).catch(() => null);
   }
 }
 
-/**
- * Handle CTV Apply Button Click (Show Modal)
- */
 export async function handleCtvApplyStart(interaction) {
   const E = createEmojiResolver(interaction.guildId);
   const settings = getCtvSettings(interaction.guildId);
-
   if (!settings.approve_channel_id) {
-    return interaction.reply({
-      content: `${E('status_cross', '❌')} Hệ thống CTV chưa được cấu hình hoàn thiện kênh duyệt đơn.`,
-      ephemeral: true
-    });
+    return interaction.reply(cardPayload(interaction.guildId, {
+      tone: 'danger',
+      title: 'Hệ thống CTV chưa sẵn sàng',
+      lines: [`${E('cenar_support')} Vui lòng báo Admin chạy lại thiết lập CTV.`],
+      ephemeral: true,
+    }));
+  }
+  if (isCustomerCtv(interaction.guildId, interaction.user.id)) {
+    return interaction.reply(cardPayload(interaction.guildId, {
+      tone: 'warning',
+      title: 'Bạn đã là CTV',
+      lines: [settings.price_channel_id ? `${E('cenar_price')} Xem bảng giá tại <#${settings.price_channel_id}>.` : 'Tài khoản đã có quyền CTV.'],
+      ephemeral: true,
+    }));
   }
 
-  const isCtv = isCustomerCtv(interaction.guildId, interaction.user.id);
-  if (isCtv) {
-    return interaction.reply({
-      content: `${E('status_cross', '❌')} Bạn đã là Cộng Tác Viên của Cenar Store rồi!`,
-      ephemeral: true
-    });
-  }
-
-  const modal = new ModalBuilder()
-    .setCustomId('ctv:apply:modal')
-    .setTitle('Đăng Ký Cộng Tác Viên (CTV)');
-
+  const modal = new ModalBuilder().setCustomId('ctv:apply:modal').setTitle('Đăng ký Cenar CTV');
   const sourceInput = new TextInputBuilder()
     .setCustomId('source')
-    .setLabel('Nguồn khách hàng của bạn')
+    .setLabel('Kênh hoặc nguồn khách hàng')
     .setStyle(TextInputStyle.Short)
     .setRequired(true)
-    .setPlaceholder('Ví dụ: Profile cá nhân, Page Facebook, Group, TikTok...');
-
+    .setMaxLength(150)
+    .setPlaceholder('Facebook, TikTok, Discord, cộng đồng riêng...');
   const reasonInput = new TextInputBuilder()
     .setCustomId('reason')
-    .setLabel('Kế hoạch bán hàng / Lý do ứng tuyển')
+    .setLabel('Kế hoạch bán hàng và hỗ trợ khách')
     .setStyle(TextInputStyle.Paragraph)
     .setRequired(true)
-    .setPlaceholder('Mô tả ngắn gọn về kế hoạch hoặc doanh số dự kiến của bạn...');
-
+    .setMinLength(20)
+    .setMaxLength(800)
+    .setPlaceholder('Mô tả cách bạn bán hàng, chăm sóc và xử lý khi khách cần hỗ trợ.');
   modal.addComponents(
     new ActionRowBuilder().addComponents(sourceInput),
-    new ActionRowBuilder().addComponents(reasonInput)
+    new ActionRowBuilder().addComponents(reasonInput),
   );
-
   await interaction.showModal(modal);
 }
 
-/**
- * Handle CTV Modal Submission
- */
 export async function handleCtvApplyModal(interaction) {
   const E = createEmojiResolver(interaction.guildId);
-  const source = interaction.fields.getTextInputValue('source');
-  const reason = interaction.fields.getTextInputValue('reason');
-
-  await interaction.deferReply({ ephemeral: true });
-
-  try {
-    const applicantId = interaction.user.id;
-    const settings = getCtvSettings(interaction.guildId);
-
-    // Send application to CTV approve channel
-    const approveChannel = await interaction.guild.channels.fetch(settings.approve_channel_id).catch(() => null);
-    if (approveChannel) {
-      const container = new ContainerBuilder().setAccentColor(accentFor('warning'));
-      container.addTextDisplayComponents(new TextDisplayBuilder().setContent(`## 📥 ĐƠN ĐĂNG KÝ CỘNG TÁC VIÊN (CTV)`));
-      container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
-      container.addTextDisplayComponents(new TextDisplayBuilder().setContent([
-        `• **Người ứng tuyển:** <@${applicantId}> (ID: \`${applicantId}\`)`,
-        `• **Nguồn khách hàng:** \`${source}\``,
-        `• **Kế hoạch & Lý do:**\n> ${reason.replace(/\n/g, '\n> ')}`
-      ].join('\n')));
-
-      const approveBtn = new ButtonBuilder()
-        .setCustomId(`ctv:approve:${applicantId}`)
-        .setLabel('Duyệt CTV')
-        .setStyle(ButtonStyle.Success);
-      const approveEmoji = E.component('status_check');
-      if (approveEmoji) approveBtn.setEmoji(approveEmoji);
-
-      const rejectBtn = new ButtonBuilder()
-        .setCustomId(`ctv:reject:${applicantId}`)
-        .setLabel('Từ Chối')
-        .setStyle(ButtonStyle.Danger);
-      const rejectEmoji = E.component('status_cross');
-      if (rejectEmoji) rejectBtn.setEmoji(rejectEmoji);
-
-      const row = new ActionRowBuilder().addComponents(approveBtn, rejectBtn);
-
-      await approveChannel.send({
-        components: [container, row],
-        flags: MessageFlags.IsComponentsV2
-      });
-    }
-
-    await interaction.editReply({
-      content: `${E('status_check', '✅')} Đơn đăng ký Cộng Tác Viên của bạn đã được gửi thành công và đang chờ xét duyệt.`
-    });
-  } catch (err) {
-    console.error('[CTV_APPLY] Lỗi:', err);
-    await interaction.editReply({
-      content: `${E('status_cross', '❌')} Có lỗi xảy ra trong quá trình xử lý đơn: ${err.message}`
-    });
-  }
-}
-
-/**
- * Handle CTV Approve Button Click
- */
-export async function handleCtvApprove(interaction, applicantId) {
-  const E = createEmojiResolver(interaction.guildId);
-  await interaction.deferUpdate();
-
-  // Update CTV Status
-  setCustomerCtvStatus(interaction.guildId, applicantId, true);
-
   const settings = getCtvSettings(interaction.guildId);
-
-  // Grant role
-  if (settings.ctv_role_id) {
-    const member = await interaction.guild.members.fetch(applicantId).catch(() => null);
-    if (member) {
-      await member.roles.add(settings.ctv_role_id).catch(e => console.error('[CTV] Cấp role lỗi:', e.message));
-    }
-  }
-
-  // Update Staff Panel
-  const updatedContainer = new ContainerBuilder().setAccentColor(accentFor('success'));
-  updatedContainer.addTextDisplayComponents(new TextDisplayBuilder().setContent(`## ${E('status_check', '✅')} ĐƠN CTV ĐÃ DUYỆT`));
-  updatedContainer.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
-  updatedContainer.addTextDisplayComponents(new TextDisplayBuilder().setContent([
-    `• **Cộng Tác Viên:** <@${applicantId}> (ID: \`${applicantId}\`)`,
-    `• **Quyết định bởi:** <@${interaction.user.id}>`,
-    `• **Trạng thái:** Đã được duyệt làm CTV. Tài khoản đã được áp dụng mức giá sỉ CTV trên cả Bot và Website.`,
-  ].join('\n')));
-
-  await interaction.editReply({
-    components: [updatedContainer],
-    flags: MessageFlags.IsComponentsV2
-  });
-
-  // DM Notify CTV
-  const applicantUser = await interaction.client.users.fetch(applicantId).catch(() => null);
-  if (applicantUser) {
-    await applicantUser.send({
-      content: `${E('icon_sparkle', '✨')} **Chúc mừng!** Đơn ứng tuyển Cộng Tác Viên (CTV) của bạn tại Cenar Store đã được phê duyệt.\n` +
-               `* ${E('icon_price', '💰')} Bạn đã được cấp quyền mua hàng với **Giá CTV (Giá sỉ chiết khấu cao)** tự động áp dụng khi tạo đơn hàng trên Bot và Website.\n` +
-               `* ${E('icon_duration', '⏱️')} Đơn hàng của bạn sẽ được tự động gắn nhãn ưu tiên xử lý giao hàng tức thì.\n` +
-               `* ${E('icon_trophy', '🏆')} Khi cần hỗ trợ, hãy mở ticket hỗ trợ. Ticket của bạn sẽ được đưa vào hàng đợi ưu tiên đặc biệt.\n` +
-               `Chúc bạn có những trải nghiệm kinh doanh tuyệt vời cùng Cenar Store!`
-    }).catch(() => null);
+  await interaction.deferReply({ flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral });
+  try {
+    const approveChannel = await interaction.guild.channels.fetch(settings.approve_channel_id).catch(() => null);
+    if (!approveChannel?.isTextBased()) throw new Error('Không tìm thấy kênh duyệt CTV.');
+    const source = stripDiscordUnicode(interaction.fields.getTextInputValue('source'));
+    const reason = stripDiscordUnicode(interaction.fields.getTextInputValue('reason'));
+    const container = new ContainerBuilder().setAccentColor(accentFor('warning'));
+    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(`## ${E('cenar_ctv')} Hồ sơ CTV mới`));
+    container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
+    container.addTextDisplayComponents(new TextDisplayBuilder().setContent([
+      `${E('cenar_verified')} **Ứng viên:** <@${interaction.user.id}> · \`${interaction.user.id}\``,
+      `${E('cenar_announce')} **Nguồn khách:** ${source}`,
+      `${E('cenar_support')} **Kế hoạch:**\n> ${reason.replace(/\n/g, '\n> ')}`,
+      `-# Khi duyệt, bot tự cấp role CTV, mở danh mục nội bộ và áp dụng giá CTV vào đơn hàng.`,
+    ].join('\n')));
+    await approveChannel.send({
+      components: addReviewButtons(
+        container,
+        E,
+        `ctv:approve:${interaction.user.id}`,
+        `ctv:reject:${interaction.user.id}`,
+        'Duyệt CTV',
+      ),
+      flags: MessageFlags.IsComponentsV2,
+      allowedMentions: { parse: [] },
+    });
+    return interaction.editReply(cardPayload(interaction.guildId, {
+      tone: 'success',
+      title: 'Đã tiếp nhận hồ sơ CTV',
+      lines: [
+        `${E('cenar_verified')} Hồ sơ đã được chuyển tới đội ngũ xét duyệt.`,
+        `${E('cenar_cooldown')} Kết quả và quyền truy cập sẽ được gửi qua tin nhắn riêng.`,
+      ],
+    }));
+  } catch (error) {
+    return interaction.editReply(cardPayload(interaction.guildId, {
+      tone: 'danger',
+      title: 'Không thể gửi hồ sơ CTV',
+      lines: [`${E('status_cross')} ${error.message}`],
+    }));
   }
 }
 
-/**
- * Handle CTV Reject Button Click
- */
-export async function handleCtvReject(interaction, applicantId) {
+export async function handleCtvApprove(interaction, applicantId) {
+  if (!await reviewerGuard(interaction)) return;
   const E = createEmojiResolver(interaction.guildId);
   await interaction.deferUpdate();
+  const settings = getCtvSettings(interaction.guildId);
+  setCustomerCtvStatus(interaction.guildId, applicantId, true);
+  const member = await interaction.guild.members.fetch(applicantId).catch(() => null);
+  let roleGranted = false;
+  if (member && settings.ctv_role_id) {
+    roleGranted = await member.roles.add(settings.ctv_role_id, `CTV approved by ${interaction.user.id}`)
+      .then(() => true)
+      .catch(() => false);
+  }
+  await interaction.editReply(cardPayload(interaction.guildId, {
+    tone: 'success',
+    title: 'Đã duyệt hồ sơ CTV',
+    lines: [
+      `${E('cenar_ctv')} **CTV:** <@${applicantId}>`,
+      `${E('cenar_admin')} **Admin duyệt:** <@${interaction.user.id}>`,
+      `${roleGranted ? E('cenar_verified') : E('cenar_cooldown')} **Role CTV:** ${roleGranted ? 'Đã cấp tự động' : 'Chưa thể cấp tự động'}`,
+      `${E('cenar_price')} Giá CTV đã được kích hoạt trong catalog và luồng mua hàng.`,
+    ],
+  }));
 
-  // Update Staff Panel
-  const updatedContainer = new ContainerBuilder().setAccentColor(accentFor('danger'));
-  updatedContainer.addTextDisplayComponents(new TextDisplayBuilder().setContent(`## ❌ ĐƠN CTV ĐÃ TỪ CHỐI`));
-  updatedContainer.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
-  updatedContainer.addTextDisplayComponents(new TextDisplayBuilder().setContent([
-    `• **Người ứng tuyển:** <@${applicantId}> (ID: \`${applicantId}\`)`,
-    `• **Từ chối bởi:** <@${interaction.user.id}>`,
-    `• **Trạng thái:** Đã từ chối`,
-  ].join('\n')));
+  const applicant = await interaction.client.users.fetch(applicantId).catch(() => null);
+  if (applicant) {
+    await applicant.send(cardPayload(interaction.guildId, {
+      tone: 'success',
+      title: 'Chúc mừng, bạn đã trở thành Cenar CTV',
+      lines: [
+        `${E('cenar_verified')} Role và mức giá CTV đã được kích hoạt.`,
+        settings.price_channel_id ? `${E('cenar_price')} Bảng giá nội bộ: <#${settings.price_channel_id}>` : null,
+        settings.chat_channel_id ? `${E('cenar_support')} Kênh trao đổi CTV: <#${settings.chat_channel_id}>` : null,
+        settings.order_log_channel_id ? `${E('cenar_announce')} Log đơn CTV: <#${settings.order_log_channel_id}>` : null,
+        `${E('cenar_wallet')} Mỗi đơn mua qua bot sẽ tự áp dụng giá CTV và ghi log riêng.`,
+      ],
+    })).catch(() => null);
+  }
+}
 
-  await interaction.editReply({
-    components: [updatedContainer],
-    flags: MessageFlags.IsComponentsV2
-  });
-
-  // DM Notify
-  const applicantUser = await interaction.client.users.fetch(applicantId).catch(() => null);
-  if (applicantUser) {
-    await applicantUser.send({
-      content: `${E('status_cross', '❌')} **Thông báo:** Đơn đăng ký Cộng Tác Viên của bạn đã bị từ chối bởi ban quản trị Cenar Store. Cảm ơn bạn đã quan tâm đến chương trình tuyển CTV.`
-    }).catch(() => null);
+export async function handleCtvReject(interaction, applicantId) {
+  if (!await reviewerGuard(interaction)) return;
+  const E = createEmojiResolver(interaction.guildId);
+  await interaction.deferUpdate();
+  setCustomerCtvStatus(interaction.guildId, applicantId, false);
+  await interaction.editReply(cardPayload(interaction.guildId, {
+    tone: 'danger',
+    title: 'Đã từ chối hồ sơ CTV',
+    lines: [
+      `${E('cenar_ctv')} **Ứng viên:** <@${applicantId}>`,
+      `${E('cenar_admin')} **Người xử lý:** <@${interaction.user.id}>`,
+      `${E('cenar_support')} Ứng viên có thể liên hệ Admin để nhận góp ý và đăng ký lại.`,
+    ],
+  }));
+  const applicant = await interaction.client.users.fetch(applicantId).catch(() => null);
+  if (applicant) {
+    await applicant.send(cardPayload(interaction.guildId, {
+      tone: 'danger',
+      title: 'Hồ sơ CTV chưa được chấp thuận',
+      lines: [
+        `${E('cenar_support')} Hồ sơ chưa phù hợp với chương trình tại thời điểm này.`,
+        `${E('cenar_partner_ok')} Bạn có thể hoàn thiện kênh bán hàng và đăng ký lại sau.`,
+      ],
+    })).catch(() => null);
   }
 }

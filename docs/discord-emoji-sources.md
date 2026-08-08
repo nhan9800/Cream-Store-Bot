@@ -24,9 +24,24 @@ Store guild. They are used by the shared Components V2 resolver:
 | Admin / settings | `cenar_admin` (`1535618678853337149`) | https://emoji.gg/emoji/4673-admin-yellow |
 | Wallet / payment amount | `cenar_wallet` (`1535618682481545217`) | https://emoji.gg/emoji/575845-coquettepinkmoneybag |
 
+## Partner and CTV set (2026-08-08)
+
+The following six assets were selected from the [Emoji.gg catalog](https://emoji.gg/),
+downloaded, renamed with stable `cenar_*` names, and uploaded to the Cenar Store guild.
+They are intentionally separate so Partner/CTV panels do not repeat the same visual symbol.
+
+| UI purpose | Server emoji |
+| --- | --- |
+| Partner identity | `cenar_partner` (`1535637391841173534`) |
+| Partner approval | `cenar_partner_ok` (`1535637394207015003`) |
+| CTV identity | `cenar_ctv` (`1535637396782317689`) |
+| Rolling 24-hour quota | `cenar_cooldown` (`1535637399596699688`) |
+| Broadcast / audit log | `cenar_announce` (`1535637405820911698`) |
+| CTV pricing | `cenar_price` (`1535637409759494185`) |
+
 All command payloads pass through the custom-emoji resolver and the final
 payload sanitizer. Native Unicode emoji are discarded instead of being used as
 a fallback. During the inventory pass, five unused name duplicates were
 removed after checking code and slot references (`15` animated, lowercase
 `gold`, the second `iron`, lowercase `diamond`, and the older `cr_grok`). The
-server now has 178 emoji and no byte-identical duplicate group.
+server now has 184 emoji and no byte-identical duplicate group.

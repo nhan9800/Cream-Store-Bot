@@ -1,212 +1,271 @@
-import { 
-  ChannelType, 
-  PermissionFlagsBits, 
-  ActionRowBuilder, 
-  ButtonBuilder, 
-  ButtonStyle, 
-  MessageFlags, 
-  ContainerBuilder, 
-  TextDisplayBuilder, 
-  SeparatorBuilder, 
-  SeparatorSpacingSize 
+import {
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle,
+  ChannelType,
+  ContainerBuilder,
+  MessageFlags,
+  PermissionFlagsBits,
+  SeparatorBuilder,
+  SeparatorSpacingSize,
+  TextDisplayBuilder,
 } from 'discord.js';
 import { db } from '../database/db.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
+import { getPartnerSettings, upsertPartnerSettings } from './partnerService.js';
+import { getCtvSettings, upsertCtvSettings } from './ctvService.js';
+import { accentFor } from '../utils/uiKit.js';
+import { publishCtvPricePanel } from './ctvPriceService.js';
+
+const IDS = Object.freeze({
+  partnerRole: '1522844528237740066',
+  ctvRole: '1522844530242748446',
+  partnerCategory: '1522844526195114185',
+  partnerRecruit: '1522844532318801962',
+  partnerDirectory: '1522844534470348810',
+  partnerReview: '1522844538396479639',
+  ctvRecruit: '1522844536202727491',
+});
+
+const ROLE_ICON_URLS = Object.freeze({
+  partner: 'https://cdn.discordapp.com/emojis/1535637391841173534.png?size=96',
+  ctv: 'https://cdn.discordapp.com/emojis/1535637396782317689.png?size=96',
+});
+
+const fruitNames = Object.freeze({
+  partnerCategory: '🍓 ｜ Cenar Partner',
+  ctvCategory: '🥝 ｜ Cenar CTV',
+  partnerRecruit: '🍇-hợp-tác-đối-tác',
+  partnerDirectory: '🍒-danh-sách-đối-tác',
+  partnerReview: '🍍-duyệt-partner',
+  partnerBroadcast: '🥭-partner-truyền-thông',
+  ctvRecruit: '🍊-tuyển-cộng-tác-viên',
+  ctvReview: '🍋-duyệt-ctv',
+  ctvChat: '🍏-ctv-trò-chuyện',
+  ctvOrderLog: '🍐-ctv-log-đơn-hàng',
+  ctvPrice: '🍎-ctv-bảng-giá',
+});
+
+const VIEW = PermissionFlagsBits.ViewChannel;
+const SEND = PermissionFlagsBits.SendMessages;
+const HISTORY = PermissionFlagsBits.ReadMessageHistory;
+const EMBED = PermissionFlagsBits.EmbedLinks;
+const ATTACH = PermissionFlagsBits.AttachFiles;
+const REACT = PermissionFlagsBits.AddReactions;
+const MENTION = PermissionFlagsBits.MentionEveryone;
+const MANAGE = PermissionFlagsBits.ManageChannels;
+
+function permissions(allow = [], deny = []) {
+  return { allow, deny };
+}
+
+function staffOverrides(guild, clientId, staffRoleIds = []) {
+  const rows = [
+    { id: guild.roles.everyone.id, ...permissions([], [VIEW, SEND, HISTORY]) },
+    { id: clientId, ...permissions([VIEW, SEND, HISTORY, EMBED, ATTACH, MANAGE]) },
+  ];
+  for (const id of staffRoleIds.filter(Boolean)) {
+    rows.push({ id, ...permissions([VIEW, SEND, HISTORY, EMBED, ATTACH, REACT]) });
+  }
+  return rows;
+}
+
+function publicReadOverrides(guild, clientId, staffRoleIds = []) {
+  const rows = [
+    { id: guild.roles.everyone.id, ...permissions([VIEW, HISTORY], [SEND]) },
+    { id: clientId, ...permissions([VIEW, SEND, HISTORY, EMBED, ATTACH, MANAGE]) },
+  ];
+  for (const id of staffRoleIds.filter(Boolean)) {
+    rows.push({ id, ...permissions([VIEW, SEND, HISTORY, EMBED, ATTACH, REACT]) });
+  }
+  return rows;
+}
+
+function restrictedOverrides(guild, clientId, roleId, staffRoleIds = [], { allowMention = false } = {}) {
+  const roleAllow = [VIEW, SEND, HISTORY, EMBED, ATTACH, REACT];
+  if (allowMention) roleAllow.push(MENTION);
+  const rows = [
+    { id: guild.roles.everyone.id, ...permissions([], [VIEW, SEND, HISTORY, MENTION]) },
+    { id: roleId, ...permissions(roleAllow, allowMention ? [] : [MENTION]) },
+    { id: clientId, ...permissions([VIEW, SEND, HISTORY, EMBED, ATTACH, REACT, MENTION, MANAGE]) },
+  ];
+  for (const id of staffRoleIds.filter(Boolean)) {
+    rows.push({ id, ...permissions([VIEW, SEND, HISTORY, EMBED, ATTACH, REACT, MENTION]) });
+  }
+  return rows;
+}
+
+async function setRoleIcon(role, url) {
+  try {
+    const response = await fetch(url);
+    if (response.ok) await role.setIcon(Buffer.from(await response.arrayBuffer()), 'Cenar custom role icon');
+  } catch (error) {
+    console.warn(`[AUTO-SETUP] role icon ${role.id}: ${error.message}`);
+  }
+}
+
+async function ensureRole(guild, client, id, { name, color, iconUrl, mentionable, legacyIds = [] }) {
+  let role = guild.roles.cache.get(id);
+  if (!role) {
+    role = await guild.roles.create({ name, color, mentionable, reason: 'Cenar Partner/CTV workspace setup' });
+  }
+  if (!role.editable) return role;
+  for (const legacyId of legacyIds) {
+    const legacy = guild.roles.cache.get(legacyId);
+    if (!legacy || legacy.id === role.id || !legacy.editable) continue;
+    for (const member of legacy.members.values()) {
+      await member.roles.add(role, 'Migrate to canonical Cenar role').catch(() => null);
+    }
+    await legacy.delete('Remove duplicate Cenar role').catch(() => null);
+  }
+  await role.edit({ name, color, mentionable, reason: 'Cenar role naming standard' }).catch(() => null);
+  if (!role.icon && iconUrl) await setRoleIcon(role, iconUrl);
+  return role;
+}
+
+async function ensureCategory(guild, id, name) {
+  let category = id ? guild.channels.cache.get(id) : null;
+  if (!category || category.type !== ChannelType.GuildCategory) {
+    category = guild.channels.cache.find((c) => c.type === ChannelType.GuildCategory && c.name === name);
+  }
+  if (!category) category = await guild.channels.create({ name, type: ChannelType.GuildCategory });
+  if (category.name !== name) await category.setName(name).catch(() => null);
+  return category;
+}
+
+async function ensureChannel(guild, { id, name, parent, overwrites }) {
+  let channel = id ? guild.channels.cache.get(id) : null;
+  if (!channel || channel.type !== ChannelType.GuildText) {
+    channel = guild.channels.cache.find((c) => c.type === ChannelType.GuildText && c.name === name && c.parentId === parent.id);
+  }
+  if (!channel) {
+    channel = await guild.channels.create({ name, type: ChannelType.GuildText, parent: parent.id, permissionOverwrites: overwrites });
+  } else {
+    if (channel.name !== name) await channel.setName(name).catch(() => null);
+    if (channel.parentId !== parent.id) await channel.setParent(parent.id).catch(() => null);
+    await channel.permissionOverwrites.set(overwrites, 'Cenar workspace permission standard').catch(() => null);
+  }
+  return channel;
+}
+
+async function postRecruitmentPanel(channel, kind, guildId, references) {
+  const latest = await channel.messages.fetch({ limit: 25 }).catch(() => null);
+  const E = createEmojiResolver(guildId);
+  const isCtv = kind === 'ctv';
+  const container = new ContainerBuilder().setAccentColor(accentFor(isCtv ? 'success' : 'primary'));
+  const title = isCtv ? `${E('cenar_ctv')} CENAR CTV | Đăng ký cộng tác viên` : `${E('cenar_partner')} CENAR PARTNER | Kết nối server`;
+  const details = isCtv
+    ? [
+        `## ${title}`,
+        `${E('cenar_verified')} Nguồn hàng và giá CTV được đồng bộ giữa bot và website.`,
+        '',
+        `### ${E('cenar_price')} Quyền lợi`,
+        `- Giá CTV tự động theo bảng giá riêng.`,
+        `- Đơn hàng được gắn ưu tiên và ghi log riêng tại <#${references.ctvOrderLog}>.`,
+        `- Trao đổi nội bộ tại <#${references.ctvChat}>.`,
+        '',
+        `### ${E('cenar_support')} Điều kiện`,
+        `Có kênh bán hàng rõ ràng và cam kết hỗ trợ khách hàng minh bạch.`,
+        `-# Hồ sơ sẽ được staff duyệt thủ công trong vòng 24 giờ.`,
+      ].join('\n')
+    : [
+        `## ${title}`,
+        `${E('cenar_verified')} Cùng phát triển cộng đồng, trao đổi banner và ưu đãi minh bạch.`,
+        '',
+        `### ${E('cenar_partner_ok')} Tiêu chí xét duyệt`,
+        `- Server từ 500 thành viên: tự động chuyển vào hàng chờ xét duyệt.`,
+        `- Server dưới 500 thành viên: chuyển **duyệt thủ công** để hỗ trợ cộng đồng nhỏ.`,
+        `- Không vi phạm chính sách Discord và có kênh quảng bá phù hợp.`,
+        '',
+        `### ${E('cenar_announce')} Sau khi được duyệt`,
+        `Role Partner được cấp tự động. Kênh truyền thông riêng: <#${references.partnerBroadcast}>.`,
+        `Giới hạn tag: role Partner 2 lần/ngày, @everyone 1 lần/ngày cho mỗi thành viên.`,
+      ].join('\n');
+  container.addTextDisplayComponents(new TextDisplayBuilder().setContent(details));
+  container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
+  const button = new ButtonBuilder()
+    .setCustomId(isCtv ? 'ctv:apply:start' : 'partner:apply:start')
+    .setLabel(isCtv ? 'Đăng ký CTV' : 'Đăng ký Partner')
+    .setStyle(ButtonStyle.Success);
+  const emoji = E.component(isCtv ? 'cenar_ctv' : 'cenar_partner');
+  if (emoji) button.setEmoji(emoji);
+  const payload = {
+    components: [container, new ActionRowBuilder().addComponents(button)],
+    flags: MessageFlags.IsComponentsV2,
+    allowedMentions: { parse: [] },
+  };
+  const customId = isCtv ? 'ctv:apply:start' : 'partner:apply:start';
+  const existing = latest?.find((message) => (
+    message.author.id === channel.client.user.id
+    && JSON.stringify(message.components.map((component) => component.toJSON())).includes(customId)
+  ));
+  if (existing?.flags?.has(MessageFlags.IsComponentsV2)) {
+    await existing.edit(payload);
+  } else {
+    if (existing) await existing.delete('Replace legacy recruitment panel with Components V2').catch(() => null);
+    await channel.send(payload);
+  }
+}
 
 export async function autoSetupPartnerAndCtv(client) {
   for (const guild of client.guilds.cache.values()) {
     try {
-      console.log(`[AUTO-SETUP] Bắt đầu tự động thiết lập cho Server: ${guild.name} (${guild.id})`);
+      const settings = db.prepare('SELECT support_role_id, manager_role_id FROM guild_settings WHERE guild_id = ?').get(guild.id) || {};
+      const staffRoles = [settings.support_role_id, settings.manager_role_id, '1282638119497109524'];
+      const partnerRole = await ensureRole(guild, client, IDS.partnerRole, {
+        name: 'Cenar Partner', color: '#7C5CFC', iconUrl: ROLE_ICON_URLS.partner, mentionable: false,
+        legacyIds: ['1367138153735131176'],
+      });
+      const ctvRole = await ensureRole(guild, client, IDS.ctvRole, {
+        name: 'Cenar CTV', color: '#F59E72', iconUrl: ROLE_ICON_URLS.ctv, mentionable: false,
+        legacyIds: ['1514858684151369832'],
+      });
 
-      // 1. Lấy thông tin Support/Manager roles hiện tại từ DB
-      const guildSettings = db.prepare('SELECT support_role_id, manager_role_id FROM guild_settings WHERE guild_id = ?').get(guild.id) || {};
-      const supportRoleId = guildSettings.support_role_id;
-      const managerRoleId = guildSettings.manager_role_id;
+      const partnerCategory = await ensureCategory(guild, IDS.partnerCategory, fruitNames.partnerCategory);
+      const ctvSettings = getCtvSettings(guild.id);
+      const ctvCategory = await ensureCategory(guild, ctvSettings.category_id, fruitNames.ctvCategory);
+      const botId = client.user.id;
 
-      // 2. Tìm hoặc Tạo Category
-      let category = guild.channels.cache.find(c => c.name === '🤝 ｜ Cenar Partner & CTV' && c.type === ChannelType.GuildCategory);
-      if (!category) {
-        category = await guild.channels.create({
-          name: '🤝 ｜ Cenar Partner & CTV',
-          type: ChannelType.GuildCategory
-        });
-        console.log(`[AUTO-SETUP] Đã tạo Category mới: ${category.id}`);
-      }
+      const partnerRecruit = await ensureChannel(guild, { id: IDS.partnerRecruit, name: fruitNames.partnerRecruit, parent: partnerCategory, overwrites: publicReadOverrides(guild, botId, staffRoles) });
+      const partnerDirectory = await ensureChannel(guild, { id: IDS.partnerDirectory, name: fruitNames.partnerDirectory, parent: partnerCategory, overwrites: publicReadOverrides(guild, botId, staffRoles) });
+      const partnerReview = await ensureChannel(guild, { id: IDS.partnerReview, name: fruitNames.partnerReview, parent: partnerCategory, overwrites: staffOverrides(guild, botId, staffRoles) });
+      const partnerBroadcast = await ensureChannel(guild, { name: fruitNames.partnerBroadcast, parent: partnerCategory, overwrites: restrictedOverrides(guild, botId, partnerRole.id, staffRoles, { allowMention: false }) });
 
-      // 3. Tìm hoặc Tạo Roles
-      async function findOrCreateRole(name, color) {
-        let role = guild.roles.cache.find(r => r.name.toLowerCase().includes(name.toLowerCase()));
-        if (!role) {
-          role = await guild.roles.create({
-            name,
-            color,
-            reason: 'Tự động thiết lập Hệ thống Đối tác & CTV'
-          });
-          console.log(`[AUTO-SETUP] Đã tạo Role mới: ${role.name} (${role.id})`);
-        }
-        return role;
-      }
+      const ctvRecruit = await ensureChannel(guild, { id: IDS.ctvRecruit, name: fruitNames.ctvRecruit, parent: ctvCategory, overwrites: publicReadOverrides(guild, botId, staffRoles) });
+      const ctvReview = await ensureChannel(guild, { name: fruitNames.ctvReview, parent: ctvCategory, overwrites: staffOverrides(guild, botId, staffRoles) });
+      const ctvChat = await ensureChannel(guild, { name: fruitNames.ctvChat, parent: ctvCategory, overwrites: restrictedOverrides(guild, botId, ctvRole.id, staffRoles) });
+      const ctvOrderLog = await ensureChannel(guild, { name: fruitNames.ctvOrderLog, parent: ctvCategory, overwrites: restrictedOverrides(guild, botId, ctvRole.id, staffRoles) });
+      const ctvPrice = await ensureChannel(guild, { name: fruitNames.ctvPrice, parent: ctvCategory, overwrites: restrictedOverrides(guild, botId, ctvRole.id, staffRoles) });
 
-      const partnerRole = await findOrCreateRole('🤝 ｜ Partner', '#5865F2');
-      const ctvRole = await findOrCreateRole('⚡ ｜ Cộng Tác Viên', '#FEE75C');
+      upsertPartnerSettings({
+        guild_id: guild.id,
+        recruit_channel_id: partnerRecruit.id,
+        approve_channel_id: partnerReview.id,
+        partner_role_id: partnerRole.id,
+        directory_channel_id: partnerDirectory.id,
+        partner_channel_id: partnerBroadcast.id,
+      });
+      upsertCtvSettings({
+        guild_id: guild.id,
+        recruit_channel_id: ctvRecruit.id,
+        approve_channel_id: ctvReview.id,
+        ctv_role_id: ctvRole.id,
+        category_id: ctvCategory.id,
+        chat_channel_id: ctvChat.id,
+        order_log_channel_id: ctvOrderLog.id,
+        price_channel_id: ctvPrice.id,
+      });
 
-      // 4. Tìm hoặc Tạo Channels
-      async function findOrCreateChannel(name, type, parentId, overrides = []) {
-        let chan = guild.channels.cache.find(c => c.name === name && c.parentId === parentId && c.type === type);
-        if (!chan) {
-          chan = await guild.channels.create({
-            name,
-            type,
-            parent: parentId,
-            permissionOverwrites: overrides
-          });
-          console.log(`[AUTO-SETUP] Đã tạo Kênh mới: ${name} (${chan.id})`);
-        }
-        return chan;
-      }
-
-      const partnerRecruitChan = await findOrCreateChannel('🤝-hợp-tác-đối-tác', ChannelType.GuildText, category.id);
-      const partnerDirChan = await findOrCreateChannel('📜-danh-sách-đối-tác', ChannelType.GuildText, category.id);
-      const ctvRecruitChan = await findOrCreateChannel('⚡-tuyển-cộng-tác-viên', ChannelType.GuildText, category.id);
-
-      // Thiết lập quyền hạn cho kênh Duyệt Đơn (Chỉ Staff được xem)
-      const staffOverrides = [
-        { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
-        { id: client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] }
-      ];
-      if (supportRoleId) {
-        staffOverrides.push({ id: supportRoleId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
-      }
-      if (managerRoleId) {
-        staffOverrides.push({ id: managerRoleId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory] });
-      }
-
-      const reviewChan = await findOrCreateChannel('🕵-duyệt-đối-tác-ctv', ChannelType.GuildText, category.id, staffOverrides);
-
-      // 5. Cập nhật cấu hình vào Database (partner_settings & ctv_settings)
-      db.prepare(`
-        INSERT INTO partner_settings (guild_id, recruit_channel_id, approve_channel_id, directory_channel_id, partner_role_id)
-        VALUES (?, ?, ?, ?, ?)
-        ON CONFLICT(guild_id) DO UPDATE SET
-          recruit_channel_id=excluded.recruit_channel_id,
-          approve_channel_id=excluded.approve_channel_id,
-          directory_channel_id=excluded.directory_channel_id,
-          partner_role_id=excluded.partner_role_id
-      `).run(guild.id, partnerRecruitChan.id, reviewChan.id, partnerDirChan.id, partnerRole.id);
-
-      db.prepare(`
-        INSERT INTO ctv_settings (guild_id, recruit_channel_id, approve_channel_id, ctv_role_id)
-        VALUES (?, ?, ?, ?)
-        ON CONFLICT(guild_id) DO UPDATE SET
-          recruit_channel_id=excluded.recruit_channel_id,
-          approve_channel_id=excluded.approve_channel_id,
-          ctv_role_id=excluded.ctv_role_id
-      `).run(guild.id, ctvRecruitChan.id, reviewChan.id, ctvRole.id);
-
-      // 6. Gửi bảng tuyển dụng nếu kênh trống
-      const E = createEmojiResolver(guild.id);
-      const storeName = process.env.STORE_NAME || 'Cenar Store';
-
-      async function postEmbedIfEmpty(channel, isCtvType) {
-        try {
-          const msgs = await channel.messages.fetch({ limit: 5 }).catch(() => []);
-          if (msgs.size > 0) {
-            return; // Đã có tin nhắn cũ, không gửi đè
-          }
-
-          console.log(`[AUTO-SETUP] Đang gửi bảng đăng tuyển vào kênh #${channel.name}`);
-          const container = new ContainerBuilder().setAccentColor(0x5865F2);
-
-          if (isCtvType) {
-            const headerLine = [E('icon_sparkle', '✨'), `TUYỂN DỤNG CỘNG TÁC VIÊN — ${storeName.toUpperCase()}`]
-              .filter(Boolean).join(' ');
-            const bodyLines = [
-              `### ${E('icon_group', '👥')} Trở thành Cộng Tác Viên (Reseller) của ${storeName}!`,
-              `Bạn muốn kinh doanh các sản phẩm giải trí & học tập bản quyền nhưng không có vốn, không có nguồn hàng?`,
-              `Hãy gia nhập đội ngũ CTV của ${storeName} để nhận được nguồn hàng giá tốt nhất thị trường cùng hệ thống tự động hóa hoàn toàn.`,
-              '',
-              `#### ${E('icon_gift', '🎁')} **QUYỀN LỢI CTV:**`,
-              `* ${E('icon_price', '💰')} **Mua hàng giá sỉ siêu rẻ:** Chiết khấu 10% - 30% trực tiếp trên hóa đơn so với giá bán lẻ.`,
-              `* ${E('icon_duration', '⏱️')} **Giao hàng ưu tiên:** Đơn hàng của CTV được hệ thống tự động đẩy lên đầu hàng đợi để Staff xử lý nhanh nhất.`,
-              `* ${E('icon_trophy', '🏆')} **Hỗ trợ VIP 24/7:** Ticket của CTV sẽ đổi tên có tag \`⚡-ctv-\` ưu tiên hiển thị hàng đầu.`,
-              `* ${E('icon_location', '📍')} Không ép doanh số tháng đầu, tự do làm chủ thời gian.`,
-              '',
-              `#### ${E('status_warn', '⚠️')} **YÊU CẦU ỨNG TUYỂN:**`,
-              `* Có kênh bán hàng riêng (Profile cá nhân, Group, Page, Tiktok, Telegram...).`,
-              `* Tuyệt đối nghiêm túc trong bán hàng, không scam/lừa đảo khách hàng của bạn.`,
-              '',
-              `**Bấm nút bên dưới để điền thông tin đăng ký (Duyệt nhanh trong 24h):**`,
-            ].join('\n');
-            
-            container.addTextDisplayComponents(new TextDisplayBuilder().setContent(`# ${headerLine}`));
-            container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
-            container.addTextDisplayComponents(new TextDisplayBuilder().setContent(bodyLines));
-
-            const applyBtn = new ButtonBuilder()
-              .setCustomId('ctv:apply:start')
-              .setLabel('Ứng Tuyển CTV')
-              .setStyle(ButtonStyle.Success);
-
-            const btnEmoji = E.component('icon_group');
-            if (btnEmoji) applyBtn.setEmoji(btnEmoji);
-
-            const row = new ActionRowBuilder().addComponents(applyBtn);
-
-            await channel.send({
-              components: [container, row],
-              flags: MessageFlags.IsComponentsV2
-            });
-          } else {
-            const headerLine = [E('icon_sparkle', '✨'), `HỢP TÁC LIÊN KẾT SERVER — ${storeName.toUpperCase()}`]
-              .filter(Boolean).join(' ');
-            const bodyLines = [
-              `### ${E('icon_trophy', '🏆')} Hãy trở thành đối tác chiến lược của ${storeName}!`,
-              `Chúng tôi mở cổng liên kết hợp tác chéo với các server chất lượng để cùng nhau phát triển cộng đồng vững mạnh.`,
-              '',
-              `#### ${E('status_warn', '⚠️')} **YÊU CẦU ĐỐI TÁC:**`,
-              `* Server liên kết phải có tối thiểu **500 thành viên trở lên** (Sẽ được bot tự động kiểm tra số lượng thực).`,
-              `* Không chứa nội dung vi phạm chính sách Discord (Discord TOS).`,
-              `* Phải có kênh riêng để đặt banner/nội dung quảng bá chéo của ${storeName}.`,
-              '',
-              `#### ${E('status_info', 'ℹ️')} **QUYỀN LỢI ĐỐI TÁC:**`,
-              `* ${E('icon_link', '🔗')} Hiển thị thông tin & banner liên kết tại kênh <#${partnerDirChan.id}> tiếp cận hàng ngàn khách hàng.`,
-              `* ${E('icon_crown', '👑')} Người đại diện đối tác nhận ngay role **@Đối Tác** nổi bật trên server.`,
-              `* ${E('icon_ticket', '🎟️')} Nhận riêng **Mã Giảm Giá Đối Tác độc quyền** giảm 10% cho thành viên server của bạn mua sắm!`,
-              `* ${E('icon_group', '👥')} Tham gia phòng chat giao lưu đại diện đối tác VIP.`,
-              '',
-              `**Bấm nút bên dưới để điền link ứng tuyển chéo ngay (Chỉ mất 5 giây):**`,
-            ].join('\n');
-            
-            container.addTextDisplayComponents(new TextDisplayBuilder().setContent(`# ${headerLine}`));
-            container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
-            container.addTextDisplayComponents(new TextDisplayBuilder().setContent(bodyLines));
-
-            const applyBtn = new ButtonBuilder()
-              .setCustomId('partner:apply:start')
-              .setLabel('Ứng Tuyển Đối Tác')
-              .setStyle(ButtonStyle.Success);
-
-            const btnEmoji = E.component('icon_link');
-            if (btnEmoji) applyBtn.setEmoji(btnEmoji);
-
-            const row = new ActionRowBuilder().addComponents(applyBtn);
-
-            await channel.send({
-              components: [container, row],
-              flags: MessageFlags.IsComponentsV2
-            });
-          }
-        } catch (postErr) {
-          console.error(`[AUTO-SETUP] Lỗi khi gửi bảng tuyển dụng vào kênh:`, postErr.message);
-        }
-      }
-
-      await postEmbedIfEmpty(partnerRecruitChan, false);
-      await postEmbedIfEmpty(ctvRecruitChan, true);
-
-      console.log(`[AUTO-SETUP] Tự động thiết lập hoàn thành cho Server: ${guild.name}`);
-    } catch (guildErr) {
-      console.error(`[AUTO-SETUP] Lỗi khi cấu hình cho Guild ${guild.id}:`, guildErr.message);
+      await postRecruitmentPanel(partnerRecruit, 'partner', guild.id, { partnerBroadcast: partnerBroadcast.id });
+      await postRecruitmentPanel(ctvRecruit, 'ctv', guild.id, { ctvChat: ctvChat.id, ctvOrderLog: ctvOrderLog.id });
+      await publishCtvPricePanel(guild).catch((error) => {
+        console.warn(`[AUTO-SETUP] CTV price panel ${guild.id}: ${error.message}`);
+      });
+      console.log(`[AUTO-SETUP] Partner/CTV workspace ready: ${guild.name}`);
+    } catch (error) {
+      console.error(`[AUTO-SETUP] ${guild.name}: ${error.message}`);
     }
   }
 }
+
+export { IDS as PARTNER_CTV_IDS };

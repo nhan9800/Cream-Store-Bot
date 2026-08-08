@@ -1,4 +1,4 @@
-import { Events, AttachmentBuilder, EmbedBuilder } from 'discord.js';
+import { Events, AttachmentBuilder, ContainerBuilder, EmbedBuilder, MessageFlags, TextDisplayBuilder } from 'discord.js';
 import { getTicketByChannelId, updateTicketAiStatus, isTicketChannel, touchTicket } from '../services/ticketService.js';
 import { processAiMessage } from '../services/aiService.js';
 import { getGuildConfig } from '../services/guildConfigService.js';
@@ -8,6 +8,8 @@ import { createEmojiResolver } from '../utils/emojiHelper.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { db } from '../database/db.js';
+import { getPartnerSettings } from '../services/partnerService.js';
+import { accentFor, stripDiscordUnicode } from '../utils/uiKit.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -46,6 +48,48 @@ export async function execute(message) {
   const isStaff = message.member?.roles?.cache?.has(guildConfig.support_role_id) || 
                   message.member?.roles?.cache?.has(guildConfig.manager_role_id) || 
                   message.member?.permissions?.has('ManageGuild');
+
+  const partnerSettings = getPartnerSettings(message.guildId);
+  const isPartnerChannel = Boolean(partnerSettings.partner_channel_id === message.channel.id);
+  const isPartner = Boolean(partnerSettings.partner_role_id && message.member?.roles?.cache?.has(partnerSettings.partner_role_id));
+
+  // Mention Partner được bot gửi hộ qua /partner-post để hạn mức được kiểm tra
+  // trước khi Discord phát notification. Tin gõ trực tiếp bị xóa nhằm tránh
+  // bypass quota; link quảng bá hợp lệ vẫn được phép trong kênh này.
+  if (isPartnerChannel && isPartner && !isStaff) {
+    const directEveryone = /@(everyone|here)\b/i.test(message.content);
+    const directPartnerRole = message.mentions.roles.has(partnerSettings.partner_role_id);
+    if (directEveryone || directPartnerRole) {
+      await message.delete().catch(() => null);
+      const warning = new ContainerBuilder().setAccentColor(accentFor('warning'))
+        .addTextDisplayComponents(new TextDisplayBuilder().setContent([
+          `## ${E('cenar_cooldown')} Mention trực tiếp đã bị chặn`,
+          `${E('cenar_partner')} <@${message.author.id}>, hãy dùng \`/partner-post send\` để bot kiểm tra hạn mức trước khi ping.`,
+          `${E('cenar_announce')} Role Partner: 2 lần/24h · Everyone: 1 lần/24h.`,
+        ].join('\n')));
+      const notice = await message.channel.send({
+        components: [warning],
+        flags: MessageFlags.IsComponentsV2,
+        allowedMentions: { parse: [] },
+      }).catch(() => null);
+      if (notice) setTimeout(() => notice.delete().catch(() => null), 15_000);
+
+      const reviewChannel = partnerSettings.approve_channel_id
+        ? await message.guild.channels.fetch(partnerSettings.approve_channel_id).catch(() => null)
+        : null;
+      if (reviewChannel?.isTextBased()) {
+        const log = new ContainerBuilder().setAccentColor(accentFor('warning'))
+          .addTextDisplayComponents(new TextDisplayBuilder().setContent([
+            `## ${E('cenar_announce')} Log chặn mention Partner`,
+            `${E('cenar_verified')} Thành viên: <@${message.author.id}> · \`${message.author.id}\``,
+            `${E('cenar_cooldown')} Loại: ${directEveryone ? 'Everyone/Here' : 'Role Partner'}`,
+            `${E('cenar_support')} Nội dung: ${stripDiscordUnicode(message.content).slice(0, 1000)}`,
+          ].join('\n')));
+        await reviewChannel.send({ components: [log], flags: MessageFlags.IsComponentsV2, allowedMentions: { parse: [] } }).catch(() => null);
+      }
+      return;
+    }
+  }
   // ═══════════════════════════════════════════════
   // AUTO SEND GMAIL SAFETY GUIDE FOR NITRO 2M
   // ═══════════════════════════════════════════════
@@ -153,7 +197,7 @@ export async function execute(message) {
     const linkRegex = /(https?:\/\/[^\s]+|discord\.gg\/[^\s]+)/gi;
     const hasLink = linkRegex.test(message.content);
 
-    if (hasLink && !isTicketChan) {
+    if (hasLink && !isTicketChan && !(isPartnerChannel && isPartner)) {
       console.log(`[Anti-Link] Link detected from user ${message.author.tag} in non-ticket channel. Deleting.`);
       await message.delete().catch(() => null);
       

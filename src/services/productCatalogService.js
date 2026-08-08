@@ -45,7 +45,16 @@ export function getProductByName(guildId, name) {
   return product;
 }
 
-export function addProduct({ guildId, name, description, price, durationMonths = 1, serviceType = 'other', emoji = 'order_product' }) {
+export function addProduct({
+  guildId,
+  name,
+  description,
+  price,
+  ctvPrice = null,
+  durationMonths = 1,
+  serviceType = 'other',
+  emoji = 'order_product',
+}) {
   const timestamp = nowIso();
   const catalogGuildId = 'WEB';
   const duplicate = db.prepare(`SELECT * FROM product_catalog WHERE guild_id = ? AND LOWER(TRIM(name)) = LOWER(TRIM(?)) AND duration_months = ? LIMIT 1`).get(catalogGuildId, name, durationMonths);
@@ -55,9 +64,22 @@ export function addProduct({ guildId, name, description, price, durationMonths =
   const sortOrder = (maxSort?.mx ?? 0) + 1;
 
   const result = db.prepare(`
-    INSERT INTO product_catalog (guild_id, name, description, price, duration_months, service_type, emoji, sort_order, product_key, created_at, updated_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `).run(catalogGuildId, name, description ?? null, Math.max(0, Number(price) || 0), durationMonths, serviceType, emoji, sortOrder, key, timestamp, timestamp);
+    INSERT INTO product_catalog (guild_id, name, description, price, ctv_price, duration_months, service_type, emoji, sort_order, product_key, created_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    catalogGuildId,
+    name,
+    description ?? null,
+    Math.max(0, Number(price) || 0),
+    ctvPrice === null ? null : Math.max(0, Number(ctvPrice) || 0),
+    durationMonths,
+    serviceType,
+    emoji,
+    sortOrder,
+    key,
+    timestamp,
+    timestamp,
+  );
 
   return getProductById(Number(result.lastInsertRowid));
 }
@@ -69,6 +91,9 @@ export function updateProduct(productId, fields = {}) {
   const name = fields.name ?? product.name;
   const description = fields.description !== undefined ? fields.description : product.description;
   const price = fields.price !== undefined ? Math.max(0, Number(fields.price) || 0) : product.price;
+  const ctvPrice = fields.ctvPrice !== undefined
+    ? (fields.ctvPrice === null ? null : Math.max(0, Number(fields.ctvPrice) || 0))
+    : product.ctv_price;
   const durationMonths = fields.durationMonths ?? product.duration_months;
   const serviceType = fields.serviceType ?? product.service_type;
   const emoji = fields.emoji ?? product.emoji;
@@ -77,10 +102,10 @@ export function updateProduct(productId, fields = {}) {
 
   db.prepare(`
     UPDATE product_catalog SET
-      name = ?, description = ?, price = ?, duration_months = ?,
+      name = ?, description = ?, price = ?, ctv_price = ?, duration_months = ?,
       service_type = ?, emoji = ?, is_active = ?, sort_order = ?, updated_at = ?
     WHERE id = ?
-  `).run(name, description, price, durationMonths, serviceType, emoji, isActive, sortOrder, nowIso(), productId);
+  `).run(name, description, price, ctvPrice, durationMonths, serviceType, emoji, isActive, sortOrder, nowIso(), productId);
 
   return getProductById(productId);
 }

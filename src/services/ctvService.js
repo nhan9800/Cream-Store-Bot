@@ -9,17 +9,69 @@ export function getCtvSettings(guildId) {
   return row;
 }
 
-export function upsertCtvSettings({ guild_id, recruit_channel_id, approve_channel_id, ctv_role_id }) {
+export function upsertCtvSettings({
+  guild_id,
+  recruit_channel_id,
+  approve_channel_id,
+  ctv_role_id,
+  category_id,
+  chat_channel_id,
+  order_log_channel_id,
+  price_channel_id,
+  price_message_id,
+  price_message_ids,
+}) {
   db.prepare(`
-    INSERT INTO ctv_settings (guild_id, recruit_channel_id, approve_channel_id, ctv_role_id, updated_at)
-    VALUES (@guild_id, @recruit_channel_id, @approve_channel_id, @ctv_role_id, CURRENT_TIMESTAMP)
+    INSERT INTO ctv_settings (
+      guild_id, recruit_channel_id, approve_channel_id, ctv_role_id,
+      category_id, chat_channel_id, order_log_channel_id, price_channel_id,
+      price_message_id, price_message_ids, updated_at
+    )
+    VALUES (
+      @guild_id, @recruit_channel_id, @approve_channel_id, @ctv_role_id,
+      @category_id, @chat_channel_id, @order_log_channel_id, @price_channel_id,
+      @price_message_id, @price_message_ids, CURRENT_TIMESTAMP
+    )
     ON CONFLICT(guild_id) DO UPDATE SET
       recruit_channel_id = COALESCE(excluded.recruit_channel_id, recruit_channel_id),
       approve_channel_id = COALESCE(excluded.approve_channel_id, approve_channel_id),
       ctv_role_id = COALESCE(excluded.ctv_role_id, ctv_role_id),
+      category_id = COALESCE(excluded.category_id, category_id),
+      chat_channel_id = COALESCE(excluded.chat_channel_id, chat_channel_id),
+      order_log_channel_id = COALESCE(excluded.order_log_channel_id, order_log_channel_id),
+      price_channel_id = COALESCE(excluded.price_channel_id, price_channel_id),
+      price_message_id = COALESCE(excluded.price_message_id, price_message_id),
+      price_message_ids = COALESCE(excluded.price_message_ids, price_message_ids),
       updated_at = CURRENT_TIMESTAMP
-  `).run({ guild_id, recruit_channel_id, approve_channel_id, ctv_role_id });
+  `).run({
+    guild_id,
+    recruit_channel_id: recruit_channel_id ?? null,
+    approve_channel_id: approve_channel_id ?? null,
+    ctv_role_id: ctv_role_id ?? null,
+    category_id: category_id ?? null,
+    chat_channel_id: chat_channel_id ?? null,
+    order_log_channel_id: order_log_channel_id ?? null,
+    price_channel_id: price_channel_id ?? null,
+    price_message_id: price_message_id ?? null,
+    price_message_ids: price_message_ids ?? null,
+  });
   return getCtvSettings(guild_id);
+}
+
+export function setCtvPriceMessage(guildId, messageId) {
+  db.prepare('UPDATE ctv_settings SET price_message_id = ?, updated_at = CURRENT_TIMESTAMP WHERE guild_id = ?')
+    .run(messageId, guildId);
+  return getCtvSettings(guildId);
+}
+
+export function setCtvPriceMessages(guildId, messageIds) {
+  const ids = [...new Set((messageIds || []).filter(Boolean).map(String))];
+  db.prepare(`
+    UPDATE ctv_settings
+    SET price_message_id = ?, price_message_ids = ?, updated_at = CURRENT_TIMESTAMP
+    WHERE guild_id = ?
+  `).run(ids[0] ?? null, JSON.stringify(ids), guildId);
+  return getCtvSettings(guildId);
 }
 
 export function isCustomerCtv(guildId, customerId) {

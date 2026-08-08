@@ -30,6 +30,7 @@ import { buildTicketWelcomeV2, buildTicketControlComponents } from '../utils/emb
 import { buildTicketChannelName, parseMoneyInput, buildOrderLogContent } from '../utils/formatters.js';
 import { ensureRateLimit } from '../services/abuseService.js';
 import { isCustomerCtv } from '../services/ctvService.js';
+import { buildCtvPriorityNotice } from '../services/ctvOrderLogService.js';
 import { getWalletBalance, addWalletBalance } from '../services/walletService.js';
 import { sendOrRefreshPaymentQr } from '../services/paymentService.js';
 import {
@@ -218,7 +219,7 @@ export async function handleProductPurchaseFlow(interaction, productId) {
       const prefix = (product.service_type || 'ticket').toLowerCase();
       
       if (isCtv) {
-        await channel.setName(`⚡-ctv-${ticket.ticket_code}`).catch(() => null);
+        await channel.setName(`🥝-ctv-${ticket.ticket_code}`).catch(() => null);
       } else {
         await channel.setName(buildTicketChannelName(ticket.ticket_code, prefix)).catch(() => null);
       }
@@ -281,11 +282,15 @@ export async function handleProductPurchaseFlow(interaction, productId) {
         flags: welcomeFlags,
       });
       // Ping riêng (content không được dùng với V2 flag)
-      await channel.send({ content: `<@${interaction.user.id}> — Đơn hàng **${order.order_code}** đã được tạo!` }).catch(() => null);
+      await channel.send({ content: `${E('cenar_verified')} <@${interaction.user.id}> — Đơn hàng **${order.order_code}** đã được tạo!` }).catch(() => null);
 
       if (isCtv) {
-        const supportPing = [guildConfig.support_role_id && `<@&${guildConfig.support_role_id}>`, guildConfig.shipper_role_id && `<@&${guildConfig.shipper_role_id}>`].filter(Boolean).join(' ');
-        await channel.send({ content: `${supportPing} ⚡ **ĐƠN HÀNG CTV ƯU TIÊN CAO:** CTV <@${interaction.user.id}> vừa lên đơn hàng \`${order.order_code}\` (Sản phẩm: **${product.name}**). Vui lòng ưu tiên xử lý và bàn giao nhanh nhất!` }).catch(() => null);
+        await channel.send(buildCtvPriorityNotice(
+          interaction.guildId,
+          interaction.user.id,
+          order,
+          [guildConfig.support_role_id, guildConfig.shipper_role_id],
+        )).catch(() => null);
       }
 
       // Nếu có tiền và chưa thanh toán -> tạo QR PayOS

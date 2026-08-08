@@ -799,6 +799,7 @@ export function initDatabase() {
       owner_id TEXT NOT NULL,
       applicant_id TEXT NOT NULL,
       status TEXT NOT NULL DEFAULT 'PENDING',
+      review_mode TEXT NOT NULL DEFAULT 'STANDARD',
       joined_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -808,6 +809,7 @@ export function initDatabase() {
       approve_channel_id TEXT,
       partner_role_id TEXT,
       directory_channel_id TEXT,
+      partner_channel_id TEXT,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
 
@@ -816,7 +818,23 @@ export function initDatabase() {
       recruit_channel_id TEXT,
       approve_channel_id TEXT,
       ctv_role_id TEXT,
+      category_id TEXT,
+      chat_channel_id TEXT,
+      order_log_channel_id TEXT,
+      price_channel_id TEXT,
+      price_message_id TEXT,
+      price_message_ids TEXT,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS partner_mention_usage (
+      guild_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      window_started_at TEXT NOT NULL,
+      partner_mentions INTEGER NOT NULL DEFAULT 0,
+      everyone_mentions INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (guild_id, user_id)
     );
 
     CREATE TABLE IF NOT EXISTS viotp_orders (
@@ -899,6 +917,14 @@ export function initDatabase() {
   ensureColumn('customer_profiles', 'is_ctv', 'INTEGER DEFAULT 0');
   ensureColumn('customer_profiles', 'ctv_joined_at', 'TEXT');
   ensureColumn('product_catalog', 'ctv_price', 'INTEGER DEFAULT NULL');
+  ensureColumn('partner_settings', 'partner_channel_id', 'TEXT');
+  ensureColumn('partners', 'review_mode', "TEXT NOT NULL DEFAULT 'STANDARD'");
+  ensureColumn('ctv_settings', 'category_id', 'TEXT');
+  ensureColumn('ctv_settings', 'chat_channel_id', 'TEXT');
+  ensureColumn('ctv_settings', 'order_log_channel_id', 'TEXT');
+  ensureColumn('ctv_settings', 'price_channel_id', 'TEXT');
+  ensureColumn('ctv_settings', 'price_message_id', 'TEXT');
+  ensureColumn('ctv_settings', 'price_message_ids', 'TEXT');
   ensureColumn('customer_profiles', 'credit_limit', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn('customer_profiles', 'credit_used', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn('customer_profiles', 'credit_status', "TEXT NOT NULL DEFAULT 'ACTIVE'");

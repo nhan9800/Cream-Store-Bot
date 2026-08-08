@@ -11,6 +11,7 @@ import { buildTicketWelcomeV2, buildTicketControlComponents } from '../utils/emb
 import { buildOrderLogContent, buildTicketChannelName } from '../utils/formatters.js';
 import { TICKET_MEMBER_PERMISSIONS } from '../utils/permissions.js';
 import { isCustomerCtv } from './ctvService.js';
+import { buildCtvPriorityNotice } from './ctvOrderLogService.js';
 import { ensureRateLimit } from './abuseService.js';
 import { config } from '../config.js';
 import { getCenarHub } from './cenarHub.js';
@@ -680,7 +681,7 @@ async function handlePremiumBuyOrder(interaction, productName, quantity, totalPr
     const prefix = (productObj?.service_type || 'ticket').toLowerCase();
     
     if (isCtv) {
-      await channel.setName(`⚡-ctv-${ticket.ticket_code}`).catch(() => null);
+      await channel.setName(`🥝-ctv-${ticket.ticket_code}`).catch(() => null);
     } else {
       await channel.setName(buildTicketChannelName(ticket.ticket_code, prefix)).catch(() => null);
     }
@@ -741,11 +742,15 @@ async function handlePremiumBuyOrder(interaction, productName, quantity, totalPr
       flags: welcomeFlags,
     });
     
-    await channel.send({ content: `<@${interaction.user.id}> — Đơn hàng **${order.order_code}** đã được tạo! ${note ? `\n> 📝 Ghi chú: **${note}**` : ''}` }).catch(() => null);
+    await channel.send({ content: `${E('cenar_verified')} <@${interaction.user.id}> — Đơn hàng **${order.order_code}** đã được tạo! ${note ? `\n> ${E('cenar_support')} Ghi chú: **${note}**` : ''}` }).catch(() => null);
 
     if (isCtv) {
-      const supportPing = [guildConfig.support_role_id && `<@&${guildConfig.support_role_id}>`, guildConfig.shipper_role_id && `<@&${guildConfig.shipper_role_id}>`].filter(Boolean).join(' ');
-      await channel.send({ content: `${supportPing} ⚡ **ĐƠN HÀNG CTV ƯU TIÊN CAO:** CTV <@${interaction.user.id}> vừa lên đơn hàng \`${order.order_code}\` (Sản phẩm: **${productName}**). Vui lòng ưu tiên xử lý và bàn giao nhanh nhất!` }).catch(() => null);
+      await channel.send(buildCtvPriorityNotice(
+        interaction.guildId,
+        interaction.user.id,
+        order,
+        [guildConfig.support_role_id, guildConfig.shipper_role_id],
+      )).catch(() => null);
     }
 
     if (totalPrice > 0 && order.status !== 'PAID') {

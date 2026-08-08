@@ -8,6 +8,7 @@ import { broadcastDashboardEvent } from './dashboardMiniServer.js';
 import { encrypt } from '../utils/crypto.js';
 import { awardOrderPoints, refundOrderPoints } from './loyaltyService.js';
 import { recordStatusChange } from './orderStateMachine.js';
+import { sendCtvOrderLog } from './ctvOrderLogService.js';
 
 function createOrderStmt() {
   return db.prepare(`
@@ -102,7 +103,13 @@ export function createOrder({ guildId, ticketId, ticketChannelId, customerId, pr
   
   transaction();
   broadcastDashboardEvent('order_update', `Đơn hàng mới: ${finalOrderCode}`);
-  return getOrderById(Number(resultId));
+  const createdOrder = getOrderById(Number(resultId));
+  queueMicrotask(() => {
+    sendCtvOrderLog(createdOrder).catch((error) => {
+      console.error(`[CTV-ORDER-LOG] ${createdOrder.order_code}: ${error.message}`);
+    });
+  });
+  return createdOrder;
 }
 
 export const getOrderByCode = (orderCode) => getOrderByCodeStmt().get(orderCode) ?? null;

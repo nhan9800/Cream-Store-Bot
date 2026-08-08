@@ -1,4 +1,4 @@
-import { SlashCommandBuilder, PermissionFlagsBits } from 'discord.js';
+import { ContainerBuilder, MessageFlags, SlashCommandBuilder, PermissionFlagsBits, TextDisplayBuilder } from 'discord.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { setCustomerCtvStatus, isCustomerCtv } from '../services/ctvService.js';
 
@@ -47,8 +47,14 @@ export async function execute(interaction) {
     }
   }
 
+  const container = new ContainerBuilder().setAccentColor(isGrant ? 0x57F287 : 0xED4245)
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent([
+      `## ${isGrant ? E('cenar_verified') : E('status_cross')} ${isGrant ? 'Đã cấp quyền CTV' : 'Đã thu hồi quyền CTV'}`,
+      `${E('cenar_ctv')} Khách hàng: <@${targetUser.id}>${roleStatusText}.`,
+    ].join('\n')));
   await interaction.reply({
-    content: `${E('status_check', '✅')} Đã **${isGrant ? 'CẤP QUYỀN' : 'THU HỒI'}** CTV cho khách hàng <@${targetUser.id}>${roleStatusText}.`,
-    ephemeral: true
+    components: [container],
+    flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
+    allowedMentions: { parse: [] },
   });
 }
