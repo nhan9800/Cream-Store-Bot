@@ -224,6 +224,21 @@ export function registerInteractionHandler(client, commands) {
             return originalUpdate(resolvePayloadEmojis(payload, E));
           };
         }
+        if (typeof interaction.showModal === 'function') {
+          const originalShowModal = interaction.showModal.bind(interaction);
+          interaction.showModal = async (payload) => {
+            return originalShowModal(resolvePayloadEmojis(payload, E));
+          };
+        }
+        // Ticket/order handlers often send a follow-up directly through the
+        // channel. Install the same policy once per channel so those messages
+        // cannot bypass custom-emoji sanitization.
+        if (interaction.channel?.send && !interaction.channel.send.__cenarEmojiPolicy) {
+          const originalChannelSend = interaction.channel.send.bind(interaction.channel);
+          const wrappedChannelSend = (payload, ...args) => originalChannelSend(resolvePayloadEmojis(payload, E), ...args);
+          wrappedChannelSend.__cenarEmojiPolicy = true;
+          interaction.channel.send = wrappedChannelSend;
+        }
       }
 
       // ── Autocomplete handler ──

@@ -17,6 +17,7 @@ import { emitStaffLog } from '../services/staffLogService.js';
 import { getOrderByCode, markOrderCompleted } from '../services/orderService.js';
 import { sendCompletedFlow, updateOrderLogMessage } from '../services/notificationService.js';
 import { buildFeedbackModalPrompt, buildWarrantyPanelModalPrompt } from '../utils/embeds.js';
+import { sanitizeDiscordPayload } from '../utils/uiKit.js';
 
 export const FEEDBACK_TEXT_INPUT_ID = 'feedback_content';
 export const WARRANTY_ORDER_INPUT_ID = 'warranty_order_code';
@@ -118,7 +119,7 @@ export function resolvePayloadEmojis(payload, E) {
   }
 
   try {
-    return resolveRecursive(payload);
+    return sanitizeDiscordPayload(resolveRecursive(payload));
   } catch (error) {
     console.error('[EMOJI] Lỗi khi xử lý payload emoji:', error);
     return payload;

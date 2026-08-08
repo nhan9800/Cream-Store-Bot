@@ -139,5 +139,5 @@ Bot sẽ:
 
 - Cấu hình emoji **lưu per-guild** (server nào set thì server đó áp dụng)
 - Bot phải có quyền **dùng emoji** trên server đó (mặc định bot có)
-- Reset = về unicode mặc định, không xóa emoji khỏi server
+- Reset chỉ bỏ cấu hình slot. Bot không dùng emoji Unicode mặc định trong UI.
 - Dùng Application Emojis nếu muốn bot dùng emoji trên nhiều server không cần upload riêng từng server

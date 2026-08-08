@@ -1,23 +1,30 @@
 import { getEmojiMap } from '../services/emojiService.js';
 
 const fallbackEmojis = {
+  // Emoji.gg assets uploaded to Cenar Store (2026-08-08)
+  cenar_verified: '<:cenar_verified:1535618654358736926>',
+  cenar_support: '<:cenar_support:1535618659010224129>',
+  cenar_staff: '<:cenar_staff:1535618674885402684>',
+  cenar_admin: '<:cenar_admin:1535618678853337149>',
+  cenar_wallet: '<:cenar_wallet:1535618682481545217>',
+
   // Panel Ticket buttons
   panel_order:        '<:cr_muahang:1348622828152426528>',
-  panel_support:      '<a:starxoay:1481141954346483845>',
+  panel_support:      '<:cenar_support:1535618659010224129>',
   panel_complaint:    '<a:dot_red:1367140105248047114>',
   panel_partnership:  '<:Partner:1367138825129955379>',
-  panel_warranty:     '<:cr_baohanh:1348625535512870965>',
-  panel_edit:         '<:gearup:1515216203453432002>',
+  panel_warranty:     '<:cenar_verified:1535618654358736926>',
+  panel_edit:         '<:cenar_admin:1535618678853337149>',
 
   // Stock / Order
   stock_header:       '<:cr_shop:1392749981332541501>',
-  order_created:      '<a:tickgreen:1384069022831874169>',
+  order_created:      '<:cenar_verified:1535618654358736926>',
   order_queue:        '<a:Dotyellow:1481134440725090315>',
   order_cancel:       '<a:tick_red51:1384069065626222632>',
   order_complete:     '<a:tickgreen:1384069022831874169>',
   order_processing:   '<a:redload:1459179959158571119>',
   order_pending:      '<a:redload:1459179959158571119>',
-  order_id:           '<:verifybadge:1481127479702847646>',
+  order_id:           '<:cenar_verified:1535618654358736926>',
   order_product:      '<a:Arrow2:1367139234833498113>',
 
   // Payment
@@ -25,15 +32,15 @@ const fallbackEmojis = {
   payment_vietqr:     '<:cr_vcb:1348627024859889676>',
   payment_success:    '<a:tickgreen:1384069022831874169>',
   payment_qr:         '<:verifybadge:1481127479702847646>',
-  payment_money:      '<:money:1442876095442714748>',
+  payment_money:      '<:cenar_wallet:1535618682481545217>',
   payment_refund:     '<a:tick_red51:1384069065626222632>',
 
   // Ticket
   ticket_close:       '<a:tick_red51:1384069065626222632>',
   ticket_claim:       '<:verifybadge:1481127479702847646>',
-  ticket_open:        '<a:tickgreen:1384069022831874169>',
-  ticket_user:        '<:verifybadge:1481127479702847646>',
-  ticket_staff:       '<:2895managerbadge:1483326442245849200>',
+  ticket_open:        '<:cenar_support:1535618659010224129>',
+  ticket_user:        '<:cenar_verified:1535618654358736926>',
+  ticket_staff:       '<:cenar_staff:1535618674885402684>',
 
   // Time
   icon_clock:         '<a:redload:1459179959158571119>',
@@ -79,7 +86,7 @@ const fallbackEmojis = {
   icon_chart:         '<a:starxoay:1481141954346483845>',
   icon_id:            '<:verifybadge:1481127479702847646>',
   icon_location:      '<a:Dotyellow:1481134440725090315>',
-  icon_settings:      '<:gearup:1515216203453432002>',
+  icon_settings:      '<:cenar_admin:1535618678853337149>',
   icon_key:           '<:verifybadge:1481127479702847646>',
   icon_link:          '<a:Arrow2:1367139234833498113>',
   icon_trophy:        '<a:starxoay:1481141954346483845>',
@@ -90,7 +97,7 @@ const fallbackEmojis = {
   icon_heart:         '<:purple_heart_glow:1327541911749263360>',
   icon_heart_purple:  '<:purple_heart_glow:1327541911749263360>',
   icon_cart:          '<:cr_carttt:1348626032747614268>',
-  icon_wallet:        '<:cr_cardd:1348624271437463552>',
+  icon_wallet:        '<:cenar_wallet:1535618682481545217>',
   icon_brain:         '<:chatgopete:1481154927677014098>',
   icon_announce:      '<a:Arrow2:1367139234833498113>',
   icon_group:         '<:2895managerbadge:1483326442245849200>',

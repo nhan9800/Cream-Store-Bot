@@ -147,21 +147,21 @@ export const EMOJI_SLOTS = {
 export const SLOT_ALIASES = {
   // Panel Ticket buttons
   panel_order: ['mua_hang', 'order', 'shopping', 'cart'],
-  panel_support: ['ho_tro', 'support', 'help', 'sos'],
+  panel_support: ['ho_tro', 'support', 'help', 'sos', 'cenar_support'],
   panel_complaint: ['khieu_nai', 'complaint', 'report'],
   panel_partnership: ['hop_tac', 'partnership', 'collab'],
-  panel_warranty: ['bao_hanh', 'warranty', 'repair'],
-  panel_edit: ['sua_panel', 'edit_panel'],
+  panel_warranty: ['bao_hanh', 'warranty', 'repair', 'cenar_verified'],
+  panel_edit: ['sua_panel', 'edit_panel', 'cenar_admin'],
 
   // Stock / Order
   stock_header: ['stock_header', 'bang_gia', 'price_list'],
-  order_created: ['order_created', 'success_created', 'don_hang_tao'],
+  order_created: ['order_created', 'success_created', 'don_hang_tao', 'cenar_verified'],
   order_queue: ['order_queue', 'queue', 'hang_cho'],
   order_cancel: ['order_cancel', 'cancel', 'huy_don'],
   order_complete: ['order_complete', 'complete', 'hoan_thanh'],
   order_processing: ['order_processing', 'processing', 'dang_xu_ly'],
   order_pending: ['order_pending', 'pending', 'cho_thanh_toan'],
-  order_id: ['order_id', 'id_don'],
+  order_id: ['order_id', 'id_don', 'cenar_verified'],
   order_product: ['order_product', 'product', 'san_pham'],
 
   // Payment
@@ -169,15 +169,15 @@ export const SLOT_ALIASES = {
   payment_vietqr: ['vietqr', 'banking', 'ngan_hang'],
   payment_success: ['payment_success', 'paid', 'da_thanh_toan'],
   payment_qr: ['qr_code', 'ma_qr'],
-  payment_money: ['money', 'tien', 'price', 'coin'],
+  payment_money: ['money', 'tien', 'price', 'coin', 'cenar_wallet'],
   payment_refund: ['refund', 'hoan_tien'],
 
   // Ticket
   ticket_close: ['close', 'ticket_close', 'dong_ticket'],
   ticket_claim: ['claim', 'ticket_claim', 'nhan_ticket'],
-  ticket_open: ['open', 'ticket_open', 'mo_ticket'],
-  ticket_user: ['user', 'ticket_user', 'khach_hang'],
-  ticket_staff: ['staff', 'ticket_staff', 'nhan_vien'],
+  ticket_open: ['open', 'ticket_open', 'mo_ticket', 'cenar_support'],
+  ticket_user: ['user', 'ticket_user', 'khach_hang', 'cenar_verified'],
+  ticket_staff: ['staff', 'ticket_staff', 'nhan_vien', 'cenar_staff'],
 
   // Time
   icon_clock: ['clock', 'time', 'dong_ho'],
@@ -220,7 +220,7 @@ export const SLOT_ALIASES = {
   icon_chart: ['chart', 'bieu_do'],
   icon_id: ['id', 'icon_id'],
   icon_location: ['location', 'dia_diem'],
-  icon_settings: ['settings', 'cai_dat'],
+  icon_settings: ['settings', 'cai_dat', 'cenar_admin'],
   icon_key: ['key', 'chia_khoa'],
   icon_link: ['link', 'lien_ket']
 };
@@ -341,7 +341,8 @@ function refreshCache(guildId) {
  */
 export function getEmoji(guildId, slot) {
   if (!emojiCache.has(guildId)) refreshCache(guildId);
-  return emojiCache.get(guildId)?.[slot] || '';
+  const value = emojiCache.get(guildId)?.[slot] || '';
+  return parseDiscordEmoji(value)?.formatted || '';
 }
 
 /**
@@ -371,6 +372,9 @@ export function setEmoji(guildId, slot, emojiString) {
   if (emojiString === null || emojiString === 'reset') {
     delete current[slot];
   } else {
+    if (!parseDiscordEmoji(emojiString)) {
+      throw new Error('Chỉ được dùng emoji custom dạng <:ten:id> hoặc <a:ten:id>.');
+    }
     current[slot] = emojiString;
   }
 
@@ -469,11 +473,8 @@ export function resolveSelectMenuEmoji(guildId, emojiStr, fallback = null) {
         animated: parsed.animated,
       };
     }
-    // Validate that the string is actually a Unicode emoji, not arbitrary text
-    if (!isValidUnicodeEmoji(resolvedEmoji)) {
-      return fallback ? resolveSelectMenuEmoji(guildId, fallback, null) : null;
-    }
-    return resolvedEmoji;
+    // Native Unicode emoji are intentionally disabled by the Cenar UI policy.
+    return fallback ? resolveSelectMenuEmoji(guildId, fallback, null) : null;
   } catch {
     // Any unexpected error → gracefully return null instead of crashing
     return null;
@@ -489,7 +490,7 @@ export function resolveSelectMenuEmoji(guildId, emojiStr, fallback = null) {
 export function resolveProductEmoji(guildId, emojiStr) {
   if (!emojiStr) return '';
   if (EMOJI_SLOTS[emojiStr]) return getEmoji(guildId, emojiStr);
-  return emojiStr;
+  return parseDiscordEmoji(emojiStr)?.formatted || '';
 }
 
 

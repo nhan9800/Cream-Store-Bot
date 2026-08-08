@@ -76,13 +76,42 @@ export function addText(c, content) {
  */
 export function normalizeV2Text(content) {
   if (content === null || content === undefined) return '';
-  return String(content)
+  return stripDiscordUnicode(String(content))
     .replace(/\r\n?/g, '\n')
     .split('\n')
     .map((line) => line.trimEnd())
     .join('\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
+}
+
+// Components V2 must use the server's custom emoji set. Strip native emoji
+// and presentation selectors at the final payload boundary so legacy builders
+// cannot reintroduce platform-dependent glyphs.
+export function stripDiscordUnicode(value) {
+  return String(value)
+    .replace(/[\u{1F000}-\u{1FAFF}\u{1FC00}-\u{1FFFD}\u2600-\u27BF\u2300-\u23FF\u2B00-\u2BFF]/gu, '')
+    .replace(/[\uFE0E\uFE0F\u200D\u20E3]/g, '');
+}
+
+export function sanitizeDiscordPayload(payload) {
+  const visit = (value) => {
+    if (value === null || value === undefined) return value;
+    if (typeof value === 'string') return stripDiscordUnicode(value);
+    if (Array.isArray(value)) return value.map(visit);
+    if (typeof value?.toJSON === 'function' && /Builder$/.test(value.constructor?.name || '')) {
+      return visit(value.toJSON());
+    }
+    if (typeof value === 'object') {
+      const result = {};
+      for (const [key, child] of Object.entries(value)) {
+        result[key] = key === 'files' ? child : visit(child);
+      }
+      return result;
+    }
+    return value;
+  };
+  return visit(payload);
 }
 
 /** TextDisplay đã chuẩn hóa, dùng cho các builder V2 không dùng addText(). */
