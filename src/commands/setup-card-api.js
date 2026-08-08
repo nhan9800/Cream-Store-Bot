@@ -12,9 +12,9 @@ export async function execute(interaction) {
 
   const inputDomain = new TextInputBuilder()
     .setCustomId('cardswap:domain')
-    .setLabel('Tên miền API (VD: card2k.com)')
+    .setLabel('Tên miền API (VD: card2k.net)')
     .setStyle(TextInputStyle.Short)
-    .setValue('card2k.com')
+    .setValue('card2k.net')
     .setRequired(true);
 
   const inputPartnerId = new TextInputBuilder()

@@ -3,7 +3,9 @@ import { getEmojiMap } from '../services/emojiService.js';
 const fallbackEmojis = {
   // Emoji.gg assets uploaded to Cenar Store (2026-08-08)
   cenar_verified: '<:cenar_verified:1535618654358736926>',
-  cenar_support: '<:cenar_support:1535618659010224129>',
+  // Emoji support cũ đã bị xóa khỏi guild; dùng asset staff còn hoạt động cho tới
+  // khi auto-sync nạp lại mapping cenar_support từ emoji đã chuẩn hóa.
+  cenar_support: '<:cenar_staff:1535618674885402684>',
   cenar_staff: '<:cenar_staff:1535618674885402684>',
   cenar_admin: '<:cenar_admin:1535618678853337149>',
   cenar_wallet: '<:cenar_wallet:1535618682481545217>',
@@ -18,10 +20,13 @@ const fallbackEmojis = {
   warranty_expiry: '<:cenar_expiry_date:1535690288658518068>',
   transcript_web: '<:cenar_transcript_web:1535690290684231700>',
   customer_patron: '<:cenar_activity_search:1535690292420812962>',
+  otp_loading: '<a:cenar_otp_loading:1535705387024515082>',
+  card_success: '<a:cenar_card_success:1535705389780439160>',
+  ctv_crystal: '<a:cenar_ctv_crystal:1535705392674508833>',
 
   // Panel Ticket buttons
   panel_order:        '<:cr_muahang:1348622828152426528>',
-  panel_support:      '<:cenar_support:1535618659010224129>',
+  panel_support:      '<:cenar_staff:1535618674885402684>',
   panel_complaint:    '<a:dot_red:1367140105248047114>',
   panel_partnership:  '<:cenar_partner:1535637391841173534>',
   panel_warranty:     '<:cenar_verified:1535618654358736926>',
@@ -49,7 +54,7 @@ const fallbackEmojis = {
   // Ticket
   ticket_close:       '<a:tick_red51:1384069065626222632>',
   ticket_claim:       '<:verifybadge:1481127479702847646>',
-  ticket_open:        '<:cenar_support:1535618659010224129>',
+  ticket_open:        '<:cenar_staff:1535618674885402684>',
   ticket_user:        '<:cenar_verified:1535618654358736926>',
   ticket_staff:       '<:cenar_staff:1535618674885402684>',
 
@@ -135,7 +140,18 @@ export function createEmojiResolver(guildId) {
     const candidate = em[slot] || fallbackEmojis[slot] || fallback;
     // UI policy: only render Discord custom emoji. Existing callers may still
     // pass a historical Unicode fallback; intentionally discard it here.
-    return /^<a?:[a-zA-Z0-9_]+:\d+>$/.test(candidate) ? candidate : '';
+    const match = String(candidate || '').match(/^<(a?):([a-zA-Z0-9_]+):(\d+)>$/);
+    if (!match) return '';
+    // Tên emoji có thể đã được chuẩn hóa thành cenar_<ten> trong khi ID giữ
+    // nguyên. Dùng tên thật từ cache để mọi Components V2 và tin nhắn đều hiển
+    // thị đúng ngay cả trước khi mapping database được refresh.
+    const cache = global.discordClient?.emojis?.cache;
+    const cached = cache?.get(match[3]);
+    if (cached) return cached.animated
+      ? `<a:${cached.name}:${cached.id}>`
+      : `<:${cached.name}:${cached.id}>`;
+    if (cache?.size) return '';
+    return candidate;
   };
   // Trả về object emoji cho ButtonBuilder.setEmoji() — nút không nhúng được
   // custom emoji vào label, phải gắn rời qua .setEmoji(). Slot trống → null.

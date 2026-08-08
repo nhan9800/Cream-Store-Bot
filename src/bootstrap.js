@@ -45,33 +45,27 @@ export async function buildClient() {
         .catch((error) => console.error('[PATRON-SYNC] Failed:', error));
     }).catch((error) => console.error('[PATRON-SYNC] Failed to load role service:', error));
 
-    // Tự động đồng bộ emoji cho tất cả các guild bot đang tham gia
-    import('./services/emojiService.js').then(({ autoSyncGuildEmojis }) => {
+    // Đồng bộ mapping emoji trước khi dựng lại panel để Components V2 luôn dùng
+    // đúng tên cenar_<ten> và không render literal :emoji_name:.
+    try {
+      const { autoSyncGuildEmojis } = await import('./services/emojiService.js');
       for (const guild of readyClient.guilds.cache.values()) {
-        try {
-          const result = autoSyncGuildEmojis(guild);
-          console.log(`[EMOJI-SYNC] Synced ${result.syncedCount} emojis for guild: ${guild.name}`);
-        } catch (e) {
-          console.error(`[EMOJI-SYNC] Failed to auto-sync for guild ${guild.name}:`, e);
-        }
+        await guild.emojis.fetch().catch(() => null);
+        const result = autoSyncGuildEmojis(guild);
+        console.log(`[EMOJI-SYNC] Synced ${result.syncedCount} emojis for guild: ${guild.name}`);
       }
-    }).catch(err => console.error('Failed to import emojiService for ready event', err));
 
-    // Tự động chạy setup Partner & CTV cho các guild mà bot tham gia
-    import('./services/autoSetupService.js').then(({ autoSetupPartnerAndCtv }) => {
-      autoSetupPartnerAndCtv(readyClient).catch(err => {
-        console.log(`[AUTO-SETUP] Lỗi chạy setup: ${err.message}`);
-      });
-    }).catch(err => console.error('Failed to import autoSetupService', err));
+      const { autoSetupPartnerAndCtv } = await import('./services/autoSetupService.js');
+      await autoSetupPartnerAndCtv(readyClient);
 
-    // Tự động setup kênh Nạp Thẻ (Đã tắt theo yêu cầu)
-    /*
-    import('./services/autoSetupCardService.js').then(({ autoSetupCardChannel }) => {
-      autoSetupCardChannel(readyClient).catch(err => {
-        console.log(`[AUTO-SETUP-CARD] Lỗi chạy setup: ${err.message}`);
-      });
-    }).catch(err => console.error('Failed to import autoSetupCardService', err));
-    */
+      const { autoSetupCardChannel } = await import('./services/autoSetupCardService.js');
+      await autoSetupCardChannel(readyClient);
+
+      const { autoRefreshOtpPanel } = await import('./services/autoSetupOtpService.js');
+      await autoRefreshOtpPanel(readyClient);
+    } catch (error) {
+      console.error('[AUTO-SETUP] Không thể đồng bộ emoji/panel:', error);
+    }
 
     // Tự động setup kênh Bảng Giá
     import('./services/autoSetupPriceBoardService.js').then(({ autoSetupPriceBoard }) => {

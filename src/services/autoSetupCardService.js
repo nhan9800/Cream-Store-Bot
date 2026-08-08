@@ -1,4 +1,4 @@
-import { ChannelType, ActionRowBuilder, ButtonBuilder, ButtonStyle, ContainerBuilder, TextDisplayBuilder, MessageFlags } from 'discord.js';
+import { ChannelType, ActionRowBuilder, ButtonBuilder, ButtonStyle, ContainerBuilder, TextDisplayBuilder, MessageFlags, SeparatorBuilder, SeparatorSpacingSize } from 'discord.js';
 import { db } from '../database/db.js';
 
 export async function autoSetupCardChannel(client) {
@@ -31,9 +31,27 @@ export async function autoSetupCardChannel(client) {
   const { createEmojiResolver } = await import('../utils/emojiHelper.js');
   const E = createEmojiResolver(guildId);
 
-  const container = new ContainerBuilder().setAccentColor(0x3498DB);
+  const container = new ContainerBuilder().setAccentColor(0x5865F2);
   container.addTextDisplayComponents(
-    new TextDisplayBuilder().setContent(`### ${E('panel_support')} DỊCH VỤ THẺ CÀO (GẠCH & MUA THẺ)\n> Hệ thống hỗ trợ xử lý thẻ cào tự động 24/7.\n> Phí gạch thẻ siêu rẻ, chiết khấu mua thẻ siêu tốt!\n\n**HƯỚNG DẪN:**\n- ${E('icon_wallet')} **Đổi Thẻ (Gạch Thẻ):** Đổi thẻ cào (Viettel, Vina, Mobi, Zing...) lấy số dư Ví tiền.\n- ${E('icon_cart')} **Mua Thẻ Cào:** Dùng số dư Ví tiền để mua mã thẻ cào mới.`)
+    new TextDisplayBuilder().setContent([
+      `## ${E('payment_payos')} CENAR CARD CENTER`,
+      `> Gạch thẻ và mua thẻ tự động, theo dõi trạng thái rõ ràng từ lúc gửi tới khi cộng ví.`,
+      '',
+      `### ${E('icon_wallet')} Gạch thẻ lấy số dư`,
+      `${E('status_loading')} Chọn nhà mạng, nhập đúng mệnh giá, serial và mã thẻ.`,
+      `${E('card_success') || E('payment_success')} Card2K xác nhận thành công rồi hệ thống mới cộng ví.`,
+      `${E('status_warn')} Thẻ sai mệnh giá được tính theo giá trị thực tế nhà cung cấp trả về.`,
+      '',
+      `### ${E('icon_cart')} Mua mã thẻ mới`,
+      `${E('cenar_verified')} Thanh toán trực tiếp từ ví Cenar, mã thẻ chỉ hiển thị riêng cho bạn.`,
+      `${E('customer_patron')} Giao dịch hợp lệ tự động đồng bộ quyền Cenar Patron với website.`,
+    ].join('\n'))
+  );
+  container.addSeparatorComponents(
+    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small),
+  );
+  container.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent(`-# ${E('cenar_support')} Không gửi mã thẻ cho người khác · Mỗi thẻ chỉ gửi một lần`),
   );
 
   const row = new ActionRowBuilder().addComponents(
@@ -45,7 +63,7 @@ export async function autoSetupCardChannel(client) {
     new ButtonBuilder()
       .setCustomId('cardswap:btn_buy')
       .setLabel('Mua Thẻ Cào')
-      .setEmoji(E.component('icon_cart'))
+      .setEmoji(E.component('card_success') || E.component('panel_order'))
       .setStyle(ButtonStyle.Primary),
     new ButtonBuilder()
       .setCustomId('cardswap:btn_fees')

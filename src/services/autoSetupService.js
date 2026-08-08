@@ -165,7 +165,7 @@ async function postRecruitmentPanel(channel, kind, guildId, references) {
         `- Đơn hàng được gắn ưu tiên và ghi log riêng tại <#${references.ctvOrderLog}>.`,
         `- Trao đổi nội bộ tại <#${references.ctvChat}>.`,
         '',
-        `### ${E('cenar_support')} Điều kiện`,
+        `### ${E('ctv_crystal') || E('cenar_staff')} Điều kiện`,
         `Có kênh bán hàng rõ ràng và cam kết hỗ trợ khách hàng minh bạch.`,
         `-# Hồ sơ sẽ được staff duyệt thủ công trong vòng 24 giờ.`,
       ].join('\n')

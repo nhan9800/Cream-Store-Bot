@@ -1,4 +1,5 @@
 import { getGuildConfig } from './guildConfigService.js';
+import { config } from '../config.js';
 import { getCustomerProfile } from './customerService.js';
 import { getCustomerFlag } from './blacklistService.js';
 import { getCustomerActivitySummary, listActivityCustomers } from './customerActivityService.js';
@@ -10,6 +11,51 @@ const VIP_TIERS = [
   { id: '1282637168149532724', name: 'VIP Client', minSpent: 1000000 },
   { id: '1282637103045279820', name: 'Cenar Patron', minSpent: 0, requireActivity: true },
 ];
+
+const CENAR_PROGRAM_ROLE_IDS = new Set([
+  ...VIP_TIERS.map((tier) => tier.id),
+  '1522844528237740066', // Partner
+  '1522844530242748446', // CTV
+]);
+
+function colorHex(value) {
+  const number = Number(value) || 0;
+  return number ? `#${number.toString(16).padStart(6, '0')}` : null;
+}
+
+export async function getCustomerDiscordRoleSnapshot(client, customerId) {
+  const guild = client?.guilds?.cache?.get(config.guildId)
+    || await client?.guilds?.fetch?.(config.guildId).catch(() => null);
+  if (!guild) return { guildId: config.guildId, guildName: null, memberFound: false, roles: [], syncedAt: new Date().toISOString() };
+  const member = await guild.members.fetch(String(customerId)).catch(() => null);
+  if (!member) return { guildId: guild.id, guildName: guild.name, memberFound: false, roles: [], syncedAt: new Date().toISOString() };
+
+  const roles = [...member.roles.cache.values()]
+    .filter((role) => role.id !== guild.id && !role.managed)
+    .sort((left, right) => right.position - left.position)
+    .slice(0, 40)
+    .map((role) => ({
+      id: role.id,
+      name: role.name,
+      position: role.position,
+      color: colorHex(role.color),
+      colors: {
+        primary: colorHex(role.colors?.primaryColor ?? role.color),
+        secondary: colorHex(role.colors?.secondaryColor),
+        tertiary: colorHex(role.colors?.tertiaryColor),
+      },
+      iconUrl: role.iconURL?.({ size: 64 }) || null,
+      cenarManaged: CENAR_PROGRAM_ROLE_IDS.has(role.id),
+    }));
+
+  return {
+    guildId: guild.id,
+    guildName: guild.name,
+    memberFound: true,
+    roles,
+    syncedAt: new Date().toISOString(),
+  };
+}
 
 export const CUSTOMER_MEMBERSHIP_TIERS = [
   { key: 'active', label: 'Active Customer', minSpent: 0, requireOrder: true },

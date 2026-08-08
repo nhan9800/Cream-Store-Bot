@@ -8,7 +8,9 @@ import {
   ButtonStyle,
   ContainerBuilder,
   TextDisplayBuilder,
-  MessageFlags
+  MessageFlags,
+  SeparatorBuilder,
+  SeparatorSpacingSize
 } from 'discord.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { 
@@ -26,6 +28,37 @@ import { getCustomerProfile } from '../services/customerService.js';
 import { getWalletBalance, addWalletBalance, getWalletTransactions } from '../services/walletService.js';
 import { formatCurrency } from '../utils/formatters.js';
 import { applyCustomerRoles } from '../services/roleService.js';
+import { emitAutomationLog, maskSerial } from '../services/automationLogService.js';
+
+function cardNotice(E, {
+  title,
+  summary,
+  lines = [],
+  status = 'info',
+  footer = 'Cenar Card Center · Xử lý tự động và bảo mật',
+}) {
+  const palette = {
+    success: { color: 0x57f287, emoji: E('card_success') || E('status_check') },
+    warning: { color: 0xfee75c, emoji: E('status_warn') },
+    danger: { color: 0xed4245, emoji: E('status_cross') },
+    info: { color: 0x5865f2, emoji: E('status_info') },
+  };
+  const tone = palette[status] || palette.info;
+  const container = new ContainerBuilder().setAccentColor(tone.color);
+  container.addTextDisplayComponents(new TextDisplayBuilder().setContent([
+    `## ${tone.emoji} ${title}`,
+    summary ? `> ${summary}` : null,
+    lines.length ? '' : null,
+    ...lines,
+  ].filter(Boolean).join('\n')));
+  container.addSeparatorComponents(
+    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small),
+  );
+  container.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent(`-# ${E('cenar_verified')} ${footer}`),
+  );
+  return container;
+}
 
 export async function handleCardSwapInteractions(interaction) {
   const E = createEmojiResolver(interaction.guild.id);
@@ -39,7 +72,7 @@ export async function handleCardSwapInteractions(interaction) {
     const buyProfitAdd = parseInt(interaction.fields.getTextInputValue('cardswap:buy_profit_add'));
 
     if (!Number.isFinite(chargingFeeAdd) || chargingFeeAdd < 2 || chargingFeeAdd > 3) {
-      await interaction.reply({ content: 'Biên lợi nhuận đổi thẻ phải nằm trong khoảng từ 2% đến 3%.', ephemeral: true });
+      await interaction.reply({ components: [cardNotice(E, { title: 'CẤU HÌNH KHÔNG HỢP LỆ', summary: 'Biên lợi nhuận phải nằm trong khoảng từ 2% đến 3%.', status: 'danger' })], flags: MessageFlags.IsComponentsV2, ephemeral: true });
       return true;
     }
 
@@ -51,7 +84,7 @@ export async function handleCardSwapInteractions(interaction) {
       cardswap_buy_profit_add: isNaN(buyProfitAdd) ? 3000 : buyProfitAdd
     });
 
-    await interaction.reply({ content: 'Đã lưu cấu hình API Đổi Thẻ thành công!', ephemeral: true });
+    await interaction.reply({ components: [cardNotice(E, { title: 'ĐÃ LƯU KẾT NỐI CARD2K', summary: 'Khóa được lưu nội bộ và sẽ không xuất hiện trong log.', status: 'success' })], flags: MessageFlags.IsComponentsV2, ephemeral: true });
     return true;
   }
 
@@ -98,6 +131,7 @@ export async function handleCardSwapInteractions(interaction) {
 
   // --- NÚT XEM BẢNG PHÍ TẠI PANEL ---
   if (interaction.isButton() && customId === 'cardswap:btn_fees') {
+    await interaction.deferReply({ ephemeral: true });
     try {
       const markdown = await buildDiscountBoardMarkdown(interaction.guild.id);
       
@@ -106,9 +140,9 @@ export async function handleCardSwapInteractions(interaction) {
         new TextDisplayBuilder().setContent(markdown)
       );
       
-      await interaction.reply({ components: [container], flags: MessageFlags.IsComponentsV2, ephemeral: true });
+      await interaction.editReply({ components: [container], flags: MessageFlags.IsComponentsV2 });
     } catch (e) {
-      await interaction.reply({ content: `Lỗi không thể lấy bảng phí: ${e.message}`, ephemeral: true });
+      await interaction.editReply({ components: [cardNotice(E, { title: 'CHƯA TẢI ĐƯỢC BẢNG PHÍ', summary: e.message, status: 'danger', lines: [`${E('cenar_support')} Vui lòng thử lại sau ít phút hoặc báo Admin kiểm tra kết nối Card2K.`] })], flags: MessageFlags.IsComponentsV2 });
     }
     return true;
   }
@@ -132,9 +166,10 @@ export async function handleCardSwapInteractions(interaction) {
   if (interaction.isButton() && customId === 'cardswap:btn_charge') {
     const config = getCardSwapConfig(interaction.guild.id);
     if (!config || !config.cardswap_partner_id) {
-      return interaction.reply({ content: 'Admin chưa cài đặt API Đổi Thẻ.', ephemeral: true });
+      return interaction.reply({ components: [cardNotice(E, { title: 'DỊCH VỤ CHƯA SẴN SÀNG', summary: 'Kết nối Card2K chưa được cấu hình.', status: 'warning' })], flags: MessageFlags.IsComponentsV2, ephemeral: true });
     }
 
+    await interaction.deferReply({ ephemeral: true });
     try {
       // Lấy fee để hiện menu
       const fees = await getChargingFees(interaction.guild.id);
@@ -155,13 +190,12 @@ export async function handleCardSwapInteractions(interaction) {
       );
       
       const row = new ActionRowBuilder().addComponents(selectMenu);
-      await interaction.reply({ 
+      await interaction.editReply({
         components: [container, row], 
-        flags: MessageFlags.IsComponentsV2,
-        ephemeral: true 
+        flags: MessageFlags.IsComponentsV2
       });
     } catch (e) {
-      await interaction.reply({ content: 'Lỗi khi lấy thông tin nhà mạng: ' + e.message, ephemeral: true });
+      await interaction.editReply({ components: [cardNotice(E, { title: 'KHÔNG THỂ MỞ GẠCH THẺ', summary: e.message, status: 'danger', lines: [`${E('status_info')} Yêu cầu chưa được tạo và ví của bạn không bị thay đổi.`] })], flags: MessageFlags.IsComponentsV2 });
     }
     return true;
   }
@@ -197,7 +231,7 @@ export async function handleCardSwapInteractions(interaction) {
     
     const amount = parseInt(amountStr.replace(/[^0-9]/g, ''));
     if (isNaN(amount) || amount <= 0) {
-      return interaction.reply({ content: 'Mệnh giá không hợp lệ.', ephemeral: true });
+      return interaction.reply({ components: [cardNotice(E, { title: 'MỆNH GIÁ KHÔNG HỢP LỆ', summary: 'Chỉ nhập số tiền đúng với mệnh giá in trên thẻ.', status: 'danger' })], flags: MessageFlags.IsComponentsV2, ephemeral: true });
     }
 
     await interaction.deferReply({ ephemeral: true });
@@ -212,8 +246,34 @@ export async function handleCardSwapInteractions(interaction) {
         components: [successContainer],
         flags: MessageFlags.IsComponentsV2
       });
+      await emitAutomationLog(interaction.client, {
+        guildId: interaction.guild.id,
+        customerId: interaction.user.id,
+        action: 'CARD_TOPUP_SUBMITTED',
+        title: 'ĐÃ NHẬN YÊU CẦU GẠCH THẺ',
+        summary: 'Thẻ đã được gửi tới Card2K và đang chờ callback xác nhận.',
+        reference: result.request_id,
+        status: 'warning',
+        fields: [
+          { label: 'Nhà mạng', value: telco, emoji: 'payment_payos' },
+          { label: 'Serial', value: `\`${maskSerial(serial)}\``, emoji: 'icon_id' },
+          { label: 'Mệnh giá', value: `${amount.toLocaleString('vi-VN')}đ`, emoji: 'payment_money' },
+        ],
+      });
     } catch (e) {
-      await interaction.editReply(`Lỗi: ${e.message}`);
+      await interaction.editReply({ components: [cardNotice(E, { title: 'GỬI THẺ KHÔNG THÀNH CÔNG', summary: e.message, status: 'danger', lines: [`${E('status_info')} Không cộng/trừ số dư khi yêu cầu gửi thẻ thất bại.`] })], flags: MessageFlags.IsComponentsV2 });
+      await emitAutomationLog(interaction.client, {
+        guildId: interaction.guild.id,
+        customerId: interaction.user.id,
+        action: 'CARD_TOPUP_SUBMIT_FAILED',
+        title: 'LỖI GỬI THẺ TỚI NHÀ CUNG CẤP',
+        summary: e.message,
+        status: 'danger',
+        fields: [
+          { label: 'Nhà mạng', value: telco, emoji: 'status_cross' },
+          { label: 'Serial', value: `\`${maskSerial(serial)}\``, emoji: 'icon_id' },
+        ],
+      });
     }
     return true;
   }

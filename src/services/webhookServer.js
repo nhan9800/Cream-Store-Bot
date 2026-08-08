@@ -124,12 +124,15 @@ export function registerPaymentRoutes(app) {
   });
 
   app.get('/api/public/cardswap/callback', async (req, res) => {
+    if (!req.query?.request_id) {
+      return res.status(200).send('CENAR_CARD_CALLBACK_READY');
+    }
     try {
       await handleCardSwapCallback(req.query, req.app.locals.discordClient);
-      res.status(200).send('OK');
+      return res.status(200).send('OK');
     } catch (e) {
       console.error('[CARDSWAP WEBHOOK] Lỗi xử lý callback:', e.message);
-      res.status(400).send('ERROR');
+      return res.status(400).send('ERROR');
     }
   });
 }

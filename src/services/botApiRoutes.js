@@ -20,7 +20,7 @@ import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { safeEqual } from '../utils/crypto.js';
 import { runtimeCommitSha } from '../utils/revision.js';
 import { discordCollectibleUrl, getDiscordCollectibleShopPrice } from './discordCollectiblePricing.js';
-import { getCustomerMembershipProgress } from './roleService.js';
+import { getCustomerDiscordRoleSnapshot, getCustomerMembershipProgress } from './roleService.js';
 import { getCustomerActivitySummary, getCustomerRecentActivities } from './customerActivityService.js';
 import { getDiscordNitroEligibility } from '../utils/discordNitro.js';
 import { recordStaffLog } from './staffLogService.js';
@@ -560,7 +560,7 @@ export function registerBotApiRoutes(app) {
     });
 
     // ── CUSTOMER PROFILE — info + spending stats ──────────────
-    app.get('/api/bot/customer/:discord_id', (req, res) => {
+    app.get('/api/bot/customer/:discord_id', async (req, res) => {
         const discordId = String(req.params.discord_id || '').trim();
         if (!discordId) return res.status(400).json({ ok: false, error: 'Thiếu discord_id' });
         if (!canAccessCustomerResource(req, discordId)) {
@@ -620,6 +620,19 @@ export function registerBotApiRoutes(app) {
                 membership,
             };
         });
+        if (result.ok) {
+            result.data.discordRoleSnapshot = await getCustomerDiscordRoleSnapshot(
+                req.app.locals.discordClient,
+                discordId,
+            ).catch((error) => ({
+                guildId: config.guildId,
+                guildName: null,
+                memberFound: false,
+                roles: [],
+                syncedAt: new Date().toISOString(),
+                error: error.message,
+            }));
+        }
         res.json(result);
     });
 

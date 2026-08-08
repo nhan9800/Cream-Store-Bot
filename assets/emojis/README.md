@@ -9,5 +9,8 @@ Các file này được giữ lại để việc đồng bộ emoji Discord có 
 | `cenar_expiry_date` | [Emoji.gg Green Calendar](https://emoji.gg/emoji/31480-green-calendar) | Ngày hết hạn |
 | `cenar_transcript_web` | [Discords.com Document Folder](https://discords.com/emoji-list/search?page=1&term=document) | Transcript web |
 | `cenar_activity_search` | [Discords.com Document Search](https://discords.com/emoji-list/search?page=1&term=document) | Hoạt động dịch vụ |
+| `cenar_otp_loading` | [Emoji.gg Loading](https://emoji.gg/emoji/6594-loading) | Trạng thái chờ OTP (GIF) |
+| `cenar_card_success` | [Emoji.gg Animated Check](https://emoji.gg/emoji/6181_check) | Callback thẻ thành công (GIF) |
+| `cenar_ctv_crystal` | [Emoji.gg Blue Crystal](https://emoji.gg/emoji/1912-blue-crystal) | Điểm nhấn panel CTV (GIF) |
 
 Không xóa emoji server theo tên/ngoại hình. Script đồng bộ chỉ tái sử dụng tên đã có hoặc tải emoji còn thiếu; việc dọn trùng byte được thực hiện riêng bởi `npm run audit:emojis`.

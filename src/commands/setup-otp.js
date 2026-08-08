@@ -12,104 +12,74 @@ import {
   TextDisplayBuilder,
 } from 'discord.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
-import { brandName, accentFor } from '../utils/uiKit.js';
+import { accentFor, brandName } from '../utils/uiKit.js';
 
 export const data = new SlashCommandBuilder()
   .setName('setup-otp')
   .setDescription('Cài đặt bảng điều khiển thuê số điện thoại trực tuyến (ViOTP)')
   .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
-  .addChannelOption(opt =>
-    opt.setName('kenh')
-      .setDescription('Kênh hiển thị bảng thuê số (mặc định kênh hiện tại)')
-      .addChannelTypes(ChannelType.GuildText)
-      .setRequired(false)
-  );
+  .addChannelOption((option) => option
+    .setName('kenh')
+    .setDescription('Kênh hiển thị bảng thuê số (mặc định kênh hiện tại)')
+    .addChannelTypes(ChannelType.GuildText)
+    .setRequired(false));
 
-export async function execute(interaction) {
-  await interaction.deferReply({ ephemeral: true });
-
-  const E = createEmojiResolver(interaction.guildId);
-  const storeName = brandName();
-  const targetChannel = interaction.options.getChannel('kenh') || interaction.channel;
-
-  // ─── Dựng Components V2 panel ───────────────────────────────
-  const iconSparkle = E('starxoay', '✨');
-  const iconCheck   = E('tickgreen', '✅');
-  const iconPhone   = E('phone', '📱');
-  const iconMoney   = E('money', '💰');
-  const iconHistory = E('chamxanh', '🕒');
-
-  const headerLine = [iconSparkle, `THUÊ SỐ ĐIỆN THOẠI ONLINE — ${storeName.toUpperCase()}`]
-    .filter(Boolean).join(' ');
-
-  const bodyLines = [
-    `Dịch vụ cho thuê số điện thoại trực tuyến để nhận mã OTP đăng ký tài khoản (Facebook, Zalo, Momo, Shopee...).`,
-    ``,
-    `${iconCheck} **Ưu điểm nổi bật:**`,
-    `> ${iconPhone} Nhận mã SMS cực nhanh.`,
-    `> ${iconMoney} Trừ thẳng vào số dư ví của bạn trong Bot.`,
-    `> ${iconHistory} Tự động hoàn tiền 100% nếu số bị lỗi hoặc không nhận được mã sau 5 phút.`,
+export function buildOtpPanel(guildId) {
+  const E = createEmojiResolver(guildId);
+  const container = new ContainerBuilder().setAccentColor(accentFor('primary') || 0x5865f2);
+  container.addTextDisplayComponents(new TextDisplayBuilder().setContent([
+    `## ${E('icon_sparkle')} THUÊ SỐ ĐIỆN THOẠI ONLINE · ${brandName().toUpperCase()}`,
+    `> Thuê số Việt Nam để nhận OTP từ nhiều nền tảng, xử lý riêng tư và ghi nhận trạng thái tự động.`,
     '',
-    '**Bấm nút bên dưới để chọn dịch vụ và bắt đầu thuê:**',
-  ].join('\n');
+    `### ${E('cenar_verified')} Quy trình rõ ràng`,
+    `${E('icon_id')} Chọn dịch vụ và nhận số đang còn khả dụng.`,
+    `${E('otp_loading') || E('status_loading')} Dùng số vừa cấp, sau đó chờ bot quét tin nhắn mỗi 15 giây.`,
+    `${E('icon_key')} Mã OTP chỉ được gửi riêng cho tài khoản đã thuê.`,
+    '',
+    `### ${E('icon_wallet')} Bảo vệ số dư`,
+    `${E('payment_refund')} Hoàn tiền đúng một lần nếu không cấp được số, lỗi phiên hoặc hết hạn sau tối đa 10 phút.`,
+    `${E('customer_patron')} Cenar Patron và lịch sử dịch vụ được đồng bộ với website ngay khi cấp số.`,
+  ].join('\n')));
+  container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
+  container.addTextDisplayComponents(new TextDisplayBuilder().setContent(`-# ${E('cenar_support')} Không chia sẻ số hoặc mã OTP · Luôn kiểm tra đúng tên dịch vụ trước khi thuê`));
 
-  const container = new ContainerBuilder()
-    .setAccentColor(accentFor('primary') || 0x3498db);
-
-  container.addTextDisplayComponents(
-    new TextDisplayBuilder().setContent(`# ${headerLine}`)
-  );
-  container.addSeparatorComponents(
-    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
-  );
-  container.addTextDisplayComponents(
-    new TextDisplayBuilder().setContent(bodyLines)
-  );
-  container.addSeparatorComponents(
-    new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small)
-  );
-
-  // ─── Nút tương tác ───────────────────────────────────────────
-  const rentBtn = new ButtonBuilder()
+  const rentButton = new ButtonBuilder()
     .setCustomId('otp:open_menu')
     .setLabel('Thuê Số Mới')
     .setStyle(ButtonStyle.Primary);
+  const rentEmoji = E.component('panel_order');
+  if (rentEmoji) rentButton.setEmoji(rentEmoji);
 
-  const btnEmoji = E.component('cr_shop') || E.component('icon_cart');
-  if (btnEmoji) rentBtn.setEmoji(btnEmoji);
-
-  const checkBalanceBtn = new ButtonBuilder()
+  const walletButton = new ButtonBuilder()
     .setCustomId('otp:check_balance')
-    .setLabel('Kiểm Tra OTP & Số Dư')
+    .setLabel('OTP & Số Dư')
     .setStyle(ButtonStyle.Secondary);
+  const walletEmoji = E.component('icon_wallet');
+  if (walletEmoji) walletButton.setEmoji(walletEmoji);
 
-  const checkEmoji = E.component('cr_pay') || E.component('icon_history');
-  if (checkEmoji) checkBalanceBtn.setEmoji(checkEmoji);
-
-  const topupBtn = new ButtonBuilder()
+  const topupButton = new ButtonBuilder()
     .setCustomId('otp:topup_menu')
     .setLabel('Nạp Tiền')
     .setStyle(ButtonStyle.Success);
-  
-  const topupEmoji = E.component('payment_payos') || E.component('cr_cardd');
-  if (topupEmoji) topupBtn.setEmoji(topupEmoji);
+  const topupEmoji = E.component('payment_payos');
+  if (topupEmoji) topupButton.setEmoji(topupEmoji);
 
-  const actionRow = new ActionRowBuilder().addComponents(rentBtn, checkBalanceBtn, topupBtn);
-
-  const panelPayload = {
-    components: [container, actionRow],
+  return {
+    components: [container, new ActionRowBuilder().addComponents(rentButton, walletButton, topupButton)],
     flags: MessageFlags.IsComponentsV2,
+    allowedMentions: { parse: [] },
   };
+}
 
+export async function execute(interaction) {
+  await interaction.deferReply({ ephemeral: true });
+  const E = createEmojiResolver(interaction.guildId);
+  const targetChannel = interaction.options.getChannel('kenh') || interaction.channel;
   try {
-    await targetChannel.send(panelPayload);
-    await interaction.editReply({
-      content: `${E('status_check')} Đã gửi Panel Thuê SIM thành công tại kênh <#${targetChannel.id}>.`
-    });
+    await targetChannel.send(buildOtpPanel(interaction.guildId));
+    await interaction.editReply({ content: `${E('status_check')} Đã gửi panel Thuê SIM tại <#${targetChannel.id}>.` });
   } catch (error) {
     console.error('[OTP Setup] Send error:', error);
-    await interaction.editReply({
-      content: `${E('status_cross')} Lỗi khi gửi Panel: \`${error.message}\`. Bạn nhớ cấp quyền Send Messages cho Bot.`
-    });
+    await interaction.editReply({ content: `${E('status_cross')} Không thể gửi panel: ${error.message}` });
   }
 }

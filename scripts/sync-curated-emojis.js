@@ -9,6 +9,9 @@ const assets = [
   ['cenar_expiry_date', 'cenar_expiry_date.png'],
   ['cenar_transcript_web', 'cenar_transcript_web.png'],
   ['cenar_activity_search', 'cenar_activity_search.png'],
+  ['cenar_otp_loading', 'cenar_otp_loading.gif'],
+  ['cenar_card_success', 'cenar_card_success.gif'],
+  ['cenar_ctv_crystal', 'cenar_ctv_crystal.gif'],
 ];
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
@@ -31,7 +34,7 @@ client.once(Events.ClientReady, async () => {
       const emoji = await guild.emojis.create({
         attachment: filePath,
         name,
-        reason: 'Cenar warranty, transcript and customer activity UI refresh',
+        reason: 'Cenar curated static and animated UI refresh',
       });
       result.push({ name, id: emoji.id, action: 'created' });
     }

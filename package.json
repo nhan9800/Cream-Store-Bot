@@ -15,6 +15,9 @@
     "publish:birthday-sale": "node scripts/publish-birthday-sale.js",
     "audit:emojis": "node scripts/audit-guild-emojis.js",
     "audit:emojis:apply": "node scripts/audit-guild-emojis.js --apply",
+    "normalize:emojis": "node scripts/normalize-guild-emoji-names.js",
+    "normalize:emojis:apply": "node scripts/normalize-guild-emoji-names.js --apply",
+    "sync:emojis": "node scripts/sync-curated-emojis.js",
     "backup": "node scripts/backup-production.js",
     "verify:backup": "node scripts/verify-backup.js",
     "test": "vitest run"

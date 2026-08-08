@@ -3,6 +3,8 @@ import { db, nowIso } from '../database/db.js';
 import { addWalletBalance } from './walletService.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { applyCustomerRoles } from './roleService.js';
+import { emitAutomationLog, maskSerial } from './automationLogService.js';
+import { decrypt, encrypt } from '../utils/crypto.js';
 import { ContainerBuilder, TextDisplayBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } from 'discord.js';
 
 export const CARD_TOPUP_PROFIT_MARGIN_PERCENT = 3;
@@ -93,8 +95,23 @@ export function buildCardTopupCatalog(fees, profitMarginPercent = CARD_TOPUP_PRO
 
 export function getCardSwapConfig(guildId) {
   const row = db.prepare('SELECT cardswap_partner_id, cardswap_partner_key, cardswap_buy_partner_id, cardswap_buy_partner_key, cardswap_domain, cardswap_charging_fee_add, cardswap_buy_profit_add FROM guild_settings WHERE guild_id = ?').get(guildId);
-  if (!row) return null;
-  return row;
+  const partnerId = String(process.env.CARDSWAP_PARTNER_ID || row?.cardswap_partner_id || '').trim();
+  const partnerKey = String(process.env.CARDSWAP_PARTNER_KEY || decrypt(row?.cardswap_partner_key) || '').trim();
+  if (!row && !partnerId && !partnerKey) return null;
+  return {
+    ...(row || {}),
+    cardswap_partner_id: partnerId || null,
+    cardswap_partner_key: partnerKey || null,
+    cardswap_buy_partner_id: String(process.env.CARDSWAP_BUY_PARTNER_ID || row?.cardswap_buy_partner_id || '').trim() || null,
+    cardswap_buy_partner_key: String(process.env.CARDSWAP_BUY_PARTNER_KEY || decrypt(row?.cardswap_buy_partner_key) || '').trim() || null,
+    cardswap_domain: String(process.env.CARDSWAP_DOMAIN || row?.cardswap_domain || 'card2k.net')
+      .trim()
+      .replace(/^https?:\/\//i, '')
+      .replace(/\/$/, '')
+      .toLowerCase(),
+    cardswap_charging_fee_add: Number(process.env.CARDSWAP_CHARGING_FEE_ADD ?? row?.cardswap_charging_fee_add ?? 3),
+    cardswap_buy_profit_add: Number(process.env.CARDSWAP_BUY_PROFIT_ADD ?? row?.cardswap_buy_profit_add ?? 3000),
+  };
 }
 
 export function saveCardSwapConfig(guildId, configData) {
@@ -105,7 +122,7 @@ export function saveCardSwapConfig(guildId, configData) {
   `);
   stmt.run(
     configData.cardswap_partner_id, 
-    configData.cardswap_partner_key, 
+    encrypt(configData.cardswap_partner_key),
     configData.cardswap_domain, 
     configData.cardswap_charging_fee_add, 
     configData.cardswap_buy_profit_add, 
@@ -121,7 +138,7 @@ export function saveCardSwapBuyConfig(guildId, configData) {
   `);
   stmt.run(
     configData.cardswap_buy_partner_id, 
-    configData.cardswap_buy_partner_key, 
+    encrypt(configData.cardswap_buy_partner_key),
     guildId
   );
 }
@@ -130,11 +147,17 @@ function md5(str) {
   return crypto.createHash('md5').update(str).digest('hex');
 }
 
+function safeHashEqual(left, right) {
+  const a = Buffer.from(String(left || '').toLowerCase(), 'utf8');
+  const b = Buffer.from(String(right || '').toLowerCase(), 'utf8');
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+}
+
 export async function getChargingFees(guildId) {
   const config = getCardSwapConfig(guildId);
   if (!config || !config.cardswap_partner_id) throw new Error('Chưa cấu hình CardSwap API');
   
-  const domain = config.cardswap_domain || 'card2k.com';
+  const domain = config.cardswap_domain || 'card2k.net';
   const url = `https://${domain}/chargingws/v2/getfee?partner_id=${config.cardswap_partner_id}`;
   
   const res = await fetch(url, {
@@ -200,7 +223,7 @@ export async function submitChargingCard(
   `).get(guildId, normalizedTelco, normalizedCode, normalizedSerial);
   if (duplicate) throw new Error('Thẻ này đã được gửi trước đó');
   
-  const domain = config.cardswap_domain || 'card2k.com';
+  const domain = config.cardswap_domain || 'card2k.net';
   const requestId = crypto.randomUUID().replace(/-/g, '').substring(0, 20);
   
   const sign = md5(config.cardswap_partner_key + normalizedCode + normalizedSerial);
@@ -252,14 +275,15 @@ export async function submitChargingCard(
   }
   
   // Update order status if immediate failure
-  if (data.status === 100) {
+  const providerStatus = Number(data?.status);
+  if (providerStatus === 100) {
     db.prepare("UPDATE card_charging_orders SET status = 'FAILED', message = ?, updated_at = ? WHERE request_id = ?").run(data.message, nowIso(), requestId);
     throw new Error(data.message || 'Gửi thẻ thất bại');
   }
   
   // Pending or success will be handled via webhook callback mostly, but wait!
   // Sanbox returns 99 for success/pending.
-  if (data.status !== 99 && data.status !== 1 && data.status !== 2) {
+  if (![99, 1, 2].includes(providerStatus)) {
     db.prepare("UPDATE card_charging_orders SET status = 'FAILED', message = ?, updated_at = ? WHERE request_id = ?").run(data.message || 'Lỗi không xác định', nowIso(), requestId);
     throw new Error(data.message || 'Lỗi xử lý thẻ');
   }
@@ -294,7 +318,7 @@ export async function getCardBalance(guildId) {
   const config = getCardSwapConfig(guildId);
   if (!config || !config.cardswap_partner_id) throw new Error('Chưa cấu hình CardSwap API');
   
-  const domain = config.cardswap_domain || 'card2k.com';
+  const domain = config.cardswap_domain || 'card2k.net';
   const sign = md5(config.cardswap_partner_key + config.cardswap_partner_id + 'getbalance');
   const url = `https://${domain}/api/cardws?partner_id=${config.cardswap_partner_id}&sign=${sign}&command=getbalance`;
   
@@ -308,7 +332,7 @@ export async function checkAvailableCard(guildId, serviceCode, value, qty) {
   const config = getCardSwapConfig(guildId);
   if (!config || !config.cardswap_buy_partner_id) throw new Error('Chưa cấu hình API Mua Thẻ');
   
-  const domain = config.cardswap_domain || 'card2k.com';
+  const domain = config.cardswap_domain || 'card2k.net';
   const sign = md5(config.cardswap_buy_partner_key + config.cardswap_buy_partner_id + 'checkavailable');
   const url = `https://${domain}/api/cardws?partner_id=${config.cardswap_buy_partner_id}&command=checkavailable&service_code=${serviceCode}&value=${value}&qty=${qty}&sign=${sign}`;
   
@@ -321,7 +345,7 @@ export async function buyCard(guildId, customerId, serviceCode, value, qty, tota
   const config = getCardSwapConfig(guildId);
   if (!config || !config.cardswap_buy_partner_id) throw new Error('Chưa cấu hình API Mua Thẻ');
   
-  const domain = config.cardswap_domain || 'card2k.com';
+  const domain = config.cardswap_domain || 'card2k.net';
   const requestId = crypto.randomUUID().replace(/-/g, '').substring(0, 20);
   const command = 'buycard';
   const sign = md5(config.cardswap_buy_partner_key + config.cardswap_buy_partner_id + command + requestId);
@@ -363,6 +387,7 @@ export async function buyCard(guildId, customerId, serviceCode, value, qty, tota
 
 export async function handleCardSwapCallback(query, discordClient) {
   const { status, message, request_id, declared_value, card_value, value, amount, code, serial, telco, trans_id, callback_sign } = query;
+  if (!request_id || !code || !serial || !callback_sign) throw new Error('Missing callback fields');
   
   const order = getChargingOrder(request_id);
   if (!order) throw new Error('Order not found');
@@ -372,7 +397,7 @@ export async function handleCardSwapCallback(query, discordClient) {
   if (!config) throw new Error('Config not found');
 
   const expectedSign = md5(config.cardswap_partner_key + code + serial);
-  if (expectedSign !== callback_sign) throw new Error('Invalid signature');
+  if (!safeHashEqual(expectedSign, callback_sign)) throw new Error('Invalid signature');
 
   const statusNum = Number(status);
   
@@ -420,6 +445,22 @@ export async function handleCardSwapCallback(query, discordClient) {
     })();
     if (!finalized) return;
 
+    await emitAutomationLog(discordClient, {
+      guildId: order.guild_id,
+      customerId: order.customer_id,
+      action: 'CARD_TOPUP_COMPLETED',
+      title: 'GẠCH THẺ ĐÃ HOÀN TẤT',
+      summary: 'Callback đã được xác thực và số dư ví đã được cộng đúng một lần.',
+      reference: request_id,
+      status: 'success',
+      fields: [
+        { label: 'Nhà mạng', value: String(telco || order.telco), emoji: 'payment_success' },
+        { label: 'Serial', value: `\`${maskSerial(serial || order.serial)}\``, emoji: 'icon_id' },
+        { label: 'Giá trị thực', value: `${actualCardValue.toLocaleString('vi-VN')}đ`, emoji: 'payment_money' },
+        { label: 'Đã cộng ví', value: `${userReceives.toLocaleString('vi-VN')}đ`, emoji: 'icon_wallet' },
+      ],
+    });
+
     const E = createEmojiResolver(order.guild_id);
 
     // Gửi tin nhắn
@@ -437,7 +478,7 @@ export async function handleCardSwapCallback(query, discordClient) {
         if (user) {
           const container = new ContainerBuilder().setAccentColor(0x2ECC71);
           container.addTextDisplayComponents(
-            new TextDisplayBuilder().setContent(`## ${E('status_check')} ĐỔI THẺ THÀNH CÔNG!\n\nBạn đã đổi thẻ **${telco} ${Number(card_value).toLocaleString('vi-VN')}đ** thành công.\nBạn nhận được: **${userReceives.toLocaleString('vi-VN')}đ** vào ví.\n> ${E('customer_patron')} Quyền khách hàng Cenar đã được đồng bộ tự động.\n> ${E('status_check')} Trạng thái: ${message}`)
+            new TextDisplayBuilder().setContent(`## ${E('card_success') || E('status_check')} ĐỔI THẺ THÀNH CÔNG!\n\nBạn đã đổi thẻ **${telco} ${Number(card_value).toLocaleString('vi-VN')}đ** thành công.\nBạn nhận được: **${userReceives.toLocaleString('vi-VN')}đ** vào ví.\n> ${E('customer_patron')} Quyền khách hàng Cenar đã được đồng bộ tự động.\n> ${E('status_check')} Trạng thái: ${message}`)
           );
           await user.send({ components: [container], flags: MessageFlags.IsComponentsV2 });
         }
@@ -461,6 +502,21 @@ export async function handleCardSwapCallback(query, discordClient) {
       return true;
     })();
     if (!failed) return;
+
+    await emitAutomationLog(discordClient, {
+      guildId: order.guild_id,
+      customerId: order.customer_id,
+      action: 'CARD_TOPUP_FAILED',
+      title: 'GẠCH THẺ BỊ TỪ CHỐI',
+      summary: message || 'Nhà cung cấp từ chối thẻ.',
+      reference: request_id,
+      status: 'danger',
+      fields: [
+        { label: 'Nhà mạng', value: String(telco || order.telco), emoji: 'status_cross' },
+        { label: 'Serial', value: `\`${maskSerial(serial || order.serial)}\``, emoji: 'icon_id' },
+        { label: 'Mệnh giá khai báo', value: `${Number(declared_value || order.declared_value).toLocaleString('vi-VN')}đ`, emoji: 'payment_money' },
+      ],
+    });
 
     const E = createEmojiResolver(order.guild_id);
     if (discordClient) {

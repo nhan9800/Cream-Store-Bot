@@ -252,6 +252,42 @@ if (process.env.IS_CHILD_BOT === 'true') {
       return;
     }
 
+    // Card2K chỉ cho cấu hình một callback cho mỗi kết nối API. Khi hai bot dùng
+    // chung kết nối, tìm request_id trong cả hai SQLite để callback luôn tới đúng
+    // tiến trình. Việc này cũng giữ nguyên một URL callback duy nhất cho đối tác.
+    if (
+      targetPort === STORE1_PORT
+      && targetUrl.startsWith('/api/public/cardswap/callback')
+    ) {
+      try {
+        const requestId = new URL(targetUrl, 'http://localhost').searchParams.get('request_id');
+        if (requestId && /^[A-Za-z0-9_-]{6,80}$/.test(requestId)) {
+          const Database = (await import('better-sqlite3')).default;
+          const dbFiles = [
+            { path: path.join(process.cwd(), 'data', 'shopbot.sqlite'), port: STORE1_PORT },
+            { path: path.join(process.cwd(), 'data', 'shopbot-store2.sqlite'), port: STORE2_PORT },
+          ];
+          for (const { path: dbPath, port } of dbFiles) {
+            try {
+              const lookupDb = new Database(dbPath, { readonly: true, fileMustExist: true });
+              const order = lookupDb.prepare('SELECT 1 FROM card_charging_orders WHERE request_id = ? LIMIT 1').get(requestId);
+              lookupDb.close();
+              if (order) {
+                targetPort = port;
+                break;
+              }
+            } catch (lookupError) {
+              if (lookupError.code !== 'SQLITE_CANTOPEN') {
+                console.error('[LAUNCHER] Không thể định tuyến callback Card2K:', lookupError.message);
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.error('[LAUNCHER] Callback Card2K không hợp lệ:', error.message);
+      }
+    }
+
     // Standard routing for other URLs
     const connector = http.request({
       hostname: '127.0.0.1',

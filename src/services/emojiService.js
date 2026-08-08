@@ -58,6 +58,9 @@ export const EMOJI_SLOTS = {
   warranty_expiry:    { label: 'Ngày hết hạn',        default: '' },
   transcript_web:     { label: 'Transcript trên web', default: '' },
   customer_patron:    { label: 'Khách hàng Cenar',    default: '' },
+  otp_loading:        { label: 'Đang chờ OTP (GIF)', default: '' },
+  card_success:       { label: 'Thẻ thành công (GIF)', default: '' },
+  ctv_crystal:        { label: 'Điểm nhấn CTV (GIF)', default: '' },
 
   // Status
   status_check:       { label: 'Tích xanh',            default: '✅' },
@@ -174,7 +177,7 @@ export const SLOT_ALIASES = {
   // Payment
   payment_payos: ['payos', 'bank_transfer', 'chuyen_khoan'],
   payment_vietqr: ['vietqr', 'banking', 'ngan_hang'],
-  payment_success: ['payment_success', 'paid', 'da_thanh_toan'],
+  payment_success: ['payment_success', 'paid', 'da_thanh_toan', 'card_success'],
   payment_qr: ['qr_code', 'ma_qr'],
   payment_money: ['money', 'tien', 'price', 'coin', 'cenar_wallet'],
   payment_refund: ['refund', 'hoan_tien'],
@@ -196,13 +199,16 @@ export const SLOT_ALIASES = {
   warranty_expiry: ['cenar_expiry_date', 'expiry_date'],
   transcript_web: ['cenar_transcript_web', 'transcript_web'],
   customer_patron: ['cenar_activity_search', 'customer_activity'],
+  otp_loading: ['cenar_otp_loading', 'otp_loading'],
+  card_success: ['cenar_card_success', 'card_success'],
+  ctv_crystal: ['cenar_ctv_crystal', 'ctv_crystal'],
 
   // Status
   status_check: ['check', 'tick', 'success', 'tich_xanh'],
   status_cross: ['cross', 'fail', 'error', 'dau_x'],
   status_warn: ['warn', 'warning', 'caution', 'canh_bao'],
   status_info: ['info', 'thong_tin'],
-  status_loading: ['loading', 'loading_icon', 'dang_tai'],
+  status_loading: ['loading', 'loading_icon', 'dang_tai', 'otp_loading'],
 
   // Brand
   brand_netflix: ['netflix', 'brand_netflix', 'netflix62'],
@@ -255,7 +261,11 @@ export function autoSyncGuildEmojis(guild) {
   });
 
   for (const [slot, meta] of Object.entries(EMOJI_SLOTS)) {
-    const potentialNames = [slot, ...(SLOT_ALIASES[slot] || [])];
+    const rawNames = [slot, ...(SLOT_ALIASES[slot] || [])];
+    const potentialNames = [...new Set(rawNames.flatMap((name) => [
+      name,
+      name.startsWith('cenar_') ? name : `cenar_${name}`,
+    ]))];
     let matchedEmoji = null;
     for (const name of potentialNames) {
       const cleanName = name.toLowerCase();
@@ -283,7 +293,10 @@ export function autoSyncGuildEmojis(guild) {
           } else {
             const oldEmoji = guild.emojis.cache.get(parsed.id);
             const isMatchingAlias = potentialNames.map(n => n.toLowerCase()).includes(oldEmoji.name.toLowerCase());
-            if (isMatchingAlias && oldEmoji.id !== matchedEmoji.id) {
+            if (
+              oldEmoji.name !== parsed.name
+              || (isMatchingAlias && oldEmoji.id !== matchedEmoji.id)
+            ) {
               shouldUpdate = true;
             }
           }
