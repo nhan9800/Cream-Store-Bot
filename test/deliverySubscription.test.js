@@ -9,6 +9,7 @@ import {
 
 const ORDER_CODE = `TEST_SUB_${Date.now()}`;
 const BACKFILL_ORDER_CODE = `${ORDER_CODE}_BACKFILL`;
+const BACKFILL_TICKET_CHANNEL = `${ORDER_CODE}_CHANNEL`;
 const originalEncryptionKey = process.env.ENCRYPTION_KEY;
 
 const netflixOrder = {
@@ -27,11 +28,13 @@ describe('/giaohang subscription synchronization', () => {
     initDatabase();
     db.prepare('DELETE FROM subscription_accounts WHERE related_order_code IN (?, ?)').run(ORDER_CODE, BACKFILL_ORDER_CODE);
     db.prepare('DELETE FROM orders WHERE order_code = ?').run(BACKFILL_ORDER_CODE);
+    db.prepare('DELETE FROM tickets WHERE channel_id = ?').run(BACKFILL_TICKET_CHANNEL);
   });
 
   afterAll(() => {
     db.prepare('DELETE FROM subscription_accounts WHERE related_order_code IN (?, ?)').run(ORDER_CODE, BACKFILL_ORDER_CODE);
     db.prepare('DELETE FROM orders WHERE order_code = ?').run(BACKFILL_ORDER_CODE);
+    db.prepare('DELETE FROM tickets WHERE channel_id = ?').run(BACKFILL_TICKET_CHANNEL);
     if (originalEncryptionKey === undefined) delete process.env.ENCRYPTION_KEY;
     else process.env.ENCRYPTION_KEY = originalEncryptionKey;
   });
@@ -89,6 +92,21 @@ describe('/giaohang subscription synchronization', () => {
 
   it('backfills a recent delivered Netflix order that is missing from the website', () => {
     const timestamp = new Date().toISOString();
+    const ticket = db.prepare(`
+      INSERT INTO tickets (
+        guild_id, channel_id, customer_id, opened_by_id,
+        ticket_type, status, created_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      'test_delivery_subscription',
+      BACKFILL_TICKET_CHANNEL,
+      '123456789012345678',
+      'test_staff',
+      'ORDER',
+      'CLOSED',
+      timestamp,
+    );
+
     db.prepare(`
       INSERT INTO orders (
         order_code, guild_id, ticket_id, ticket_channel_id, customer_id,
@@ -101,8 +119,8 @@ describe('/giaohang subscription synchronization', () => {
     `).run(
       BACKFILL_ORDER_CODE,
       'test_delivery_subscription',
-      1,
-      'test_ticket_channel',
+      Number(ticket.lastInsertRowid),
+      BACKFILL_TICKET_CHANNEL,
       '123456789012345678',
       'Netflix Premium 1 Tháng',
       1,
