@@ -583,17 +583,27 @@ export function registerInteractionHandler(client, commands) {
           await interaction.reply({ content: `${E_pe('status_cross')} Chỉ **Manager/Admin** mới được chỉnh sửa Panel.`, ephemeral: true });
           return;
         }
+
+        // Nút chỉnh sửa nằm ngay trên panel thật. Ghi nhận lại vị trí này để
+        // tự phục hồi cấu hình cũ nếu channel/message trước đó đã bị xóa.
+        upsertGuildConfig({
+          guild_id: interaction.guildId,
+          ticket_panel_channel_id: interaction.channelId,
+          ticket_panel_message_id: interaction.message.id,
+          updated_by: interaction.user.id,
+        });
+
         const { ModalBuilder, TextInputBuilder, TextInputStyle } = await import('discord.js');
         const modal = new ModalBuilder()
           .setCustomId('ticket:panel:edit:modal')
-          .setTitle('✏️ Chỉnh Sửa Panel Ticket');
+          .setTitle('Chỉnh Sửa Panel Ticket');
 
         const titleInput = new TextInputBuilder()
           .setCustomId('panel_title')
           .setLabel('Tiêu đề (bỏ trống = mặc định)')
           .setStyle(TextInputStyle.Short)
           .setRequired(false)
-          .setPlaceholder('VD: 🎫 Cream Store — Trung Tâm Hỗ Trợ')
+          .setPlaceholder('VD: Cenar Store — Trung Tâm Hỗ Trợ')
           .setValue(guildConfig?.panel_title || '');
 
         const descInput = new TextInputBuilder()
