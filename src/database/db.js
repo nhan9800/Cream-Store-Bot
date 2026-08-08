@@ -416,6 +416,7 @@ export function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_sub_accounts_guild_status ON subscription_accounts (guild_id, status, service_type);
     CREATE INDEX IF NOT EXISTS idx_sub_accounts_renewal ON subscription_accounts (next_renewal_at, status);
     CREATE INDEX IF NOT EXISTS idx_sub_accounts_expiry ON subscription_accounts (expiry_at, status);
+    CREATE INDEX IF NOT EXISTS idx_sub_accounts_related_order ON subscription_accounts (related_order_code);
 
     CREATE INDEX IF NOT EXISTS idx_wallet_trans_customer ON wallet_transactions (guild_id, customer_id);
     CREATE INDEX IF NOT EXISTS idx_wallet_topups_code ON wallet_topup_orders (topup_code);

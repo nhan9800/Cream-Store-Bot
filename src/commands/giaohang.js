@@ -16,6 +16,10 @@ import {
   buildPublicOrderLogV2,
 } from '../utils/embeds.js';
 import { getCenarHub } from '../services/cenarHub.js';
+import {
+  detectDeliverySubscriptionService,
+  syncDeliverySubscription,
+} from '../services/deliverySubscriptionService.js';
 
 export const data = new SlashCommandBuilder()
   .setName('giaohang')
@@ -64,6 +68,7 @@ export async function execute(interaction) {
   const subKeywords = ['youtube', 'netflix', 'spotify', 'canva', 'capcut', 'office', 'zoom', 'chatgpt', 'vpn', 'prime', 'hbo'];
   const productNameLower = order.product_name?.toLowerCase() || '';
   const isSubProduct = subKeywords.some(kw => productNameLower.includes(kw));
+  const trackedSubscriptionService = detectDeliverySubscriptionService(order);
 
   if (isSubProduct) {
     if (!credentialEmail || credentialEmail.trim() === '') {
@@ -75,6 +80,15 @@ export async function execute(interaction) {
     }
   }
 
+  if (trackedSubscriptionService && (!credentialEmail?.trim() || !credentialPassword?.trim())) {
+    await interaction.editReply({
+      content: `${E('status_warn')} Đơn **${order.product_name}** cần nhập đủ \`gmail\` và \`mat_khau\` để tạo bản ghi gia hạn trên website.`,
+      ephemeral: true,
+    });
+    return;
+  }
+
+  const completedDuringDelivery = order.status !== 'COMPLETED';
   if (order.status !== 'COMPLETED') {
     if (order.total_amount > 0 && !['PAID', 'FREE'].includes(order.payment_status)) {
       await interaction.editReply({ content: `${E('status_warn')} Đơn chưa thanh toán xong nên bot chưa thể tự đồng bộ sang hoàn thành khi giao hàng.`, ephemeral: true });
@@ -110,7 +124,7 @@ export async function execute(interaction) {
   const shouldShowClaimButton = Boolean(credentialEmail && credentialPassword) && !sendDirect;
   let dmMessage = null;
   const persist = (messageId = null) => saveDelivery(order.order_code, interaction.user.id, credentialEmail, credentialPassword, credentialProfile, credentialPin, deliveryLoginUrl, claimNotes, dmChannel.id, messageId);
-  const storedOrder = persist(null);
+  let storedOrder = persist(null);
 
   if (Boolean(credentialEmail && credentialPassword) && sendDirect) {
     dmMessage = await dmChannel.send({ embeds: buildDeliveryCredentialEmbeds(storedOrder), components: buildDeliveryLoginComponents(storedOrder) }).catch(() => null);
@@ -118,7 +132,7 @@ export async function execute(interaction) {
       await interaction.editReply({ content: `${E('status_warn')} Không gửi được DM giao hàng cho khách hàng.`, ephemeral: true });
       return;
     }
-    persist(dmMessage.id);
+    storedOrder = persist(dmMessage.id);
   } else {
     const { container, flags } = buildDeliveryNoticeV2(storedOrder);
     dmMessage = await dmChannel.send({
@@ -129,16 +143,38 @@ export async function execute(interaction) {
       await interaction.editReply({ content: `${E('status_warn')} Không gửi được DM cho khách hàng.`, ephemeral: true });
       return;
     }
-    persist(dmMessage.id);
+    storedOrder = persist(dmMessage.id);
+  }
+
+  let subscriptionRecord = null;
+  let subscriptionSyncError = null;
+  if (trackedSubscriptionService) {
+    try {
+      subscriptionRecord = syncDeliverySubscription({
+        order: storedOrder,
+        gmailEmail: credentialEmail,
+        gmailPassword: credentialPassword,
+        profile: credentialProfile,
+        customerDiscordName: customer.tag || customer.username,
+      });
+    } catch (error) {
+      subscriptionSyncError = error;
+      console.error(`[SUBSCRIPTION-SYNC] ${order.order_code}: ${error.message}`);
+    }
   }
   
   const hub = getCenarHub();
   if (hub) {
-    hub.deliverOrder(order.order_code, {
+    await hub.deliverOrder(order.order_code, {
       credential_email: credentialEmail,
       credential_password: credentialPassword,
       staff_id: interaction.user.id
     }).catch(e => console.error('[HUB] Lỗi deliver:', e.message));
+    if (completedDuringDelivery) {
+      await hub.completeOrder(order.order_code, {
+        staff_id: interaction.user.id,
+      }).catch(e => console.error('[HUB] Lỗi complete:', e.message));
+    }
   }
 
   const ticketChannel = await interaction.guild.channels.fetch(order.ticket_channel_id).catch(() => null);
@@ -150,5 +186,13 @@ export async function execute(interaction) {
   // Luôn gửi bảng Feedback 5 sao vào ticket sau khi giao hàng (dù trước đó đã hoàn thành hay chưa)
   await sendCompletedTicketFlow({ guild: interaction.guild, order, actorId: interaction.user.id, supportId: interaction.user.id });
 
-  await interaction.editReply({ content: `${E('status_check')} Đã gửi DM giao hàng cho khách của đơn ${order.order_code} và đồng bộ trạng thái hoàn thành.`, ephemeral: true });
+  const subscriptionStatus = subscriptionRecord
+    ? `\n${E('cenar_verified')} Đã đồng bộ **${trackedSubscriptionService}** lên website · Subscription ID **${subscriptionRecord.id}**.`
+    : subscriptionSyncError
+      ? `\n${E('status_warn')} DM đã gửi nhưng đồng bộ website lỗi: ${subscriptionSyncError.message}`
+      : '';
+  await interaction.editReply({
+    content: `${E('status_check')} Đã gửi DM giao hàng cho khách của đơn ${order.order_code} và đồng bộ trạng thái hoàn thành.${subscriptionStatus}`,
+    ephemeral: true,
+  });
 }

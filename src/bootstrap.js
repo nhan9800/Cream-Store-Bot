@@ -6,12 +6,18 @@ import { startScheduler } from './services/schedulerService.js';
 import { startWebhookServer } from './services/webhookServer.js';
 import { startPresenceRotation } from './services/presenceService.js';
 import { startOtpAutoCheck } from './services/otpAutoCheckService.js';
+import { backfillRecentDeliverySubscriptions } from './services/deliverySubscriptionService.js';
 
 import { initErrorLogger } from './services/errorLogService.js';
 import { autoSetupDiscountBoard } from './services/autoSetupDiscountBoardService.js';
 
 export async function buildClient() {
   initDatabase();
+  const subscriptionBackfill = backfillRecentDeliverySubscriptions({ lookbackDays: 14 });
+  console.log(`[SUBSCRIPTION-SYNC] scanned=${subscriptionBackfill.scanned} created=${subscriptionBackfill.created} skipped=${subscriptionBackfill.skipped} failed=${subscriptionBackfill.failed.length}`);
+  for (const failure of subscriptionBackfill.failed) {
+    console.error(`[SUBSCRIPTION-SYNC] ${failure.orderCode}: ${failure.error}`);
+  }
 
   const commands = await loadCommands();
   const client = new Client(getClientOptions());
