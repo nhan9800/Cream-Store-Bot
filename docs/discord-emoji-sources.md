@@ -26,6 +26,7 @@ Store guild. They are used by the shared Components V2 resolver:
 
 All command payloads pass through the custom-emoji resolver and the final
 payload sanitizer. Native Unicode emoji are discarded instead of being used as
-a fallback. Emoji inventory cleanup is content-hash based: no byte-identical
-duplicates were found in the 178 existing guild emojis, so no existing asset
-was deleted blindly.
+a fallback. During the inventory pass, five unused name duplicates were
+removed after checking code and slot references (`15` animated, lowercase
+`gold`, the second `iron`, lowercase `diamond`, and the older `cr_grok`). The
+server now has 178 emoji and no byte-identical duplicate group.
