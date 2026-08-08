@@ -27,7 +27,8 @@ import {
 } from './formatters.js';
 import { getEmojiMap } from '../services/emojiService.js';
 import { T, fmt, h2, h3, subtext, fieldQ, fields, vnd, lines as joinLines, statusPill, SP } from './embedHelpers.js';
-import { accentFor, brandName } from './uiKit.js';
+import { accentFor, brandName, normalizeV2Text, textDisplay } from './uiKit.js';
+import { createEmojiResolver } from './emojiHelper.js';
 
 // Parses a custom emoji string "<a:name:id>" or "<:name:id>" into a component object
 // for use with ButtonBuilder.setEmoji() / StringSelectMenuOptionBuilder
@@ -73,27 +74,20 @@ export function buildTicketPanelV2(customConfig = {}) {
   const imageUrl = customConfig.panel_image_url || null;
   const guildId = customConfig.guild_id;
 
-  // Load emoji map (custom > default)
-  const em = guildId ? getEmojiMap(guildId) : {};
-  const E = (slot, fallback = '') => em[slot] || fallback;
+  // Luôn lấy emoji qua resolver: custom đã cấu hình > bộ custom mặc định của bot.
+  // Resolver tự loại fallback Unicode nên Components V2 không bị lẫn emoji máy.
+  const E = createEmojiResolver(guildId);
 
   const container = new ContainerBuilder().setAccentColor(accentFor('primary'));
 
-  if (hasCustomDesc) {
-    // Chế độ tuỳ chỉnh: chỉ hiện tiêu đề + nội dung user nhập (không kèm services mặc định)
-    container.addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(`## ${title}\n${customConfig.panel_description}`)
-    );
-  } else {
-    // Chế độ mặc định
-    container.addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(
-        `## ${title}\n` +
-        `> Chào mừng bạn đến với **${brand.name || 'Cenar Store'}**!\n` +
-        `> Bấm nút bên dưới để mở ticket. Chọn **đúng loại** giúp staff phục vụ bạn nhanh hơn.`
-      )
-    );
-  }
+  const intro = hasCustomDesc
+    ? `## ${title}\n${customConfig.panel_description}`
+    : [
+      `## ${title}`,
+      `> ${E('ticket_user')} Chào mừng bạn đến với **${brand.name || 'Cenar Store'}**!`,
+      `> ${E('ticket_open')} Chọn đúng mục bên dưới để bot mở luồng hỗ trợ phù hợp.`,
+    ].join('\n');
+  container.addTextDisplayComponents(new TextDisplayBuilder().setContent(normalizeV2Text(intro)));
 
   // Ảnh banner hiển thị inline qua MediaGallery
   if (imageUrl) {
@@ -104,53 +98,50 @@ export function buildTicketPanelV2(customConfig = {}) {
     );
   }
 
-  container.addSeparatorComponents(
-    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
-  );
+  container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
 
   // Chỉ hiện services mặc định khi user CHƯA tuỳ chỉnh nội dung
   if (!hasCustomDesc) {
-    container.addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(
-        `${E('panel_order')}  **Mua Hàng** — Netflix, Spotify, YouTube Premium, Nicho...\n` +
-        `${E('panel_support')}  **Hỗ Trợ** — Tài khoản lỗi, thắc mắc về dịch vụ\n` +
-        `${E('panel_complaint')}  **Khiếu Nại** — Phản ánh trải nghiệm chưa tốt\n` +
-        `${E('panel_partnership')}  **Hợp Tác** — Đề xuất hợp tác kinh doanh\n` +
-        `${E('panel_warranty')}  **Bảo Hành** — Yêu cầu bảo hành sản phẩm đã mua`
-      )
-    );
-    container.addSeparatorComponents(
-      new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
-    );
+    const serviceLines = [
+      `${E('panel_order')} **Mua hàng** — Netflix, Spotify, YouTube Premium và các dịch vụ số`,
+      `${E('panel_support')} **Hỗ trợ** — Tài khoản lỗi hoặc cần hướng dẫn`,
+      `${E('panel_complaint')} **Khiếu nại** — Phản ánh trải nghiệm chưa tốt`,
+      `${E('panel_partnership')} **Hợp tác** — Đề xuất hợp tác kinh doanh`,
+      `${E('panel_warranty')} **Bảo hành** — Yêu cầu bảo hành sản phẩm đã mua`,
+    ].map((line) => line.trim()).join('\n');
+    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(normalizeV2Text(serviceLines)));
+    container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
   }
 
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(
-      `> _Sau khi mở ticket, bot sẽ hướng dẫn bạn từng bước._\n` +
-      `— _${brand.footer || brand.name}_`
+      normalizeV2Text([
+        `> ${E('icon_sparkle')} Sau khi mở ticket, bot sẽ hướng dẫn bạn từng bước.`,
+        subtext(`${E('icon_heart_purple')} ${brand.footer || brand.name}`),
+      ].join('\n'))
     )
   );
 
 
   // Buttons row 1
   const btnOrder = new ButtonBuilder().setCustomId('ticket:create:ORDER').setLabel('Mua Hàng').setStyle(ButtonStyle.Primary);
-  const btnSupport = new ButtonBuilder().setCustomId('ticket:create:SUPPORT').setLabel('Ho Tro').setStyle(ButtonStyle.Secondary);
-  const btnComplaint = new ButtonBuilder().setCustomId('ticket:create:COMPLAINT').setLabel('Khieu Nai').setStyle(ButtonStyle.Danger);
-  const btnPartnership = new ButtonBuilder().setCustomId('ticket:create:PARTNERSHIP').setLabel('Hop Tac').setStyle(ButtonStyle.Success);
-  const e1 = ec(em, 'panel_order'); if (e1) btnOrder.setEmoji(e1);
-  const e2 = ec(em, 'panel_support'); if (e2) btnSupport.setEmoji(e2);
-  const e3 = ec(em, 'panel_complaint'); if (e3) btnComplaint.setEmoji(e3);
-  const e4 = ec(em, 'panel_partnership'); if (e4) btnPartnership.setEmoji(e4);
+  const btnSupport = new ButtonBuilder().setCustomId('ticket:create:SUPPORT').setLabel('Hỗ Trợ').setStyle(ButtonStyle.Secondary);
+  const btnComplaint = new ButtonBuilder().setCustomId('ticket:create:COMPLAINT').setLabel('Khiếu Nại').setStyle(ButtonStyle.Danger);
+  const btnPartnership = new ButtonBuilder().setCustomId('ticket:create:PARTNERSHIP').setLabel('Hợp Tác').setStyle(ButtonStyle.Success);
+  const e1 = E.component('panel_order'); if (e1) btnOrder.setEmoji(e1);
+  const e2 = E.component('panel_support'); if (e2) btnSupport.setEmoji(e2);
+  const e3 = E.component('panel_complaint'); if (e3) btnComplaint.setEmoji(e3);
+  const e4 = E.component('panel_partnership'); if (e4) btnPartnership.setEmoji(e4);
   const row1 = new ActionRowBuilder().addComponents(btnOrder, btnSupport, btnComplaint, btnPartnership);
 
   // Buttons row 2
   const btnWarranty = new ButtonBuilder().setCustomId('ticket:warranty:panel').setLabel('Bảo Hành Sản Phẩm').setStyle(ButtonStyle.Secondary);
   const btnAppeal = new ButtonBuilder().setCustomId('ytb:appeal:apply').setLabel('Kháng 12 Tháng YT').setStyle(ButtonStyle.Primary);
   const btnEdit = new ButtonBuilder().setCustomId('ticket:panel:edit').setLabel('Sửa Panel').setStyle(ButtonStyle.Secondary);
-  const e5 = ec(em, 'panel_warranty'); if (e5) btnWarranty.setEmoji(e5);
-  const appealEmoji = ec(em, 'ticket_claim');
+  const e5 = E.component('panel_warranty'); if (e5) btnWarranty.setEmoji(e5);
+  const appealEmoji = E.component('ticket_claim');
   if (appealEmoji) btnAppeal.setEmoji(appealEmoji);
-  const e6 = ec(em, 'panel_edit'); if (e6) btnEdit.setEmoji(e6);
+  const e6 = E.component('panel_edit'); if (e6) btnEdit.setEmoji(e6);
   const row2 = new ActionRowBuilder().addComponents(btnWarranty, btnAppeal, btnEdit);
 
   return { container, rows: [row1, row2], flags: MessageFlags.IsComponentsV2 };
@@ -223,9 +214,9 @@ const TICKET_TYPE_META = {
     color: () => 0x5865F2,
     intro: 'Yêu cầu kháng cáo giới hạn 12 tháng gia đình YouTube của bạn đã được tiếp nhận. Vui lòng đọc kỹ các quy định sau và chuẩn bị phối hợp cùng Admin.',
     steps: [
-      '⚠️ **1. Luôn online**: Bạn cần duy trì online. Khi Admin/Chủ shop tag tên, bạn cần phản hồi ngay lập tức để tiến hành kháng.',
-      '⏳ **2. Kế hoạch dự phòng**: Nếu không kháng được, bắt buộc phải đổi email khác hoặc chờ 7 - 15 ngày để bắt đầu lượt kháng thứ 2.',
-      '💳 **3. Phí dịch vụ (Khách vãng lai)**: Miễn phí nếu mua YouTube tại shop. Phí 20,000đ/lượt thành công đối với khách vãng lai.',
+      '**Luôn online** — Khi Admin/Chủ shop tag tên, bạn cần phản hồi ngay để tiến hành kháng.',
+      '**Kế hoạch dự phòng** — Nếu chưa kháng được, cần đổi email khác hoặc chờ 7–15 ngày để thử lại.',
+      '**Phí dịch vụ** — Miễn phí với đơn YouTube tại shop; khách vãng lai trả 20.000đ/lượt thành công.',
     ],
   },
 };
@@ -261,6 +252,7 @@ const TICKET_V2_ACCENT = {
   COMPLAINT:   accentFor('danger'),
   PARTNERSHIP: accentFor('success'),
   WARRANTY:    accentFor('warning'),
+  APPEAL:      accentFor('info'),
 };
 
 const TICKET_V2_STEPS = {
@@ -289,6 +281,11 @@ const TICKET_V2_STEPS = {
     { slot: 'icon_search', text: '**Gửi bằng chứng** — Ảnh/video lỗi giúp staff xử lý nhanh hơn' },
     { slot: 'icon_clock', text: '**Thời gian xử lý** — Thường từ 5–30 phút tùy mức độ' },
   ],
+  APPEAL: [
+    { slot: 'status_warn', text: '**Luôn online** — Phản hồi ngay khi Admin hoặc Chủ shop tag tên' },
+    { slot: 'icon_clock', text: '**Kế hoạch dự phòng** — Đổi email khác hoặc chờ 7–15 ngày nếu chưa kháng được' },
+    { slot: 'payment_money', text: '**Phí dịch vụ** — Miễn phí với đơn YouTube tại shop; khách vãng lai 20.000đ/lượt thành công' },
+  ],
 };
 
 export function buildTicketWelcomeV2(ticketCode, customerId, ticketType = 'ORDER', relatedOrderCode = null, productName = null, guildId = null) {
@@ -296,46 +293,40 @@ export function buildTicketWelcomeV2(ticketCode, customerId, ticketType = 'ORDER
   const accentColor = TICKET_V2_ACCENT[ticketType] ?? accentFor('primary');
   const steps = TICKET_V2_STEPS[ticketType] ?? TICKET_V2_STEPS.ORDER;
   const brand = brandConfig('store');
-  const em = guildId ? getEmojiMap(guildId) : {};
-  const E = (slot, fallback = '') => em[slot] || fallback;
+  const E = createEmojiResolver(guildId);
 
   const container = new ContainerBuilder().setAccentColor(accentColor);
 
   // Header — title h2, info dạng quoted fields
-  container.addTextDisplayComponents(
-    new TextDisplayBuilder().setContent(joinLines(
-      `## ${E(meta.titleSlot)}  ${meta.title}`,
-      `> ${E('ticket_user')} Xin chào ${/^\\d+$/.test(customerId) ? fmt.user(customerId) : 'Khách Vãng Lai (Web)'}!`,
-      `> ${E('ticket_open')} ${fmt.b('Mã Ticket:')} ${fmt.code(ticketCode)}`,
-      relatedOrderCode ? `> ${E('order_id')} ${fmt.b('Liên kết Đơn:')} ${fmt.code(relatedOrderCode)}` : null,
-      productName ? `> ${E('order_product')} ${fmt.b('Sản phẩm:')} ${fmt.b(productName)}` : null,
-      `> ${E('icon_clock')} ${fmt.b('Thời gian:')} ${T.rel(new Date())}`,
-    ))
-  );
+  container.addTextDisplayComponents(textDisplay(joinLines(
+    `## ${E(meta.titleSlot)} ${meta.title}`,
+    `> ${E('ticket_user')} Xin chào ${/^\\d+$/.test(customerId) ? fmt.user(customerId) : 'Khách Vãng Lai (Web)'}!`,
+    `> ${E('ticket_open')} ${fmt.b('Mã ticket:')} ${fmt.code(ticketCode)}`,
+    relatedOrderCode ? `> ${E('order_id')} ${fmt.b('Đơn liên quan:')} ${fmt.code(relatedOrderCode)}` : null,
+    productName ? `> ${E('order_product')} ${fmt.b('Sản phẩm:')} ${fmt.b(productName)}` : null,
+    `> ${E('icon_clock')} ${fmt.b('Khởi tạo:')} ${T.rel(new Date())}`,
+  )));
 
   container.addSeparatorComponents(
     new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
   );
 
-  // Intro + steps — heading h3
-  container.addTextDisplayComponents(
-    new TextDisplayBuilder().setContent(joinLines(
-      `### ${E('status_info')}  ${fmt.b(meta.intro)}`,
-      '',
-      ...steps.map((s) => `${E(s.slot)} ${s.text}`),
-    ))
-  );
+  // Một dòng định hướng, sau đó là ba bước cùng nhịp để quét nhanh.
+  container.addTextDisplayComponents(textDisplay(joinLines(
+    `### ${E('status_info')} Hướng dẫn xử lý`,
+    meta.intro,
+    '',
+    ...steps.map((s) => `${E(s.slot)} ${s.text}`),
+  )));
 
   container.addSeparatorComponents(
     new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
   );
 
   // Footer subtext
-  container.addTextDisplayComponents(
-    new TextDisplayBuilder().setContent(
-      subtext(`${E('icon_heart_purple')} ${brand.footer || brand.name}`)
-    )
-  );
+  container.addTextDisplayComponents(textDisplay(
+    subtext(`${E('icon_heart_purple')} ${brand.footer || brand.name}`)
+  ));
 
   return { container, flags: MessageFlags.IsComponentsV2 };
 }
@@ -345,7 +336,7 @@ export function buildTicketWelcomeV2(ticketCode, customerId, ticketType = 'ORDER
 // ═══════════════════════════════════════════════
 export function buildPaymentMethodSelector(order) {
   const em = order.guild_id ? getEmojiMap(order.guild_id) : {};
-  const E = (slot, fallback = '') => em[slot] || fallback;
+  const E = createEmojiResolver(order.guild_id);
 
   const container = new ContainerBuilder().setAccentColor(accentFor('warning'));
 
@@ -486,7 +477,7 @@ export function buildWarrantySelectEmbed() {
 
 export function buildWarrantySelectV2(guildId = null) {
   const em = guildId ? getEmojiMap(guildId) : {};
-  const E = (slot, fallback = '') => em[slot] || fallback;
+  const E = createEmojiResolver(guildId);
   const container = new ContainerBuilder().setAccentColor(accentFor('warning'));
 
   container.addTextDisplayComponents(
@@ -559,7 +550,7 @@ export function buildOrderCreatedEmbed(order, orderChannelId) {
 export function buildOrderCreatedV2(order, orderChannelId) {
   const hasPay = order.total_amount > 0;
   const em = order.guild_id ? getEmojiMap(order.guild_id) : {};
-  const E = (slot, fallback = '') => em[slot] || fallback;
+  const E = createEmojiResolver(order.guild_id);
   const container = new ContainerBuilder().setAccentColor(accentFor(hasPay ? 'primary' : 'success'));
 
   // Header — mention khách ngay trong header (gộp tin thừa, chống spam)
@@ -592,7 +583,8 @@ export function buildOrderCreatedV2(order, orderChannelId) {
     .setCustomId(`order:cancel:${order.order_code}`)
     .setLabel('Hủy Đơn')
     .setStyle(ButtonStyle.Danger);
-  if (em.order_cancel) cancelBtn.setEmoji(em.order_cancel);
+  const cancelEmoji = E.component('order_cancel');
+  if (cancelEmoji) cancelBtn.setEmoji(cancelEmoji);
   const actionRow = new ActionRowBuilder().addComponents(cancelBtn);
 
   return { container, actionRow, flags: MessageFlags.IsComponentsV2 };
@@ -602,7 +594,7 @@ export function buildOrderCreatedV2(order, orderChannelId) {
 export function buildOrderLogV2Update(order) {
   const hasPay = order.total_amount > 0;
   const em = order.guild_id ? getEmojiMap(order.guild_id) : {};
-  const E = (slot, fallback = '') => em[slot] || fallback;
+  const E = createEmojiResolver(order.guild_id);
 
   const accentMap = {
     CANCELLED:       0xEF4444,
@@ -685,7 +677,7 @@ export function buildQueuePositionEmbed(order, position, totalInQueue) {
 export function buildQueuePositionV2(order, position, totalInQueue) {
   const groupName = normalizeQueueGroup(order.product_name) || 'đơn hàng';
   const em = order.guild_id ? getEmojiMap(order.guild_id) : {};
-  const E = (slot, fallback = '') => em[slot] || fallback;
+  const E = createEmojiResolver(order.guild_id);
   const container = new ContainerBuilder().setAccentColor(accentFor('info'));
 
   container.addTextDisplayComponents(
@@ -789,7 +781,7 @@ export function buildPaymentPendingComponents(orderCode, checkoutUrl = null) {
 // ═══ Payment QR V2 (Components V2 — QR inline qua MediaGallery attachment://) ═══
 export function buildPaymentQrV2({ order, attachmentName = null, checkoutUrl = null, hasImage = false }) {
   const em = order.guild_id ? getEmojiMap(order.guild_id) : {};
-  const E = (slot, fallback = '') => em[slot] || fallback;
+  const E = createEmojiResolver(order.guild_id);
 
   const expireText = order.payment_expired_at
     ? `<t:${Math.floor(new Date(order.payment_expired_at).getTime() / 1000)}:R>`
@@ -843,13 +835,13 @@ export function buildPaymentQrV2({ order, attachmentName = null, checkoutUrl = n
   const actionRow = new ActionRowBuilder();
   if (checkoutUrl && /^https?:\/\//i.test(checkoutUrl)) {
     const payBtn = new ButtonBuilder().setLabel('Thanh Toán Ngay').setStyle(ButtonStyle.Link).setURL(checkoutUrl);
-    const ePay = ec(em, 'payment_payos'); if (ePay) payBtn.setEmoji(ePay);
+    const ePay = E.component('payment_payos'); if (ePay) payBtn.setEmoji(ePay);
     actionRow.addComponents(payBtn);
   }
   const regenBtn = new ButtonBuilder().setCustomId(`payment:regen:${order.order_code}`).setLabel('Tạo Hoá Đơn Mới').setStyle(ButtonStyle.Secondary);
   const queueBtn = new ButtonBuilder().setCustomId(`queue:view:${order.order_code}`).setLabel('Xem Hàng Chờ').setStyle(ButtonStyle.Secondary);
-  const eRefresh = ec(em, 'icon_refresh'); if (eRefresh) regenBtn.setEmoji(eRefresh);
-  const eQueue = ec(em, 'order_queue'); if (eQueue) queueBtn.setEmoji(eQueue);
+  const eRefresh = E.component('icon_refresh'); if (eRefresh) regenBtn.setEmoji(eRefresh);
+  const eQueue = E.component('order_queue'); if (eQueue) queueBtn.setEmoji(eQueue);
   actionRow.addComponents(regenBtn, queueBtn);
 
   return { container, actionRow, flags: MessageFlags.IsComponentsV2 };
@@ -857,7 +849,7 @@ export function buildPaymentQrV2({ order, attachmentName = null, checkoutUrl = n
 
 export function buildPaymentSuccessEmbed(order, amountText = null, transactionContent = null) {
   const em = order.guild_id ? getEmojiMap(order.guild_id) : {};
-  const E = (slot) => em[slot] || '';
+  const E = createEmojiResolver(order.guild_id);
 
   const amountDisplay = amountText ?? formatCurrency(order.amount_paid || order.total_amount);
   const productDisplay = formatOrderProduct(order.quantity, order.product_name);
@@ -916,9 +908,9 @@ export function buildPaymentSuccessEmbed(order, amountText = null, transactionCo
 }
 
 export function buildPaymentSuccessDmEmbed(order) {
-  // Lấy emoji custom (theo guild của order, fallback unicode)
+  // Lấy emoji custom theo guild của order.
   const em = order.guild_id ? getEmojiMap(order.guild_id) : {};
-  const E = (slot, fallback = '') => em[slot] || fallback;
+  const E = createEmojiResolver(order.guild_id);
 
   const desc = joinLines(
     h2(`${E('payment_success')}  Đã Nhận Thanh Toán`),
@@ -945,7 +937,7 @@ export function buildPaymentSuccessDmEmbed(order) {
 // ═══════════════════════════════════════════════
 export function buildOrderCompletedMainEmbed(order) {
   const em = order.guild_id ? getEmojiMap(order.guild_id) : {};
-  const E = (slot, fallback = '') => em[slot] || fallback;
+  const E = createEmojiResolver(order.guild_id);
 
   const desc = joinLines(
     h2(`${E('order_complete')}  Đơn Hàng Hoàn Thành`),
@@ -1004,7 +996,7 @@ export function buildCompletionDmEmbed(order) {
 // ═══ Order Completed V2 (gộp completion + info + nhắc feedback vào 1 container) ═══
 export function buildOrderCompletedV2(order, staffId, supportId = null) {
   const em = order.guild_id ? getEmojiMap(order.guild_id) : {};
-  const E = (slot, fallback = '') => em[slot] || fallback;
+  const E = createEmojiResolver(order.guild_id);
   const store = brandName('store');
 
   const container = new ContainerBuilder().setAccentColor(accentFor('primary'));
@@ -1061,7 +1053,7 @@ export function buildOrderCompletedV2(order, staffId, supportId = null) {
 
 export function buildPublicOrderLogEmbed(order) {
   const em = order.guild_id ? getEmojiMap(order.guild_id) : {};
-  const E = (slot, fallback = '') => em[slot] || fallback;
+  const E = createEmojiResolver(order.guild_id);
 
   const color = 0x22c55e; // Green COMPLETED color
 
@@ -1086,7 +1078,7 @@ export function buildPublicOrderLogEmbed(order) {
 
 export function buildPublicOrderLogV2(order) {
   const em = order.guild_id ? getEmojiMap(order.guild_id) : {};
-  const E = (slot, fallback = '') => em[slot] || fallback;
+  const E = createEmojiResolver(order.guild_id);
 
   const ticketVal = order.ticket_channel_id
     ? `<#${order.ticket_channel_id}>`
@@ -1222,7 +1214,7 @@ export function buildQuickFeedbackAckEmbed(order, stars) {
 
 export function buildQuickFeedbackAckV2(order, stars) {
   const em = order.guild_id ? getEmojiMap(order.guild_id) : {};
-  const E = (slot, fallback = '') => em[slot] || fallback;
+  const E = createEmojiResolver(order.guild_id);
   const starEmoji = E('icon_star');
   const starBar = starEmoji ? starEmoji.repeat(Math.max(1, Math.min(5, stars))) : `${stars}/5`;
   const accent = stars >= 4 ? 'success' : stars >= 3 ? 'warning' : 'danger';
@@ -1251,7 +1243,7 @@ export function buildFeedbackV2({ member, order, stars, content }) {
   const safeOrderCode = String(order?.order_code ?? order?.payment_code ?? '').trim() || 'KHONG_RO_MA_DON';
   const guildId = order?.guild_id ?? null;
   const em = guildId ? getEmojiMap(guildId) : {};
-  const E = (slot, fallback = '') => em[slot] || fallback;
+  const E = createEmojiResolver(guildId);
   const starBar = toStars(stars, guildId);
   const accent = stars >= 4 ? 'success' : stars >= 3 ? 'warning' : 'danger';
 
@@ -1316,7 +1308,7 @@ export function buildDeliveryNoticeEmbed(order) {
 // ═══ Delivery Notice V2 (Components V2) ═══
 export function buildDeliveryNoticeV2(order) {
   const em = order.guild_id ? getEmojiMap(order.guild_id) : {};
-  const E = (slot, fallback = '') => em[slot] || fallback;
+  const E = createEmojiResolver(order.guild_id);
   const store = brandName('store');
 
   const container = new ContainerBuilder().setAccentColor(accentFor('primary'));
@@ -1558,7 +1550,7 @@ export function buildCustomerProfileEmbed(user, profile, orders) {
 // ═══ Customer Profile V2 (Components V2) ═══
 export function buildCustomerProfileV2(user, profile, orders, points, guildId = null) {
   const em = guildId ? getEmojiMap(guildId) : {};
-  const E = (slot, fallback = '') => em[slot] || fallback;
+  const E = createEmojiResolver(guildId);
 
   const container = new ContainerBuilder().setAccentColor(accentFor('info'));
 
@@ -1760,7 +1752,7 @@ export function buildPaymentWaitingAckEmbed(order) {
 // ═══════════════════════════════════════════════
 export function buildDashboardEmbed(summary, topProducts = [], recentLogs = [], guildId = null) {
   const em = guildId ? getEmojiMap(guildId) : {};
-  const E = (slot, fallback = '') => em[slot] || fallback;
+  const E = createEmojiResolver(guildId);
   const MEDAL_SLOTS = ['icon_gold', 'icon_silver', 'icon_bronze'];
 
   // Build description đẹp với heading + grouped stats
@@ -1849,7 +1841,7 @@ export function buildBlacklistEmbed(user, flag) {
 export function buildCreditOfferV2(creditInfo, customerId, guildId = null) {
   const brand = brandConfig('store');
   const em = guildId ? getEmojiMap(guildId) : {};
-  const E = (slot, fallback = '') => em[slot] || fallback;
+  const E = createEmojiResolver(guildId);
 
   const container = new ContainerBuilder().setAccentColor(0x57F287); // Emerald Green
 

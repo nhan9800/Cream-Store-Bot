@@ -209,7 +209,7 @@ export async function handleOtpInteraction(interaction) {
         const topupData = await createTopupCheckout(interaction.guildId, interaction.user.id, amount);
         const container = new ContainerBuilder().setAccentColor(0x3498db);
         container.addTextDisplayComponents(
-          new TextDisplayBuilder().setContent(`### ${E('payment_payos') || '💰'} QUÉT MÃ QR ĐỂ NẠP TIỀN\n> Vui lòng quét mã QR bên dưới bằng ứng dụng ngân hàng hoặc Momo để nạp **${amount.toLocaleString('vi-VN')}đ** vào ví.\n> Nội dung chuyển khoản: \`${topupData.topupCode}\`\n\n*Hệ thống sẽ tự động cộng tiền trong 3-10 giây sau khi chuyển khoản thành công.*`)
+          new TextDisplayBuilder().setContent(`### ${E('payment_payos')} QUÉT MÃ QR ĐỂ NẠP TIỀN\n> Vui lòng quét mã QR bên dưới bằng ứng dụng ngân hàng hoặc Momo để nạp **${amount.toLocaleString('vi-VN')}đ** vào ví.\n> Nội dung chuyển khoản: \`${topupData.topupCode}\`\n\n*Hệ thống sẽ tự động cộng tiền trong 3-10 giây sau khi chuyển khoản thành công.*`)
         );
         
         const qrBuffer = await QRCode.toBuffer(topupData.qrCode, { width: 400, margin: 2, color: { dark: '#000000', light: '#ffffff' } });
@@ -261,7 +261,7 @@ export async function handleOtpInteraction(interaction) {
       if (completedOrders.length > 0) {
         content += `**Các phiên OTP gần đây:**\n`;
         completedOrders.forEach(o => {
-          content += `> ${E('tickgreen') || '✅'} **${o.service_name}** (\`${o.phone_number}\`): \`${o.otp_code}\`\n`;
+          content += `> ${E('status_check')} **${o.service_name}** (\`${o.phone_number}\`): \`${o.otp_code}\`\n`;
         });
       }
 

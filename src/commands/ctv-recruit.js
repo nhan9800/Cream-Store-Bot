@@ -14,7 +14,7 @@ export async function execute(interaction) {
 
   if (!settings.recruit_channel_id) {
     return interaction.reply({
-      content: `${E('status_cross', '❌')} Bạn cần cấu hình kênh tuyển dụng bằng lệnh \`/setup-ctv\` trước.`,
+      content: `${E('status_cross')} Bạn cần cấu hình kênh tuyển dụng bằng lệnh \`/setup-ctv\` trước.`,
       ephemeral: true
     });
   }
@@ -22,28 +22,28 @@ export async function execute(interaction) {
   const channel = await interaction.guild.channels.fetch(settings.recruit_channel_id).catch(() => null);
   if (!channel) {
     return interaction.reply({
-      content: `${E('status_cross', '❌')} Kênh tuyển dụng đã cấu hình không tồn tại hoặc bot không có quyền truy cập.`,
+      content: `${E('status_cross')} Kênh tuyển dụng đã cấu hình không tồn tại hoặc bot không có quyền truy cập.`,
       ephemeral: true
     });
   }
 
   const storeName = brandName();
 
-  const headerLine = [E('icon_sparkle', '✨'), `TUYỂN DỤNG CỘNG TÁC VIÊN — ${storeName.toUpperCase()}`]
+  const headerLine = [E('icon_sparkle'), `TUYỂN DỤNG CỘNG TÁC VIÊN — ${storeName.toUpperCase()}`]
     .filter(Boolean).join(' ');
 
   const bodyLines = [
-    `### ${E('icon_group', '👥')} Trở thành Cộng Tác Viên (Reseller) của Cenar Store!`,
+    `### ${E('icon_group')} Trở thành Cộng Tác Viên (Reseller) của Cenar Store!`,
     `Bạn muốn kinh doanh các sản phẩm giải trí & học tập bản quyền nhưng không có vốn, không có nguồn hàng?`,
     `Hãy gia nhập đội ngũ CTV của Cenar Store để nhận được nguồn hàng giá tốt nhất thị trường cùng hệ thống tự động hóa hoàn toàn.`,
     '',
-    `#### ${E('icon_gift', '🎁')} **QUYỀN LỢI CTV:**`,
-    `* ${E('icon_price', '💰')} **Mua hàng giá sỉ siêu rẻ:** Chiết khấu 10% - 30% trực tiếp trên hóa đơn so với giá bán lẻ.`,
-    `* ${E('icon_duration', '⏱️')} **Giao hàng ưu tiên:** Đơn hàng của CTV được hệ thống tự động đẩy lên đầu hàng đợi để Staff xử lý nhanh nhất.`,
-    `* ${E('icon_trophy', '🏆')} **Hỗ trợ VIP 24/7:** Ticket của CTV sẽ đổi tên có tag \`⚡-ctv-\` ưu tiên hiển thị hàng đầu.`,
-    `* ${E('icon_location', '📍')} Không ép doanh số tháng đầu, tự do làm chủ thời gian.`,
+    `#### ${E('icon_gift')} **QUYỀN LỢI CTV:**`,
+    `* ${E('icon_price')} **Mua hàng giá sỉ siêu rẻ:** Chiết khấu 10% - 30% trực tiếp trên hóa đơn so với giá bán lẻ.`,
+    `* ${E('icon_duration')} **Giao hàng ưu tiên:** Đơn hàng của CTV được hệ thống tự động đẩy lên đầu hàng đợi để Staff xử lý nhanh nhất.`,
+    `* ${E('icon_trophy')} **Hỗ trợ VIP 24/7:** Ticket của CTV được ưu tiên hiển thị và xử lý.`,
+    `* ${E('icon_location')} Không ép doanh số tháng đầu, tự do làm chủ thời gian.`,
     '',
-    `#### ${E('status_warn', '⚠️')} **YÊU CẦU ỨNG TUYỂN:**`,
+    `#### ${E('status_warn')} **YÊU CẦU ỨNG TUYỂN:**`,
     `* Có kênh bán hàng riêng (Profile cá nhân, Group, Page, Tiktok, Telegram...).`,
     `* Tuyệt đối nghiêm túc trong bán hàng, không scam/lừa đảo khách hàng của bạn.`,
     '',
@@ -71,7 +71,7 @@ export async function execute(interaction) {
   });
 
   await interaction.reply({
-    content: `${E('status_check', '✅')} Đã gửi Panel tuyển CTV vào kênh <#${settings.recruit_channel_id}>.`,
+    content: `${E('status_check')} Đã gửi Panel tuyển CTV vào kênh <#${settings.recruit_channel_id}>.`,
     ephemeral: true
   });
 }

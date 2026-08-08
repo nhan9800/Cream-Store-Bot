@@ -75,12 +75,12 @@ export async function handleCardSwapInteractions(interaction) {
     const txs = getWalletTransactions(guildId, targetUser.id, 5);
 
     const container = new ContainerBuilder().setAccentColor(0x3d5dff);
-    let desc = `### ${E('icon_wallet') || '💰'} VÍ ĐIỆN TỬ CỦA BẠN\n> **Số dư hiện tại:** \`${formatCurrency(balance)}\`\n`;
+    let desc = `### ${E('icon_wallet')} VÍ ĐIỆN TỬ CỦA BẠN\n> **Số dư hiện tại:** \`${formatCurrency(balance)}\`\n`;
     
     if (txs.length > 0) {
       desc += `\n**Lịch sử giao dịch gần đây:**\n`;
       const history = txs.map(tx => {
-        const icon = tx.amount >= 0 ? (E('icon_green') || '🟩') : (E('icon_red') || '🟥');
+        const icon = tx.amount >= 0 ? E('status_check') : E('status_cross');
         const sign = tx.amount >= 0 ? '+' : '';
         return `${icon} \`${sign}${formatCurrency(tx.amount)}\` - ${tx.description} (<t:${Math.floor(new Date(tx.created_at).getTime()/1000)}:R>)`;
       }).join('\n');
@@ -150,7 +150,7 @@ export async function handleCardSwapInteractions(interaction) {
         
       const container = new ContainerBuilder().setAccentColor(0x3498DB);
       container.addTextDisplayComponents(
-        new TextDisplayBuilder().setContent(`### ${E('icon_wallet') || '💳'} ĐỔI THẺ CÀO LẤY SỐ DƯ VÍ\nVui lòng chọn nhà mạng của thẻ bạn muốn gạch:`)
+        new TextDisplayBuilder().setContent(`### ${E('icon_wallet')} ĐỔI THẺ CÀO LẤY SỐ DƯ VÍ\nVui lòng chọn nhà mạng của thẻ bạn muốn gạch:`)
       );
       
       const row = new ActionRowBuilder().addComponents(selectMenu);
@@ -205,7 +205,7 @@ export async function handleCardSwapInteractions(interaction) {
       const result = await submitChargingCard(interaction.guild.id, interaction.user.id, telco, code, serial, amount);
       const successContainer = new ContainerBuilder().setAccentColor(0x2ECC71);
       successContainer.addTextDisplayComponents(
-        new TextDisplayBuilder().setContent(`### ${E('tick_green') || '✅'} ĐÃ GỬI THẺ THÀNH CÔNG!\n> Yêu cầu của bạn đang được xử lý (Request ID: \`${result.request_id}\`).\n> Hệ thống sẽ gửi thông báo cho bạn khi thẻ được duyệt xong.`)
+        new TextDisplayBuilder().setContent(`### ${E('status_check')} ĐÃ GỬI THẺ THÀNH CÔNG!\n> Yêu cầu của bạn đang được xử lý (Request ID: \`${result.request_id}\`).\n> Hệ thống sẽ gửi thông báo cho bạn khi thẻ được duyệt xong.`)
       );
       await interaction.editReply({
         components: [successContainer],
@@ -238,7 +238,7 @@ export async function handleCardSwapInteractions(interaction) {
       
     const container = new ContainerBuilder().setAccentColor(0x3498DB);
     container.addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(`### ${E('icon_cart') || '🛒'} MUA THẺ CÀO\nVui lòng chọn loại thẻ bạn muốn mua:`)
+      new TextDisplayBuilder().setContent(`### ${E('icon_cart')} MUA THẺ CÀO\nVui lòng chọn loại thẻ bạn muốn mua:`)
     );
       
     const row = new ActionRowBuilder().addComponents(selectMenu);
@@ -267,7 +267,7 @@ export async function handleCardSwapInteractions(interaction) {
       
     const container = new ContainerBuilder().setAccentColor(0x3498DB);
     container.addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(`### ${E('icon_cart') || '🛒'} MUA THẺ ${telco.toUpperCase()}\nVui lòng chọn mệnh giá:`)
+      new TextDisplayBuilder().setContent(`### ${E('icon_cart')} MUA THẺ ${telco.toUpperCase()}\nVui lòng chọn mệnh giá:`)
     );
       
     const row = new ActionRowBuilder().addComponents(selectMenu);
@@ -346,7 +346,7 @@ export async function handleCardSwapInteractions(interaction) {
       
       const container = new ContainerBuilder().setAccentColor(0x2ECC71);
       container.addTextDisplayComponents(
-        new TextDisplayBuilder().setContent(`### ${E('tick_green') || '✅'} GIAO DỊCH MUA THẺ THÀNH CÔNG\nBạn đã mua thành công **${qty} thẻ ${telco} ${amount.toLocaleString('vi-VN')}đ**.\nTổng thanh toán: **${totalToPay.toLocaleString('vi-VN')}đ**\n\n**THÔNG TIN THẺ:**\n${cardsText}`)
+        new TextDisplayBuilder().setContent(`### ${E('status_check')} GIAO DỊCH MUA THẺ THÀNH CÔNG\nBạn đã mua thành công **${qty} thẻ ${telco} ${amount.toLocaleString('vi-VN')}đ**.\nTổng thanh toán: **${totalToPay.toLocaleString('vi-VN')}đ**\n\n**THÔNG TIN THẺ:**\n${cardsText}`)
       );
 
       await interaction.editReply({ components: [container], flags: MessageFlags.IsComponentsV2 });

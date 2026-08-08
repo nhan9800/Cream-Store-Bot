@@ -63,9 +63,32 @@ export function container({ accent = 'primary' } = {}) {
 
 /** Thêm 1 TextDisplay (content là chuỗi đã format sẵn bằng embedHelpers). */
 export function addText(c, content) {
-  if (content === null || content === undefined || content === '') return c;
-  c.addTextDisplayComponents(new TextDisplayBuilder().setContent(String(content)));
+  const normalized = normalizeV2Text(content);
+  if (!normalized) return c;
+  c.addTextDisplayComponents(new TextDisplayBuilder().setContent(normalized));
   return c;
+}
+
+/**
+ * Chuẩn hóa nội dung TextDisplay trước khi gửi lên Discord.
+ * Components V2 rất dễ bị cảm giác rời rạc khi mỗi builder tự thêm nhiều
+ * dòng trống; quy tắc chung chỉ giữ tối đa một dòng trống giữa các section.
+ */
+export function normalizeV2Text(content) {
+  if (content === null || content === undefined) return '';
+  return String(content)
+    .replace(/\r\n?/g, '\n')
+    .split('\n')
+    .map((line) => line.trimEnd())
+    .join('\n')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim();
+}
+
+/** TextDisplay đã chuẩn hóa, dùng cho các builder V2 không dùng addText(). */
+export function textDisplay(content) {
+  const normalized = normalizeV2Text(content);
+  return normalized ? new TextDisplayBuilder().setContent(normalized) : null;
 }
 
 /** Header: h2(title) + optional dòng subtitle (đã format sẵn). */
@@ -82,7 +105,7 @@ export function addFieldsBlock(c, pairs) {
 
 /** Separator (đường kẻ ngang). */
 export function addSeparator(c, { divider = true, size = 'small' } = {}) {
-  const spacing = size === 'large' ? SeparatorSpacingSize.Small : SeparatorSpacingSize.Small;
+  const spacing = size === 'large' ? SeparatorSpacingSize.Large : SeparatorSpacingSize.Small;
   c.addSeparatorComponents(new SeparatorBuilder().setDivider(divider).setSpacing(spacing));
   return c;
 }

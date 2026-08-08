@@ -8,8 +8,9 @@ import {
   SeparatorBuilder, SeparatorSpacingSize,
   ActionRowBuilder, ButtonBuilder, ButtonStyle,
 } from 'discord.js';
-import { getEmojiMap } from '../src/services/emojiService.js';
 import { fmt, subtext } from '../src/utils/embedHelpers.js';
+import { createEmojiResolver } from '../src/utils/emojiHelper.js';
+import { normalizeV2Text } from '../src/utils/uiKit.js';
 import { config } from '../src/config.js';
 
 const GUILD_ID = process.env.GUILD_ID;
@@ -45,8 +46,7 @@ client.once('ready', async () => {
     }
     console.log('SERVICE_CHANNEL =', `#${chan.name}`, chan.id);
 
-    const em = getEmojiMap(GUILD_ID);
-    const E = (slot) => em[slot] || '';
+    const E = createEmojiResolver(GUILD_ID);
 
     if (DRY) { console.log('DRY_RUN — không gửi.'); process.exit(0); }
 
@@ -63,11 +63,11 @@ client.once('ready', async () => {
     const intro = new ContainerBuilder().setAccentColor(config.accentColorPrimary || 0xF3A6D7);
 
     intro.addTextDisplayComponents(
-      new TextDisplayBuilder().setContent([
+      new TextDisplayBuilder().setContent(normalizeV2Text([
         `# ${E('brand_discord')}  DỊCH VỤ SETUP DISCORD & BOT CUSTOM`,
         `> ${E('icon_sparkle')} ${fmt.b('Trọn gói từ A–Z — Chính chủ — Bảo trì dài hạn')}`,
         subtext('Cenar Store cung cấp dịch vụ thiết kế, lập trình và vận hành máy chủ Discord chuyên nghiệp'),
-      ].join('\n'))
+      ].join('\n')))
     );
 
     intro.addSeparatorComponents(
@@ -76,21 +76,17 @@ client.once('ready', async () => {
 
     // ── Combo trọn gói ──
     intro.addTextDisplayComponents(
-      new TextDisplayBuilder().setContent([
+      new TextDisplayBuilder().setContent(normalizeV2Text([
         `## ${E('icon_gem')}  Combo Trọn Gói — Chỉ từ ${fmt.b('500.000đ')}`,
-        '',
         `${E('ticket_claim')} ${fmt.b('Setup Máy Chủ Discord Đầy Đủ')}`,
         `> Cấu trúc kênh chuyên nghiệp, phân quyền role, icon server, banner, quy tắc.`,
-        '',
         `${E('icon_brain')}  ${fmt.b('Bot Custom Hoàn Chỉnh')}`,
         `> Ticket hỗ trợ, log đơn hàng, bảo hành, xác minh OAuth2, chống spam/raid.`,
-        '',
         `${E('icon_sparkle')} ${fmt.b('Boost Server')}`,
         `> Gói Boost để mở khóa tính năng nâng cao cho server của bạn (theo gói boost).`,
-        '',
         `${E('icon_calendar')}  ${fmt.b('Bảo Trì Định Kỳ')} — ${fmt.b('30.000đ/tháng')}`,
         `> Hỗ trợ lỗi, cập nhật tính năng, đảm bảo bot luôn online và ổn định.`,
-      ].join('\n'))
+      ].join('\n')))
     );
 
     intro.addSeparatorComponents(
@@ -99,19 +95,17 @@ client.once('ready', async () => {
 
     // ── Dịch vụ thêm ──
     intro.addTextDisplayComponents(
-      new TextDisplayBuilder().setContent([
+      new TextDisplayBuilder().setContent(normalizeV2Text([
         `## ${E('icon_art')}  Dịch Vụ Bổ Sung (Giá Thương Lượng)`,
-        '',
         `${E('order_product')}  ${fmt.b('Tính Năng Bot Custom')}`,
         `> Lập trình thêm tính năng theo yêu cầu riêng của server bạn.`,
         `> Tích hợp API ngoài, mini-game, hệ thống kinh tế, v.v.`,
-        `> ${subtext('Báo giá theo từng tính năng — liên hệ để được tư vấn miễn phí')}`,
-        '',
+        subtext('Báo giá theo từng tính năng — liên hệ để được tư vấn miễn phí'),
         `${E('icon_brain')}  ${fmt.b('Website Bán Hàng Custom')}`,
         `> Website hiện đại tích hợp với bot Discord, quản lý đơn hàng trực tuyến.`,
         `> Dashboard quản trị, payment gateway, thống kê doanh thu tự động.`,
-        `> ${subtext('Báo giá theo quy mô dự án — liên hệ để được tư vấn miễn phí')}`,
-      ].join('\n'))
+        subtext('Báo giá theo quy mô dự án — liên hệ để được tư vấn miễn phí'),
+      ].join('\n')))
     );
 
     intro.addSeparatorComponents(
@@ -119,24 +113,23 @@ client.once('ready', async () => {
     );
 
     intro.addTextDisplayComponents(
-      new TextDisplayBuilder().setContent([
+      new TextDisplayBuilder().setContent(normalizeV2Text([
         `## ${E('status_check')}  Cam Kết Chất Lượng`,
-        `> ${E('icon_sparkle')} Bàn giao trong **24–48 giờ** tùy độ phức tạp`,
-        `> ${E('icon_sparkle')} Hỗ trợ kỹ thuật trực tiếp từ developer`,
-        `> ${E('icon_sparkle')} Bảo hành lỗi phát sinh trong **7 ngày** sau bàn giao`,
-        `> ${E('icon_sparkle')} Cam kết bảo mật thông tin — không chia sẻ source code`,
-        '',
+        `${E('icon_sparkle')} Bàn giao trong **24–48 giờ** tùy độ phức tạp`,
+        `${E('icon_sparkle')} Hỗ trợ kỹ thuật trực tiếp từ developer`,
+        `${E('icon_sparkle')} Bảo hành lỗi phát sinh trong **7 ngày** sau bàn giao`,
+        `${E('icon_sparkle')} Cam kết bảo mật thông tin — không chia sẻ source code`,
         subtext(`${E('icon_heart_purple')} Cenar Store — Uy Tín & Chất Lượng Hàng Đầu`),
-      ].join('\n'))
+      ].join('\n')))
     );
 
     const ticketRow = new ActionRowBuilder().addComponents(
       new ButtonBuilder()
         .setCustomId('ticket:create:ORDER')
-        .setLabel('Mo Ticket Tu Van')
+        .setLabel('Mở Ticket Tư Vấn')
         .setStyle(ButtonStyle.Success),
       new ButtonBuilder()
-        .setLabel('Bang Gia Chi Tiet')
+        .setLabel('Bảng Giá Chi Tiết')
         .setStyle(ButtonStyle.Link)
         .setURL('https://cenarstore.xyz')
     );

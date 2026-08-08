@@ -90,7 +90,18 @@ const fallbackEmojis = {
   icon_heart:         '<:purple_heart_glow:1327541911749263360>',
   icon_heart_purple:  '<:purple_heart_glow:1327541911749263360>',
   icon_cart:          '<:cr_carttt:1348626032747614268>',
-  icon_wallet:        '<:cr_cardd:1348624271437463552>'
+  icon_wallet:        '<:cr_cardd:1348624271437463552>',
+  icon_brain:         '<:chatgopete:1481154927677014098>',
+  icon_announce:      '<a:Arrow2:1367139234833498113>',
+  icon_group:         '<:2895managerbadge:1483326442245849200>',
+  icon_search:        '<:verifybadge:1481127479702847646>',
+  icon_tip:           '<a:starxoay:1481141954346483845>',
+  icon_doc:           '<:cr_shop:1392749981332541501>',
+  icon_art:           '<:cr_adobe:1366632539032125470>',
+  icon_green:         '<a:tickgreen:1384069022831874169>',
+  icon_red:           '<a:tick_red51:1384069065626222632>',
+  icon_prev:          '<a:Arrow2:1367139234833498113>',
+  icon_next:          '<a:Arrow2:1367139234833498113>',
 };
 
 /**
