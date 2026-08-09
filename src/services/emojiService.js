@@ -528,8 +528,84 @@ export function resolveSelectMenuEmoji(guildId, emojiStr, fallback = null) {
  */
 export function resolveProductEmoji(guildId, emojiStr) {
   if (!emojiStr) return '';
-  if (EMOJI_SLOTS[emojiStr]) return getEmoji(guildId, emojiStr);
-  return parseDiscordEmoji(emojiStr)?.formatted || '';
+
+  const raw = String(emojiStr).trim();
+  const parsed = parseDiscordEmoji(raw);
+  const legacyName = raw.match(/^:([a-zA-Z0-9_]+):$/)?.[1];
+  const lookupName = (parsed?.name || legacyName || raw).toLowerCase();
+  const slot = EMOJI_SLOTS[raw]
+    ? raw
+    : Object.entries(SLOT_ALIASES).find(([slotName, aliases]) => (
+      slotName.toLowerCase() === lookupName
+      || aliases.some((alias) => alias.toLowerCase() === lookupName)
+    ))?.[0];
+
+  const guildCache = global.discordClient?.guilds?.cache.get(guildId)?.emojis?.cache;
+  const globalCache = global.discordClient?.emojis?.cache;
+  const cache = guildCache?.size ? guildCache : globalCache;
+  const formatCached = (emoji) => emoji
+    ? (emoji.animated ? `<a:${emoji.name}:${emoji.id}>` : `<:${emoji.name}:${emoji.id}>`)
+    : '';
+
+  // A full Discord mention is safe only while its ID still exists. If an emoji
+  // was renamed, rebuild the mention with the live name from cache.
+  if (parsed) {
+    const cachedById = cache?.get(parsed.id);
+    if (cachedById) return formatCached(cachedById);
+    if (!cache?.size) return parsed.formatted;
+  }
+
+  if (slot) {
+    const configured = getEmoji(guildId, slot);
+    const configuredParsed = parseDiscordEmoji(configured);
+    if (configuredParsed) {
+      const cachedConfigured = cache?.get(configuredParsed.id);
+      if (cachedConfigured) return formatCached(cachedConfigured);
+      if (!cache?.size) return configuredParsed.formatted;
+    }
+  }
+
+  // Legacy catalog values such as :spotify2: may refer to an emoji that was
+  // later normalized to cenar_spotify2. Resolve either live name when present.
+  const cachedByName = cache?.find?.((emoji) => {
+    const name = String(emoji.name || '').toLowerCase();
+    return name === lookupName || name === `cenar_${lookupName}`;
+  });
+  return formatCached(cachedByName);
+}
+
+/**
+ * Render product names that may still contain legacy `:emoji_name:` tokens.
+ * Invalid/deleted tokens are removed instead of being exposed as broken text.
+ * The optional resolver lets callers use their verified custom-emoji fallback
+ * for a known slot when the guild database has not been auto-synced yet.
+ *
+ * @param {string} guildId
+ * @param {string} productName
+ * @param {(slot: string) => string} [fallbackResolver]
+ * @returns {string}
+ */
+export function formatProductDisplayName(guildId, productName, fallbackResolver = null) {
+  const raw = String(productName ?? '').trim();
+  if (!raw) return '';
+
+  const resolveToken = (token) => {
+    const parsed = parseDiscordEmoji(token);
+    const legacyName = token.match(/^:([a-zA-Z0-9_]+):$/)?.[1];
+    const lookupName = (parsed?.name || legacyName || '').toLowerCase();
+    const slot = Object.entries(SLOT_ALIASES).find(([slotName, aliases]) => (
+      slotName.toLowerCase() === lookupName
+      || aliases.some((alias) => alias.toLowerCase() === lookupName)
+    ))?.[0];
+    return resolveProductEmoji(guildId, token)
+      || (slot && typeof fallbackResolver === 'function' ? fallbackResolver(slot) : '')
+      || '';
+  };
+
+  return raw
+    .replace(/<a?:[a-zA-Z0-9_]+:\d+>|:[a-zA-Z0-9_]+:/g, resolveToken)
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 

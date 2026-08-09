@@ -48,7 +48,7 @@ import { deliverTranscript, sendCompletedFlow, updateOrderLogMessage } from '../
 import { closeTicket, createTicket, getOpenTicketByCustomer, getTicketByChannelId, getTicketById } from '../services/ticketService.js';
 import { exportTicketTranscript } from '../services/transcriptService.js';
 import { openWarrantyTicket, buildWarrantyCustomerConfirmV2 } from '../services/warrantyService.js';
-import { resolveSelectMenuEmoji, resolveProductEmoji } from '../services/emojiService.js';
+import { resolveSelectMenuEmoji, resolveProductEmoji, formatProductDisplayName } from '../services/emojiService.js';
 import { handlePartnerApplyStart, handlePartnerApplyModal, handlePartnerApprove, handlePartnerReject, handleCtvApplyStart, handleCtvApplyModal, handleCtvApprove, handleCtvReject } from '../services/partnerAndCtvHandlers.js';
 import { isCustomerCtv } from '../services/ctvService.js';
 import {
@@ -1292,6 +1292,12 @@ export function registerInteractionHandler(client, commands) {
             return;
           }
 
+          const productDisplay = formatProductDisplayName(
+            interaction.guildId,
+            order.product_name || 'YouTube Premium',
+            E,
+          ) || 'YouTube Premium';
+
           // Cập nhật trạng thái đơn hàng về COMPLETED
           let updatedOrder = null;
           if (isAltDb) {
@@ -1325,7 +1331,7 @@ export function registerInteractionHandler(client, commands) {
                   '',
                   `${E('ticket_user')} **Khách Hàng:** <@${ticket.customer_id}>`,
                   `${E('order_id')} **Mã Đơn Hàng:** \`${orderCode}\``,
-                  `${E('order_product')} **Sản Phẩm:** ${order.product_name || 'YouTube Premium'}`,
+                  `${E('order_product')} **Sản Phẩm:** ${productDisplay}`,
                   `${E('ticket_open')} **Kênh Hỗ Trợ:** <#${ticket.channel_id}>`,
                   `${E('icon_clock')} **Thời Gian:** <t:${Math.floor(Date.now() / 1000)}:F>`
                 ].join('\n'))
@@ -1347,7 +1353,7 @@ export function registerInteractionHandler(client, commands) {
               .setTitle(`${E('status_check')} XÁC NHẬN BẢO HÀNH THÀNH CÔNG`)
               .setDescription(
                 `> ${E('icon_sparkle')} Đơn hàng \`${orderCode}\` của bạn đã được bảo hành thành công!\n\n` +
-                `${E('order_product')} **Sản Phẩm:** ${order.product_name || 'YouTube Premium'}\n` +
+                `${E('order_product')} **Sản Phẩm:** ${productDisplay}\n` +
                 `${E('icon_key')} **Hướng Dẫn:** Vui lòng kiểm tra hộp thư Gmail của bạn để tham gia vào nhóm gia đình nhé!`
               )
               .setTimestamp()
@@ -1364,7 +1370,7 @@ export function registerInteractionHandler(client, commands) {
               .setTitle(`${E('status_check')} BẢO HÀNH THÀNH CÔNG`)
               .setDescription(
                 `> ${E('icon_sparkle')} Chào <@${ticket.customer_id}>, yêu cầu bảo hành cho đơn hàng \`${orderCode}\` của bạn đã được hoàn tất!\n\n` +
-                `${E('order_product')} **Sản Phẩm:** ${order.product_name || 'YouTube Premium'}\n` +
+                `${E('order_product')} **Sản Phẩm:** ${productDisplay}\n` +
                 `${E('icon_key')} **Hướng Dẫn:** Vui lòng kiểm tra hộp thư Gmail của bạn để tham gia vào nhóm gia đình nhé!`
               )
               .setTimestamp();
@@ -1537,6 +1543,12 @@ export function registerInteractionHandler(client, commands) {
             return;
           }
 
+          const productDisplay = formatProductDisplayName(
+            interaction.guildId,
+            order.product_name || 'YouTube Premium',
+            E,
+          ) || 'YouTube Premium';
+
           // Cập nhật trạng thái đơn hàng về COMPLETED
           const updatedOrder = setOrderStatus(orderCode, 'COMPLETED');
           if (updatedOrder) {
@@ -1586,7 +1598,7 @@ export function registerInteractionHandler(client, commands) {
                   '',
                   `${E('ticket_user')} **Khách Hàng:** <@${ticket.customer_id}>`,
                   `${E('order_id')} **Mã Đơn Hàng:** \`${orderCode}\``,
-                  `${E('order_product')} **Sản Phẩm:** ${order.product_name || 'YouTube Premium'}`,
+                  `${E('order_product')} **Sản Phẩm:** ${productDisplay}`,
                   `${E('ticket_open')} **Kênh Hỗ Trợ:** <#${ticket.channel_id}>`,
                   `${E('icon_clock')} **Thời Gian:** <t:${Math.floor(Date.now() / 1000)}:F>`
                 ].join('\n'))

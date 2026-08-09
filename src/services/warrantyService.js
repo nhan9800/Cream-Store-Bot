@@ -11,6 +11,7 @@ import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { T, subtext } from '../utils/embedHelpers.js';
 import { accentFor, brandName } from '../utils/uiKit.js';
 import { config } from '../config.js';
+import { formatProductDisplayName } from './emojiService.js';
 
 /**
  * Dữ liệu form bảo hành từ modal
@@ -94,6 +95,7 @@ export function normalizeWarrantyFormData(order, formData = {}) {
  */
 export function buildWarrantyTicketOpenedV2({ order, ticket, channel, formData, guildId }) {
   const E = createEmojiResolver(guildId);
+  const productDisplay = formatProductDisplayName(guildId, order.product_name, E) || 'Chưa xác định';
 
   const container = new ContainerBuilder().setAccentColor(accentFor('warning'));
 
@@ -112,7 +114,7 @@ export function buildWarrantyTicketOpenedV2({ order, ticket, channel, formData, 
     new TextDisplayBuilder().setContent([
       `### ${E('icon_clipboard')} Hồ Sơ Đơn Hàng`,
       `${E('order_id')} **Mã đơn** — \`${order.order_code}\``,
-      `${E('order_product')} **Sản phẩm** — ${order.product_name || 'Chưa xác định'}`,
+      `${E('order_product')} **Sản phẩm** — ${productDisplay}`,
       `${E('ticket_user')} **Khách hàng** — <@${order.customer_id}>`,
       `${E('ticket_open')} **Kênh xử lý** — ${channel}`,
     ].join('\n'))
@@ -160,6 +162,7 @@ export function buildWarrantyTicketOpenedV2({ order, ticket, channel, formData, 
  */
 export function buildWarrantyLogV2({ order, ticket, channel, formData, actorId, guildId }) {
   const E = createEmojiResolver(guildId);
+  const productDisplay = formatProductDisplayName(guildId, order.product_name, E) || 'N/A';
 
   const container = new ContainerBuilder().setAccentColor(accentFor('warning'));
 
@@ -178,7 +181,7 @@ export function buildWarrantyLogV2({ order, ticket, channel, formData, actorId, 
     new TextDisplayBuilder().setContent([
       `${E('ticket_user')} **Khách Hàng** — <@${order.customer_id}>`,
       `${E('order_id')} **Mã Đơn** — \`${order.order_code}\``,
-      `${E('order_product')} **Sản Phẩm** — ${order.product_name || 'N/A'}`,
+      `${E('order_product')} **Sản Phẩm** — ${productDisplay}`,
       `${E('payment_money')} **Giá Trị** — \`${order.total_amount ? order.total_amount.toLocaleString('vi-VN') + 'đ' : 'N/A'}\``,
       `${E('ticket_open')} **Kênh Bảo Hành** — ${channel}`,
       `${E('ticket_staff')} **Mở Bởi** — <@${actorId}>`,
@@ -242,6 +245,7 @@ export function buildWarrantyLogV2({ order, ticket, channel, formData, actorId, 
  */
 export function buildWarrantyCustomerConfirmV2({ order, channel, guildId }) {
   const E = createEmojiResolver(guildId);
+  const productDisplay = formatProductDisplayName(guildId, order.product_name, E) || 'N/A';
 
   const container = new ContainerBuilder().setAccentColor(accentFor('warning'));
 
@@ -259,7 +263,7 @@ export function buildWarrantyCustomerConfirmV2({ order, channel, guildId }) {
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent([
       `${E('order_id')} **Đơn Hàng** — \`${order.order_code}\``,
-      `${E('order_product')} **Sản Phẩm** — ${order.product_name || 'N/A'}`,
+      `${E('order_product')} **Sản Phẩm** — ${productDisplay}`,
       `${E('ticket_open')} **Kênh Hỗ Trợ** — ${channel}`,
       '',
       subtext(`${E('icon_clock')} Thời gian xử lý thường từ 5–30 phút. Cảm ơn bạn đã kiên nhẫn chờ đợi.`),
