@@ -222,11 +222,11 @@ export const SLOT_ALIASES = {
   status_loading: ['loading', 'loading_icon', 'dang_tai', 'otp_loading'],
 
   // Brand
-  brand_netflix: ['netflix', 'brand_netflix', 'netflix62'],
+  brand_netflix: ['price_netflix', 'netflix', 'brand_netflix', 'netflix62'],
   brand_spotify: ['spotify', 'brand_spotify', 'spotify2', 'spotify_app_logo10'],
   brand_youtube: ['youtube', 'brand_youtube'],
-  brand_chatgpt: ['chatgpt', 'brand_chatgpt', 'cr_chatgpt'],
-  brand_nitro: ['nitro', 'brand_nitro', 'discord_nitro', '9836flyingnitroboost'],
+  brand_chatgpt: ['price_chatgpt', 'chatgpt', 'brand_chatgpt', 'cr_chatgpt'],
+  brand_nitro: ['price_nitro', 'nitro', 'brand_nitro', 'discord_nitro', '9836flyingnitroboost'],
   brand_boost: ['boost', 'brand_boost', 'booster', 'discord_boost', '3825boosterorange', '9836flyingnitroboost'],
   brand_discord: ['discord', 'brand_discord'],
   brand_adobe: ['adobe', 'cr_adobe', 'photoshop_cc_icon3'],
@@ -252,7 +252,8 @@ export const SLOT_ALIASES = {
   icon_location: ['location', 'dia_diem'],
   icon_settings: ['settings', 'cai_dat', 'cenar_admin'],
   icon_key: ['key', 'chia_khoa', 'verifybadge'],
-  icon_link: ['link', 'lien_ket']
+  icon_link: ['link', 'lien_ket'],
+  icon_cart: ['price_cart', 'cart', 'shopping_cart', 'gio_hang']
 };
 
 /**

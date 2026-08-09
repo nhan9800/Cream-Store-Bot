@@ -81,11 +81,11 @@ const fallbackEmojis = {
   status_loading:     '<a:redload:1459179959158571119>',
 
   // Brands
-  brand_netflix:      '<:Netflix:1481133651319328789>',
+  brand_netflix:      '<:cenar_price_netflix:1535910620828803113>',
   brand_spotify:      '<:spotify:1459181297288220704>',
   brand_youtube:      '<:youtube:1373734824342327297>',
-  brand_chatgpt:      '<:chatgopete:1481154927677014098>',
-  brand_nitro:        '<:discord_nitro:1384901794475282523>',
+  brand_chatgpt:      '<:cenar_price_chatgpt:1535910616748007464>',
+  brand_nitro:        '<:cenar_price_nitro:1535910618782240768>',
   brand_boost:        '<:boost:1327543332171284532>',
   brand_discord:      '<:discord_nitro:1384901794475282523>',
   brand_adobe:        '<:cr_adobe:1366632539032125470>',
@@ -118,7 +118,7 @@ const fallbackEmojis = {
   icon_clipboard:     '<:cr_shop:1392749981332541501>',
   icon_heart:         '<:cenar_tim:1535691544387002508>',
   icon_heart_purple:  '<:cenar_tim:1535691544387002508>',
-  icon_cart:          '<:cenar_carttt:1535691821647405137>',
+  icon_cart:          '<a:cenar_price_cart:1535910626088583190>',
   icon_wallet:        '<:cenar_wallet:1535618682481545217>',
   icon_brain:         '<:chatgopete:1481154927677014098>',
   icon_announce:      '<a:Arrow2:1367139234833498113>',

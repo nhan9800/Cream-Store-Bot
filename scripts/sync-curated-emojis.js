@@ -17,6 +17,10 @@ const assets = [
   ['cenar_verify_shield', 'cenar_verify_shield.png'],
   ['cenar_recovery_backup', 'cenar_recovery_backup.gif'],
   ['cenar_recovery_restore', 'cenar_recovery_restore.png'],
+  ['cenar_price_chatgpt', 'cenar_price_chatgpt.png'],
+  ['cenar_price_nitro', 'cenar_price_nitro.png'],
+  ['cenar_price_netflix', 'cenar_price_netflix.png'],
+  ['cenar_price_cart', 'cenar_price_cart.gif'],
 ];
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });

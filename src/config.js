@@ -126,6 +126,9 @@ export const config = {
   paymentThumbnailUrl: getEnv('PAYMENT_THUMBNAIL_URL', ''),
   deliveryBannerUrl: getEnv('DELIVERY_BANNER_URL', ''),
   publicBaseUrl: getEnv('PUBLIC_BASE_URL', ''),
+  // Trang cửa hàng người dùng nhìn thấy. Tách khỏi PUBLIC_BASE_URL vì biến đó
+  // có thể là địa chỉ callback/hosting nội bộ dành cho PayOS.
+  storeWebsiteUrl: getEnv('STORE_WEBSITE_URL', 'https://cenarstore.xyz'),
   // Domain cho link transcript — fallback về PUBLIC_BASE_URL nếu không set riêng
   transcriptBaseUrl: getEnv('TRANSCRIPT_BASE_URL', '') || getEnv('PUBLIC_BASE_URL', ''),
   transcriptRetentionDays: Number.parseInt(getEnv('TRANSCRIPT_RETENTION_DAYS', '30'), 10),

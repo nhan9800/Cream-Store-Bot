@@ -267,7 +267,7 @@ Spotify Premium | 25k | 1`;
 
     if (sub === 'sync') {
       await interaction.editReply({ content: `${E('status_loading')} Đang rebuild bảng giá...` });
-      await autoSetupPriceBoard(interaction.client);
+      await autoSetupPriceBoard(interaction.client, { force: true, targetGuildId: interaction.guildId });
       return interaction.editReply({ content: `${E('status_check')} Đã rebuild toàn bộ bảng giá thành công!` });
     }
 
