@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { ButtonBuilder, ButtonStyle, MessageFlags } from 'discord.js';
+import { buildAnnouncementMessageV2, publishAnnouncement } from '../src/services/announcementService.js';
 import { buildCardPanelPayload } from '../src/services/cardPanelService.js';
 import { normalizeButtonEmoji, withButtonEmoji } from '../src/utils/emojiHelper.js';
 
@@ -57,5 +58,63 @@ describe('safe custom emoji components', () => {
     const buttons = json[1].components;
     expect(buttons).toHaveLength(4);
     expect(buttons.every((button) => button.emoji === undefined)).toBe(true);
+  });
+
+  it('builds /thongbao safely and limits mentions to the selected targets', () => {
+    const unrelatedEmoji = {
+      id: '1999999999999999999',
+      name: 'unrelated',
+      animated: false,
+    };
+    global.discordClient = {
+      guilds: {
+        cache: new Map([[GUILD_ID, { emojis: { cache: new Map([[unrelatedEmoji.id, unrelatedEmoji]]) } }]]),
+      },
+      emojis: { cache: new Map() },
+    };
+
+    const payload = buildAnnouncementMessageV2({
+      guildId: GUILD_ID,
+      content: 'Nội dung kiểm thử',
+      roleIds: ['123456789012345678', 'invalid', '123456789012345678'],
+      tagEveryone: true,
+    });
+
+    expect(payload.flags & MessageFlags.IsComponentsV2).toBeTruthy();
+    expect(payload.allowedMentions).toEqual({
+      parse: ['everyone'],
+      roles: ['123456789012345678'],
+      users: [],
+      repliedUser: false,
+    });
+
+    const json = payload.components.map((component) => component.toJSON());
+    expect(json[1].components).toHaveLength(2);
+    expect(json[1].components.every((button) => button.emoji === undefined)).toBe(true);
+  });
+
+  it('does not report /thongbao success when Discord rejects the message', async () => {
+    const guild = {
+      id: GUILD_ID,
+      channels: {
+        fetch: async () => ({
+          isTextBased: () => true,
+          isThread: () => false,
+          send: async () => {
+            throw new Error('Unknown Emoji');
+          },
+        }),
+      },
+      members: {
+        me: null,
+        fetchMe: async () => null,
+      },
+    };
+
+    await expect(publishAnnouncement({
+      guild,
+      channelId: '123456789012345679',
+      content: 'Nội dung kiểm thử',
+    })).rejects.toThrow('Unknown Emoji');
   });
 });

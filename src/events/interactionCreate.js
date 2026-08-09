@@ -80,6 +80,7 @@ import { buildVerificationPromptV2, buildVerificationUnavailableV2 } from '../se
 import { getRecoveryStatus } from '../services/guildRecoveryService.js';
 import { memberHasVerificationRole, resolveVerificationRole } from '../services/verificationRoleService.js';
 import { refreshAllShopPanels } from '../services/shopPanelService.js';
+import { publishAnnouncement } from '../services/announcementService.js';
 import {
   FEEDBACK_TEXT_INPUT_ID,
   WARRANTY_ORDER_INPUT_ID,
@@ -2156,69 +2157,50 @@ export function registerInteractionHandler(client, commands) {
            return;
          }
 
-         // Xóa ngay khỏi cache để chống spam/double click/retry
-         announcementCache.delete(interaction.message.id);
+         if (cacheData.publishing) {
+           await interaction.deferUpdate().catch(() => null);
+           return;
+         }
+         cacheData.publishing = true;
 
          // ACK ngay để tránh timeout 3 giây Discord
-         await interaction.deferUpdate().catch(() => null);
+         await interaction.deferUpdate();
 
          try {
-           let rolePings = cacheData.roles.map(r => `<@&${r}>`).join(' ');
-           if (cacheData.tagEveryone) rolePings += ' @everyone';
-           if (cacheData.tagHere) rolePings += ' @here';
+           const result = await publishAnnouncement({
+             guild: interaction.guild,
+             channelId: cacheData.channelId,
+             content: cacheData.content,
+             roleIds: cacheData.roles,
+             tagEveryone: cacheData.tagEveryone,
+             tagHere: cacheData.tagHere,
+           });
 
-           const prefix = rolePings.trim();
-           const fullContent = cacheData.content;
-
-           const channel = await interaction.guild.channels.fetch(cacheData.channelId).catch(() => null);
-           if (channel) {
-               const E = createEmojiResolver(interaction.guildId);
-               const container = new ContainerBuilder().setAccentColor(0x2B2D31);
-
-               // Header
-               container.addTextDisplayComponents(
-                 new TextDisplayBuilder().setContent(
-                   `${prefix ? prefix + '\n' : ''}` +
-                   `# <a:Dotyellow:1481134440725090315> **THÔNG BÁO TỪ BAN QUẢN TRỊ** <a:Dotyellow:1481134440725090315>`
-                 )
-               );
-
-               container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
-
-               // Content
-               container.addTextDisplayComponents(
-                 new TextDisplayBuilder().setContent(fullContent)
-               );
-
-               container.addSeparatorComponents(new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small));
-
-               // Footer
-               container.addTextDisplayComponents(
-                 new TextDisplayBuilder().setContent(`Trân trọng,\n**Ban Quản Trị Hệ Thống** <:verifybadge:1481127479702847646>`)
-               );
-
-               const actionRow = new ActionRowBuilder().addComponents(
-                 new ButtonBuilder()
-                   .setCustomId('announce_dummy_1')
-                   .setLabel('Quy Định Chung')
-                   .setStyle(ButtonStyle.Primary)
-                   .setEmoji({ id: '1392749981332541501', name: 'cr_shop' }), 
-                 new ButtonBuilder()
-                   .setCustomId('announce_dummy_2')
-                   .setLabel('Chính Sách Bảo Hành')
-                   .setStyle(ButtonStyle.Secondary)
-                   .setEmoji({ id: '1348625535512870965', name: 'cr_baohanh' }) 
-               );
-
-               await channel.send({ components: [container, actionRow], flags: MessageFlags.IsComponentsV2 }).catch(() => null);
-
-               await interaction.editReply({ content: '✅ Đã đăng thông báo siêu xịn (Component V2) thành công!', embeds: [], components: [] }).catch(() => null);
-           } else {
-               await interaction.editReply({ content: '❌ Không tìm thấy kênh tương ứng để đăng.', embeds: [], components: [] }).catch(() => null);
-           }
+           announcementCache.delete(interaction.message.id);
+           const E = createEmojiResolver(interaction.guildId);
+           await interaction.editReply({
+             content: `${E('status_check')} Đã đăng thông báo thành công tại <#${result.channel.id}>.`,
+             embeds: [],
+             components: [],
+           });
          } catch (err) {
-           console.error('[ANNOUNCEMENT_CONFIRM] Lỗi:', err);
-           await interaction.editReply({ content: `Có lỗi xảy ra khi đăng thông báo: ${err.message}`, embeds: [], components: [] }).catch(() => null);
+           cacheData.publishing = false;
+           console.error('[ANNOUNCEMENT_CONFIRM] Không thể đăng thông báo:', {
+             guildId: interaction.guildId,
+             channelId: cacheData.channelId,
+             userId: interaction.user.id,
+             code: err?.code,
+             message: err?.message,
+             stack: err?.stack,
+           });
+           const E = createEmojiResolver(interaction.guildId);
+           await interaction.editReply({
+             content: `${E('status_cross')} Không thể đăng thông báo: ${err.message}\nBạn có thể bấm **Xác nhận gửi** để thử lại sau khi khắc phục.`,
+             embeds: [],
+             components: interaction.message.components,
+           }).catch((replyError) => {
+             console.error('[ANNOUNCEMENT_CONFIRM] Không thể trả lỗi cho người dùng:', replyError);
+           });
          }
          return;
       }
