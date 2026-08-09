@@ -61,6 +61,8 @@ export const EMOJI_SLOTS = {
   otp_loading:        { label: 'Đang chờ OTP (GIF)', default: '' },
   card_success:       { label: 'Thẻ thành công (GIF)', default: '' },
   ctv_crystal:        { label: 'Điểm nhấn CTV (GIF)', default: '' },
+  partner_rules:      { label: 'Quy định Partner', default: '' },
+  partner_guide:      { label: 'Hướng dẫn Partner', default: '' },
 
   // Status
   status_check:       { label: 'Tích xanh',            default: '✅' },
@@ -203,6 +205,8 @@ export const SLOT_ALIASES = {
   otp_loading: ['cenar_otp_loading', 'otp_loading'],
   card_success: ['cenar_card_success', 'card_success'],
   ctv_crystal: ['cenar_ctv_crystal', 'ctv_crystal'],
+  partner_rules: ['cenar_partner_rules', 'partner_rules'],
+  partner_guide: ['cenar_partner_guide', 'partner_guide'],
 
   // Status
   status_check: ['check', 'tick', 'success', 'tich_xanh'],

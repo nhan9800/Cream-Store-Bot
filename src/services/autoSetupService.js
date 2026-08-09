@@ -25,6 +25,7 @@ const IDS = Object.freeze({
   partnerRecruit: '1522844532318801962',
   partnerDirectory: '1522844534470348810',
   partnerReview: '1522844538396479639',
+  partnerBroadcast: '1535669776628584449',
   ctvRecruit: '1522844536202727491',
 });
 
@@ -208,6 +209,72 @@ async function postRecruitmentPanel(channel, kind, guildId, references) {
   }
 }
 
+export function buildPartnerBroadcastGuidePayload(guildId, { partnerRoleId } = {}) {
+  const E = createEmojiResolver(guildId);
+  const roleLabel = partnerRoleId ? `<@&${partnerRoleId}>` : '**Role Partner**';
+
+  const guide = new ContainerBuilder().setAccentColor(accentFor('primary'));
+  guide.addTextDisplayComponents(new TextDisplayBuilder().setContent([
+    `# ${E('partner_guide')} CENAR PARTNER | TRUNG TÂM TRUYỀN THÔNG`,
+    `> ${E('cenar_announce')} Khu vực đăng bài dành riêng cho đại diện đối tác đã được xác minh.`,
+  ].join('\n')));
+  guide.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
+  guide.addTextDisplayComponents(new TextDisplayBuilder().setContent([
+    `### ${E('cenar_partner')} CÁCH ĐĂNG BÀI`,
+    `${E('partner_guide')} Dùng lệnh \`/partner-post send\` ngay trong server.`,
+    `${E('icon_link')} Chọn \`ping: Role Partner\` để thông báo ${roleLabel}.`,
+    `${E('cenar_announce')} Chọn \`ping: Everyone\` khi đây là thông báo quan trọng cho toàn server.`,
+    `${E('cenar_verified')} Điền \`noi_dung\` rõ ràng: tên server, nội dung chính, ưu đãi và link mời còn hạn.`,
+    `-# ${E('cenar_support')} Bot sẽ đăng hộ, kiểm tra quyền, trừ hạn mức và ghi log tự động.`,
+  ].join('\n')));
+
+  const rules = new ContainerBuilder().setAccentColor(accentFor('warning'));
+  rules.addTextDisplayComponents(new TextDisplayBuilder().setContent([
+    `## ${E('partner_rules')} QUY ĐỊNH & HẠN MỨC 24 GIỜ`,
+    `${E('cenar_partner')} **Role Partner** · \`2 lượt / người / 24 giờ\``,
+    `${E('cenar_announce')} **Everyone** · \`1 lượt / người / 24 giờ\``,
+    `${E('cenar_cooldown')} Cửa sổ giới hạn tính liên tục 24 giờ từ lần sử dụng đầu tiên.`,
+  ].join('\n')));
+  rules.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
+  rules.addTextDisplayComponents(new TextDisplayBuilder().setContent([
+    `### ${E('cenar_verified')} CHECKLIST TRƯỚC KHI GỬI`,
+    `${E('status_check')} Nội dung ngắn gọn, đúng sự thật và link Discord còn hoạt động.`,
+    `${E('status_warn')} Không spam, lặp bài, lách hạn mức hoặc tag trực tiếp bên ngoài lệnh.`,
+    `${E('status_cross')} Cấm nội dung lừa đảo, NSFW, hàng cấm hoặc vi phạm chính sách Discord.`,
+    `${E('cenar_support')} Staff có quyền gỡ bài và tạm khóa quyền truyền thông khi phát hiện vi phạm.`,
+    `-# ${E('partner_guide')} Kiểm tra lượt còn lại bất kỳ lúc nào bằng \`/partner-post quota\`.`,
+  ].join('\n')));
+
+  return {
+    components: [guide, rules],
+    flags: MessageFlags.IsComponentsV2,
+    allowedMentions: { parse: [] },
+  };
+}
+
+export async function publishPartnerBroadcastGuide(channel, guildId, settings = {}) {
+  if (!channel?.isTextBased()) return null;
+  const payload = buildPartnerBroadcastGuidePayload(guildId, {
+    partnerRoleId: settings.partner_role_id,
+  });
+  const marker = 'CENAR PARTNER | TRUNG TÂM TRUYỀN THÔNG';
+  const latest = await channel.messages.fetch({ limit: 50 }).catch(() => null);
+  const existing = latest
+    ? [...latest.values()].filter((message) => (
+        message.author.id === channel.client.user.id
+        && JSON.stringify(message.components.map((component) => component.toJSON())).includes(marker)
+      ))
+    : [];
+  const primary = existing[0];
+  const message = primary?.flags?.has(MessageFlags.IsComponentsV2)
+    ? await primary.edit(payload)
+    : await channel.send(payload);
+  await Promise.all(existing.slice(1).map((duplicate) => (
+    duplicate.delete('Remove duplicate Partner broadcast guide').catch(() => null)
+  )));
+  return message;
+}
+
 export async function autoSetupPartnerAndCtv(client) {
   for (const guild of client.guilds.cache.values()) {
     try {
@@ -231,7 +298,7 @@ export async function autoSetupPartnerAndCtv(client) {
       const partnerRecruit = await ensureChannel(guild, { id: IDS.partnerRecruit, name: fruitNames.partnerRecruit, parent: partnerCategory, overwrites: publicReadOverrides(guild, botId, staffRoles) });
       const partnerDirectory = await ensureChannel(guild, { id: IDS.partnerDirectory, name: fruitNames.partnerDirectory, parent: partnerCategory, overwrites: publicReadOverrides(guild, botId, staffRoles) });
       const partnerReview = await ensureChannel(guild, { id: IDS.partnerReview, name: fruitNames.partnerReview, parent: partnerCategory, overwrites: staffOverrides(guild, botId, staffRoles) });
-      const partnerBroadcast = await ensureChannel(guild, { name: fruitNames.partnerBroadcast, parent: partnerCategory, overwrites: restrictedOverrides(guild, botId, partnerRole.id, staffRoles, { allowMention: false }) });
+      const partnerBroadcast = await ensureChannel(guild, { id: IDS.partnerBroadcast, name: fruitNames.partnerBroadcast, parent: partnerCategory, overwrites: restrictedOverrides(guild, botId, partnerRole.id, staffRoles, { allowMention: false }) });
 
       const ctvRecruit = await ensureChannel(guild, { id: IDS.ctvRecruit, name: fruitNames.ctvRecruit, parent: ctvCategory, overwrites: publicReadOverrides(guild, botId, staffRoles) });
       const ctvReview = await ensureChannel(guild, { name: fruitNames.ctvReview, parent: ctvCategory, overwrites: staffOverrides(guild, botId, staffRoles) });
@@ -259,6 +326,7 @@ export async function autoSetupPartnerAndCtv(client) {
       });
 
       await postRecruitmentPanel(partnerRecruit, 'partner', guild.id, { partnerBroadcast: partnerBroadcast.id });
+      await publishPartnerBroadcastGuide(partnerBroadcast, guild.id, { partner_role_id: partnerRole.id });
       await postRecruitmentPanel(ctvRecruit, 'ctv', guild.id, { ctvChat: ctvChat.id, ctvOrderLog: ctvOrderLog.id });
       await publishCtvPricePanel(guild).catch((error) => {
         console.warn(`[AUTO-SETUP] CTV price panel ${guild.id}: ${error.message}`);

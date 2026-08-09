@@ -12,5 +12,7 @@ Các file này được giữ lại để việc đồng bộ emoji Discord có 
 | `cenar_otp_loading` | [Emoji.gg Loading](https://emoji.gg/emoji/6594-loading) | Trạng thái chờ OTP (GIF) |
 | `cenar_card_success` | [Emoji.gg Animated Check](https://emoji.gg/emoji/6181_check) | Callback thẻ thành công (GIF) |
 | `cenar_ctv_crystal` | [Emoji.gg Blue Crystal](https://emoji.gg/emoji/1912-blue-crystal) | Điểm nhấn panel CTV (GIF) |
+| `cenar_partner_rules` | [Emoji.gg Rules](https://emoji.gg/emoji/16120-rules) | Quy định kênh Partner |
+| `cenar_partner_guide` | [Emoji.gg Guide](https://emoji.gg/emoji/3568-guide) | Hướng dẫn đăng truyền thông Partner |
 
 Không xóa emoji server theo tên/ngoại hình. Script đồng bộ chỉ tái sử dụng tên đã có hoặc tải emoji còn thiếu; việc dọn trùng byte được thực hiện riêng bởi `npm run audit:emojis`.

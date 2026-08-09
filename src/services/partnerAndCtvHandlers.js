@@ -18,6 +18,7 @@ import {
   addPartnerApplication,
   getPartnerById,
   getPartnerSettings,
+  normalizeDiscordInviteUrl,
   updatePartnerStatus,
 } from './partnerService.js';
 import { getCtvSettings, isCustomerCtv, setCustomerCtvStatus } from './ctvService.js';
@@ -129,6 +130,8 @@ export async function handlePartnerApplyModal(interaction) {
     const partnerName = stripDiscordUnicode(invite.guild.name);
     const memberCount = Number(invite.approximateMemberCount || 0);
     const applicantId = interaction.user.id;
+    const canonicalInviteLink = normalizeDiscordInviteUrl(invite.code || inviteCode);
+    if (!canonicalInviteLink) throw new Error('Không thể chuẩn hóa link mời Discord.');
     const duplicate = db.prepare(`
       SELECT id, status FROM partners
       WHERE guild_id = ? AND partner_guild_id = ? AND status IN ('PENDING', 'ACTIVE')
@@ -147,7 +150,7 @@ export async function handlePartnerApplyModal(interaction) {
       interaction.guildId,
       partnerGuildId,
       partnerName,
-      inviteLink,
+      canonicalInviteLink,
       memberCount,
       invite.guild.ownerId || 'UNKNOWN',
       applicantId,
@@ -167,7 +170,7 @@ export async function handlePartnerApplyModal(interaction) {
       `${E('cenar_partner')} **Server:** ${partnerName} · \`${partnerGuildId}\``,
       `${E('cenar_announce')} **Thành viên:** ${memberCount.toLocaleString('vi-VN')}`,
       `${E('cenar_support')} **Chế độ:** ${reviewMode === 'MANUAL_SUPPORT' ? 'Duyệt thủ công · Hỗ trợ cộng đồng dưới 500 thành viên' : 'Xét duyệt tiêu chuẩn'}`,
-      `${E('cenar_partner_ok')} **Tham quan:** [Mở server ứng tuyển](${inviteLink})`,
+      `${E('cenar_partner_ok')} **Tham quan:** [Mở server ứng tuyển](${canonicalInviteLink})`,
       `-# Bot không tự từ chối server nhỏ. Admin đánh giá nội dung, mức độ hoạt động và tiềm năng cộng đồng.`,
     ].join('\n')));
     await approveChannel.send({
@@ -215,39 +218,62 @@ export async function handlePartnerApprove(interaction, appId) {
       ephemeral: true,
     }));
   }
-  await interaction.deferUpdate();
-
   const settings = getPartnerSettings(interaction.guildId);
-  const member = await interaction.guild.members.fetch(app.applicant_id).catch(() => null);
-  let roleGranted = false;
-  if (member && settings.partner_role_id) {
-    roleGranted = await member.roles.add(settings.partner_role_id, `Partner #${appId} approved by ${interaction.user.id}`)
+  updatePartnerStatus(appId, 'ACTIVE');
+  const processingPayload = cardPayload(interaction.guildId, {
+    tone: 'warning',
+    title: `Đã nhận lệnh duyệt Partner #${appId}`,
+    lines: [
+      `${E('cenar_cooldown')} Bot đang cấp role và đồng bộ hồ sơ đối tác.`,
+      `${E('cenar_verified')} Nút duyệt đã được khóa để tránh xử lý trùng.`,
+    ],
+  });
+  const { flags: _processingFlags, ...processingUpdate } = processingPayload;
+  await interaction.update(processingUpdate);
+
+  const [member, directoryChannel] = await Promise.all([
+    interaction.guild.members.fetch(app.applicant_id).catch(() => null),
+    settings.directory_channel_id
+      ? interaction.guild.channels.fetch(settings.directory_channel_id).catch(() => null)
+      : Promise.resolve(null),
+  ]);
+
+  const roleGrantPromise = member && settings.partner_role_id
+    ? member.roles.add(settings.partner_role_id, `Partner #${appId} approved by ${interaction.user.id}`)
       .then(() => true)
       .catch((error) => {
         console.error('[PARTNER-ROLE]', error);
         return false;
-      });
-  }
-  updatePartnerStatus(appId, 'ACTIVE');
+      })
+    : Promise.resolve(false);
 
-  const directoryChannel = settings.directory_channel_id
-    ? await interaction.guild.channels.fetch(settings.directory_channel_id).catch(() => null)
-    : null;
-  if (directoryChannel?.isTextBased()) {
-    const directory = new ContainerBuilder().setAccentColor(accentFor('success'));
-    directory.addTextDisplayComponents(new TextDisplayBuilder().setContent(
-      `# ${E('cenar_partner_ok')} Cenar Partner | ${stripDiscordUnicode(app.partner_name)}`,
-    ));
-    directory.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
-    directory.addTextDisplayComponents(new TextDisplayBuilder().setContent([
-      `${E('cenar_verified')} **Trạng thái:** Đối tác đã xác minh`,
-      `${E('cenar_announce')} **Quy mô:** ${Number(app.member_count).toLocaleString('vi-VN')} thành viên`,
-      `${E('cenar_partner')} **Đại diện:** <@${app.applicant_id}>`,
-      `${E('cenar_support')} **Kết nối:** [Tham gia server đối tác](${app.invite_link})`,
-      `-# Cenar Store đồng hành cùng các cộng đồng minh bạch, an toàn và cùng phát triển.`,
-    ].join('\n')));
-    await directoryChannel.send({ components: [directory], flags: MessageFlags.IsComponentsV2, allowedMentions: { parse: [] } });
-  }
+  const canonicalInviteLink = normalizeDiscordInviteUrl(app.invite_link);
+  const directoryPromise = directoryChannel?.isTextBased()
+    ? (() => {
+        const directory = new ContainerBuilder().setAccentColor(accentFor('success'));
+        directory.addTextDisplayComponents(new TextDisplayBuilder().setContent(
+          `# ${E('cenar_partner_ok')} Cenar Partner | ${stripDiscordUnicode(app.partner_name)}`,
+        ));
+        directory.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
+        directory.addTextDisplayComponents(new TextDisplayBuilder().setContent([
+          `${E('cenar_verified')} **Trạng thái:** Đối tác đã xác minh`,
+          `${E('cenar_announce')} **Quy mô:** ${Number(app.member_count).toLocaleString('vi-VN')} thành viên`,
+          `${E('cenar_partner')} **Đại diện:** <@${app.applicant_id}>`,
+          canonicalInviteLink ? `${E('cenar_support')} **Kết nối:** [Tham gia server đối tác](${canonicalInviteLink})` : null,
+          `-# Cenar Store đồng hành cùng các cộng đồng minh bạch, an toàn và cùng phát triển.`,
+        ].filter(Boolean).join('\n')));
+        return directoryChannel.send({
+          components: [directory],
+          flags: MessageFlags.IsComponentsV2,
+          allowedMentions: { parse: [] },
+        }).catch((error) => {
+          console.error('[PARTNER-DIRECTORY]', error);
+          return null;
+        });
+      })()
+    : Promise.resolve(null);
+
+  const [roleGranted] = await Promise.all([roleGrantPromise, directoryPromise]);
 
   await interaction.editReply(cardPayload(interaction.guildId, {
     tone: 'success',

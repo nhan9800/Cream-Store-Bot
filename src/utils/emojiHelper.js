@@ -23,6 +23,8 @@ const fallbackEmojis = {
   otp_loading: '<a:cenar_otp_loading:1535705387024515082>',
   card_success: '<a:cenar_card_success:1535705389780439160>',
   ctv_crystal: '<a:cenar_ctv_crystal:1535705392674508833>',
+  partner_rules: '<:cenar_partner_rules:1535867940161716328>',
+  partner_guide: '<:cenar_partner_guide:1535867942183636992>',
   brand_locket: '<:cenar_tsm_locket:1282651426459226155>',
 
   // Panel Ticket buttons

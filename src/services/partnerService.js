@@ -1,5 +1,15 @@
 import { db } from '../database/db.js';
 
+const DISCORD_INVITE_PATTERN = /(?:https?:\/\/)?(?:www\.)?(?:discord\.(?:gg|io|me|li)|discord(?:app)?\.com\/invite)\/([a-zA-Z0-9-]+)/i;
+
+export function normalizeDiscordInviteUrl(value) {
+  const raw = String(value || '').trim();
+  if (!raw) return null;
+  const match = raw.match(DISCORD_INVITE_PATTERN);
+  const code = match?.[1] || (/^[a-zA-Z0-9-]+$/.test(raw) ? raw : null);
+  return code ? `https://discord.gg/${code}` : null;
+}
+
 export function getPartnerSettings(guildId) {
   let row = db.prepare('SELECT * FROM partner_settings WHERE guild_id = ?').get(guildId);
   if (!row) {
