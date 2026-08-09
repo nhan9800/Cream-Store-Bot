@@ -76,6 +76,8 @@ import { getActiveProducts, getProductById, updateProduct, addProduct, getAllPro
 import { handlePremiumProductInteraction } from '../services/premiumProductSetupService.js';
 import { getCenarHub } from '../services/cenarHub.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
+import { buildVerificationPromptV2 } from '../services/verificationPanelService.js';
+import { getRecoveryStatus } from '../services/guildRecoveryService.js';
 import { refreshAllShopPanels } from '../services/shopPanelService.js';
 import {
   FEEDBACK_TEXT_INPUT_ID,
@@ -2070,68 +2072,37 @@ export function registerInteractionHandler(client, commands) {
       ensureRateLimit({ guildId: interaction.guildId, userId: interaction.user.id, action: `BUTTON_${interaction.customId.split(':')[0]}`, limit: 1, windowSeconds: config.buttonCooldownSeconds, message: 'Bạn bấm nút quá nhanh, vui lòng chờ vài giây.' });
 
       if (interaction.customId === 'oauth:verify:button') {
-        const host = process.env.PUBLIC_BASE_URL || 'https://api2.cenarstore.xyz';
-        const loginUrl = `${host.replace(/\/$/, '')}/oauth/login?guild_id=${interaction.guildId}`;
         const E = createEmojiResolver(interaction.guildId);
-
-        // Kiểm tra nếu đã có role verified chưa (tránh verify lại)
         const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
-        const alreadyVerified = member && member.roles.cache.some(r =>
-          r.name.includes('Explorer') || r.name.includes('Active Customer') ||
-          r.name.includes('Thành Viên Mới') || r.name.toLowerCase().includes('member')
-        );
+        const guildConfig = getGuildConfig(interaction.guildId);
+        const hasRole = Boolean(member && (
+          (guildConfig?.customer_role_id && member.roles.cache.has(guildConfig.customer_role_id))
+          || member.roles.cache.some((role) => (
+            role.name.includes('Explorer')
+            || role.name.includes('Active Customer')
+            || role.name.includes('Thành Viên Mới')
+            || (role.name.toLowerCase().includes('member') && !role.name.toLowerCase().includes('bot'))
+          ))
+        ));
+        const recovery = getRecoveryStatus(interaction.guildId, interaction.user.id);
+        const recoveryActive = Boolean(recovery?.recovery_consent_at && String(recovery.scopes || '').includes('guilds.join'));
+        const host = String(config.publicBaseUrl || '').trim().replace(/\/$/, '');
 
-        if (alreadyVerified) {
-          const container = new ContainerBuilder().setAccentColor(0x10B981);
-          container.addTextDisplayComponents(
-            new TextDisplayBuilder().setContent([
-              `## ${E('status_check')} Bạn Đã Xác Minh Rồi!`,
-              `Tài khoản **${interaction.user.tag}** đã được xác minh và có đầy đủ quyền truy cập.`,
-              '',
-              `> ${E('icon_group')} Bạn có thể xem toàn bộ kênh và tạo ticket mua hàng ngay!`,
-              `> ${E('ticket_claim')} Dùng lệnh \`/order\` hoặc bấm **Mở Ticket** trong kênh hỗ trợ.`,
-              '',
-              `-# ${E('icon_heart_purple')} Cenar Store — Cảm ơn bạn đã tin tưởng`,
-            ].join('\n'))
-          );
+        if (!host && !recoveryActive) {
           await safeReply(interaction, {
-            components: [container],
-            flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
+            content: `${E('status_cross')} Hệ thống OAuth đang thiếu PUBLIC_BASE_URL. Vui lòng báo quản trị viên cấu hình trước khi xác minh.`,
+            flags: MessageFlags.Ephemeral,
           });
           return;
         }
 
-        const avatar = interaction.user.displayAvatarURL({ forceStatic: false, size: 128 });
-        const container = new ContainerBuilder().setAccentColor(0x7C3AED);
-        container.addTextDisplayComponents(
-          new TextDisplayBuilder().setContent([
-            `## ${E('icon_lock')} Xác Minh Tài Khoản Discord`,
-            `Chào **${interaction.user.username}**! Để mở khóa toàn bộ server bạn cần xác minh tài khoản.`,
-            '',
-            `**Tại sao cần xác minh?**`,
-            `> ${E('icon_lock')} Bảo vệ server khỏi spam / raid`,
-            `> ${E('icon_brain')} Bot lưu thông tin — tự động kéo bạn sang server dự phòng nếu bị quét`,
-            `> ${E('ticket_claim')} Mở khóa: bảng giá, phòng chat, tạo ticket mua hàng`,
-            '',
-            `> ${E('icon_sparkle')} **Bấm nút bên dưới để bắt đầu xác minh qua Discord OAuth2:**`,
-            `> *(Chỉ mất 5 giây, không lấy mật khẩu của bạn)*`,
-            '',
-            `-# ${E('icon_heart_purple')} Cenar Store — Bảo Mật & Uy Tín`,
-          ].join('\n'))
-        );
-
-        const verifyLinkBtn = new ButtonBuilder()
-          .setLabel('Xác Minh Ngay Tại Đây')
-          .setStyle(ButtonStyle.Link)
-          .setURL(loginUrl);
-        const verifyBtnEmoji = E.component('status_check');
-        if (verifyBtnEmoji) verifyLinkBtn.setEmoji(verifyBtnEmoji);
-        const verifyLinkRow = new ActionRowBuilder().addComponents(verifyLinkBtn);
-
-        await safeReply(interaction, {
-          components: [container, verifyLinkRow],
-          flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
-        });
+        await safeReply(interaction, buildVerificationPromptV2({
+          guildId: interaction.guildId,
+          username: interaction.user.username,
+          loginUrl: host ? `${host}/oauth/login?guild_id=${interaction.guildId}` : null,
+          hasRole,
+          recoveryActive,
+        }));
         return;
       }
 

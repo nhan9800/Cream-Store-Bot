@@ -3,12 +3,13 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { db, getDatabasePath } from '../database/db.js';
 import { fileURLToPath } from 'node:url';
+import { snapshotAllGuilds } from './guildRecoveryService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const projectRoot = path.resolve(__dirname, '..', '..');
 const BACKUP_DIR = path.resolve(projectRoot, 'backups');
-const BACKUP_RETENTION = 1;
+const BACKUP_RETENTION = Math.max(3, Number(process.env.BACKUP_RETENTION || 3));
 
 function getBackupPrefix() {
   return String(process.env.ENV_FILE || '.env').includes('store2')
@@ -128,6 +129,11 @@ async function uploadToGoogleDrive(accessToken, filePath, folderId = null) {
 let lastTelegramSentDate = null;
 
 export async function backupDatabase() {
+  // Chụp cấu trúc Discord trước khi sao lưu SQLite để cùng một file có thể
+  // phục hồi dữ liệu shop, vai trò, kênh, quyền và asset custom emoji.
+  await snapshotAllGuilds().catch((error) => {
+    console.error('[RECOVERY] Không thể cập nhật snapshot trước backup:', error.message);
+  });
   return new Promise((resolve, reject) => {
     try {
       if (!fs.existsSync(BACKUP_DIR)) {

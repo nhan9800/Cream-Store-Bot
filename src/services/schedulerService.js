@@ -176,7 +176,7 @@ export function startScheduler(client) {
     autoBackupDatabase();
   }, 12 * 60 * 60 * 1000);
 
-  console.log(`[V11.5] Scheduler đang chạy định kỳ (Non-overlapping) mỗi ${Math.max(1, intervalMinutes)} phút. Chế độ Auto-backup Bật (lưu 7 ngày).`);
+  console.log(`[V11.5] Scheduler chạy mỗi ${Math.max(1, intervalMinutes)} phút. Auto-backup giữ tối thiểu 3 điểm phục hồi và chụp recovery snapshot trước khi sao lưu.`);
   console.log(`[V11.5] Cenar Store Bot — Scheduler & Backup Service started.`);
 }
 

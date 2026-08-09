@@ -3,6 +3,7 @@ import path from 'node:path';
 import Database from 'better-sqlite3';
 import { fileURLToPath } from 'node:url';
 import { config } from '../config.js';
+import { encrypt, isEncrypted } from '../utils/crypto.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -675,6 +676,9 @@ export function initDatabase() {
   ensureColumn('oauth_backups', 'avatar', 'TEXT');
   ensureColumn('oauth_backups', 'token_expires_at', 'TEXT');
   ensureColumn('oauth_backups', 'last_refreshed_at', 'TEXT');
+  ensureColumn('oauth_backups', 'scopes', 'TEXT');
+  ensureColumn('oauth_backups', 'recovery_consent_at', 'TEXT');
+  ensureColumn('oauth_backups', 'member_roles_json', 'TEXT NOT NULL DEFAULT "[]"');
 
   // Seed product catalog data
   try {
@@ -799,10 +803,23 @@ export function initDatabase() {
       refresh_token     TEXT,
       token_expires_at  TEXT,
       last_refreshed_at TEXT,
+      scopes TEXT,
+      recovery_consent_at TEXT,
+      member_roles_json TEXT NOT NULL DEFAULT '[]',
       verified_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       PRIMARY KEY (discord_id, guild_id)
     );
     CREATE INDEX IF NOT EXISTS idx_oauth_guild ON oauth_backups (guild_id);
+
+    CREATE TABLE IF NOT EXISTS guild_recovery_snapshots (
+      guild_id TEXT PRIMARY KEY,
+      captured_at TEXT NOT NULL,
+      structure_hash TEXT NOT NULL,
+      snapshot_json TEXT NOT NULL,
+      member_count INTEGER NOT NULL DEFAULT 0,
+      authorized_member_count INTEGER NOT NULL DEFAULT 0,
+      customer_count INTEGER NOT NULL DEFAULT 0
+    );
 
     CREATE TABLE IF NOT EXISTS partners (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -944,6 +961,45 @@ export function initDatabase() {
   ensureColumn('customer_profiles', 'credit_limit', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn('customer_profiles', 'credit_used', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn('customer_profiles', 'credit_status', "TEXT NOT NULL DEFAULT 'ACTIVE'");
+
+  // OAuth recovery token là credential nhạy cảm. Migrate dữ liệu legacy dạng
+  // plaintext sang AES-256-GCM ngay khi khởi động, không chờ token hết hạn.
+  ensureColumn('oauth_backups', 'scopes', 'TEXT');
+  ensureColumn('oauth_backups', 'recovery_consent_at', 'TEXT');
+  ensureColumn('oauth_backups', 'member_roles_json', 'TEXT NOT NULL DEFAULT "[]"');
+  db.prepare(`
+    UPDATE oauth_backups
+    SET scopes = COALESCE(NULLIF(scopes, ''), 'identify guilds.join'),
+        recovery_consent_at = COALESCE(recovery_consent_at, verified_at)
+    WHERE refresh_token IS NOT NULL AND refresh_token != ''
+  `).run();
+  const legacyOauthRows = db.prepare(`
+    SELECT discord_id, guild_id, access_token, refresh_token
+    FROM oauth_backups
+    WHERE (access_token IS NOT NULL AND access_token != '')
+       OR (refresh_token IS NOT NULL AND refresh_token != '')
+  `).all().filter((row) => (
+    (row.access_token && !isEncrypted(row.access_token))
+    || (row.refresh_token && !isEncrypted(row.refresh_token))
+  ));
+  if (legacyOauthRows.length > 0) {
+    const migrateToken = db.prepare(`
+      UPDATE oauth_backups
+      SET access_token = ?, refresh_token = ?
+      WHERE discord_id = ? AND guild_id = ?
+    `);
+    db.transaction(() => {
+      for (const row of legacyOauthRows) {
+        migrateToken.run(
+          row.access_token ? encrypt(row.access_token) : null,
+          row.refresh_token ? encrypt(row.refresh_token) : null,
+          row.discord_id,
+          row.guild_id,
+        );
+      }
+    })();
+    console.log(`[DB-MIGRATION] Đã mã hóa ${legacyOauthRows.length} bản ghi OAuth recovery legacy.`);
+  }
 
 }
 

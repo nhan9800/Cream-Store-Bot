@@ -1,12 +1,21 @@
-import { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } from 'discord.js';
+import {
+  ContainerBuilder,
+  MessageFlags,
+  PermissionFlagsBits,
+  SlashCommandBuilder,
+  TextDisplayBuilder,
+} from 'discord.js';
 import { db } from '../database/db.js';
 import { config } from '../config.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
+import { decrypt, encrypt } from '../utils/crypto.js';
+import { hasConfiguredOwnerRole, isBotDeveloper } from '../utils/permissions.js';
+import { mapRecoveryRoleIds } from '../services/guildRecoveryService.js';
 
 export const data = new SlashCommandBuilder()
   .setName('chuyen-server')
   .setDescription('[Admin] Di chuyển toàn bộ thành viên đã verify sang server mới bằng OAuth2 token')
-  .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
+  .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
   .addStringOption(opt =>
     opt.setName('guild_id')
       .setDescription('ID của server mới cần chuyển thành viên vào')
@@ -50,26 +59,34 @@ async function refreshAccessToken(refreshToken) {
 }
 
 // Thêm user vào guild mới dùng access_token của họ
-async function addMemberToGuild(newGuildId, discordId, accessToken, botToken) {
+async function addMemberToGuild(newGuildId, discordId, accessToken, botToken, roles = []) {
   const res = await fetch(`https://discord.com/api/v10/guilds/${newGuildId}/members/${discordId}`, {
     method: 'PUT',
     headers: {
       Authorization: `Bot ${botToken}`,
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({ access_token: accessToken }),
+    body: JSON.stringify({ access_token: accessToken, roles }),
   });
 
   // 201 = thêm mới, 204 = đã có trong server
-  return { status: res.status, ok: res.status === 201 || res.status === 204 };
+  let error = '';
+  if (res.status !== 201 && res.status !== 204) {
+    const payload = await res.json().catch(() => null);
+    error = String(payload?.message || `HTTP ${res.status}`).slice(0, 100);
+  }
+  return { status: res.status, ok: res.status === 201 || res.status === 204, error };
 }
 
 export async function execute(interaction) {
   const E = createEmojiResolver(interaction.guildId);
 
   // Kiểm tra quyền
-  if (!interaction.memberPermissions?.has(PermissionFlagsBits.ManageGuild)) {
-    return interaction.reply({ content: 'Bạn cần quyền Quản lý Server để dùng lệnh này.', ephemeral: true });
+  const canRunRecovery = interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)
+    || hasConfiguredOwnerRole(interaction.member)
+    || isBotDeveloper(interaction.user.id);
+  if (!canRunRecovery) {
+    return interaction.reply({ content: `${E('status_cross')} Chỉ Owner hoặc quản trị viên cấp cao được chạy khôi phục thành viên.`, ephemeral: true });
   }
 
   const newGuildId = interaction.options.getString('guild_id', true).trim();
@@ -89,12 +106,19 @@ export async function execute(interaction) {
   try {
     newGuild = await interaction.client.guilds.fetch(newGuildId);
   } catch {
-    return interaction.editReply('Bot chưa có trong server đích. Hãy mời bot vào server mới trước.');
+    return interaction.editReply(`${E('status_cross')} Bot chưa có trong server đích. Hãy mời bot vào server mới trước.`);
+  }
+  if (!newGuild.members.me?.permissions.has(PermissionFlagsBits.CreateInstantInvite)) {
+    return interaction.editReply(`${E('status_cross')} Bot cần quyền **Create Invite** tại server đích để Discord cho phép thêm thành viên qua OAuth2.`);
   }
 
   // Lấy danh sách user cần chuyển
   const rows = db.prepare(
-    'SELECT discord_id, username, access_token, refresh_token, token_expires_at FROM oauth_backups WHERE guild_id = ? ORDER BY verified_at'
+    `SELECT discord_id, username, access_token, refresh_token, token_expires_at,
+            member_roles_json, scopes, recovery_consent_at
+     FROM oauth_backups
+     WHERE guild_id = ? AND recovery_consent_at IS NOT NULL
+     ORDER BY verified_at`
   ).all(sourceGuildId);
 
   if (rows.length === 0) {
@@ -113,18 +137,29 @@ export async function execute(interaction) {
   // Xử lý từng user với delay nhỏ để tránh rate limit
   for (const row of rows) {
     try {
-      let accessToken = row.access_token;
+      if (!String(row.scopes || '').split(/\s+/).includes('guilds.join')) {
+        failures.push({ user: row.username || row.discord_id, reason: 'Thiếu quyền guilds.join' });
+        countFailed++;
+        continue;
+      }
+      let accessToken = decrypt(row.access_token);
+      const refreshToken = decrypt(row.refresh_token);
+      if (!accessToken || !refreshToken) {
+        failures.push({ user: row.username || row.discord_id, reason: 'Token recovery không đầy đủ' });
+        countFailed++;
+        continue;
+      }
 
       // Refresh token nếu đã hết hạn hoặc sắp hết (trong vòng 1 giờ)
       const expiresAt = row.token_expires_at ? new Date(row.token_expires_at) : null;
       const needsRefresh = !expiresAt || expiresAt.getTime() - Date.now() < 3600 * 1000;
 
-      if (needsRefresh && row.refresh_token) {
+      if (needsRefresh && refreshToken) {
         try {
-          const refreshed = await refreshAccessToken(row.refresh_token);
+          const refreshed = await refreshAccessToken(refreshToken);
           accessToken = refreshed.access_token;
           // Lưu token mới vào DB ngay lập tức
-          updateStmt.run(refreshed.access_token, refreshed.refresh_token, refreshed.expires_at, row.discord_id, sourceGuildId);
+          updateStmt.run(encrypt(refreshed.access_token), encrypt(refreshed.refresh_token), refreshed.expires_at, row.discord_id, sourceGuildId);
         } catch (refreshErr) {
           failures.push({ user: row.username || row.discord_id, reason: `Refresh token thất bại` });
           countFailed++;
@@ -132,14 +167,15 @@ export async function execute(interaction) {
         }
       }
 
-      const result = await addMemberToGuild(newGuildId, row.discord_id, accessToken, botToken);
+      const targetRoleIds = mapRecoveryRoleIds(row.member_roles_json, newGuild);
+      const result = await addMemberToGuild(newGuildId, row.discord_id, accessToken, botToken, targetRoleIds);
 
       if (result.status === 201) {
         countSuccess++;
       } else if (result.status === 204) {
         countAlready++;
       } else {
-        failures.push({ user: row.username || row.discord_id, reason: `HTTP ${result.status}` });
+        failures.push({ user: row.username || row.discord_id, reason: result.error || `HTTP ${result.status}` });
         countFailed++;
       }
     } catch (err) {
@@ -151,28 +187,31 @@ export async function execute(interaction) {
     await new Promise(r => setTimeout(r, 120));
   }
 
-  const embed = new EmbedBuilder()
-    .setColor(countFailed === 0 ? 0x10B981 : countSuccess > 0 ? 0xF59E0B : 0xEF4444)
-    .setTitle(`${E('status_check')} Chuyển Server Hoàn Tất`.trim())
-    .setDescription([
-      `Đã xử lý **${rows.length}** thành viên từ guild \`${sourceGuildId}\``,
-      `Server đích: **${newGuild.name}** (\`${newGuildId}\`)`,
-    ].join('\n'))
-    .addFields(
-      { name: 'Thêm mới thành công', value: `**${countSuccess}** thành viên`, inline: true },
-      { name: 'Đã có trong server', value: `**${countAlready}** thành viên`, inline: true },
-      { name: 'Thất bại', value: `**${countFailed}** thành viên`, inline: true },
-    )
-    .setFooter({ text: 'Cenar Store — OAuth2 Server Backup' })
-    .setTimestamp();
-
+  const icon = countFailed === 0 ? E('status_check') : countSuccess > 0 ? E('status_warn') : E('status_cross');
+  const lines = [
+    `## ${icon} KHÔI PHỤC THÀNH VIÊN HOÀN TẤT`,
+    `> ${E('recovery_backup')} Nguồn: \`${sourceGuildId}\``,
+    `> ${E('recovery_restore')} Đích: **${newGuild.name}** (\`${newGuildId}\`)`,
+    '',
+    `${E('status_check')} **Thêm mới:** ${countSuccess}`,
+    `${E('icon_group')} **Đã có sẵn:** ${countAlready}`,
+    `${E('status_cross')} **Thất bại:** ${countFailed}`,
+  ];
   if (failures.length > 0) {
-    const failList = failures.slice(0, 8).map(f => `\`${f.user}\` — ${f.reason}`).join('\n');
-    embed.addFields({
-      name: 'Chi tiết lỗi (tối đa 8)',
-      value: failList + (failures.length > 8 ? `\n... và ${failures.length - 8} lỗi khác` : ''),
-    });
+    lines.push(
+      '',
+      `### ${E('status_warn')} CHI TIẾT CẦN KIỂM TRA`,
+      ...failures.slice(0, 8).map((failure) => `> \`${failure.user}\` • ${failure.reason}`),
+    );
+    if (failures.length > 8) lines.push(`-# Còn ${failures.length - 8} lỗi khác trong log hệ thống.`);
   }
+  lines.push('', `-# ${E('icon_lock')} Token chỉ được giải mã trong bộ nhớ khi gọi API Discord.`);
 
-  await interaction.editReply({ embeds: [embed] });
+  const container = new ContainerBuilder()
+    .setAccentColor(countFailed === 0 ? 0x10B981 : countSuccess > 0 ? 0xF59E0B : 0xEF4444)
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join('\n')));
+  await interaction.editReply({
+    components: [container],
+    flags: MessageFlags.IsComponentsV2,
+  });
 }

@@ -14,6 +14,9 @@ const assets = [
   ['cenar_ctv_crystal', 'cenar_ctv_crystal.gif'],
   ['cenar_partner_rules', 'cenar_partner_rules.png'],
   ['cenar_partner_guide', 'cenar_partner_guide.png'],
+  ['cenar_verify_shield', 'cenar_verify_shield.png'],
+  ['cenar_recovery_backup', 'cenar_recovery_backup.gif'],
+  ['cenar_recovery_restore', 'cenar_recovery_restore.png'],
 ];
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
