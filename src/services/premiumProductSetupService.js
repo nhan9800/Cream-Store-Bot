@@ -1,7 +1,7 @@
 import { ChannelType, PermissionFlagsBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder, ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, SeparatorSpacingSize, MediaGalleryBuilder, MediaGalleryItemBuilder, MessageFlags } from 'discord.js';
 import { db } from '../database/db.js';
 import { getProductByName } from './productCatalogService.js';
-import { createEmojiResolver } from '../utils/emojiHelper.js';
+import { createEmojiResolver, withButtonEmoji } from '../utils/emojiHelper.js';
 import { getWalletBalance, addWalletBalance } from './walletService.js';
 import { getGuildConfig } from './guildConfigService.js';
 import { createOrder, saveOrderLogMessage } from './orderService.js';
@@ -249,10 +249,10 @@ export async function publishPremiumProductsForGuild(guild, settingOverrides = {
     );
 
     const claudeRow = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('product:claude:buy').setLabel('Mua ngay').setStyle(ButtonStyle.Success).setEmoji(E.component('card_success')),
-      new ButtonBuilder().setCustomId('product:claude:pricing').setLabel('Tính giá').setStyle(ButtonStyle.Secondary).setEmoji(E.component('payment_money')),
-      new ButtonBuilder().setCustomId('product:claude:models').setLabel('Models').setStyle(ButtonStyle.Secondary).setEmoji(E.component('brand_claude')),
-      new ButtonBuilder().setCustomId('product:claude:policy').setLabel('Điều khoản').setStyle(ButtonStyle.Secondary).setEmoji(E.component('icon_gem'))
+      withButtonEmoji(new ButtonBuilder().setCustomId('product:claude:buy').setLabel('Mua ngay').setStyle(ButtonStyle.Success), E.component('card_success')),
+      withButtonEmoji(new ButtonBuilder().setCustomId('product:claude:pricing').setLabel('Tính giá').setStyle(ButtonStyle.Secondary), E.component('payment_money')),
+      withButtonEmoji(new ButtonBuilder().setCustomId('product:claude:models').setLabel('Models').setStyle(ButtonStyle.Secondary), E.component('brand_claude')),
+      withButtonEmoji(new ButtonBuilder().setCustomId('product:claude:policy').setLabel('Điều khoản').setStyle(ButtonStyle.Secondary), E.component('icon_gem'))
     );
 
     const claudeAttachment = new AttachmentBuilder(claudeBannerPath);
@@ -347,9 +347,9 @@ export async function publishPremiumProductsForGuild(guild, settingOverrides = {
     );
 
     const locketRow = new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('product:locket:buy').setLabel('Mua ngay').setStyle(ButtonStyle.Success).setEmoji(E.component('panel_order')),
-      new ButtonBuilder().setCustomId('product:locket:features').setLabel('Đặc quyền').setStyle(ButtonStyle.Secondary).setEmoji(E.component('icon_star')),
-      new ButtonBuilder().setCustomId('product:locket:policy').setLabel('Điều khoản').setStyle(ButtonStyle.Secondary).setEmoji(E.component('icon_gem'))
+      withButtonEmoji(new ButtonBuilder().setCustomId('product:locket:buy').setLabel('Mua ngay').setStyle(ButtonStyle.Success), E.component('panel_order')),
+      withButtonEmoji(new ButtonBuilder().setCustomId('product:locket:features').setLabel('Đặc quyền').setStyle(ButtonStyle.Secondary), E.component('icon_star')),
+      withButtonEmoji(new ButtonBuilder().setCustomId('product:locket:policy').setLabel('Điều khoản').setStyle(ButtonStyle.Secondary), E.component('icon_gem'))
     );
 
     const locketAttachment = new AttachmentBuilder(locketBannerPath);

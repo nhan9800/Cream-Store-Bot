@@ -11,7 +11,7 @@ import {
   TextDisplayBuilder,
   AttachmentBuilder
 } from 'discord.js';
-import { createEmojiResolver } from '../utils/emojiHelper.js';
+import { createEmojiResolver, withButtonEmoji } from '../utils/emojiHelper.js';
 import fs from 'node:fs';
 import path from 'node:path';
 
@@ -155,12 +155,14 @@ export async function execute(interaction) {
   }
 
   const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setLabel('Hỗ Trợ & Mua Hàng')
-      .setStyle(ButtonStyle.Primary)
-      .setEmoji(E.component('icon_store'))
-      .setCustomId('announce_dummy_1')
-      .setDisabled(true)
+    withButtonEmoji(
+      new ButtonBuilder()
+        .setLabel('Hỗ Trợ & Mua Hàng')
+        .setStyle(ButtonStyle.Primary)
+        .setCustomId('announce_dummy_1')
+        .setDisabled(true),
+      E.component('icon_store'),
+    ),
   );
 
   try {

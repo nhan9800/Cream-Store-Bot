@@ -170,3 +170,45 @@ export function createEmojiResolver(guildId) {
   return fn;
 }
 
+/**
+ * Chuẩn hóa custom emoji trước khi đưa vào Discord component builders.
+ * Resolver cố ý trả null khi guild không có emoji; Discord.js lại ném
+ * ValidationError nếu null/undefined được truyền thẳng vào setEmoji().
+ */
+export function normalizeButtonEmoji(value) {
+  if (!value) return null;
+
+  if (typeof value === 'string') {
+    const custom = value.match(/^<(a?):([a-zA-Z0-9_]+):(\d{17,20})>$/);
+    if (custom) {
+      return { id: custom[3], name: custom[2], animated: custom[1] === 'a' };
+    }
+    if (/^\d{17,20}$/.test(value)) return { id: value };
+    return null;
+  }
+
+  if (typeof value !== 'object') return null;
+  const id = String(value.id || '').trim();
+  if (!/^\d{17,20}$/.test(id)) return null;
+  const name = String(value.name || '').trim();
+  return {
+    id,
+    ...(name ? { name } : {}),
+    ...(value.animated === true ? { animated: true } : {}),
+  };
+}
+
+/**
+ * Gắn custom emoji đầu tiên hợp lệ, hoặc giữ nguyên button khi không có emoji.
+ * Hàm luôn trả lại builder để vẫn có thể dùng theo kiểu chain.
+ */
+export function withButtonEmoji(button, ...candidates) {
+  for (const candidate of candidates) {
+    const emoji = normalizeButtonEmoji(candidate);
+    if (!emoji) continue;
+    button.setEmoji(emoji);
+    break;
+  }
+  return button;
+}
+

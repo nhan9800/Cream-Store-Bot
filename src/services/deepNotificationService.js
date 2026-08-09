@@ -17,7 +17,7 @@ import {
   MessageFlags,
 } from 'discord.js';
 import { decrypt } from '../utils/crypto.js';
-import { createEmojiResolver } from '../utils/emojiHelper.js';
+import { createEmojiResolver, withButtonEmoji } from '../utils/emojiHelper.js';
 
 // ═══════════════ Helpers ═══════════════
 
@@ -109,8 +109,14 @@ function buildCustomerRenewalAskV2(sub) {
 
 function buildCustomerRenewalButtons(subId, E) {
   return new ActionRowBuilder().addComponents(
-    new ButtonBuilder().setCustomId(`sub:renew:yes:${subId}`).setLabel('Có, tôi muốn gia hạn').setStyle(ButtonStyle.Success).setEmoji(E.component('status_check') ?? undefined),
-    new ButtonBuilder().setCustomId(`sub:renew:no:${subId}`).setLabel('Không, cảm ơn').setStyle(ButtonStyle.Secondary).setEmoji(E.component('status_cross') ?? undefined),
+    withButtonEmoji(
+      new ButtonBuilder().setCustomId(`sub:renew:yes:${subId}`).setLabel('Có, tôi muốn gia hạn').setStyle(ButtonStyle.Success),
+      E.component('status_check'),
+    ),
+    withButtonEmoji(
+      new ButtonBuilder().setCustomId(`sub:renew:no:${subId}`).setLabel('Không, cảm ơn').setStyle(ButtonStyle.Secondary),
+      E.component('status_cross'),
+    ),
   );
 }
 

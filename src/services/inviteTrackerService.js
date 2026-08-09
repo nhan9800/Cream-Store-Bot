@@ -1,6 +1,7 @@
 import { db } from '../database/db.js';
 import { ChannelType, PermissionFlagsBits, ContainerBuilder, TextDisplayBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } from 'discord.js';
 import { createTicket } from './ticketService.js';
+import { withButtonEmoji } from '../utils/emojiHelper.js';
 
 // ─── Emoji custom của Cenar Store ────────────
 const E = (key) => {
@@ -156,11 +157,13 @@ export async function processPendingInviteRewards(client) {
 
         container.addText(title).addText(desc);
 
-        const closeBtn = new ButtonBuilder()
-          .setCustomId('ticket:close')
-          .setLabel('Khóa Ticket')
-          .setStyle(ButtonStyle.Danger)
-          .setEmoji(E('icon_lock'));
+        const closeBtn = withButtonEmoji(
+          new ButtonBuilder()
+            .setCustomId('ticket:close')
+            .setLabel('Khóa Ticket')
+            .setStyle(ButtonStyle.Danger),
+          E('icon_lock'),
+        );
 
         const actionRow = new ActionRowBuilder().addComponents(closeBtn);
 
