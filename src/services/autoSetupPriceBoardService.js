@@ -17,7 +17,7 @@ import { formatCurrency } from '../utils/formatters.js';
 import { fmt, subtext } from '../utils/embedHelpers.js';
 import { config } from '../config.js';
 
-export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3';
+export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.1';
 const PRIMARY_GUILD_ID = '1282637033340403754';
 const PRIMARY_PRICE_CHANNEL_ID = '1514606995842273280';
 
@@ -150,12 +150,6 @@ function setButtonEmoji(button, E, slot) {
   return button;
 }
 
-function splitIntoChunks(items, size) {
-  const chunks = [];
-  for (let i = 0; i < items.length; i += size) chunks.push(items.slice(i, i + size));
-  return chunks;
-}
-
 export function groupPriceProducts(products) {
   const used = new Set();
   const panels = [];
@@ -183,14 +177,27 @@ export function buildPricePortalPayload(guildId, guildConfig, panels = []) {
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent([
       `# ${E('icon_store')} BẢNG GIÁ CENAR STORE`,
-      `> ${E('status_check')} **Giá bán được đồng bộ trực tiếp từ hệ thống sản phẩm đang hoạt động.**`,
-      '',
-      `${E('icon_search')} **Cách xem:** Cuộn xuống đúng danh mục và đối chiếu tên gói, giá, thời hạn.`,
-      `${E('icon_cart')} **Cách mua:** Chọn sản phẩm trong menu bên dưới bảng tương ứng để tạo đơn.`,
-      `${E('warranty_shield')} **Bảo hành:** Áp dụng theo mô tả của từng sản phẩm và thời gian sử dụng.`,
-      '',
-      `-# ${E('icon_price')} ${panels.length} danh mục · ${panels.reduce((sum, panel) => sum + panel.items.length, 0)} sản phẩm đang mở bán · ${PRICE_BOARD_VERSION}`,
+      `> ${E('status_check')} **Đồng bộ trực tiếp từ hệ thống sản phẩm đang hoạt động.**`,
     ].join('\n'))
+  );
+  container.addSeparatorComponents(
+    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
+  );
+  container.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent([
+      `### ${E('icon_search')} HƯỚNG DẪN NHANH`,
+      `${E('icon_search')} **Tra cứu:** Cuộn đến đúng danh mục, sau đó đối chiếu **tên gói · giá bán · thời hạn**.`,
+      `${E('icon_cart')} **Đặt hàng:** Chọn đúng sản phẩm trong menu ngay bên dưới danh mục.`,
+      `${E('warranty_shield')} **Bảo hành:** Áp dụng theo mô tả sản phẩm và thời gian sử dụng của từng gói.`,
+    ].join('\n'))
+  );
+  container.addSeparatorComponents(
+    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
+  );
+  container.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent(
+      subtext(`${E('icon_price')} ${panels.length} danh mục · ${panels.reduce((sum, panel) => sum + panel.items.length, 0)} sản phẩm đang mở bán · ${PRICE_BOARD_VERSION}`)
+    )
   );
 
   const row = new ActionRowBuilder();
@@ -238,24 +245,29 @@ export function buildPriceGroupPayload(guildId, group, products) {
     new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
   );
 
-  for (const chunk of splitIntoChunks(products, 5)) {
-    const content = chunk.map((product) => {
-      const slot = inferProductSlot(product);
-      const productIcon = E(slot) || E(group.titleSlot) || E('order_product');
-      const duration = getDurationText(product);
-      const hasDiscount = Number(product.original_price) > Number(product.price) && Number(product.price) > 0;
-      const price = Number(product.price) > 0
-        ? (hasDiscount
-          ? `~~${formatCurrency(product.original_price)}~~ → ${fmt.b(formatCurrency(product.price))}`
-          : fmt.b(formatCurrency(product.price)))
-        : fmt.b('Liên hệ báo giá');
-      return [
+  products.forEach((product, index) => {
+    if (index > 0) {
+      container.addSeparatorComponents(
+        new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
+      );
+    }
+    const slot = inferProductSlot(product);
+    const productIcon = E(slot) || E(group.titleSlot) || E('order_product');
+    const duration = getDurationText(product);
+    const hasDiscount = Number(product.original_price) > Number(product.price) && Number(product.price) > 0;
+    const price = Number(product.price) > 0
+      ? (hasDiscount
+        ? `~~${formatCurrency(product.original_price)}~~ → ${fmt.b(formatCurrency(product.price))}`
+        : `\`${formatCurrency(product.price)}\``)
+      : fmt.b('Liên hệ báo giá');
+    container.addTextDisplayComponents(
+      new TextDisplayBuilder().setContent([
         `### ${productIcon} ${product.name}`,
-        `> ${E('payment_money')} **Giá:** ${price}  ·  ${E('icon_duration')} **Thời hạn:** ${duration}`,
-      ].join('\n');
-    }).join('\n\n');
-    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(content));
-  }
+        `> ${E('payment_money')} **Giá bán:** ${price}`,
+        `> ${E('icon_duration')} **Thời hạn:** \`${duration}\``,
+      ].join('\n'))
+    );
+  });
 
   container.addSeparatorComponents(
     new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)

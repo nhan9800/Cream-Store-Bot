@@ -240,7 +240,7 @@ export const SLOT_ALIASES = {
   // Misc
   icon_price: ['price_tag', 'tag_gia', 'money', 'cenar_price'],
   icon_duration: ['duration', 'thoi_han'],
-  icon_store: ['store', 'cua_hang'],
+  icon_store: ['shop', 'store', 'cua_hang', 'cr_shop'],
   icon_star: ['star', 'sao'],
   icon_fire: ['fire', 'lua'],
   icon_gem: ['gem', 'diamond', 'kim_cuong'],
@@ -253,7 +253,8 @@ export const SLOT_ALIASES = {
   icon_settings: ['settings', 'cai_dat', 'cenar_admin'],
   icon_key: ['key', 'chia_khoa', 'verifybadge'],
   icon_link: ['link', 'lien_ket'],
-  icon_cart: ['price_cart', 'cart', 'shopping_cart', 'gio_hang']
+  icon_cart: ['price_cart', 'cart', 'shopping_cart', 'gio_hang'],
+  icon_search: ['activity_search', 'search', 'find', 'tim_kiem']
 };
 
 /**

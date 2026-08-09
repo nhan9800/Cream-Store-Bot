@@ -4,6 +4,7 @@ import { autoSetupPriceBoard } from '../src/services/autoSetupPriceBoardService.
 
 const dryRun = process.argv.includes('--dry');
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
+global.discordClient = client;
 
 client.once(Events.ClientReady, async () => {
   try {

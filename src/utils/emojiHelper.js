@@ -39,7 +39,7 @@ const fallbackEmojis = {
   panel_edit:         '<:cenar_admin:1535618678853337149>',
 
   // Stock / Order
-  stock_header:       '<:cr_shop:1392749981332541501>',
+  stock_header:       '<:cenar_shop:1535691148994023506>',
   order_created:      '<:cenar_verified:1535618654358736926>',
   order_queue:        '<a:Dotyellow:1481134440725090315>',
   order_cancel:       '<a:tick_red51:1384069065626222632>',
@@ -53,13 +53,13 @@ const fallbackEmojis = {
   payment_payos:      '<:cr_cardd:1348624271437463552>',
   payment_vietqr:     '<:cr_vcb:1348627024859889676>',
   payment_success:    '<a:tickgreen:1384069022831874169>',
-  payment_qr:         '<:verifybadge:1481127479702847646>',
+  payment_qr:         '<:cenar_verifybadge:1535690872551768164>',
   payment_money:      '<:cenar_wallet:1535618682481545217>',
   payment_refund:     '<a:tick_red51:1384069065626222632>',
 
   // Ticket
   ticket_close:       '<a:tick_red51:1384069065626222632>',
-  ticket_claim:       '<:verifybadge:1481127479702847646>',
+  ticket_claim:       '<:cenar_verifybadge:1535690872551768164>',
   ticket_open:        '<:cenar_staff:1535618674885402684>',
   ticket_user:        '<:cenar_verified:1535618654358736926>',
   ticket_staff:       '<:cenar_staff:1535618674885402684>',
@@ -98,7 +98,7 @@ const fallbackEmojis = {
   // Misc
   icon_price:         '<:cenar_money:1535691094585507930>',
   icon_duration:      '<a:redload:1459179959158571119>',
-  icon_store:         '<:cr_shop:1392749981332541501>',
+  icon_store:         '<:cenar_shop:1535691148994023506>',
   icon_star:          '<a:sao:1481149556753305600>',
   icon_fire:          '<a:tsm_fire:1327553120842158111>',
   icon_gem:           '<:Diamond:1485905790903783465>',
@@ -115,7 +115,7 @@ const fallbackEmojis = {
   icon_gold:          '<:Gold:1485905231199076412>',
   icon_silver:        '<:sliver:1327567474211684394>',
   icon_bronze:        '<:bronze:1327567486219976764>',
-  icon_clipboard:     '<:cr_shop:1392749981332541501>',
+  icon_clipboard:     '<:cenar_shop:1535691148994023506>',
   icon_heart:         '<:cenar_tim:1535691544387002508>',
   icon_heart_purple:  '<:cenar_tim:1535691544387002508>',
   icon_cart:          '<a:cenar_price_cart:1535910626088583190>',
@@ -123,9 +123,9 @@ const fallbackEmojis = {
   icon_brain:         '<:chatgopete:1481154927677014098>',
   icon_announce:      '<a:Arrow2:1367139234833498113>',
   icon_group:         '<:2895managerbadge:1483326442245849200>',
-  icon_search:        '<:verifybadge:1481127479702847646>',
+  icon_search:        '<:cenar_activity_search:1535690292420812962>',
   icon_tip:           '<a:starxoay:1481141954346483845>',
-  icon_doc:           '<:cr_shop:1392749981332541501>',
+  icon_doc:           '<:cenar_shop:1535691148994023506>',
   icon_art:           '<:cr_adobe:1366632539032125470>',
   icon_green:         '<a:tickgreen:1384069022831874169>',
   icon_red:           '<a:tick_red51:1384069065626222632>',
@@ -151,7 +151,8 @@ export function createEmojiResolver(guildId) {
     // Tên emoji có thể đã được chuẩn hóa thành cenar_<ten> trong khi ID giữ
     // nguyên. Dùng tên thật từ cache để mọi Components V2 và tin nhắn đều hiển
     // thị đúng ngay cả trước khi mapping database được refresh.
-    const cache = global.discordClient?.emojis?.cache;
+    const cache = global.discordClient?.guilds?.cache.get(guildId)?.emojis?.cache
+      || global.discordClient?.emojis?.cache;
     const cached = cache?.get(match[3]);
     if (cached) return cached.animated
       ? `<a:${cached.name}:${cached.id}>`

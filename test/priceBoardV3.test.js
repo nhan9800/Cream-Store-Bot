@@ -74,4 +74,22 @@ describe('Cenar price board V3', () => {
     expect(creativePayload).toContain('CapCut Pro 7 Ngày');
     expect(creativePayload).toContain('7 ngày');
   });
+
+  it('renders every product as its own consistently spaced Markdown block', () => {
+    const payloads = buildPriceBoardPayloads(GUILD_ID, {}, getActiveProducts(GUILD_ID));
+    for (const payload of payloads.slice(1)) {
+      const container = payload.components[0].toJSON();
+      const productBlocks = container.components
+        .filter((component) => component.type === 10 && component.content.startsWith('### '));
+
+      expect(productBlocks.length).toBeGreaterThan(0);
+      for (const block of productBlocks) {
+        expect(block.content).toContain('\n> ');
+        expect(block.content).toContain('**Giá bán:**');
+        expect(block.content).toContain('\n> ');
+        expect(block.content).toContain('**Thời hạn:**');
+        expect(block.content).not.toContain('\n\n### ');
+      }
+    }
+  });
 });
