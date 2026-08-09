@@ -1336,8 +1336,10 @@ export function registerInteractionHandler(client, commands) {
             }
           }
 
-          // Gửi DM thông báo bảo hành thành công cho khách hàng
-          const { EmbedBuilder } = await import('discord.js');
+          // Gửi DM thông báo bảo hành thành công cho khách hàng.
+          // EmbedBuilder đã được import ở cấp module; không khai báo lại trong
+          // block này vì binding cục bộ sẽ rơi vào temporal dead zone và làm
+          // phần log bảo hành phía trên lỗi trước khi được khởi tạo.
           const customer = await interaction.client.users.fetch(ticket.customer_id).catch(() => null);
           if (customer) {
             const embedCustomer = new EmbedBuilder()
@@ -1541,8 +1543,7 @@ export function registerInteractionHandler(client, commands) {
             await updateOrderLogMessage(interaction.guild, updatedOrder).catch(() => null);
           }
 
-          // Gửi DM từ chối bảo hành cho khách hàng
-          const { EmbedBuilder } = await import('discord.js');
+          // Dùng EmbedBuilder cấp module để tránh shadowing/temporal dead zone.
           const customer = await interaction.client.users.fetch(ticket.customer_id).catch(() => null);
           if (customer) {
             const embedCustomer = new EmbedBuilder()
@@ -1675,8 +1676,6 @@ export function registerInteractionHandler(client, commands) {
             await interaction.reply({ content: E('status_cross') + ' Không tìm thấy ticket tương ứng trong database.', ephemeral: true }).catch(() => null);
             return;
           }
-
-          const { EmbedBuilder, ButtonBuilder, ActionRowBuilder, ButtonStyle } = await import('discord.js');
 
           // Gửi tin nhắn thông báo thành công cho khách hàng qua DM
           const customer = await interaction.client.users.fetch(ticket.customer_id).catch(() => null);
@@ -1815,8 +1814,6 @@ export function registerInteractionHandler(client, commands) {
             await interaction.reply({ content: E('status_cross') + ' Không tìm thấy ticket tương ứng trong database.', ephemeral: true }).catch(() => null);
             return;
           }
-
-          const { EmbedBuilder, ButtonBuilder, ActionRowBuilder, ButtonStyle } = await import('discord.js');
 
           // Gửi tin nhắn thông báo thất bại cho khách hàng qua DM
           const customer = await interaction.client.users.fetch(ticket.customer_id).catch(() => null);
