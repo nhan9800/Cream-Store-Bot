@@ -11,6 +11,7 @@ import {
 } from '../utils/oauthState.js';
 import { snapshotGuildForRecovery, updateOauthMemberSnapshot } from './guildRecoveryService.js';
 import { buildVerificationSuccessDmV2 } from './verificationPanelService.js';
+import { resolveVerificationRole } from './verificationRoleService.js';
 
 // So sánh key an toàn theo thời gian (chống timing attack), fail-closed nếu thiếu key.
 function safeKeyMatch(provided) {
@@ -190,7 +191,7 @@ export function registerOauthRoutes(app) {
         scopes,
       );
 
-      console.log(`[OAuth Verify] Verified and backed up user: ${username} (${discordId})`);
+      console.log(`[OAuth Verify] OAuth callback validated and recovery consent stored: ${username} (${discordId})`);
 
       // Assign verified role in the target guild
       let roleGranted = false;
@@ -205,20 +206,9 @@ export function registerOauthRoutes(app) {
             guildName = guild.name;
             const member = verifiedMember;
             if (member) {
-              // Find the verified member role (prioritize customer_role_id from database)
-              const guildConfig = db.prepare('SELECT customer_role_id FROM guild_settings WHERE guild_id = ?').get(guildId);
-              let role = null;
-              if (guildConfig && guildConfig.customer_role_id) {
-                role = guild.roles.cache.get(guildConfig.customer_role_id);
-              }
-              if (!role) {
-                role = guild.roles.cache.find(r =>
-                  r.name.includes('Explorer') ||
-                  r.name.includes('Active Customer') ||
-                  r.name.includes('Thành Viên Mới') ||
-                  (r.name.toLowerCase().includes('member') && !r.name.toLowerCase().includes('bot'))
-                );
-              }
+              // Customer/VIP roles must never count as account verification.
+              // This role is resolved only after the OAuth callback was validated.
+              const role = resolveVerificationRole(guild);
               
               if (role) {
                 // Check if already has the role

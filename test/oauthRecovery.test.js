@@ -11,6 +11,7 @@ import {
   buildVerificationSuccessDmV2,
   buildVerificationUnavailableV2,
 } from '../src/services/verificationPanelService.js';
+import { resolveVerificationRole } from '../src/services/verificationRoleService.js';
 
 const GUILD_ID = '1282637033340403754';
 const DEFAULT_EMOJI = /[\u{1F000}-\u{1FAFF}\u2600-\u27BF]/u;
@@ -66,5 +67,37 @@ describe('verification Components V2', () => {
     expect(serializedText(prompt)).not.toMatch(DEFAULT_EMOJI);
     expect(serializedText(dm)).not.toMatch(DEFAULT_EMOJI);
     expect(serializedText(buildVerificationUnavailableV2(GUILD_ID))).not.toMatch(DEFAULT_EMOJI);
+  });
+
+  it('states that no verification role is granted before the OAuth callback', () => {
+    const prompt = buildVerificationPromptV2({
+      guildId: GUILD_ID,
+      username: 'tester',
+      loginUrl: 'https://cenarstore.xyz/oauth/login?guild_id=1282637033340403754',
+      hasRole: false,
+      recoveryActive: false,
+    });
+    const text = serializedText(prompt);
+    expect(text).toContain('BƯỚC 1/2 • CHỜ XÁC NHẬN OAUTH');
+    expect(text).toContain('chưa cấp vai trò xác minh');
+    expect(text).toContain('Xác Minh Với Discord');
+    expect(text).not.toContain('HOÀN TẤT XÁC MINH DISCORD');
+  });
+
+  it('does not confuse the customer Patron role with the verification role', () => {
+    const roles = [
+      { id: '1282637103045279820', name: 'Cenar Patron', managed: false },
+      { id: '1282638730812854345', name: 'Cenar Member', managed: false },
+    ];
+    const guild = {
+      roles: {
+        cache: {
+          get: (id) => roles.find((role) => role.id === id),
+          find: (predicate) => roles.find(predicate),
+        },
+      },
+    };
+
+    expect(resolveVerificationRole(guild)?.name).toBe('Cenar Member');
   });
 });

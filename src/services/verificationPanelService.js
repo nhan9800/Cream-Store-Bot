@@ -88,22 +88,22 @@ export function buildVerificationPromptV2({ guildId, username, loginUrl, hasRole
         `-# ${E('icon_heart_purple')} Bạn không cần xác minh lại ở thời điểm này.`,
       ]
     : [
-        title(E('verify_shield'), 'HOÀN TẤT XÁC MINH DISCORD', 2),
-        `Chào **${username}**, bước này vừa mở quyền cộng đồng vừa bật khả năng khôi phục có sự đồng ý.`,
+        title(E('verify_shield'), 'BƯỚC 1/2 • CHỜ XÁC NHẬN OAUTH', 2),
+        `Chào **${username}**, yêu cầu đã được bot tiếp nhận nhưng **chưa cấp vai trò xác minh**.`,
         `> ${E('icon_lock')} Discord chỉ chia sẻ danh tính cơ bản và quyền tham gia server dự phòng.`,
         `> ${E('recovery_backup')} Token recovery được mã hóa trước khi lưu vào database backup.`,
-        `> ${E('status_info')} Hệ thống không đọc mật khẩu và không thể khôi phục người chưa cấp quyền.`,
-        `-# ${E('icon_sparkle')} Trang Discord tiếp theo sẽ hiển thị chính xác các quyền trước khi bạn đồng ý.`,
+        `> ${E('status_info')} Vai trò chỉ được cấp sau khi Discord callback thành công và bot xác nhận đúng tài khoản.`,
+        `-# ${E('icon_sparkle')} Bấm nút bên dưới, xem đúng ứng dụng Cenar Store rồi chọn Ủy quyền.`,
       ];
 
   container.addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join('\n')));
   const components = [container];
   if (!active && loginUrl) {
     const linkButton = new ButtonBuilder()
-      .setLabel(hasRole ? 'Bật Recovery Backup' : 'Tiếp Tục Với Discord')
+      .setLabel('Xác Minh Với Discord')
       .setStyle(ButtonStyle.Link)
       .setURL(loginUrl);
-    const emoji = E.component(hasRole ? 'recovery_backup' : 'verify_shield') || E.component('status_check');
+    const emoji = E.component('verify_shield') || E.component('status_check');
     if (emoji) linkButton.setEmoji(emoji);
     components.push(new ActionRowBuilder().addComponents(linkButton));
   }

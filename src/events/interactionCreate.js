@@ -78,6 +78,7 @@ import { getCenarHub } from '../services/cenarHub.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { buildVerificationPromptV2, buildVerificationUnavailableV2 } from '../services/verificationPanelService.js';
 import { getRecoveryStatus } from '../services/guildRecoveryService.js';
+import { memberHasVerificationRole, resolveVerificationRole } from '../services/verificationRoleService.js';
 import { refreshAllShopPanels } from '../services/shopPanelService.js';
 import {
   FEEDBACK_TEXT_INPUT_ID,
@@ -2078,16 +2079,8 @@ export function registerInteractionHandler(client, commands) {
           return;
         }
         const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
-        const guildConfig = getGuildConfig(interaction.guildId);
-        const hasRole = Boolean(member && (
-          (guildConfig?.customer_role_id && member.roles.cache.has(guildConfig.customer_role_id))
-          || member.roles.cache.some((role) => (
-            role.name.includes('Explorer')
-            || role.name.includes('Active Customer')
-            || role.name.includes('Thành Viên Mới')
-            || (role.name.toLowerCase().includes('member') && !role.name.toLowerCase().includes('bot'))
-          ))
-        ));
+        const verificationRole = resolveVerificationRole(interaction.guild);
+        const hasRole = memberHasVerificationRole(member, verificationRole);
         const recovery = getRecoveryStatus(interaction.guildId, interaction.user.id);
         const recoveryActive = Boolean(recovery?.recovery_consent_at && String(recovery.scopes || '').includes('guilds.join'));
         const host = String(config.publicBaseUrl || '').trim().replace(/\/$/, '');
