@@ -15,16 +15,13 @@ import {
 import { getGuildConfig } from './guildConfigService.js';
 import { config } from '../config.js';
 
-// Dải phân cách thương hiệu (emoji custom, đồng bộ với kênh điều khoản/thông báo)
-const BRAND_DIVIDER = '<a:ccjdeobt:1481142015994495059>'.repeat(5);
-
 /**
  * Dựng thông báo Components V2 (Container + TextDisplay) để emoji custom hiển thị
  * được cả ở dòng tiêu đề — điều mà embed .setTitle() không làm được.
  * @param {{ accent: number, headerEmoji: string, headerText: string, bodyLines: string[] }} opts
  * @returns {{ components: any[], flags: number }}
  */
-function buildNoticeV2({ accent, headerEmoji, headerText, bodyLines }) {
+export function buildNoticeV2({ accent, headerEmoji, headerText, bodyLines }) {
   const header = [headerEmoji, headerText].filter(Boolean).join(' ').trim();
   const container = new ContainerBuilder().setAccentColor(accent);
   container.addTextDisplayComponents(
@@ -37,6 +34,31 @@ function buildNoticeV2({ accent, headerEmoji, headerText, bodyLines }) {
     new TextDisplayBuilder().setContent(bodyLines.join('\n'))
   );
   return { components: [container], flags: MessageFlags.IsComponentsV2 };
+}
+
+export function buildPaymentReminderV2({ guildId, customerId, orderCode, stage = 'first' }) {
+  const E = createEmojiResolver(guildId);
+  const isFinal = stage === 'final';
+  const deadlineMinutes = isFinal ? 10 : 20;
+
+  return buildNoticeV2({
+    accent: isFinal ? 0xE67E22 : 0xFEE75C,
+    headerEmoji: isFinal ? E('status_warn') : E('icon_clock'),
+    headerText: isFinal ? 'NHẮC THANH TOÁN · LẦN CUỐI' : 'NHẮC THANH TOÁN · LẦN 1/2',
+    bodyLines: [
+      `${E('ticket_user')} Chào <@${customerId}>, hệ thống vẫn chưa ghi nhận thanh toán cho đơn hàng của bạn.`,
+      '',
+      `> ${E('order_id')} **Mã đơn:** \`${orderCode}\``,
+      `> ${E('icon_clock')} **Thời hạn còn lại:** **${deadlineMinutes} phút**`,
+      `> ${E('payment_money')} **Cần thực hiện:** ${isFinal ? 'Hoàn tất thanh toán hoặc phản hồi ngay trong ticket.' : 'Thanh toán hoặc gửi một phản hồi để giữ ticket mở.'}`,
+      '',
+      isFinal
+        ? `${E('order_cancel')} **Sau thời hạn trên, đơn sẽ tự động hủy và ticket sẽ được đóng.**`
+        : `${E('status_info')} Chỉ cần gửi một tin nhắn ngắn như \`mình đang thanh toán\` để hệ thống ghi nhận bạn vẫn cần hỗ trợ.`,
+      '',
+      `-# ${E('ticket_open')} Ticket được theo dõi tự động · Không cần ping nhân viên hoặc Owner`,
+    ],
+  });
 }
 
 export async function processPendingPaymentTickets(client) {
@@ -95,7 +117,6 @@ export async function processPendingPaymentTickets(client) {
           headerText: 'ĐƠN HÀNG BỊ HỦY',
           bodyLines: [
             `${E('status_cross')} Đơn hàng **${order.order_code}** đã bị hủy do liên kết thanh toán đã hết hạn hoặc bị hủy.`,
-            BRAND_DIVIDER,
             '',
             `${E('ticket_close')} **Ticket này sẽ tự động đóng và xóa kênh sau 5 giây.**`,
           ],
@@ -145,18 +166,11 @@ export async function processPendingPaymentTickets(client) {
       // CASE 1: Chưa gửi nhắc nhở lần 1
       if (!order.payment_reminder_sent_at) {
         if (ageMinutes >= 15) {
-          const payload = buildNoticeV2({
-            accent: 0xFEE75C, // Vàng
-            headerEmoji: E('icon_clock'),
-            headerText: 'NHẮC NHỞ THANH TOÁN (LẦN 1)',
-            bodyLines: [
-              `${E('icon_fire')} Chào <@${order.customer_id}>, đơn hàng **${order.order_code}** của bạn đã được tạo 15 phút nhưng hệ thống chưa nhận được thanh toán.`,
-              BRAND_DIVIDER,
-              '',
-              `${E('order_product')} **Yêu cầu:** Vui lòng thanh toán hoặc gửi phản hồi tại đây trong vòng **20 phút** để giữ ticket luôn mở.`,
-              '',
-              `${E('status_info')} *Mẹo: Bạn có thể gõ bất kỳ nội dung nào (ví dụ: 'đợi tí', 'tôi muốn mua') để hệ thống tự động giữ ticket mở.*`,
-            ],
+          const payload = buildPaymentReminderV2({
+            guildId: order.guild_id,
+            customerId: order.customer_id,
+            orderCode: order.order_code,
+            stage: 'first',
           });
 
           await channel.send({
@@ -202,7 +216,6 @@ export async function processPendingPaymentTickets(client) {
               headerText: 'ĐƠN HÀNG BỊ HỦY TỰ ĐỘNG',
               bodyLines: [
                 `${E('status_cross')} Đơn hàng **${order.order_code}** đã bị hủy tự động do quá **20 phút** không nhận được phản hồi hoặc thanh toán kể từ lần nhắc thứ 1.`,
-                BRAND_DIVIDER,
                 '',
                 `${E('ticket_close')} **Ticket này sẽ tự động đóng và xóa kênh sau 5 giây.**`,
               ],
@@ -249,18 +262,11 @@ export async function processPendingPaymentTickets(client) {
             const minsSinceReply = (now - latestReplyTimestamp) / (60 * 1000);
             if (minsSinceReply >= 5) {
               // Nhắc nhở lần 2 (Đợi 10 phút)
-              const payload = buildNoticeV2({
-                accent: 0xE67E22, // Cam
-                headerEmoji: E('icon_fire'),
-                headerText: 'NHẮC NHỞ THANH TOÁN LẦN CUỐI',
-                bodyLines: [
-                  `${E('icon_fire')} Chào <@${order.customer_id}>, cảm ơn bạn đã phản hồi. Tuy nhiên đơn hàng **${order.order_code}** vẫn chưa được hoàn tất thanh toán.`,
-                  BRAND_DIVIDER,
-                  '',
-                  `${E('order_product')} **Yêu cầu:** Vui lòng hoàn tất thanh toán hoặc phản hồi tại đây trong vòng **10 phút** tiếp theo.`,
-                  '',
-                  `${E('status_cross')} Quá thời hạn trên, hệ thống sẽ tự động hủy đơn và đóng ticket này.`,
-                ],
+              const payload = buildPaymentReminderV2({
+                guildId: order.guild_id,
+                customerId: order.customer_id,
+                orderCode: order.order_code,
+                stage: 'final',
               });
 
               await channel.send({
@@ -306,7 +312,6 @@ export async function processPendingPaymentTickets(client) {
               headerText: 'ĐƠN HÀNG BỊ HỦY TỰ ĐỘNG (LẦN CUỐI)',
               bodyLines: [
                 `${E('status_cross')} Đơn hàng **${order.order_code}** đã bị hủy tự động do quá **10 phút** không nhận được phản hồi hoặc thanh toán kể từ lần nhắc cuối cùng.`,
-                BRAND_DIVIDER,
                 '',
                 `${E('ticket_close')} **Ticket này sẽ tự động đóng và xóa kênh sau 5 giây.**`,
               ],
@@ -420,7 +425,6 @@ export async function processCompletedFeedbackTickets(client) {
             headerText: 'TỰ ĐỘNG ĐÓNG TICKET & HỦY BẢO HÀNH',
             bodyLines: [
               `${E('status_cross')} Đơn hàng **${order.order_code}** đã quá **48 giờ** hoàn thành nhưng bạn vẫn chưa gửi đánh giá (feedback).`,
-              BRAND_DIVIDER,
               '',
               `${E('status_warn')} **Hậu quả:**`,
               `${E('order_product')} Tài khoản của bạn đã bị gắn role **Quên Feedback**.`,
@@ -476,7 +480,6 @@ export async function processCompletedFeedbackTickets(client) {
             headerText: 'NHẮC NHỞ HOÀN TẤT ĐÁNH GIÁ (FEEDBACK)',
             bodyLines: [
               `${E('icon_fire')} Chào <@${order.customer_id}>, đơn hàng **${order.order_code}** của bạn đã hoàn thành được **24 giờ**. Tuy nhiên, hệ thống nhận thấy bạn chưa gửi đánh giá (feedback) về cho shop.`,
-              BRAND_DIVIDER,
               '',
               `${E('order_product')} **Yêu cầu:** Vui lòng hoàn tất đánh giá trong vòng **24 giờ tới** để **kích hoạt & bảo vệ quyền lợi bảo hành** trọn đời của đơn hàng.`,
               '',
