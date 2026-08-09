@@ -557,8 +557,18 @@ export async function buildDiscountBoardMarkdown(guildId) {
   return markdown;
 }
 
-export async function buildDiscountBoardComponents(guildId) {
+export function buildDiscountBoardRefreshButton(guildId) {
   const E = createEmojiResolver(guildId);
+  const button = new ButtonBuilder()
+    .setCustomId('cardswap:btn_refresh_discount')
+    .setLabel('Cập Nhật Bảng Phí')
+    .setStyle(ButtonStyle.Secondary);
+  const refreshEmoji = E.component('icon_clock');
+  if (refreshEmoji) button.setEmoji(refreshEmoji);
+  return button;
+}
+
+export async function buildDiscountBoardComponents(guildId) {
   const markdown = await buildDiscountBoardMarkdown(guildId);
   
   const container = new ContainerBuilder().setAccentColor(0x3498DB);
@@ -567,11 +577,7 @@ export async function buildDiscountBoardComponents(guildId) {
   );
   
   const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
-      .setCustomId('cardswap:btn_refresh_discount')
-      .setLabel('Cập Nhật Bảng Phí')
-      .setEmoji(E.component('icon_clock'))
-      .setStyle(ButtonStyle.Secondary)
+    buildDiscountBoardRefreshButton(guildId),
   );
   
   return { components: [container, row], flags: MessageFlags.IsComponentsV2 };

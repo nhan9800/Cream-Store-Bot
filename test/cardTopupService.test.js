@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CARD_TOPUP_PROFIT_MARGIN_PERCENT,
   buildCardTopupCatalog,
+  buildDiscountBoardRefreshButton,
   calculateCardTopupCredit,
   normalizeCardTopupProfitMargin,
 } from '../src/services/cardSwapService.js';
@@ -67,5 +68,20 @@ describe('card top-up pricing', () => {
       fee_percent: 13.5,
       received_amount: 86_500,
     });
+  });
+
+  it('renders the discount refresh button without throwing when the guild has no mapped emoji', () => {
+    const previousClient = global.discordClient;
+    global.discordClient = { emojis: { cache: new Map([['another_emoji', { id: 'another_emoji' }]]) } };
+    try {
+      const button = buildDiscountBoardRefreshButton('guild_without_icon_clock');
+      expect(button.toJSON()).toMatchObject({
+        custom_id: 'cardswap:btn_refresh_discount',
+        label: 'Cập Nhật Bảng Phí',
+      });
+      expect(button.toJSON().emoji).toBeUndefined();
+    } finally {
+      global.discordClient = previousClient;
+    }
   });
 });
