@@ -25,6 +25,9 @@ const fallbackEmojis = {
   ctv_crystal: '<a:cenar_ctv_crystal:1535705392674508833>',
   partner_rules: '<:cenar_partner_rules:1535867940161716328>',
   partner_guide: '<:cenar_partner_guide:1535867942183636992>',
+  verify_shield: '<:cenar_verify_shield:1535887317011664987>',
+  recovery_backup: '<a:cenar_recovery_backup:1535887319406485627>',
+  recovery_restore: '<:cenar_recovery_restore:1535887322304880671>',
   brand_locket: '<:cenar_tsm_locket:1282651426459226155>',
 
   // Panel Ticket buttons

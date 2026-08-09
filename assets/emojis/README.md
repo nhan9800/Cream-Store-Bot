@@ -14,5 +14,8 @@ Các file này được giữ lại để việc đồng bộ emoji Discord có 
 | `cenar_ctv_crystal` | [Emoji.gg Blue Crystal](https://emoji.gg/emoji/1912-blue-crystal) | Điểm nhấn panel CTV (GIF) |
 | `cenar_partner_rules` | [Emoji.gg Rules](https://emoji.gg/emoji/16120-rules) | Quy định kênh Partner |
 | `cenar_partner_guide` | [Emoji.gg Guide](https://emoji.gg/emoji/3568-guide) | Hướng dẫn đăng truyền thông Partner |
+| `cenar_verify_shield` | [Emoji.gg SecurityShield](https://emoji.gg/emoji/525884-securityshield) | Nhận diện xác minh an toàn |
+| `cenar_recovery_backup` | [Emoji.gg Upload Neon](https://emoji.gg/emoji/24234-upload-neon) | Backup mã hóa và đồng bộ (GIF) |
+| `cenar_recovery_restore` | [Emoji.gg Restore](https://emoji.gg/emoji/750227-restore) | Khôi phục server dự phòng |
 
 Không xóa emoji server theo tên/ngoại hình. Script đồng bộ chỉ tái sử dụng tên đã có hoặc tải emoji còn thiếu; việc dọn trùng byte được thực hiện riêng bởi `npm run audit:emojis`.

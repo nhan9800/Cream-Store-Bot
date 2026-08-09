@@ -63,6 +63,9 @@ export const EMOJI_SLOTS = {
   ctv_crystal:        { label: 'Điểm nhấn CTV (GIF)', default: '' },
   partner_rules:      { label: 'Quy định Partner', default: '' },
   partner_guide:      { label: 'Hướng dẫn Partner', default: '' },
+  verify_shield:      { label: 'Khiên xác minh OAuth', default: '' },
+  recovery_backup:    { label: 'Backup mã hóa (GIF)', default: '' },
+  recovery_restore:   { label: 'Khôi phục server', default: '' },
 
   // Status
   status_check:       { label: 'Tích xanh',            default: '✅' },
@@ -207,6 +210,9 @@ export const SLOT_ALIASES = {
   ctv_crystal: ['cenar_ctv_crystal', 'ctv_crystal'],
   partner_rules: ['cenar_partner_rules', 'partner_rules'],
   partner_guide: ['cenar_partner_guide', 'partner_guide'],
+  verify_shield: ['cenar_verify_shield', 'verify_shield'],
+  recovery_backup: ['cenar_recovery_backup', 'recovery_backup'],
+  recovery_restore: ['cenar_recovery_restore', 'recovery_restore'],
 
   // Status
   status_check: ['check', 'tick', 'success', 'tich_xanh'],

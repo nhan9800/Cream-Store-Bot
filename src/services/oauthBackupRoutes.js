@@ -1,8 +1,16 @@
 import { config } from '../config.js';
 import { db } from '../database/db.js';
-import { EmbedBuilder } from 'discord.js';
-import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { timingSafeEqual } from 'node:crypto';
+import { encrypt } from '../utils/crypto.js';
+import {
+  createOAuthState,
+  oauthStateCookieName,
+  OAUTH_STATE_TTL_MS,
+  parseCookieHeader,
+  verifyOAuthState,
+} from '../utils/oauthState.js';
+import { snapshotGuildForRecovery, updateOauthMemberSnapshot } from './guildRecoveryService.js';
+import { buildVerificationSuccessDmV2 } from './verificationPanelService.js';
 
 // So sánh key an toàn theo thời gian (chống timing attack), fail-closed nếu thiếu key.
 function safeKeyMatch(provided) {
@@ -17,27 +25,54 @@ function safeKeyMatch(provided) {
 export function registerOauthRoutes(app) {
   
   // 1. Route redirect to Discord OAuth2 page
-  app.get('/oauth/login', (req, res) => {
-    const guildId = req.query.guild_id || config.guildId;
+  app.get('/oauth/login', async (req, res) => {
+    const guildId = String(req.query.guild_id || config.guildId || '').trim();
     const clientId = config.clientId;
     
     if (!clientId) {
       return res.status(500).send('CLIENT_ID is not configured in bot settings.');
+    }
+    if (!String(process.env.CLIENT_SECRET || '').trim() || !String(process.env.ENCRYPTION_KEY || '').trim()) {
+      return res.status(503).send(buildErrorPage(
+        'Recovery đang chờ cấu hình',
+        'Owner cần hoàn tất khóa OAuth và mã hóa trên hosting trước khi người dùng xác minh.',
+      ));
+    }
+
+    if (!/^\d{17,20}$/.test(guildId)) {
+      return res.status(400).send(buildErrorPage('Server không hợp lệ', 'Liên kết xác minh không chứa Discord server hợp lệ.'));
+    }
+    const discordClient = req.app.locals.discordClient;
+    const guild = discordClient?.isReady?.()
+      ? await discordClient.guilds.fetch(guildId).catch(() => null)
+      : null;
+    if (!guild) {
+      return res.status(400).send(buildErrorPage('Không tìm thấy server', 'Bot chưa sẵn sàng hoặc không thuộc Discord server này.'));
     }
 
     const host = req.get('host');
     const protocol = req.secure || req.headers['x-forwarded-proto'] === 'https' ? 'https' : 'http';
     const baseUrl = config.publicBaseUrl || `${protocol}://${host}`;
     const redirectUri = `${baseUrl}/oauth/callback`;
-
-    const authorizeUrl = `https://discord.com/api/oauth2/authorize?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=identify%20guilds.join&state=${guildId}`;
+    const state = createOAuthState(guildId);
+    const cookieName = oauthStateCookieName(clientId);
+    const secureCookie = baseUrl.startsWith('https://') ? '; Secure' : '';
+    const cookiePath = new URL(redirectUri).pathname;
+    res.setHeader('Set-Cookie', `${cookieName}=${encodeURIComponent(state)}; Max-Age=${Math.floor(OAUTH_STATE_TTL_MS / 1000)}; Path=${cookiePath}; HttpOnly; SameSite=Lax${secureCookie}`);
+    const authorizeUrl = `https://discord.com/api/oauth2/authorize?${new URLSearchParams({
+      client_id: clientId,
+      redirect_uri: redirectUri,
+      response_type: 'code',
+      scope: 'identify guilds.join',
+      state,
+    }).toString()}`;
     
     res.redirect(authorizeUrl);
   });
 
   // 2. Route OAuth2 Callback
   app.get('/oauth/callback', async (req, res) => {
-    const { code, state: guildId } = req.query;
+    const { code, state } = req.query;
 
     if (!code) {
       return res.status(400).send(buildErrorPage('Thiếu mã xác minh', 'Không tìm thấy mã xác minh từ Discord. Vui lòng thử lại.'));
@@ -46,14 +81,27 @@ export function registerOauthRoutes(app) {
     const clientSecret = process.env.CLIENT_SECRET;
     const clientId = config.clientId;
 
-    if (!clientSecret) {
-      return res.status(500).send(buildErrorPage('Lỗi cấu hình', 'CLIENT_SECRET chưa được cài đặt. Vui lòng liên hệ quản trị viên.'));
-    }
-
     const host = req.get('host');
     const protocol = req.secure || req.headers['x-forwarded-proto'] === 'https' ? 'https' : 'http';
     const baseUrl = config.publicBaseUrl || `${protocol}://${host}`;
     const redirectUri = `${baseUrl}/oauth/callback`;
+    const cookieName = oauthStateCookieName(clientId);
+    const cookies = parseCookieHeader(req.headers.cookie);
+    let guildId;
+    try {
+      guildId = verifyOAuthState(state, cookies[cookieName]).guildId;
+    } catch (error) {
+      return res.status(400).send(buildErrorPage('Phiên xác minh không hợp lệ', error.message));
+    }
+    const secureCookie = baseUrl.startsWith('https://') ? '; Secure' : '';
+    const cookiePath = new URL(redirectUri).pathname;
+    res.setHeader('Set-Cookie', `${cookieName}=; Max-Age=0; Path=${cookiePath}; HttpOnly; SameSite=Lax${secureCookie}`);
+    if (!String(clientSecret || '').trim() || !String(process.env.ENCRYPTION_KEY || '').trim()) {
+      return res.status(503).send(buildErrorPage(
+        'Recovery đang chờ cấu hình',
+        'Owner cần hoàn tất khóa OAuth và mã hóa trên hosting trước khi người dùng xác minh.',
+      ));
+    }
 
     try {
       // Exchange code for token
@@ -77,6 +125,10 @@ export function registerOauthRoutes(app) {
       const tokenData = await tokenResponse.json();
       const accessToken = tokenData.access_token;
       const refreshToken = tokenData.refresh_token;
+      const scopes = String(tokenData.scope || '').trim();
+      if (!accessToken || !refreshToken || !scopes.split(/\s+/).includes('guilds.join')) {
+        throw new Error('Discord không cấp đủ quyền recovery bắt buộc.');
+      }
       const expiresIn = tokenData.expires_in || 604800; // 7 ngày mặc định
       const tokenExpiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
 
@@ -94,12 +146,28 @@ export function registerOauthRoutes(app) {
       const username = `${userProfile.username}${userProfile.discriminator !== '0' ? '#' + userProfile.discriminator : ''}`;
       const email = userProfile.email || null;
       const avatar = userProfile.avatar || null;
-      const resolvedGuildId = guildId || '';
+      const resolvedGuildId = guildId;
+      const discordClient = req.app.locals.discordClient;
+      const verifiedGuild = discordClient?.isReady?.()
+        ? await discordClient.guilds.fetch(guildId).catch(() => null)
+        : null;
+      const verifiedMember = verifiedGuild
+        ? await verifiedGuild.members.fetch(discordId).catch(() => null)
+        : null;
+      if (!verifiedGuild || !verifiedMember) {
+        return res.status(400).send(buildErrorPage(
+          'Không thể xác nhận thành viên',
+          'Bạn cần ở trong server Cenar Store trước khi bật recovery backup.',
+        ));
+      }
 
       // Save user to database oauth_backups
       db.prepare(`
-        INSERT INTO oauth_backups (discord_id, guild_id, access_token, refresh_token, token_expires_at, username, email, avatar, verified_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+        INSERT INTO oauth_backups (
+          discord_id, guild_id, access_token, refresh_token, token_expires_at,
+          username, email, avatar, scopes, recovery_consent_at, verified_at
+        )
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
         ON CONFLICT(discord_id, guild_id) DO UPDATE SET
           access_token     = excluded.access_token,
           refresh_token    = excluded.refresh_token,
@@ -107,13 +175,24 @@ export function registerOauthRoutes(app) {
           username         = excluded.username,
           email            = excluded.email,
           avatar           = excluded.avatar,
+          scopes           = excluded.scopes,
+          recovery_consent_at = CURRENT_TIMESTAMP,
           verified_at      = CURRENT_TIMESTAMP
-      `).run(discordId, resolvedGuildId, accessToken, refreshToken, tokenExpiresAt, username, email, avatar);
+      `).run(
+        discordId,
+        resolvedGuildId,
+        encrypt(accessToken),
+        encrypt(refreshToken),
+        tokenExpiresAt,
+        username,
+        email,
+        avatar,
+        scopes,
+      );
 
       console.log(`[OAuth Verify] Verified and backed up user: ${username} (${discordId})`);
 
       // Assign verified role in the target guild
-      const discordClient = req.app.locals.discordClient;
       let roleGranted = false;
       let assignedRoleName = '';
       let errorMsg = '';
@@ -121,10 +200,10 @@ export function registerOauthRoutes(app) {
 
       if (discordClient && guildId) {
         try {
-          const guild = await discordClient.guilds.fetch(guildId).catch(() => null);
+          const guild = verifiedGuild;
           if (guild) {
             guildName = guild.name;
-            const member = await guild.members.fetch(discordId).catch(() => null);
+            const member = verifiedMember;
             if (member) {
               // Find the verified member role (prioritize customer_role_id from database)
               const guildConfig = db.prepare('SELECT customer_role_id FROM guild_settings WHERE guild_id = ?').get(guildId);
@@ -157,32 +236,11 @@ export function registerOauthRoutes(app) {
 
                 // ─── Gửi DM chào mừng sau khi verify thành công ───
                 try {
-                  const E = createEmojiResolver(guildId);
-                  const dmEmbed = new EmbedBuilder()
-                    .setColor(0x7C3AED)
-                    .setTitle(`${E('status_check')} Xác Minh Thành Công — ${guild.name}`.trim())
-                    .setDescription([
-                      `Xin chào **${member.user.username}**!`,
-                      '',
-                      `Tài khoản Discord của bạn đã được **xác minh thành công** tại **${guild.name}**.`,
-                      '',
-                      '**Bạn đã nhận được:**',
-                      `> ${E('order_product')} Vai trò: **${role.name}**`,
-                      `> ${E('status_check')} Quyền xem toàn bộ kênh của server`,
-                      `> ${E('icon_sparkle')} Tài khoản được sao lưu bảo mật (backup)`,
-                      '',
-                      '**Bước tiếp theo:**',
-                      `> ${E('payment_money')} Xem bảng giá sản phẩm trong kênh \`bang-gia\``,
-                      `> ${E('panel_order')} Mở ticket mua hàng trong kênh \`ho-tro\``,
-                      `> ${E('brand_discord')} Tham gia trò chuyện trong \`thao-luan\``,
-                      '',
-                      '*Nếu có vấn đề, hãy mở ticket hỗ trợ trong server.*'
-                    ].join('\n'))
-                    .setThumbnail(guild.iconURL({ forceStatic: false }) || undefined)
-                    .setFooter({ text: `${guild.name} — Uy Tin & Chat Luong` })
-                    .setTimestamp();
-
-                  await member.send({ embeds: [dmEmbed] }).catch(() => {
+                  await member.send(buildVerificationSuccessDmV2({
+                    guildId,
+                    guildName: guild.name,
+                    roleName: role.name,
+                  })).catch(() => {
                     // DM có thể bị tắt — không phải lỗi nghiêm trọng
                     console.log(`[OAuth Verify] DM disabled for ${username}, skipping.`);
                   });
@@ -194,6 +252,10 @@ export function registerOauthRoutes(app) {
                 console.warn(`[OAuth Verify] Verification role not found in guild ${guild.name}`);
                 errorMsg = 'Không tìm thấy vai trò xác minh trong server.';
               }
+              updateOauthMemberSnapshot(guildId, member);
+              await snapshotGuildForRecovery(guild).catch((snapshotError) => {
+                console.warn(`[RECOVERY] Chưa thể làm mới snapshot sau OAuth: ${snapshotError.message}`);
+              });
             } else {
               console.warn(`[OAuth Verify] Member ${discordId} not in guild ${guild.name}`);
               errorMsg = 'Bạn chưa vào server Discord. Hãy join server trước rồi thử lại.';
@@ -216,7 +278,10 @@ export function registerOauthRoutes(app) {
 
     } catch (err) {
       console.error('[OAuth Verify] Callback Error:', err);
-      res.status(500).send(buildErrorPage('Xác Minh Thất Bại', `Lỗi trong quá trình kết nối: ${err.message}. Vui lòng thử lại hoặc mở ticket hỗ trợ.`));
+      res.status(500).send(buildErrorPage(
+        'Xác Minh Thất Bại',
+        'Phiên kết nối chưa hoàn tất. Vui lòng thử lại; nếu lỗi lặp lại, hãy mở ticket hỗ trợ.',
+      ));
     }
   });
 
@@ -240,7 +305,21 @@ export function registerOauthRoutes(app) {
 // HTML Page Builders
 // ─────────────────────────────────────────────────
 
+function escapeHtml(value) {
+  return String(value ?? '').replace(/[&<>'"]/g, (character) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    "'": '&#39;',
+    '"': '&quot;',
+  })[character]);
+}
+
 function buildSuccessPage(username, roleGranted, roleName, errorMsg, guildName) {
+  username = escapeHtml(username);
+  roleName = escapeHtml(roleName);
+  errorMsg = escapeHtml(errorMsg);
+  guildName = escapeHtml(guildName);
   const isPartial = !roleGranted && errorMsg;
   return `<!DOCTYPE html>
 <html lang="vi">
@@ -376,7 +455,7 @@ function buildSuccessPage(username, roleGranted, roleName, errorMsg, guildName) 
       </div>
       <div class="info-row">
         <span class="label">Trạng thái</span>
-        <span class="value">${roleGranted ? 'Đã xác minh &amp; sao lưu' : 'Đã lưu, chưa cấp quyền'}</span>
+        <span class="value">${roleGranted ? 'OAuth recovery đã mã hóa' : 'Recovery đã lưu, chưa cấp vai trò'}</span>
       </div>
     </div>
 
@@ -398,6 +477,8 @@ function buildSuccessPage(username, roleGranted, roleName, errorMsg, guildName) 
 }
 
 function buildErrorPage(title, message) {
+  title = escapeHtml(title);
+  message = escapeHtml(message);
   return `<!DOCTYPE html>
 <html lang="vi">
 <head>
