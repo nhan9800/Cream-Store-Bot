@@ -18,6 +18,8 @@ import {
 } from 'discord.js';
 import { decrypt } from '../utils/crypto.js';
 import { createEmojiResolver, withButtonEmoji } from '../utils/emojiHelper.js';
+import { isInternationalGuild } from '../utils/locale.js';
+import { translateProductName } from '../utils/internationalCatalog.js';
 
 // ═══════════════ Helpers ═══════════════
 
@@ -153,75 +155,64 @@ function buildOwnerCustomerWantsRenewalV2(sub, customerUser) {
 
 function buildExpiredSubscriptionAlertV2(order, ownerId) {
   const E = createEmojiResolver(order.guild_id);
+  const international = isInternationalGuild(order.guild_id);
   const expiryTs = Math.floor(new Date(order.expiry_at).getTime() / 1000);
 
   let pName = (order.product_name || '').toLowerCase();
-  let emoji = E('icon_price', '<:Diamond:1485905790903783465>');
   let color = 0x808080;
-  let serviceName = "DỊCH VỤ";
+  let serviceName = international ? 'DIGITAL SERVICE' : 'DỊCH VỤ';
   
   if (pName.includes('youtube')) {
-    emoji = E('brand_youtube', '<:youtube:1373734824342327297>'); color = 0xFF0000; serviceName = "YOUTUBE PREMIUM";
+    color = 0xFF0000; serviceName = 'YOUTUBE PREMIUM';
   } else if (pName.includes('netflix')) {
-    emoji = E('brand_netflix', '<:cr_shop:1392749981332541501>'); color = 0xE50914; serviceName = "NETFLIX";
+    color = 0xE50914; serviceName = 'NETFLIX';
   } else if (pName.includes('spotify')) {
-    emoji = E('brand_spotify', '<a:tickgreen:1384069022831874169>'); color = 0x1DB954; serviceName = "SPOTIFY";
+    color = 0x1DB954; serviceName = 'SPOTIFY';
   } else if (pName.includes('canva')) {
-    emoji = E('brand_canva', '<:verifybadge:1481127479702847646>'); color = 0x00C4CC; serviceName = "CANVA";
+    color = 0x00C4CC; serviceName = 'CANVA';
   } else if (pName.includes('office') || pName.includes('microsoft')) {
-    emoji = E('brand_office', '<:money:1442876095442714748>'); color = 0xD83B01; serviceName = "OFFICE 365";
+    color = 0xD83B01; serviceName = 'OFFICE 365';
   } else if (pName.includes('vpn')) {
-    emoji = E('brand_vpn', '<:verifybadge:1481127479702847646>'); color = 0x00A4FF; serviceName = "VPN";
+    color = 0x00A4FF; serviceName = 'VPN';
   }
 
   const container = new ContainerBuilder().setAccentColor(color);
 
   const pingText = ownerId ? `<@${ownerId}>` : '@everyone';
 
-  container.addTextDisplayComponents(
-    new TextDisplayBuilder().setContent(
-      `${pingText}\n` +
-      `# ${E('status_warn')} **BÁO ĐỘNG: GÓI ${serviceName} ĐÃ HẾT HẠN** ${E('status_warn')}\n` +
-      `> Đã phát hiện khách hàng hết hạn gói mua. Cần xử lý ngay để tránh lỗ gia hạn!`
-    )
-  );
+  container.addTextDisplayComponents(new TextDisplayBuilder().setContent(international
+    ? `${pingText}\n# ${E('status_warn')} **EXPIRED ${serviceName} SUBSCRIPTION**\n> A customer subscription reached its expiry date and requires a renewal or service-status decision.`
+    : `${pingText}\n# ${E('status_warn')} **BÁO ĐỘNG: GÓI ${serviceName} ĐÃ HẾT HẠN** ${E('status_warn')}\n> Đã phát hiện khách hàng hết hạn gói mua. Cần xử lý ngay để tránh lỗ gia hạn!`));
 
   container.addSeparatorComponents(
     new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
   );
 
-  container.addTextDisplayComponents(
-    new TextDisplayBuilder().setContent(
-      `> ${E('icon_fire')} **Tài khoản (Email):** \`${order.credential_email || 'Không có Email'}\`\n` +
-      `> ${E('icon_gift')} **Sản phẩm:** ${order.product_name}\n` +
-      `> ${E('icon_cart')} **Đơn hàng gốc:** \`${order.order_code}\`\n` +
-      `> ${E('icon_heart')} **Khách hàng:** <@${order.customer_id}>\n` +
-      `> ${E('icon_clock')} **Ngày hết hạn:** <t:${expiryTs}:d> (<t:${expiryTs}:R>)`
-    )
-  );
+  container.addTextDisplayComponents(new TextDisplayBuilder().setContent(international
+    ? `> ${E('icon_fire')} **Account:** \`${order.credential_email || 'Not recorded'}\`\n> ${E('icon_gift')} **Product:** ${translateProductName(order.product_name)}\n> ${E('icon_cart')} **Original order:** \`${order.order_code}\`\n> ${E('icon_heart')} **Customer:** <@${order.customer_id}>\n> ${E('icon_clock')} **Expired:** <t:${expiryTs}:d> (<t:${expiryTs}:R>)`
+    : `> ${E('icon_fire')} **Tài khoản (Email):** \`${order.credential_email || 'Không có Email'}\`\n> ${E('icon_gift')} **Sản phẩm:** ${order.product_name}\n> ${E('icon_cart')} **Đơn hàng gốc:** \`${order.order_code}\`\n> ${E('icon_heart')} **Khách hàng:** <@${order.customer_id}>\n> ${E('icon_clock')} **Ngày hết hạn:** <t:${expiryTs}:d> (<t:${expiryTs}:R>)`));
 
   container.addSeparatorComponents(
     new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small)
   );
 
-  container.addTextDisplayComponents(
-    new TextDisplayBuilder().setContent(
-      `${E('icon_gem')} *Vui lòng truy cập trang quản lý để Kick/Huỷ gói này hoặc yêu cầu khách gia hạn!*`
-    )
-  );
+  container.addTextDisplayComponents(new TextDisplayBuilder().setContent(international
+    ? `${E('icon_gem')} *Choose whether to send a renewal invoice or mark the service as stopped.*`
+    : `${E('icon_gem')} *Vui lòng truy cập trang quản lý để Kick/Huỷ gói này hoặc yêu cầu khách gia hạn!*`));
 
-  const row = new ActionRowBuilder().addComponents(
-    new ButtonBuilder()
+  const renewButton = new ButtonBuilder()
       .setCustomId(`sub_order:renew:bill:${order.order_code}`)
-      .setLabel('Gửi bill nhắc gia hạn')
-      .setStyle(ButtonStyle.Success)
-      .setEmoji({ id: '1348626032747614268', name: 'cr_carttt' }),
-    new ButtonBuilder()
+      .setLabel(international ? 'Send Renewal Invoice' : 'Gửi bill nhắc gia hạn')
+      .setStyle(ButtonStyle.Success);
+  withButtonEmoji(renewButton, E.component('icon_cart'), E.component('payment_money'));
+
+  const stoppedButton = new ButtonBuilder()
       .setCustomId(`sub_order:renew:kicked:${order.order_code}`)
-      .setLabel('Đã Kick / Ngừng gia hạn')
-      .setStyle(ButtonStyle.Danger)
-      .setEmoji({ id: '1348625535512870965', name: 'cr_baohanh' })
-  );
+      .setLabel(international ? 'Service Stopped' : 'Đã Kick / Ngừng gia hạn')
+      .setStyle(ButtonStyle.Danger);
+  withButtonEmoji(stoppedButton, E.component('status_cross'), E.component('warranty_shield'));
+
+  const row = new ActionRowBuilder().addComponents(renewButton, stoppedButton);
 
   return { components: [container, row], flags: MessageFlags.IsComponentsV2 };
 }
