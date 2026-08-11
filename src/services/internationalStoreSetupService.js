@@ -14,7 +14,7 @@ import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { STORE_TWO_GUILD_ID } from '../utils/locale.js';
 import { buildTicketPanelV2 } from '../utils/embeds.js';
 import { snapshotGuildForRecovery } from './guildRecoveryService.js';
-import { upsertGuildConfig } from './guildConfigService.js';
+import { getGuildConfig, upsertGuildConfig } from './guildConfigService.js';
 import { buildVerificationPanelV2 } from './verificationPanelService.js';
 import { resolveVerificationRole } from './verificationRoleService.js';
 
