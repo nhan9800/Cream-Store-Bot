@@ -327,6 +327,7 @@ export function initDatabase() {
       penalty_level INTEGER NOT NULL DEFAULT 0,
       last_mention_at TEXT NOT NULL,
       last_penalty_at TEXT,
+      policy_version INTEGER NOT NULL DEFAULT 2,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       PRIMARY KEY (guild_id, user_id)
     );
@@ -575,6 +576,9 @@ export function initDatabase() {
   // Customer flags — mute ticket (ngăn tạo ticket)
   ensureColumn('customer_flags', 'is_ticket_muted', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn('customer_flags', 'ticket_mute_reason', 'TEXT');
+  // Existing rows receive v1 so ownerPingGuardService can reset counters that
+  // may have been inflated by Discord reply mentions before policy v2.
+  ensureColumn('owner_ping_enforcement', 'policy_version', 'INTEGER NOT NULL DEFAULT 1');
 
   // Thêm ví điện tử
   ensureColumn('customer_profiles', 'wallet_balance', 'INTEGER NOT NULL DEFAULT 0');

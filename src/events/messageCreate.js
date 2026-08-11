@@ -14,6 +14,8 @@ import { config } from '../config.js';
 import {
   formatOwnerPingPenalty,
   OWNER_PING_PENALTIES_MS,
+  OWNER_PING_TIMEOUT_THRESHOLD,
+  isDirectOwnerMention,
   registerOwnerPing,
 } from '../services/ownerPingGuardService.js';
 import { emitAutomationLog } from '../services/automationLogService.js';
@@ -43,31 +45,36 @@ async function enforceProtectedOwnerPing(message, E, isStaff) {
     || isStaff
     || !message.member
     || message.author.id === protectedOwnerId
-    || !message.mentions.users.has(protectedOwnerId)
+    || !isDirectOwnerMention(message, protectedOwnerId)
   ) return false;
 
   const result = registerOwnerPing(message.guildId, message.author.id);
   if (result.action === 'counted') return false;
 
   if (result.action === 'warning') {
+    const remainingBeforeTimeout = Math.max(1, OWNER_PING_TIMEOUT_THRESHOLD - result.mentionCount);
+    const warningDetail = remainingBeforeTimeout === 1
+      ? `${E('status_warn')} Đây là nhắc nhở cuối trong chu kỳ. Chỉ khi **tag trực tiếp thêm 1 lần** bot mới tạm khóa chat **10 phút**.`
+      : `${E('status_info')} Bạn vẫn còn **${remainingBeforeTimeout} lần tag trực tiếp** trước giới hạn tạm khóa **10 phút**.`;
     logAbuseEvent(
       message.guildId,
       message.author.id,
       'OWNER_PING_WARNING',
-      `Ping Owner lần ${result.mentionCount} trong cửa sổ 24 giờ.`,
+      `Tag trực tiếp Owner lần ${result.mentionCount} trong cửa sổ 6 giờ.`,
     );
 
     const warning = new ContainerBuilder().setAccentColor(accentFor('warning'))
       .addTextDisplayComponents(new TextDisplayBuilder().setContent([
-        `## ${E('cenar_cooldown')} VUI LÒNG KHÔNG SPAM TAG OWNER`,
-        `${E('status_warn')} <@${message.author.id}>, bạn đã ping Owner **${result.mentionCount} lần trong 24 giờ**.`,
+        `## ${E('cenar_cooldown')} NHẮC NHỞ HẠN CHẾ TAG OWNER`,
+        `${E('status_warn')} <@${message.author.id}>, bạn đã tag trực tiếp Owner **${result.mentionCount} lần trong 6 giờ**.`,
+        `${E('cenar_verified')} Reply hoặc trích dẫn tin nhắn **không bị tính**; hệ thống chỉ ghi nhận khi bạn chủ động gõ @Owner.`,
         '',
         `### ${E('order_processing')} Đơn hàng vẫn đang được tiến hành`,
         `${E('cenar_staff')} Nếu đơn bị chậm, nguồn hàng hoặc nguyên liệu có thể đang gặp vấn đề. Cenar Store thành thật xin lỗi và mong bạn kiên nhẫn chờ xử lý.`,
-        `${E('cenar_verified')} Vui lòng tiếp tục theo dõi tại ticket/website; staff sẽ phản hồi ngay khi có cập nhật.`,
+        `${E('cenar_verified')} Vui lòng theo dõi tại ticket/website; chỉ tag lại khi chưa nhận được phản hồi sau một khoảng thời gian hợp lý.`,
         '',
-        `${E('status_cross')} **Cảnh báo cuối:** ping thêm một lần sẽ bị timeout **15 phút**. Tái phạm tiếp theo tăng lên **24 giờ**, sau đó **3–28 ngày**.`,
-        `-# ${E('icon_clock')} Bộ đếm tự làm mới sau 24 giờ · Cấp phạt giảm sau 30 ngày không vi phạm`,
+        warningDetail,
+        `-# ${E('icon_clock')} Bộ đếm tự làm mới sau 6 giờ · Cấp phạt giảm sau 7 ngày không vi phạm`,
       ].join('\n')));
 
     await message.channel.send({
@@ -80,16 +87,18 @@ async function enforceProtectedOwnerPing(message, E, isStaff) {
       guildId: message.guildId,
       customerId: message.author.id,
       action: 'OWNER_PING_WARNING',
-      title: 'CẢNH BÁO SPAM TAG OWNER',
-      summary: `Thành viên đã ping Owner ${result.mentionCount} lần trong 24 giờ.`,
+      title: 'NHẮC NHỞ TAG OWNER',
+      summary: `Thành viên đã tag trực tiếp Owner ${result.mentionCount} lần trong 6 giờ.`,
       reference: message.id,
       status: 'warning',
       fields: [
         { label: 'Kênh', value: `#${message.channel.name || message.channel.id}`, emoji: 'cenar_staff' },
-        { label: 'Vi phạm kế tiếp', value: 'Timeout 15 phút', emoji: 'cenar_cooldown' },
+        { label: 'Còn lại trước timeout', value: `${remainingBeforeTimeout} lần tag trực tiếp`, emoji: 'cenar_cooldown' },
       ],
     });
-    return true;
+    // The customer message remains visible and continues through normal ticket
+    // processing; a gentle warning must not swallow a legitimate support reply.
+    return false;
   }
 
   const durationLabel = formatOwnerPingPenalty(result.timeoutMs);
@@ -105,7 +114,6 @@ async function enforceProtectedOwnerPing(message, E, isStaff) {
       });
   }
 
-  await message.delete().catch(() => null);
   logAbuseEvent(
     message.guildId,
     message.author.id,
@@ -120,7 +128,7 @@ async function enforceProtectedOwnerPing(message, E, isStaff) {
       '',
       `${E('order_processing')} Đơn hàng của bạn **vẫn đang được tiến hành**. Việc ping liên tục không làm đơn được xử lý nhanh hơn và gây gián đoạn hỗ trợ.`,
       `${E('cenar_staff')} Nếu bị delay, nguyên nhân có thể đến từ nguồn hàng/nguyên liệu. Cenar Store thành thật xin lỗi và mong bạn chờ cập nhật tại ticket.`,
-      `${E('status_warn')} Vi phạm tiếp theo trong chu kỳ sẽ tăng lên **${nextDurationLabel}**; mức tối đa là **28 ngày** theo giới hạn Discord.`,
+      `${E('status_warn')} Nếu tiếp tục tag trực tiếp trong chu kỳ, mức kế tiếp là **${nextDurationLabel}**; mức tối đa đã được giới hạn ở **24 giờ**.`,
       `-# ${E('icon_clock')} Hệ thống chống spam Owner · Ghi nhận tự động`,
     ].join('\n')));
 
@@ -136,12 +144,12 @@ async function enforceProtectedOwnerPing(message, E, isStaff) {
     action: timeoutApplied ? 'OWNER_PING_TIMEOUT' : 'OWNER_PING_TIMEOUT_FAILED',
     title: timeoutApplied ? 'ĐÃ PHẠT SPAM TAG OWNER' : 'CẦN ADMIN XỬ LÝ SPAM TAG OWNER',
     summary: timeoutApplied
-      ? `Đã timeout ${durationLabel} do tiếp tục ping Owner sau cảnh báo.`
+      ? `Đã timeout ${durationLabel} do tiếp tục tag trực tiếp Owner sau các nhắc nhở.`
       : 'Bot không đủ điều kiện timeout thành viên; cần quản trị viên kiểm tra role/quyền.',
     reference: message.id,
     status: timeoutApplied ? 'danger' : 'warning',
     fields: [
-      { label: 'Số lần trong 24 giờ', value: String(result.mentionCount), emoji: 'status_warn' },
+      { label: 'Số lần trong 6 giờ', value: String(result.mentionCount), emoji: 'status_warn' },
       { label: 'Cấp phạt', value: String(result.penaltyLevel), emoji: 'cenar_cooldown' },
       { label: 'Thời hạn', value: durationLabel, emoji: 'icon_clock' },
     ],

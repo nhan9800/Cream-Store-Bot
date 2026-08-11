@@ -1,14 +1,16 @@
 import { db } from '../database/db.js';
 
-export const OWNER_PING_WINDOW_MS = 24 * 60 * 60 * 1000;
-export const OWNER_PING_STRIKE_DECAY_MS = 30 * 24 * 60 * 60 * 1000;
+export const OWNER_PING_POLICY_VERSION = 2;
+export const OWNER_PING_WINDOW_MS = 6 * 60 * 60 * 1000;
+export const OWNER_PING_STRIKE_DECAY_MS = 7 * 24 * 60 * 60 * 1000;
+export const OWNER_PING_WARNING_THRESHOLD = 4;
+export const OWNER_PING_TIMEOUT_THRESHOLD = 6;
 export const OWNER_PING_PENALTIES_MS = [
-  15 * 60 * 1000,
+  10 * 60 * 1000,
+  30 * 60 * 1000,
+  2 * 60 * 60 * 1000,
+  12 * 60 * 60 * 1000,
   24 * 60 * 60 * 1000,
-  3 * 24 * 60 * 60 * 1000,
-  7 * 24 * 60 * 60 * 1000,
-  14 * 24 * 60 * 60 * 1000,
-  28 * 24 * 60 * 60 * 1000,
 ];
 
 function toMs(value) {
@@ -40,6 +42,17 @@ export function getOwnerPingState(guildId, userId) {
   `).get(String(guildId), String(userId)) || null;
 }
 
+/**
+ * Discord includes the author of a replied-to message in mentions.users in
+ * some reply flows. Count only an explicit user mention token that is present
+ * in the message body, never the implicit reply reference.
+ */
+export function isDirectOwnerMention(message, ownerId) {
+  const protectedId = String(ownerId || '').trim();
+  if (!protectedId || !message?.mentions?.users?.has?.(protectedId)) return false;
+  return new RegExp(`<@!?${protectedId}>`).test(String(message.content || ''));
+}
+
 export function registerOwnerPing(guildId, userId, now = new Date()) {
   const guildKey = String(guildId);
   const userKey = String(userId);
@@ -49,13 +62,21 @@ export function registerOwnerPing(guildId, userId, now = new Date()) {
 
   return db.transaction(() => {
     const current = getOwnerPingState(guildKey, userKey);
-    if (!current) {
+    if (!current || Number(current.policy_version || 1) < OWNER_PING_POLICY_VERSION) {
       db.prepare(`
         INSERT INTO owner_ping_enforcement (
           guild_id, user_id, window_started_at, mention_count,
-          penalty_level, last_mention_at, updated_at
-        ) VALUES (?, ?, ?, 1, 0, ?, ?)
-      `).run(guildKey, userKey, nowIso, nowIso, nowIso);
+          penalty_level, last_mention_at, last_penalty_at, updated_at, policy_version
+        ) VALUES (?, ?, ?, 1, 0, ?, NULL, ?, ?)
+        ON CONFLICT(guild_id, user_id) DO UPDATE SET
+          window_started_at = excluded.window_started_at,
+          mention_count = 1,
+          penalty_level = 0,
+          last_mention_at = excluded.last_mention_at,
+          last_penalty_at = NULL,
+          updated_at = excluded.updated_at,
+          policy_version = excluded.policy_version
+      `).run(guildKey, userKey, nowIso, nowIso, nowIso, OWNER_PING_POLICY_VERSION);
       return { action: 'counted', mentionCount: 1, penaltyLevel: 0, timeoutMs: 0 };
     }
 
@@ -68,9 +89,12 @@ export function registerOwnerPing(guildId, userId, now = new Date()) {
     let timeoutMs = 0;
     let action = 'counted';
 
-    if (mentionCount === 3) {
+    if (
+      mentionCount >= OWNER_PING_WARNING_THRESHOLD
+      && mentionCount < OWNER_PING_TIMEOUT_THRESHOLD
+    ) {
       action = 'warning';
-    } else if (mentionCount >= 4) {
+    } else if (mentionCount >= OWNER_PING_TIMEOUT_THRESHOLD) {
       const penalty = nextPenalty(penaltyLevel);
       penaltyLevel = penalty.penaltyLevel;
       timeoutMs = penalty.timeoutMs;
@@ -81,7 +105,7 @@ export function registerOwnerPing(guildId, userId, now = new Date()) {
     db.prepare(`
       UPDATE owner_ping_enforcement
       SET window_started_at = ?, mention_count = ?, penalty_level = ?,
-          last_mention_at = ?, last_penalty_at = ?, updated_at = ?
+          last_mention_at = ?, last_penalty_at = ?, updated_at = ?, policy_version = ?
       WHERE guild_id = ? AND user_id = ?
     `).run(
       windowExpired ? nowIso : current.window_started_at,
@@ -90,6 +114,7 @@ export function registerOwnerPing(guildId, userId, now = new Date()) {
       nowIso,
       lastPenaltyAt,
       nowIso,
+      OWNER_PING_POLICY_VERSION,
       guildKey,
       userKey,
     );
