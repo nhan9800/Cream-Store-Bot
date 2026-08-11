@@ -47,7 +47,12 @@ import { cancelPayOSPaymentLink, confirmOrderPaidManually, sendOrRefreshPaymentQ
 import { deliverTranscript, sendCompletedFlow, updateOrderLogMessage } from '../services/notificationService.js';
 import { closeTicket, createTicket, getOpenTicketByCustomer, getTicketByChannelId, getTicketById } from '../services/ticketService.js';
 import { exportTicketTranscript } from '../services/transcriptService.js';
-import { openWarrantyTicket, buildWarrantyCustomerConfirmV2 } from '../services/warrantyService.js';
+import {
+  openWarrantyTicket,
+  buildWarrantyCustomerConfirmV2,
+  buildWarrantyApprovedCustomerV2,
+  buildWarrantyReviewedStateV2,
+} from '../services/warrantyService.js';
 import { resolveSelectMenuEmoji, resolveProductEmoji, formatProductDisplayName } from '../services/emojiService.js';
 import { handlePartnerApplyStart, handlePartnerApplyModal, handlePartnerApprove, handlePartnerReject, handleCtvApplyStart, handleCtvApplyModal, handleCtvApprove, handleCtvReject } from '../services/partnerAndCtvHandlers.js';
 import { isCustomerCtv } from '../services/ctvService.js';
@@ -1301,6 +1306,25 @@ export function registerInteractionHandler(client, commands) {
             return;
           }
 
+          // Nút duyệt có thể xuất hiện đồng thời ở ticket và kênh log. Trạng
+          // thái đơn là khóa idempotency để một hồ sơ không gửi DM/thông báo
+          // thành công nhiều lần khi staff bấm ở hai nơi.
+          if (order.status !== 'WARRANTY_OPEN') {
+            if (isAltDb && targetDb) targetDb.close();
+            await interaction.editReply({
+              ...buildWarrantyReviewedStateV2({
+                order,
+                ticket,
+                reviewerId: interaction.user.id,
+                guildId: interaction.guildId,
+                state: 'approved',
+              }),
+              content: null,
+              embeds: [],
+            }).catch(() => null);
+            return;
+          }
+
           const productDisplay = formatProductDisplayName(
             interaction.guildId,
             order.product_name || 'YouTube Premium',
@@ -1351,71 +1375,48 @@ export function registerInteractionHandler(client, commands) {
             }
           }
 
-          // Gửi DM thông báo bảo hành thành công cho khách hàng.
-          // EmbedBuilder đã được import ở cấp module; không khai báo lại trong
-          // block này vì binding cục bộ sẽ rơi vào temporal dead zone và làm
-          // phần log bảo hành phía trên lỗi trước khi được khởi tạo.
+          const approvedOrder = updatedOrder ?? { ...order, status: 'COMPLETED' };
+
+          // Gửi DM bằng Components V2 để khách nhận được xác nhận rõ ràng kể
+          // cả khi họ không còn mở Discord ở kênh ticket.
           const customer = await interaction.client.users.fetch(ticket.customer_id).catch(() => null);
           if (customer) {
-            const embedCustomer = new EmbedBuilder()
-              .setColor(0x57F287)
-              .setTitle(`${E('status_check')} XÁC NHẬN BẢO HÀNH THÀNH CÔNG`)
-              .setDescription(
-                `> ${E('icon_sparkle')} Đơn hàng \`${orderCode}\` của bạn đã được bảo hành thành công!\n\n` +
-                `${E('order_product')} **Sản Phẩm:** ${productDisplay}\n` +
-                `${E('icon_key')} **Hướng Dẫn:** Vui lòng kiểm tra hộp thư Gmail của bạn để tham gia vào nhóm gia đình nhé!`
-              )
-              .setTimestamp()
-              .setFooter({ text: interaction.guild.name, iconURL: interaction.guild.iconURL() });
-
-            await customer.send({ embeds: [embedCustomer] }).catch(() => null);
+            await customer.send(buildWarrantyApprovedCustomerV2({
+              order: approvedOrder,
+              ticket,
+              reviewerId: interaction.user.id,
+              guildId: interaction.guildId,
+            })).catch(() => null);
           }
 
-          // Gửi tin nhắn vào kênh ticket của khách hàng
+          // Gửi cùng giao diện vào ticket; mention trong TextDisplay được giới
+          // hạn đúng customer để không ping nhầm role/everyone.
           const ticketChannel = await interaction.guild.channels.fetch(ticket.channel_id).catch(() => null);
           if (ticketChannel?.isTextBased()) {
-            const embedTicket = new EmbedBuilder()
-              .setColor(0x57F287)
-              .setTitle(`${E('status_check')} BẢO HÀNH THÀNH CÔNG`)
-              .setDescription(
-                `> ${E('icon_sparkle')} Chào <@${ticket.customer_id}>, yêu cầu bảo hành cho đơn hàng \`${orderCode}\` của bạn đã được hoàn tất!\n\n` +
-                `${E('order_product')} **Sản Phẩm:** ${productDisplay}\n` +
-                `${E('icon_key')} **Hướng Dẫn:** Vui lòng kiểm tra hộp thư Gmail của bạn để tham gia vào nhóm gia đình nhé!`
-              )
-              .setTimestamp();
-
-            await ticketChannel.send({ content: `<@${ticket.customer_id}>`, embeds: [embedTicket] }).catch(() => null);
-          }
-
-          // Cập nhật tin nhắn trong kênh duyệt
-          const oldEmbed = interaction.message.embeds[0];
-          if (oldEmbed) {
-            const embed = EmbedBuilder.from(oldEmbed)
-              .setColor(0x57F287)
-              .setTitle((oldEmbed.title || 'YÊU CẦU BẢO HÀNH YOUTUBE PREMIUM') + ' [ĐÃ DUYỆT]')
-              .setDescription((oldEmbed.description || '') + `\n\n${E('status_check')} **Đã duyệt bảo hành bởi:** <@${interaction.user.id}>`);
-            await interaction.editReply({ embeds: [embed], components: [] }).catch(() => null);
-          } else {
-            // Đây là V2 Container!
-            const { ContainerBuilder, TextDisplayBuilder } = await import('discord.js');
-            let originalContent = '';
-            if (interaction.message.components && interaction.message.components[0]) {
-              const row = interaction.message.components[0];
-              const comp = row.components && row.components[0];
-              if (comp) {
-                originalContent = comp.content || (comp.data && comp.data.content) || '';
-              }
-            }
-            
-            const updatedContent = originalContent + `\n\n${E('status_check')} **Đã duyệt bảo hành bởi:** <@${interaction.user.id}>`;
-            const container = new ContainerBuilder().setAccentColor(0x57F287);
-            container.addTextDisplayComponents(new TextDisplayBuilder().setContent(updatedContent));
-            
-            await interaction.editReply({
-              components: [container],
-              flags: MessageFlags.IsComponentsV2
+            const customerNotice = buildWarrantyApprovedCustomerV2({
+              order: approvedOrder,
+              ticket,
+              reviewerId: interaction.user.id,
+              guildId: interaction.guildId,
+            });
+            await ticketChannel.send({
+              ...customerNotice,
+              allowedMentions: { parse: [], users: [ticket.customer_id] },
             }).catch(() => null);
           }
+
+          // Khóa nút ở chính panel vừa thao tác và thay bằng trạng thái duyệt.
+          await interaction.editReply({
+            ...buildWarrantyReviewedStateV2({
+              order: approvedOrder,
+              ticket,
+              reviewerId: interaction.user.id,
+              guildId: interaction.guildId,
+              state: 'approved',
+            }),
+            content: null,
+            embeds: [],
+          }).catch(() => null);
         } catch (err) {
           console.error('[YTB-APPROVE] Error:', err.stack || err);
           await safeReply(interaction, { content: E('status_cross') + ' Lỗi xử lý: ' + err.message, ephemeral: true });

@@ -97,6 +97,10 @@ export async function buildClient() {
       for (const guild of readyClient.guilds.cache.values()) {
         await publishPremiumProductsForGuild(guild);
       }
+
+      const { refreshOpenWarrantyActionPanels } = await import('./services/warrantyService.js');
+      const warrantyActions = await refreshOpenWarrantyActionPanels(readyClient);
+      console.log(`[WARRANTY-ACTIONS] scanned=${warrantyActions.scanned} published=${warrantyActions.published} current=${warrantyActions.current} missing=${warrantyActions.missingChannels}`);
     } catch (error) {
       console.error('[AUTO-SETUP] Không thể đồng bộ emoji/panel:', error);
     }
