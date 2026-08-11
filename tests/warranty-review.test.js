@@ -6,6 +6,7 @@ import {
   buildWarrantyTicketOpenedV2,
 } from '../src/services/warrantyService.js';
 import { STORE_ONE_GUILD_ID } from '../src/utils/locale.js';
+import { canTransition } from '../src/services/orderStateMachine.js';
 
 const NATIVE_EMOJI = /[\u{1F000}-\u{1FAFF}\u2600-\u27BF]/u;
 const order = {
@@ -21,6 +22,11 @@ const ticket = {
 };
 
 describe('Warranty review controls', () => {
+  test('tracks the complete warranty lifecycle as valid order states', () => {
+    expect(canTransition('COMPLETED', 'WARRANTY_OPEN')).toBe(true);
+    expect(canTransition('WARRANTY_OPEN', 'COMPLETED')).toBe(true);
+  });
+
   test('places approve and reject controls directly under a new warranty case', () => {
     const payload = buildWarrantyTicketOpenedV2({
       order,
@@ -50,6 +56,7 @@ describe('Warranty review controls', () => {
     expect(json).toContain('BẢO HÀNH THÀNH CÔNG');
     expect(json).toContain('CN_266378');
     expect(json).toContain('Hộp thư đến, Spam và Quảng cáo');
+    expect(json).toContain('Ticket bảo hành được tự động đóng sau khi duyệt');
     expect(json).not.toMatch(NATIVE_EMOJI);
   });
 

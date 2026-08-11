@@ -44,6 +44,7 @@ function countQueueStmt(){return db.prepare(`SELECT COUNT(*) AS total FROM order
 function countQueueAheadStmt(){return db.prepare(`SELECT COUNT(*) AS total FROM orders WHERE guild_id=? AND status IN ('PENDING_PAYMENT','PROCESSING','WARRANTY_OPEN') AND queue_group=? AND (priority_rank > ? OR (priority_rank = ? AND id <= ?))`);}
 function markOrderPaidStmt(){return db.prepare(`UPDATE orders SET payment_status='PAID', amount_paid=?, paid_at=?, paid_transaction_id=?, paid_transaction_content=?, status=CASE WHEN status='PENDING_PAYMENT' THEN 'PROCESSING' ELSE status END, status_changed_at=?, updated_at=? WHERE order_code=?`);}
 function setOrderStatusStmt(){return db.prepare('UPDATE orders SET status=?, status_changed_at=?, updated_at=? WHERE order_code=?');}
+function completeWarrantyStmt(){return db.prepare(`UPDATE orders SET status='COMPLETED', status_changed_at=?, warranty_completed_at=?, warranty_completed_by_id=?, warranty_count=COALESCE(warranty_count,0)+1, updated_at=? WHERE order_code=? AND status='WARRANTY_OPEN'`);}
 function getOutstandingOrdersStmt(){return db.prepare(`SELECT * FROM orders WHERE guild_id=? AND status IN ('PENDING_PAYMENT','PROCESSING','WARRANTY_OPEN') AND (? IS NULL OR customer_id=?) ORDER BY priority_rank DESC, created_at ASC LIMIT ? OFFSET ?`);}
 function getOutstandingSummaryStmt(){return db.prepare(`SELECT COUNT(*) total_orders, SUM(CASE WHEN status='PENDING_PAYMENT' THEN 1 ELSE 0 END) waiting_payment, SUM(CASE WHEN status='PROCESSING' THEN 1 ELSE 0 END) processing, SUM(CASE WHEN status='WARRANTY_OPEN' THEN 1 ELSE 0 END) warranty_open FROM orders WHERE guild_id=? AND status IN ('PENDING_PAYMENT','PROCESSING','WARRANTY_OPEN') AND (? IS NULL OR customer_id=?)`);}
 function insertPaymentEventStmt(){return db.prepare(`INSERT OR IGNORE INTO payment_events (order_code,provider,transaction_id,amount,content,raw_payload,created_at) VALUES (?,?,?,?,?,?,?)`);}
@@ -259,6 +260,32 @@ export function setOrderStatus(orderCode,status){
 
   broadcastDashboardEvent('order_update'); 
   return updated;
+}
+export function completeWarranty(orderCode, completedById){
+  const order = getOrderByCode(orderCode);
+  if (!order) return { completed: false, order: null };
+  const completedAt = nowIso();
+  const result = db.transaction(() => {
+    const update = completeWarrantyStmt().run(completedAt, completedAt, completedById, completedAt, orderCode);
+    if (update.changes > 0) {
+      recordStatusChange(db, {
+        orderCode,
+        previousStatus: order.status,
+        newStatus: 'COMPLETED',
+        actor: completedById || 'SYSTEM',
+        reason: 'Warranty approved and completed',
+      });
+    }
+    return update;
+  })();
+  const updated = getOrderByCode(orderCode);
+  if (result.changes > 0) {
+    try { syncCustomerStats(updated.guild_id, updated.customer_id); }
+    catch (error) { console.error('[WARRANTY] Customer stats sync failed:', error.message); }
+    try { broadcastDashboardEvent('order_update', `Warranty completed: ${orderCode}`); }
+    catch (error) { console.error('[WARRANTY] Dashboard event failed:', error.message); }
+  }
+  return { completed: result.changes > 0, order: updated };
 }
 export function updateOrderEditableFields(orderCode,{productName,quantity,totalAmount,priorityRank}){const order=getOrderByCode(orderCode); if(!order) return null; const nextName=productName ?? order.product_name; const nextQty=quantity ?? order.quantity; const nextAmount=totalAmount === undefined ? order.total_amount : ensureAmountValue(totalAmount); const nextPriority=priorityRank === undefined ? Number(order.priority_rank ?? 0) : Number(priorityRank); updateOrderFieldsStmt().run(nextName, nextQty, nextAmount, normalizeQueueGroup(nextName) || 'mac-dinh', nextPriority, nowIso(), orderCode); return getOrderByCode(orderCode);}
 

@@ -41,11 +41,12 @@ import {
   releaseOrderClaim,
   createOrder,
   saveOrderLogMessage,
+  completeWarranty,
 } from '../services/orderService.js';
 import { publishFeedback } from '../services/feedbackService.js';
 import { cancelPayOSPaymentLink, confirmOrderPaidManually, sendOrRefreshPaymentQr } from '../services/paymentService.js';
 import { deliverTranscript, sendCompletedFlow, updateOrderLogMessage } from '../services/notificationService.js';
-import { closeTicket, createTicket, getOpenTicketByCustomer, getTicketByChannelId, getTicketById } from '../services/ticketService.js';
+import { closeTicket, closeTicketIfOpen, createTicket, getOpenTicketByCustomer, getTicketByChannelId, getTicketById } from '../services/ticketService.js';
 import { exportTicketTranscript } from '../services/transcriptService.js';
 import {
   openWarrantyTicket,
@@ -181,6 +182,58 @@ import { handleCardSwapInteractions } from "./cardHandlers.js";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const commandsDirectory = path.resolve(__dirname, '..', 'commands');
+
+async function closeApprovedWarrantyCase({ interaction, ticket, orderCode, ticketChannel = null }) {
+  const channel = ticketChannel
+    ?? await interaction.guild.channels.fetch(ticket.channel_id).catch(() => null);
+  let transcriptResult = null;
+  const closeResult = closeTicketIfOpen(ticket.id, interaction.user.id);
+
+  if (closeResult.closed) {
+    transcriptResult = channel?.isTextBased()
+      ? await exportTicketTranscript(channel).catch((error) => {
+          console.error('[WARRANTY-CLOSE] Transcript error:', error.message);
+          return null;
+        })
+      : null;
+
+    await emitStaffLog(interaction.client, {
+      guildId: interaction.guildId,
+      actorId: interaction.user.id,
+      targetId: ticket.customer_id,
+      action: 'WARRANTY_APPROVED_AUTO_CLOSE',
+      detail: `Warranty completed and ticket auto-closed: ${ticket.ticket_code}`,
+      relatedTicketCode: ticket.ticket_code,
+      relatedOrderCode: orderCode,
+    }).catch(() => null);
+
+    if (transcriptResult) {
+      await deliverTranscript({
+        guild: interaction.guild,
+        ticket,
+        transcriptResult,
+        closedById: interaction.user.id,
+      }).catch(() => null);
+    }
+  }
+
+  if (channel?.isTextBased()) {
+    if (channel.permissionOverwrites?.edit) {
+      await channel.permissionOverwrites.edit(ticket.customer_id, {
+        SendMessages: false,
+        AddReactions: false,
+      }, { reason: `Warranty ${orderCode} completed` }).catch(() => null);
+    }
+    if (typeof channel.setName === 'function' && !channel.name?.startsWith('closed-')) {
+      await channel.setName(`closed-${channel.name}`.slice(0, 95), `Warranty ${orderCode} completed`).catch(() => null);
+    }
+    setTimeout(() => {
+      channel.delete(`Warranty ${orderCode} approved and completed`).catch(() => null);
+    }, 5000);
+  }
+
+  return { ticket: getTicketById(ticket.id), transcriptResult };
+}
 
 
 
@@ -1311,6 +1364,13 @@ export function registerInteractionHandler(client, commands) {
           // thành công nhiều lần khi staff bấm ở hai nơi.
           if (order.status !== 'WARRANTY_OPEN') {
             if (isAltDb && targetDb) targetDb.close();
+            if (!order.warranty_completed_at) {
+              await safeReply(interaction, {
+                content: E('status_warn') + ` Hồ sơ này không còn ở trạng thái chờ bảo hành nên không thể duyệt lại.`,
+                ephemeral: true,
+              });
+              return;
+            }
             await interaction.editReply({
               ...buildWarrantyReviewedStateV2({
                 order,
@@ -1322,6 +1382,9 @@ export function registerInteractionHandler(client, commands) {
               content: null,
               embeds: [],
             }).catch(() => null);
+            await closeApprovedWarrantyCase({ interaction, ticket, orderCode }).catch((error) => {
+              console.error('[WARRANTY-CLOSE] Idempotent close error:', error.stack || error);
+            });
             return;
           }
 
@@ -1333,19 +1396,42 @@ export function registerInteractionHandler(client, commands) {
 
           // Cập nhật trạng thái đơn hàng về COMPLETED
           let updatedOrder = null;
+          let warrantyCompletionApplied = false;
           if (isAltDb) {
             try {
               const now = new Date().toISOString();
-              targetDb.prepare("UPDATE orders SET status='COMPLETED', status_changed_at=?, updated_at=? WHERE order_code=?")
-                .run(now, now, orderCode);
+              const result = targetDb.prepare("UPDATE orders SET status='COMPLETED', status_changed_at=?, warranty_completed_at=?, warranty_completed_by_id=?, warranty_count=COALESCE(warranty_count,0)+1, updated_at=? WHERE order_code=? AND status='WARRANTY_OPEN'")
+                .run(now, now, interaction.user.id, now, orderCode);
+              warrantyCompletionApplied = result.changes > 0;
               updatedOrder = targetDb.prepare("SELECT * FROM orders WHERE order_code = ?").get(orderCode);
             } catch (e) {
               console.error('[DB-CROSS] Lỗi update db phụ:', e.message);
+              throw e;
             } finally {
               targetDb.close();
             }
           } else {
-            updatedOrder = setOrderStatus(orderCode, 'COMPLETED');
+            const result = completeWarranty(orderCode, interaction.user.id);
+            warrantyCompletionApplied = result.completed;
+            updatedOrder = result.order;
+          }
+
+          // Khóa cập nhật trong database quyết định staff nào xử lý thành công đầu tiên.
+          // Click đồng thời ở ticket/log chỉ đóng panel còn lại, không gửi trùng DM/log.
+          if (!warrantyCompletionApplied) {
+            await interaction.editReply({
+              ...buildWarrantyReviewedStateV2({
+                order: updatedOrder ?? order,
+                ticket,
+                reviewerId: updatedOrder?.warranty_completed_by_id || interaction.user.id,
+                guildId: interaction.guildId,
+                state: 'approved',
+              }),
+              content: null,
+              embeds: [],
+            }).catch(() => null);
+            await closeApprovedWarrantyCase({ interaction, ticket, orderCode }).catch(() => null);
+            return;
           }
 
           if (updatedOrder) {
@@ -1417,6 +1503,15 @@ export function registerInteractionHandler(client, commands) {
             content: null,
             embeds: [],
           }).catch(() => null);
+
+          await closeApprovedWarrantyCase({
+            interaction,
+            ticket,
+            orderCode,
+            ticketChannel,
+          }).catch((error) => {
+            console.error('[WARRANTY-CLOSE] Auto-close error:', error.stack || error);
+          });
         } catch (err) {
           console.error('[YTB-APPROVE] Error:', err.stack || err);
           await safeReply(interaction, { content: E('status_cross') + ' Lỗi xử lý: ' + err.message, ephemeral: true });

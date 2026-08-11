@@ -176,6 +176,9 @@ export function initDatabase() {
       payment_reminder_sent_at TEXT,
       processing_reminder_sent_at TEXT,
       feedback_reminder_sent_at TEXT,
+      warranty_completed_at TEXT,
+      warranty_completed_by_id TEXT,
+      warranty_count INTEGER NOT NULL DEFAULT 0,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (ticket_id) REFERENCES tickets(id)
@@ -544,6 +547,9 @@ export function initDatabase() {
   ensureColumn('orders', 'payment_reminder_sent_at', 'TEXT');
   ensureColumn('orders', 'processing_reminder_sent_at', 'TEXT');
   ensureColumn('orders', 'feedback_reminder_sent_at', 'TEXT');
+  ensureColumn('orders', 'warranty_completed_at', 'TEXT');
+  ensureColumn('orders', 'warranty_completed_by_id', 'TEXT');
+  ensureColumn('orders', 'warranty_count', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn('orders', 'status_changed_at', 'TEXT');
   ensureColumn('orders', 'queue_group', 'TEXT');
   ensureColumn('orders', 'priority_rank', 'INTEGER NOT NULL DEFAULT 0');

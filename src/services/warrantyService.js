@@ -336,7 +336,8 @@ export function buildWarrantyApprovedCustomerV2({ order, ticket, reviewerId, gui
     `### ${E('cenar_support')} ${international ? 'NEXT STEPS' : 'BƯỚC TIẾP THEO'}`,
     `${E('status_check')} ${international ? 'Check the repaired account or service using the information provided by staff.' : 'Vui lòng kiểm tra lại tài khoản hoặc dịch vụ vừa được bảo hành.'}`,
     `${E('icon_link')} ${international ? 'For invite-based products, check Inbox, Spam and Promotions.' : 'Nếu sản phẩm nhận lời mời qua email, hãy kiểm tra cả Hộp thư đến, Spam và Quảng cáo.'}`,
-    `${E('status_warn')} ${international ? 'If anything is still incorrect, reply in the warranty ticket before it is closed.' : 'Nếu vẫn còn vấn đề, hãy phản hồi ngay trong ticket trước khi ticket được đóng.'}`,
+    `${E('ticket_close')} ${international ? 'This warranty ticket is automatically closed after approval; its transcript remains available to the support team.' : 'Ticket bảo hành được tự động đóng sau khi duyệt; toàn bộ lịch sử xử lý vẫn được lưu cho bộ phận hỗ trợ.'}`,
+    `${E('status_warn')} ${international ? 'If the issue returns, open a new warranty request and include this order code for priority checking.' : 'Nếu sự cố tái diễn, hãy mở yêu cầu bảo hành mới và cung cấp mã đơn này để được ưu tiên kiểm tra.'}`,
     `-# ${E('icon_heart_purple')} ${international ? 'Thank you for choosing Cenar Global.' : 'Cảm ơn bạn đã tin tưởng và sử dụng dịch vụ tại Cenar Store.'}`,
   ].join('\n')));
 
