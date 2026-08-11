@@ -334,12 +334,21 @@ async function findPriceChannel(guild, guildConfig) {
     || (guild.id === PRIMARY_GUILD_ID ? PRIMARY_PRICE_CHANNEL_ID : null);
   if (configuredId) {
     const configured = await guild.channels.fetch(configuredId).catch(() => null);
-    if (configured?.isTextBased()) return configured;
+    if (configured?.isTextBased() && !configured.isThread()) return configured;
   }
-  return guild.channels.cache.find((channel) =>
-    channel.type === ChannelType.GuildText
-    && (channel.name.includes('bảng-giá') || channel.name.includes('bang-gia') || channel.name.includes('price'))
-  ) || null;
+
+  const sendableChannels = [...guild.channels.cache.values()].filter((channel) => (
+    channel.isTextBased?.()
+    && !channel.isThread?.()
+    && typeof channel.send === 'function'
+  ));
+  const exactNames = new Set(['pricing', 'price-list', 'bang-gia', 'bảng-giá']);
+  return sendableChannels.find((channel) => exactNames.has(channel.name))
+    || sendableChannels.find((channel) => (
+      channel.parent?.name === 'GLOBAL MARKETPLACE'
+      && channel.name.includes('price')
+    ))
+    || null;
 }
 
 async function hasCurrentPriceBoard(channel, botId) {
@@ -418,3 +427,5 @@ export async function autoSetupPriceBoard(client, { force = false, targetGuildId
   }
   return results;
 }
+
+export const priceBoardInternals = { findPriceChannel };

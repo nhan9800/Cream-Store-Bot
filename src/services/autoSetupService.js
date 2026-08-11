@@ -354,9 +354,14 @@ export async function publishPartnerBroadcastGuide(channel, guildId, settings = 
 export async function autoSetupPartnerAndCtv(client) {
   for (const guild of client.guilds.cache.values()) {
     try {
+      await guild.roles.fetch().catch(() => null);
       const names = isInternationalGuild(guild.id) ? internationalNames : fruitNames;
       const settings = db.prepare('SELECT support_role_id, manager_role_id FROM guild_settings WHERE guild_id = ?').get(guild.id) || {};
-      const staffRoles = [settings.support_role_id, settings.manager_role_id, '1282638119497109524'];
+      const staffRoles = [...new Set([
+        settings.support_role_id,
+        settings.manager_role_id,
+        '1282638119497109524',
+      ].filter((id) => id && guild.roles.cache.has(id)))];
       const enhancedRoleColors = guild.features.includes('ENHANCED_ROLE_COLORS');
       const partnerRole = await ensureRole(guild, client, IDS.partnerRole, {
         name: 'Cenar Partner', colors: roleColorsFor(IDS.partnerRole, { enhanced: enhancedRoleColors }), iconUrl: ROLE_ICON_URLS.partner, mentionable: false,

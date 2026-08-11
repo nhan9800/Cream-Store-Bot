@@ -5,6 +5,7 @@ import { internationalStoreInternals } from '../src/services/internationalStoreS
 import { signBinancePayload, binancePayInternals } from '../src/services/binancePayService.js';
 import { localizeCommandsForInternationalStore } from '../src/utils/internationalCommands.js';
 import { translateProductDescription, translateProductName } from '../src/utils/internationalCatalog.js';
+import { priceBoardInternals } from '../src/services/autoSetupPriceBoardService.js';
 
 describe('Store 2 international isolation', () => {
   test('activates only for the configured Store 2 guild', () => {
@@ -25,6 +26,32 @@ describe('Store 2 international isolation', () => {
     expect(translateProductName('🚀 Gia hạn Discord Nitro 12 Tháng')).toBe('Renewal Discord Nitro 12 Months');
     expect(translateProductDescription('Đăng nhập gia hạn. Vui lòng gửi tài khoản, mật khẩu và 4-5 mã dự phòng khi mua.'))
       .toBe('Login-based renewal. Please provide the account credentials and 4–5 backup codes after ordering.');
+  });
+
+  test('finds the canonical pricing channel after an international channel migration', async () => {
+    const affiliatePricing = {
+      name: 'affiliate-pricing',
+      parent: { name: 'AFFILIATE PROGRAM' },
+      isTextBased: () => true,
+      isThread: () => false,
+      send: () => null,
+    };
+    const pricing = {
+      name: 'pricing',
+      parent: { name: 'GLOBAL MARKETPLACE' },
+      isTextBased: () => true,
+      isThread: () => false,
+      send: () => null,
+    };
+    const guild = {
+      id: STORE_TWO_GUILD_ID,
+      channels: {
+        fetch: async () => null,
+        cache: new Map([['affiliate', affiliatePricing], ['pricing', pricing]]),
+      },
+    };
+
+    await expect(priceBoardInternals.findPriceChannel(guild, null)).resolves.toBe(pricing);
   });
 });
 

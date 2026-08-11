@@ -14,7 +14,7 @@ import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { STORE_TWO_GUILD_ID } from '../utils/locale.js';
 import { buildTicketPanelV2 } from '../utils/embeds.js';
 import { snapshotGuildForRecovery } from './guildRecoveryService.js';
-import { getGuildConfig, upsertGuildConfig } from './guildConfigService.js';
+import { upsertGuildConfig } from './guildConfigService.js';
 import { buildVerificationPanelV2 } from './verificationPanelService.js';
 import { resolveVerificationRole } from './verificationRoleService.js';
 
@@ -383,6 +383,12 @@ export async function setupInternationalStore(guild) {
       allowSend: name === 'global-chat',
     });
   }
+
+  upsertGuildConfig({
+    guild_id: guild.id,
+    price_list_channel_id: channels.pricing.id,
+    updated_by: guild.client.user.id,
+  });
 
   for (const channel of guild.channels.cache.values()) {
     const parentName = PARENT_BY_CHANNEL[channel.name];
