@@ -14,6 +14,7 @@ import {
 } from 'discord.js';
 import { getGuildConfig } from './guildConfigService.js';
 import { config } from '../config.js';
+import { isInternationalGuild } from '../utils/locale.js';
 
 /**
  * Dựng thông báo Components V2 (Container + TextDisplay) để emoji custom hiển thị
@@ -40,12 +41,27 @@ export function buildPaymentReminderV2({ guildId, customerId, orderCode, stage =
   const E = createEmojiResolver(guildId);
   const isFinal = stage === 'final';
   const deadlineMinutes = isFinal ? 10 : 20;
+  const international = isInternationalGuild(guildId);
 
   return buildNoticeV2({
     accent: isFinal ? 0xE67E22 : 0xFEE75C,
     headerEmoji: isFinal ? E('status_warn') : E('icon_clock'),
-    headerText: isFinal ? 'NHẮC THANH TOÁN · LẦN CUỐI' : 'NHẮC THANH TOÁN · LẦN 1/2',
-    bodyLines: [
+    headerText: international
+      ? (isFinal ? 'PAYMENT REMINDER • FINAL NOTICE' : 'PAYMENT REMINDER • 1/2')
+      : (isFinal ? 'NHẮC THANH TOÁN · LẦN CUỐI' : 'NHẮC THANH TOÁN · LẦN 1/2'),
+    bodyLines: international ? [
+      `${E('ticket_user')} Hi <@${customerId}>, payment has not been confirmed for your order yet.`,
+      '',
+      `> ${E('order_id')} **Order:** \`${orderCode}\``,
+      `> ${E('icon_clock')} **Time remaining:** **${deadlineMinutes} minutes**`,
+      `> ${E('payment_money')} **Action required:** ${isFinal ? 'Complete payment or reply in this ticket now.' : 'Pay or send a short reply to keep the ticket open.'}`,
+      '',
+      isFinal
+        ? `${E('order_cancel')} **After this deadline, the order is cancelled and the ticket closes automatically.**`
+        : `${E('status_info')} A short message such as \`I am paying now\` confirms that you still need assistance.`,
+      '',
+      `-# ${E('ticket_open')} Automated ticket monitoring · You do not need to mention staff or the Owner`,
+    ] : [
       `${E('ticket_user')} Chào <@${customerId}>, hệ thống vẫn chưa ghi nhận thanh toán cho đơn hàng của bạn.`,
       '',
       `> ${E('order_id')} **Mã đơn:** \`${orderCode}\``,

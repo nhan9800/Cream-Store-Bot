@@ -443,10 +443,10 @@ function normalizePayOSWebhookBody(body) {
   };
 }
 
-async function finalizePaidOrder(client, order, paymentData, transactionId, transactionContent) {
+export async function finalizePaidOrder(client, order, paymentData, transactionId, transactionContent, provider = 'PAYOS') {
   const eventState = recordPaymentEvent({
     orderCode: order.order_code,
-    provider: 'PAYOS',
+    provider,
     transactionId,
     amount: paymentData.amount ?? order.total_amount,
     content: transactionContent,

@@ -29,6 +29,8 @@ import { getEmojiMap } from '../services/emojiService.js';
 import { T, fmt, h2, h3, subtext, fieldQ, fields, vnd, lines as joinLines, statusPill, SP } from './embedHelpers.js';
 import { accentFor, brandName, normalizeV2Text, textDisplay } from './uiKit.js';
 import { createEmojiResolver } from './emojiHelper.js';
+import { isInternationalGuild } from './locale.js';
+import { formatInternationalPrice, translateProductName } from './internationalCatalog.js';
 
 // Parses a custom emoji string "<a:name:id>" or "<:name:id>" into a component object
 // for use with ButtonBuilder.setEmoji() / StringSelectMenuOptionBuilder
@@ -73,6 +75,8 @@ export function buildTicketPanelV2(customConfig = {}) {
   const title = customConfig.panel_title || `${brand.name || 'Cenar Store'} — Trung Tâm Hỗ Trợ`;
   const imageUrl = customConfig.panel_image_url || null;
   const guildId = customConfig.guild_id;
+  const international = isInternationalGuild(guildId);
+  const effectiveTitle = international && !customConfig.panel_title ? 'Cenar Global • Order & Support Center' : title;
 
   // Luôn lấy emoji qua resolver: custom đã cấu hình > bộ custom mặc định của bot.
   // Resolver tự loại fallback Unicode nên Components V2 không bị lẫn emoji máy.
@@ -83,9 +87,9 @@ export function buildTicketPanelV2(customConfig = {}) {
   const intro = hasCustomDesc
     ? `## ${title}\n${customConfig.panel_description}`
     : [
-      `## ${title}`,
-      `> ${E('ticket_user')} Chào mừng bạn đến với **${brand.name || 'Cenar Store'}**!`,
-      `> ${E('ticket_open')} Chọn đúng mục bên dưới để bot mở luồng hỗ trợ phù hợp.`,
+      `## ${effectiveTitle}`,
+      international ? `> ${E('ticket_user')} Welcome to **Cenar Global**.` : `> ${E('ticket_user')} Chào mừng bạn đến với **${brand.name || 'Cenar Store'}**!`,
+      international ? `> ${E('ticket_open')} Choose the correct option to open a private guided ticket.` : `> ${E('ticket_open')} Chọn đúng mục bên dưới để bot mở luồng hỗ trợ phù hợp.`,
     ].join('\n');
   container.addTextDisplayComponents(new TextDisplayBuilder().setContent(normalizeV2Text(intro)));
 
@@ -102,7 +106,13 @@ export function buildTicketPanelV2(customConfig = {}) {
 
   // Chỉ hiện services mặc định khi user CHƯA tuỳ chỉnh nội dung
   if (!hasCustomDesc) {
-    const serviceLines = [
+    const serviceLines = international ? [
+      `${E('panel_order')} **Place an Order** — Digital subscriptions, AI, Discord and gaming services`,
+      `${E('panel_support')} **Support** — Product assistance and troubleshooting`,
+      `${E('panel_complaint')} **Complaint** — Escalate an unresolved experience`,
+      `${E('panel_partnership')} **Partnership** — Business and community proposals`,
+      `${E('panel_warranty')} **Warranty** — Support for an eligible purchase`,
+    ].map((line) => line.trim()).join('\n') : [
       `${E('panel_order')} **Mua hàng** — Netflix, Spotify, YouTube Premium và các dịch vụ số`,
       `${E('panel_support')} **Hỗ trợ** — Tài khoản lỗi hoặc cần hướng dẫn`,
       `${E('panel_complaint')} **Khiếu nại** — Phản ánh trải nghiệm chưa tốt`,
@@ -116,18 +126,18 @@ export function buildTicketPanelV2(customConfig = {}) {
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(
       normalizeV2Text([
-        `> ${E('icon_sparkle')} Sau khi mở ticket, bot sẽ hướng dẫn bạn từng bước.`,
-        subtext(`${E('icon_heart_purple')} ${brand.footer || brand.name}`),
+        international ? `> ${E('icon_sparkle')} The bot will guide you through each step after the ticket opens.` : `> ${E('icon_sparkle')} Sau khi mở ticket, bot sẽ hướng dẫn bạn từng bước.`,
+        subtext(`${E('icon_heart_purple')} ${international ? 'Cenar Global' : (brand.footer || brand.name)}`),
       ].join('\n'))
     )
   );
 
 
   // Buttons row 1
-  const btnOrder = new ButtonBuilder().setCustomId('ticket:create:ORDER').setLabel('Mua Hàng').setStyle(ButtonStyle.Primary);
-  const btnSupport = new ButtonBuilder().setCustomId('ticket:create:SUPPORT').setLabel('Hỗ Trợ').setStyle(ButtonStyle.Secondary);
-  const btnComplaint = new ButtonBuilder().setCustomId('ticket:create:COMPLAINT').setLabel('Khiếu Nại').setStyle(ButtonStyle.Danger);
-  const btnPartnership = new ButtonBuilder().setCustomId('ticket:create:PARTNERSHIP').setLabel('Hợp Tác').setStyle(ButtonStyle.Success);
+  const btnOrder = new ButtonBuilder().setCustomId('ticket:create:ORDER').setLabel(international ? 'Place an Order' : 'Mua Hàng').setStyle(ButtonStyle.Primary);
+  const btnSupport = new ButtonBuilder().setCustomId('ticket:create:SUPPORT').setLabel(international ? 'Support' : 'Hỗ Trợ').setStyle(ButtonStyle.Secondary);
+  const btnComplaint = new ButtonBuilder().setCustomId('ticket:create:COMPLAINT').setLabel(international ? 'Complaint' : 'Khiếu Nại').setStyle(ButtonStyle.Danger);
+  const btnPartnership = new ButtonBuilder().setCustomId('ticket:create:PARTNERSHIP').setLabel(international ? 'Partnership' : 'Hợp Tác').setStyle(ButtonStyle.Success);
   const e1 = E.component('panel_order'); if (e1) btnOrder.setEmoji(e1);
   const e2 = E.component('panel_support'); if (e2) btnSupport.setEmoji(e2);
   const e3 = E.component('panel_complaint'); if (e3) btnComplaint.setEmoji(e3);
@@ -135,9 +145,9 @@ export function buildTicketPanelV2(customConfig = {}) {
   const row1 = new ActionRowBuilder().addComponents(btnOrder, btnSupport, btnComplaint, btnPartnership);
 
   // Buttons row 2
-  const btnWarranty = new ButtonBuilder().setCustomId('ticket:warranty:panel').setLabel('Bảo Hành Sản Phẩm').setStyle(ButtonStyle.Secondary);
-  const btnAppeal = new ButtonBuilder().setCustomId('ytb:appeal:apply').setLabel('Kháng 12 Tháng YT').setStyle(ButtonStyle.Primary);
-  const btnEdit = new ButtonBuilder().setCustomId('ticket:panel:edit').setLabel('Sửa Panel').setStyle(ButtonStyle.Secondary);
+  const btnWarranty = new ButtonBuilder().setCustomId('ticket:warranty:panel').setLabel(international ? 'Product Warranty' : 'Bảo Hành Sản Phẩm').setStyle(ButtonStyle.Secondary);
+  const btnAppeal = new ButtonBuilder().setCustomId('ytb:appeal:apply').setLabel(international ? 'YouTube Appeal' : 'Kháng 12 Tháng YT').setStyle(ButtonStyle.Primary);
+  const btnEdit = new ButtonBuilder().setCustomId('ticket:panel:edit').setLabel(international ? 'Edit Panel' : 'Sửa Panel').setStyle(ButtonStyle.Secondary);
   const e5 = E.component('panel_warranty'); if (e5) btnWarranty.setEmoji(e5);
   const appealEmoji = E.component('ticket_claim');
   if (appealEmoji) btnAppeal.setEmoji(appealEmoji);
@@ -288,10 +298,54 @@ const TICKET_V2_STEPS = {
   ],
 };
 
+const TICKET_TYPE_META_EN = Object.freeze({
+  ORDER: { title: 'Order Ticket Created', intro: 'Tell us which product and package you would like to purchase.' },
+  SUPPORT: { title: 'Support Ticket Created', intro: 'Describe the issue clearly so our team can help efficiently.' },
+  COMPLAINT: { title: 'Complaint Ticket Created', intro: 'A manager will review the case fairly and respond as soon as possible.' },
+  PARTNERSHIP: { title: 'Partnership Ticket Created', intro: 'Introduce your community or business and explain the proposed collaboration.' },
+  WARRANTY: { title: 'Warranty Ticket Created', intro: 'Your warranty request has been recorded for eligibility review.' },
+  APPEAL: { title: 'YouTube Appeal Ticket Created', intro: 'Follow the instructions and remain available when staff requests coordination.' },
+});
+
+const TICKET_V2_STEPS_EN = Object.freeze({
+  ORDER: [
+    { slot: 'icon_cart', text: '**Step 1** — Confirm the product and quantity' },
+    { slot: 'payment_payos', text: '**Step 2** — Choose bank checkout or Binance Pay when available' },
+    { slot: 'status_check', text: '**Step 3** — Payment is verified automatically before processing begins' },
+  ],
+  SUPPORT: [
+    { slot: 'icon_doc', text: '**Describe** — Device, error and when it started' },
+    { slot: 'icon_search', text: '**Evidence** — Attach relevant screenshots or video' },
+    { slot: 'icon_clock', text: '**Response** — Staff will reply as soon as possible' },
+  ],
+  COMPLAINT: [
+    { slot: 'icon_doc', text: '**Explain** — Include the order and exact issue' },
+    { slot: 'icon_search', text: '**Evidence** — Attach supporting records' },
+    { slot: 'ticket_staff', text: '**Review** — Management will provide a fair resolution' },
+  ],
+  PARTNERSHIP: [
+    { slot: 'ticket_user', text: '**Introduction** — Name, field and community size' },
+    { slot: 'icon_tip', text: '**Proposal** — State the idea and expected value' },
+    { slot: 'icon_announce', text: '**Review** — Management will respond after evaluation' },
+  ],
+  WARRANTY: [
+    { slot: 'panel_warranty', text: '**Issue** — What failed and when?' },
+    { slot: 'icon_search', text: '**Evidence** — Attach a screenshot or video' },
+    { slot: 'icon_clock', text: '**Eligibility** — Staff verifies the order and warranty dates first' },
+  ],
+  APPEAL: [
+    { slot: 'status_warn', text: '**Stay available** — Respond when staff mentions you' },
+    { slot: 'icon_clock', text: '**Fallback** — A different email or waiting period may be required' },
+    { slot: 'payment_money', text: '**Fee** — The applicable fee is confirmed before work begins' },
+  ],
+});
+
 export function buildTicketWelcomeV2(ticketCode, customerId, ticketType = 'ORDER', relatedOrderCode = null, productName = null, guildId = null) {
-  const meta = TICKET_TYPE_META[ticketType] ?? TICKET_TYPE_META.ORDER;
+  const international = isInternationalGuild(guildId);
+  const baseMeta = TICKET_TYPE_META[ticketType] ?? TICKET_TYPE_META.ORDER;
+  const meta = international ? { ...baseMeta, ...(TICKET_TYPE_META_EN[ticketType] || TICKET_TYPE_META_EN.ORDER) } : baseMeta;
   const accentColor = TICKET_V2_ACCENT[ticketType] ?? accentFor('primary');
-  const steps = TICKET_V2_STEPS[ticketType] ?? TICKET_V2_STEPS.ORDER;
+  const steps = international ? (TICKET_V2_STEPS_EN[ticketType] ?? TICKET_V2_STEPS_EN.ORDER) : (TICKET_V2_STEPS[ticketType] ?? TICKET_V2_STEPS.ORDER);
   const brand = brandConfig('store');
   const E = createEmojiResolver(guildId);
 
@@ -300,11 +354,11 @@ export function buildTicketWelcomeV2(ticketCode, customerId, ticketType = 'ORDER
   // Header — title h2, info dạng quoted fields
   container.addTextDisplayComponents(textDisplay(joinLines(
     `## ${E(meta.titleSlot)} ${meta.title}`,
-    `> ${E('ticket_user')} Xin chào ${/^\\d+$/.test(customerId) ? fmt.user(customerId) : 'Khách Vãng Lai (Web)'}!`,
-    `> ${E('ticket_open')} ${fmt.b('Mã ticket:')} ${fmt.code(ticketCode)}`,
-    relatedOrderCode ? `> ${E('order_id')} ${fmt.b('Đơn liên quan:')} ${fmt.code(relatedOrderCode)}` : null,
-    productName ? `> ${E('order_product')} ${fmt.b('Sản phẩm:')} ${fmt.b(productName)}` : null,
-    `> ${E('icon_clock')} ${fmt.b('Khởi tạo:')} ${T.rel(new Date())}`,
+    `> ${E('ticket_user')} ${international ? 'Welcome' : 'Xin chào'} ${/^\d+$/.test(customerId) ? fmt.user(customerId) : (international ? 'Web Customer' : 'Khách Vãng Lai (Web)')}!`,
+    `> ${E('ticket_open')} ${fmt.b(international ? 'Ticket:' : 'Mã ticket:')} ${fmt.code(ticketCode)}`,
+    relatedOrderCode ? `> ${E('order_id')} ${fmt.b(international ? 'Related order:' : 'Đơn liên quan:')} ${fmt.code(relatedOrderCode)}` : null,
+    productName ? `> ${E('order_product')} ${fmt.b(international ? 'Product:' : 'Sản phẩm:')} ${fmt.b(productName)}` : null,
+    `> ${E('icon_clock')} ${fmt.b(international ? 'Created:' : 'Khởi tạo:')} ${T.rel(new Date())}`,
   )));
 
   container.addSeparatorComponents(
@@ -313,7 +367,7 @@ export function buildTicketWelcomeV2(ticketCode, customerId, ticketType = 'ORDER
 
   // Một dòng định hướng, sau đó là ba bước cùng nhịp để quét nhanh.
   container.addTextDisplayComponents(textDisplay(joinLines(
-    `### ${E('status_info')} Hướng dẫn xử lý`,
+    `### ${E('status_info')} ${international ? 'NEXT STEPS' : 'Hướng dẫn xử lý'}`,
     meta.intro,
     '',
     ...steps.map((s) => `${E(s.slot)} ${s.text}`),
@@ -325,7 +379,7 @@ export function buildTicketWelcomeV2(ticketCode, customerId, ticketType = 'ORDER
 
   // Footer subtext
   container.addTextDisplayComponents(textDisplay(
-    subtext(`${E('icon_heart_purple')} ${brand.footer || brand.name}`)
+    subtext(`${E('icon_heart_purple')} ${international ? 'Cenar Global' : (brand.footer || brand.name)}`)
   ));
 
   return { container, flags: MessageFlags.IsComponentsV2 };
@@ -338,15 +392,25 @@ export function buildPaymentMethodSelector(order) {
   const em = order.guild_id ? getEmojiMap(order.guild_id) : {};
   const E = createEmojiResolver(order.guild_id);
 
+  const international = isInternationalGuild(order.guild_id);
   const container = new ContainerBuilder().setAccentColor(accentFor('warning'));
+  const globalAmount = config.storePriceSourceCurrency === 'VND'
+    ? `~$${(Number(order.total_amount || 0) / Math.max(1, config.storeVndPerUsd)).toFixed(2)} USD (${formatCurrency(order.total_amount)})`
+    : `$${Number(order.total_amount || 0).toFixed(2)} USD`;
 
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(
-      h2(`${E('payment_payos')}  Chọn Phương Thức Thanh Toán`) + '\n' +
-      `> ${E('order_product')} ${fmt.b('Sản phẩm:')} ${order.quantity}x ${order.product_name}\n` +
-      `> ${E('payment_money')} ${fmt.b('Số tiền:')} ${fmt.code(formatCurrency(order.total_amount))}\n` +
-      `> ${E('order_id')} ${fmt.b('Mã đơn:')} ${fmt.code(order.order_code)}\n\n` +
-      subtext('Chọn phương thức thanh toán phù hợp bên dưới')
+      (international
+        ? h2(`${E('payment_payos')} SELECT A PAYMENT METHOD`) + '\n' +
+          `> ${E('order_product')} ${fmt.b('Product:')} ${order.quantity}x ${translateProductName(order.product_name)}\n` +
+          `> ${E('payment_money')} ${fmt.b('Amount:')} ${fmt.code(globalAmount)}\n` +
+          `> ${E('order_id')} ${fmt.b('Order:')} ${fmt.code(order.order_code)}\n\n` +
+          subtext('Choose a secure checkout option below. Crypto is confirmed only by a signed Binance webhook.')
+        : h2(`${E('payment_payos')}  Chọn Phương Thức Thanh Toán`) + '\n' +
+          `> ${E('order_product')} ${fmt.b('Sản phẩm:')} ${order.quantity}x ${order.product_name}\n` +
+          `> ${E('payment_money')} ${fmt.b('Số tiền:')} ${fmt.code(formatCurrency(order.total_amount))}\n` +
+          `> ${E('order_id')} ${fmt.b('Mã đơn:')} ${fmt.code(order.order_code)}\n\n` +
+          subtext('Chọn phương thức thanh toán phù hợp bên dưới'))
     )
   );
 
@@ -356,22 +420,36 @@ export function buildPaymentMethodSelector(order) {
 
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(
-      `${E('payment_qr')} ${fmt.b('Thanh Toán Tự Động')} — Quét QR từ app ngân hàng, hệ thống tự xác nhận trong 1-2 phút.\n` +
-      subtext(`${E('icon_clock')} QR có hiệu lực 60 phút từ khi tạo`)
+      (international
+        ? `${E('payment_qr')} ${fmt.b('Automatic checkout')} — Bank QR or Binance Pay, depending on the option you select.\n` +
+          subtext(`${E('icon_clock')} Each invoice expires automatically and cannot be reused for another order.`)
+        : `${E('payment_qr')} ${fmt.b('Thanh Toán Tự Động')} — Quét QR từ app ngân hàng, hệ thống tự xác nhận trong 1-2 phút.\n` +
+          subtext(`${E('icon_clock')} QR có hiệu lực 60 phút từ khi tạo`))
     )
   );
 
   const qrBtn = new ButtonBuilder()
     .setCustomId(`payment:method:payos:${order.order_code}`)
-    .setLabel('Lay Ma QR Thanh Toan')
+    .setLabel(international ? 'Bank QR' : 'Lay Ma QR Thanh Toan')
     .setStyle(ButtonStyle.Primary);
   const cancelBtn = new ButtonBuilder()
     .setCustomId(`order:cancel_customer:${order.order_code}`)
-    .setLabel('Huy Don')
+    .setLabel(international ? 'Cancel Order' : 'Huy Don')
     .setStyle(ButtonStyle.Danger);
   const eQr = ec(em, 'payment_qr'); if (eQr) qrBtn.setEmoji(eQr);
   const eCancel = ec(em, 'order_cancel'); if (eCancel) cancelBtn.setEmoji(eCancel);
-  const actionRow = new ActionRowBuilder().addComponents(qrBtn, cancelBtn);
+  const buttons = [qrBtn];
+  if (international && config.binancePayEnabled) {
+    const binanceBtn = new ButtonBuilder()
+      .setCustomId(`payment:method:binance:${order.order_code}`)
+      .setLabel('Binance Pay')
+      .setStyle(ButtonStyle.Success);
+    const eBinance = E.component('payment_money') || E.component('payment_qr');
+    if (eBinance) binanceBtn.setEmoji(eBinance);
+    buttons.push(binanceBtn);
+  }
+  buttons.push(cancelBtn);
+  const actionRow = new ActionRowBuilder().addComponents(...buttons);
 
   return { container, actionRow, flags: MessageFlags.IsComponentsV2 };
 }
@@ -478,13 +556,14 @@ export function buildWarrantySelectEmbed() {
 export function buildWarrantySelectV2(guildId = null) {
   const em = guildId ? getEmojiMap(guildId) : {};
   const E = createEmojiResolver(guildId);
+  const international = isInternationalGuild(guildId);
   const container = new ContainerBuilder().setAccentColor(accentFor('warning'));
 
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent([
-      h2(`${E('panel_warranty')} Bảo Hành Sản Phẩm`),
-      `> ${E('icon_sparkle')} Chọn đơn hàng cần bảo hành từ danh sách bên dưới.`,
-      `> Sau khi chọn, bạn sẽ cần điền thông tin tài khoản để chúng tôi hỗ trợ nhanh hơn.`,
+      h2(`${E('panel_warranty')} ${international ? 'PRODUCT WARRANTY' : 'Bảo Hành Sản Phẩm'}`),
+      international ? `> ${E('icon_sparkle')} Select the eligible completed order below.` : `> ${E('icon_sparkle')} Chọn đơn hàng cần bảo hành từ danh sách bên dưới.`,
+      international ? `> You will be asked for the information required to investigate the product issue.` : `> Sau khi chọn, bạn sẽ cần điền thông tin tài khoản để chúng tôi hỗ trợ nhanh hơn.`,
     ].join('\n'))
   );
 
@@ -494,8 +573,8 @@ export function buildWarrantySelectV2(guildId = null) {
 
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent([
-      `${E('icon_tip')} **Lưu ý:** Chỉ hiển thị các đơn đã hoàn thành trong 6 tháng gần nhất.`,
-      subtext('Nếu không thấy đơn phù hợp, hãy liên hệ staff để được hỗ trợ trực tiếp.'),
+      international ? `${E('icon_tip')} **Note:** Only eligible completed orders from the last six months are shown.` : `${E('icon_tip')} **Lưu ý:** Chỉ hiển thị các đơn đã hoàn thành trong 6 tháng gần nhất.`,
+      subtext(international ? 'If an eligible order is missing, open one support ticket for review.' : 'Nếu không thấy đơn phù hợp, hãy liên hệ staff để được hỗ trợ trực tiếp.'),
     ].join('\n'))
   );
 
@@ -505,10 +584,11 @@ export function buildWarrantySelectV2(guildId = null) {
 export function buildWarrantyProductSelectComponents(orders, guildId = null) {
   const em = guildId ? getEmojiMap(guildId) : {};
   const productEmoji = ec(em, 'order_product');
+  const international = isInternationalGuild(guildId);
   const options = orders.slice(0, 25).map(order => {
     const opt = {
-      label: `${order.order_code} — ${String(order.product_name ?? '').slice(0, 50)}`,
-      description: `Hoàn thành: ${order.completed_at ? new Date(order.completed_at).toLocaleDateString('vi-VN') : 'N/A'}`,
+      label: `${order.order_code} — ${String(international ? translateProductName(order.product_name) : order.product_name ?? '').slice(0, 50)}`,
+      description: `${international ? 'Completed' : 'Hoàn thành'}: ${order.completed_at ? new Date(order.completed_at).toLocaleDateString(international ? 'en-US' : 'vi-VN') : 'N/A'}`,
       value: order.order_code,
     };
     if (productEmoji) opt.emoji = productEmoji;
@@ -518,7 +598,7 @@ export function buildWarrantyProductSelectComponents(orders, guildId = null) {
     new ActionRowBuilder().addComponents(
       new StringSelectMenuBuilder()
         .setCustomId('warranty:product:select')
-        .setPlaceholder('Chọn đơn hàng cần bảo hành...')
+        .setPlaceholder(international ? 'Select an order for warranty...' : 'Chọn đơn hàng cần bảo hành...')
         .addOptions(options),
     ),
   ];
@@ -782,20 +862,21 @@ export function buildPaymentPendingComponents(orderCode, checkoutUrl = null) {
 export function buildPaymentQrV2({ order, attachmentName = null, checkoutUrl = null, hasImage = false }) {
   const em = order.guild_id ? getEmojiMap(order.guild_id) : {};
   const E = createEmojiResolver(order.guild_id);
+  const international = isInternationalGuild(order.guild_id);
 
   const expireText = order.payment_expired_at
     ? `<t:${Math.floor(new Date(order.payment_expired_at).getTime() / 1000)}:R>`
-    : '_30 phút_';
+    : (international ? '_30 minutes_' : '_30 phút_');
 
   const container = new ContainerBuilder().setAccentColor(accentFor('info'));
 
   // Header — mention khách trong TextDisplay (V2 không dùng content/embeds)
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(joinLines(
-      h2(`${E('payment_payos')}  Thanh Toán Đơn Hàng`),
+      h2(`${E('payment_payos')}  ${international ? 'SECURE BANK CHECKOUT' : 'Thanh Toán Đơn Hàng'}`),
       `> ${fmt.user(order.customer_id)}`,
-      `> ${E('payment_qr')} Quét mã QR ${fmt.b('hoặc')} bấm ${fmt.b('Thanh Toán Ngay')} bên dưới`,
-      `> ${E('status_check')} Bot ${fmt.b('tự động xác nhận')} sau khi nhận được giao dịch`,
+      international ? `> ${E('payment_qr')} Scan the QR code ${fmt.b('or')} use ${fmt.b('Pay Now')} below` : `> ${E('payment_qr')} Quét mã QR ${fmt.b('hoặc')} bấm ${fmt.b('Thanh Toán Ngay')} bên dưới`,
+      international ? `> ${E('status_check')} Processing starts only after the provider confirms payment` : `> ${E('status_check')} Bot ${fmt.b('tự động xác nhận')} sau khi nhận được giao dịch`,
     ))
   );
 
@@ -806,10 +887,10 @@ export function buildPaymentQrV2({ order, attachmentName = null, checkoutUrl = n
   // Thông tin đơn
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(joinLines(
-      `${E('order_id')} ${fmt.b('Nội dung:')} ${fmt.code(order.payment_code ?? order.order_code)}`,
-      `${E('order_product')} ${fmt.b('Sản phẩm:')} ${formatOrderProduct(order.quantity, order.product_name)}`,
-      `${E('payment_money')} ${fmt.b('Số tiền:')} ${fmt.b(formatCurrency(order.total_amount))}`,
-      `${E('icon_clock')} ${fmt.b('Hết hạn:')} ${expireText}`,
+      `${E('order_id')} ${fmt.b(international ? 'Reference:' : 'Nội dung:')} ${fmt.code(order.payment_code ?? order.order_code)}`,
+      `${E('order_product')} ${fmt.b(international ? 'Product:' : 'Sản phẩm:')} ${formatOrderProduct(order.quantity, international ? translateProductName(order.product_name) : order.product_name)}`,
+      `${E('payment_money')} ${fmt.b(international ? 'Amount:' : 'Số tiền:')} ${fmt.b(international ? formatInternationalPrice(order.total_amount, { includeSource: true }) : formatCurrency(order.total_amount))}`,
+      `${E('icon_clock')} ${fmt.b(international ? 'Expires:' : 'Hết hạn:')} ${expireText}`,
     ))
   );
 
@@ -828,18 +909,20 @@ export function buildPaymentQrV2({ order, attachmentName = null, checkoutUrl = n
 
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(
-      subtext(`${E('status_warn')} Giao dịch hết hạn sau ít phút nếu chưa thanh toán. Bạn có thể tạo lại hoá đơn mới.`)
+      subtext(international
+        ? `${E('status_warn')} This invoice expires automatically if unpaid. Create a new invoice instead of reusing an expired one.`
+        : `${E('status_warn')} Giao dịch hết hạn sau ít phút nếu chưa thanh toán. Bạn có thể tạo lại hoá đơn mới.`)
     )
   );
 
   const actionRow = new ActionRowBuilder();
   if (checkoutUrl && /^https?:\/\//i.test(checkoutUrl)) {
-    const payBtn = new ButtonBuilder().setLabel('Thanh Toán Ngay').setStyle(ButtonStyle.Link).setURL(checkoutUrl);
+    const payBtn = new ButtonBuilder().setLabel(international ? 'Pay Now' : 'Thanh Toán Ngay').setStyle(ButtonStyle.Link).setURL(checkoutUrl);
     const ePay = E.component('payment_payos'); if (ePay) payBtn.setEmoji(ePay);
     actionRow.addComponents(payBtn);
   }
-  const regenBtn = new ButtonBuilder().setCustomId(`payment:regen:${order.order_code}`).setLabel('Tạo Hoá Đơn Mới').setStyle(ButtonStyle.Secondary);
-  const queueBtn = new ButtonBuilder().setCustomId(`queue:view:${order.order_code}`).setLabel('Xem Hàng Chờ').setStyle(ButtonStyle.Secondary);
+  const regenBtn = new ButtonBuilder().setCustomId(`payment:regen:${order.order_code}`).setLabel(international ? 'New Invoice' : 'Tạo Hoá Đơn Mới').setStyle(ButtonStyle.Secondary);
+  const queueBtn = new ButtonBuilder().setCustomId(`queue:view:${order.order_code}`).setLabel(international ? 'Queue Status' : 'Xem Hàng Chờ').setStyle(ButtonStyle.Secondary);
   const eRefresh = E.component('icon_refresh'); if (eRefresh) regenBtn.setEmoji(eRefresh);
   const eQueue = E.component('order_queue'); if (eQueue) queueBtn.setEmoji(eQueue);
   actionRow.addComponents(regenBtn, queueBtn);
@@ -850,9 +933,10 @@ export function buildPaymentQrV2({ order, attachmentName = null, checkoutUrl = n
 export function buildPaymentSuccessEmbed(order, amountText = null, transactionContent = null) {
   const em = order.guild_id ? getEmojiMap(order.guild_id) : {};
   const E = createEmojiResolver(order.guild_id);
+  const international = isInternationalGuild(order.guild_id);
 
-  const amountDisplay = amountText ?? formatCurrency(order.amount_paid || order.total_amount);
-  const productDisplay = formatOrderProduct(order.quantity, order.product_name);
+  const amountDisplay = amountText ?? (international ? formatInternationalPrice(order.amount_paid || order.total_amount, { includeSource: true }) : formatCurrency(order.amount_paid || order.total_amount));
+  const productDisplay = formatOrderProduct(order.quantity, international ? translateProductName(order.product_name) : order.product_name);
 
   const container = new ContainerBuilder().setAccentColor(accentFor('success'));
 
@@ -860,8 +944,8 @@ export function buildPaymentSuccessEmbed(order, amountText = null, transactionCo
     new TextDisplayBuilder().setContent(
       joinLines(
         `<@${order.customer_id}>`,
-        h2(`${E('payment_success')}  Thanh Toán Thành Công!`),
-        `> ${E('icon_heart_purple')} Đơn hàng đã xác nhận — shop sẽ xử lý ngay!`.trim(),
+        h2(`${E('payment_success')}  ${international ? 'PAYMENT CONFIRMED' : 'Thanh Toán Thành Công!'}`),
+        `> ${E('icon_heart_purple')} ${international ? 'Your order is confirmed and has entered processing.' : 'Đơn hàng đã xác nhận — shop sẽ xử lý ngay!'}`.trim(),
       )
     )
   );
@@ -873,11 +957,11 @@ export function buildPaymentSuccessEmbed(order, amountText = null, transactionCo
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(
       joinLines(
-        `> ${E('order_id')} ${fmt.b('Mã Đơn:')} ${fmt.code(order.order_code)}`.trim(),
-        `> ${E('payment_money')} ${fmt.b('Đã Nhận:')} **${amountDisplay}**`.trim(),
-        `> ${E('order_product')} ${fmt.b('Sản Phẩm:')} ${productDisplay}`.trim(),
-        `> ${E('icon_clock')} ${fmt.b('Thời gian:')} ${T.rel(order.payment_confirmed_at || new Date())}`.trim(),
-        ...(transactionContent ? [`> ${E('icon_doc')} ${fmt.b('Mã GD:')} ${fmt.code(transactionContent)}`.trim()] : []),
+        `> ${E('order_id')} ${fmt.b(international ? 'Order:' : 'Mã Đơn:')} ${fmt.code(order.order_code)}`.trim(),
+        `> ${E('payment_money')} ${fmt.b(international ? 'Received:' : 'Đã Nhận:')} **${amountDisplay}**`.trim(),
+        `> ${E('order_product')} ${fmt.b(international ? 'Product:' : 'Sản Phẩm:')} ${productDisplay}`.trim(),
+        `> ${E('icon_clock')} ${fmt.b(international ? 'Time:' : 'Thời gian:')} ${T.rel(order.payment_confirmed_at || new Date())}`.trim(),
+        ...(transactionContent ? [`> ${E('icon_doc')} ${fmt.b(international ? 'Transaction:' : 'Mã GD:')} ${fmt.code(transactionContent)}`.trim()] : []),
       )
     )
   );
@@ -896,7 +980,7 @@ export function buildPaymentSuccessEmbed(order, amountText = null, transactionCo
 
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(
-      subtext(`${brandName()} — Vui lòng chờ staff giao hàng qua DM.`)
+      subtext(international ? 'Cenar Global — Delivery updates will appear in your ticket or DM.' : `${brandName()} — Vui lòng chờ staff giao hàng qua DM.`)
     )
   );
 
@@ -998,14 +1082,15 @@ export function buildOrderCompletedV2(order, staffId, supportId = null) {
   const em = order.guild_id ? getEmojiMap(order.guild_id) : {};
   const E = createEmojiResolver(order.guild_id);
   const store = brandName('store');
+  const international = isInternationalGuild(order.guild_id);
 
   const container = new ContainerBuilder().setAccentColor(accentFor('primary'));
 
   // Header — lời cảm ơn + mention khách (V2 mention trong TextDisplay)
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(joinLines(
-      `# ${E('order_complete', '<a:Dotyellow:1481134440725090315>')} **ĐƠN HÀNG HOÀN THÀNH** ${E('icon_gift', '<:gift:1392749981332541501>')}`,
-      `> ${E('icon_heart', '<:cr_shop:1392749981332541501>')} ${fmt.user(order.customer_id)} — cảm ơn bạn đã ủng hộ **${store}**!`,
+      `# ${E('order_complete')} **${international ? 'ORDER COMPLETED' : 'ĐƠN HÀNG HOÀN THÀNH'}** ${E('icon_gift')}`,
+      `> ${E('icon_heart')} ${fmt.user(order.customer_id)} — ${international ? 'thank you for choosing **Cenar Global**!' : `cảm ơn bạn đã ủng hộ **${store}**!`}`,
     ))
   );
 
@@ -1016,13 +1101,13 @@ export function buildOrderCompletedV2(order, staffId, supportId = null) {
   // Thông tin đơn + xử lý
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(joinLines(
-      `> ${E('order_id', '<:Diamond:1485905790903783465>')} **Mã Đơn:** \`${order.order_code}\``,
-      `> ${E('order_product', '<:cr_shop:1392749981332541501>')} **Sản Phẩm:** ${formatOrderProduct(order.quantity, order.product_name)}`,
-      `> ${E('ticket_staff', '<:verifybadge:1481127479702847646>')} **Nhân Viên:** ${fmt.user(staffId)}`,
-      `> ${E('ticket_claim', '<:verifybadge:1481127479702847646>')} **Hỗ Trợ:** ${fmt.user(supportId || staffId)}`,
-      `> ${E('icon_clock', '<a:Time:1481134440725090315>')} **Hoàn thành:** ${T.rel(order.completed_at || new Date())}`,
+      `> ${E('order_id')} **${international ? 'Order' : 'Mã Đơn'}:** \`${order.order_code}\``,
+      `> ${E('order_product')} **${international ? 'Product' : 'Sản Phẩm'}:** ${formatOrderProduct(order.quantity, international ? translateProductName(order.product_name) : order.product_name)}`,
+      `> ${E('ticket_staff')} **${international ? 'Handled by' : 'Nhân Viên'}:** ${fmt.user(staffId)}`,
+      `> ${E('ticket_claim')} **${international ? 'Support' : 'Hỗ Trợ'}:** ${fmt.user(supportId || staffId)}`,
+      `> ${E('icon_clock')} **${international ? 'Completed' : 'Hoàn thành'}:** ${T.rel(order.completed_at || new Date())}`,
       order.expiry_at
-        ? `> ${E('icon_calendar', '<a:Time:1481134440725090315>')} **Hết hạn:** ${T.full(order.expiry_at)} (${T.rel(order.expiry_at)})`
+        ? `> ${E('icon_calendar')} **${international ? 'Expires' : 'Hết hạn'}:** ${T.full(order.expiry_at)} (${T.rel(order.expiry_at)})`
         : null,
     ))
   );
@@ -1034,9 +1119,9 @@ export function buildOrderCompletedV2(order, staffId, supportId = null) {
   // Nhắc feedback + bảo hành (gộp tin thừa, chống spam)
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(joinLines(
-      `## ${E('icon_star', '<a:Dotyellow:1481134440725090315>')} HÃY ĐÁNH GIÁ TRẢI NGHIỆM MUA HÀNG CỦA BẠN!`,
-      `> ${E('icon_sparkle', '<a:Dotyellow:1481134440725090315>')} Feedback giúp shop cải thiện dịch vụ — và bạn được **giảm giá đơn sau**.`,
-      `> ${E('panel_warranty', '<:cr_baohanh:1348625535512870965>')} Cần **bảo hành**? Dùng nút bên dưới bất cứ lúc nào.`,
+      `## ${E('icon_star')} ${international ? 'SHARE YOUR EXPERIENCE' : 'HÃY ĐÁNH GIÁ TRẢI NGHIỆM MUA HÀNG CỦA BẠN!'}`,
+      `> ${E('icon_sparkle')} ${international ? 'Your feedback helps us improve global service quality.' : 'Feedback giúp shop cải thiện dịch vụ — và bạn được **giảm giá đơn sau**.'}`,
+      `> ${E('panel_warranty')} ${international ? 'Need warranty support? Use the warranty option linked to this purchase.' : 'Cần **bảo hành**? Dùng nút bên dưới bất cứ lúc nào.'}`,
     ))
   );
 
@@ -1045,7 +1130,7 @@ export function buildOrderCompletedV2(order, staffId, supportId = null) {
   );
 
   container.addTextDisplayComponents(
-    new TextDisplayBuilder().setContent(subtext(`${E('icon_heart_purple')} ${config.storeFooter || store}`))
+    new TextDisplayBuilder().setContent(subtext(`${E('icon_heart_purple')} ${international ? 'Cenar Global' : (config.storeFooter || store)}`))
   );
 
   return { container, flags: MessageFlags.IsComponentsV2 };
@@ -1079,6 +1164,7 @@ export function buildPublicOrderLogEmbed(order) {
 export function buildPublicOrderLogV2(order) {
   const em = order.guild_id ? getEmojiMap(order.guild_id) : {};
   const E = createEmojiResolver(order.guild_id);
+  const international = isInternationalGuild(order.guild_id);
 
   const ticketVal = order.ticket_channel_id
     ? `<#${order.ticket_channel_id}>`
@@ -1088,8 +1174,8 @@ export function buildPublicOrderLogV2(order) {
 
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent([
-      `## ${E('order_complete')} GIAO H\u00c0NG TH\u00c0NH C\u00d4NG \u2014 \`${order.order_code}\``,
-      `> ${E('icon_heart_purple')} C\u1ea3m \u01a1n qu\u00fd kh\u00e1ch \u0111\u00e3 tin t\u01b0\u1edfng v\u00e0 mua h\u00e0ng t\u1ea1i **${brandName()}**!`,
+      `## ${E('order_complete')} ${international ? 'ORDER DELIVERED' : 'GIAO H\u00c0NG TH\u00c0NH C\u00d4NG'} \u2014 \`${order.order_code}\``,
+      `> ${E('icon_heart_purple')} ${international ? 'Thank you for choosing **Cenar Global**.' : `C\u1ea3m \u01a1n qu\u00fd kh\u00e1ch \u0111\u00e3 tin t\u01b0\u1edfng v\u00e0 mua h\u00e0ng t\u1ea1i **${brandName()}**!`}`,
     ].join('\n'))
   );
 
@@ -1099,13 +1185,13 @@ export function buildPublicOrderLogV2(order) {
 
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent([
-      `${E('ticket_user')} **Kh\u00e1ch H\u00e0ng** \u2014 <@${order.customer_id}>`,
-      `${E('order_product')} **S\u1ea3n Ph\u1ea9m** \u2014 ${formatOrderProduct(order.quantity, order.product_name)}`,
-      `${E('payment_money')} **T\u1ed5ng Ti\u1ec1n** \u2014 \`${vnd(order.total_amount)}\u0111\``,
-      `${E('payment_success')} **Thanh To\u00e1n** \u2014 ${statusPill(order.payment_status || 'PAID')}`,
+      `${E('ticket_user')} **${international ? 'Customer' : 'Kh\u00e1ch H\u00e0ng'}** \u2014 <@${order.customer_id}>`,
+      `${E('order_product')} **${international ? 'Product' : 'S\u1ea3n Ph\u1ea9m'}** \u2014 ${formatOrderProduct(order.quantity, international ? translateProductName(order.product_name) : order.product_name)}`,
+      `${E('payment_money')} **${international ? 'Total' : 'T\u1ed5ng Ti\u1ec1n'}** \u2014 \`${international ? formatInternationalPrice(order.total_amount, { includeSource: true }) : `${vnd(order.total_amount)}\u0111`}\``,
+      `${E('payment_success')} **${international ? 'Payment' : 'Thanh To\u00e1n'}** \u2014 ${statusPill(order.payment_status || 'PAID')}`,
       `${E('ticket_open')} **Ticket** \u2014 ${ticketVal}`,
       order.completed_at
-        ? `${E('icon_clock')} **Ho\u00e0n Th\u00e0nh** \u2014 ${T.rel(order.completed_at)}`
+        ? `${E('icon_clock')} **${international ? 'Completed' : 'Ho\u00e0n Th\u00e0nh'}** \u2014 ${T.rel(order.completed_at)}`
         : null,
     ].filter(Boolean).join('\n'))
   );
@@ -1116,7 +1202,9 @@ export function buildPublicOrderLogV2(order) {
 
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(
-      `-# ${E('icon_sparkle')} **${brandName()}** \u2014 Uy T\u00edn \u2022 Ch\u1ea5t L\u01b0\u1ee3ng \u2022 H\u1ed7 Tr\u1ee3 24/7`
+      international
+        ? `-# ${E('icon_sparkle')} **Cenar Global** \u2014 Secure \u2022 Transparent \u2022 Global Support`
+        : `-# ${E('icon_sparkle')} **${brandName()}** \u2014 Uy T\u00edn \u2022 Ch\u1ea5t L\u01b0\u1ee3ng \u2022 H\u1ed7 Tr\u1ee3 24/7`
     )
   );
 

@@ -35,15 +35,15 @@ describe('welcome and payment Components V2', () => {
     const content = expectCustomEmojiOnly(payload);
     expect(payload.flags & MessageFlags.IsComponentsV2).toBeTruthy();
     expect(payload.allowedMentions).toEqual({ users: ['123456789012345678'] });
-    expect(content).toContain('THÀNH VIÊN MỚI GIA NHẬP');
+    expect(content).toContain('WELCOME TO CENAR GLOBAL');
     expect(content).toContain('<#1535880000000000000>');
     expect(content).not.toContain(':purple_heart_glow:');
     expect(content).not.toContain(':muiten:');
   });
 
   it.each([
-    ['first', 'LẦN 1/2', '20 phút'],
-    ['final', 'LẦN CUỐI', '10 phút'],
+    ['first', 'PAYMENT REMINDER • 1/2', '20 minutes'],
+    ['final', 'PAYMENT REMINDER • FINAL NOTICE', '10 minutes'],
   ])('renders the %s payment reminder with an explicit deadline', (stage, heading, deadline) => {
     const payload = buildPaymentReminderV2({
       guildId: '1070676180103086132',

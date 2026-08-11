@@ -1,7 +1,7 @@
 {
   "name": "cenar-store-bot",
-  "version": "1.10.4",
-  "description": "Bot ho tro ban hang Discord.js cho Cenar Store voi PayOS, ticket phan loai, dashboard, blacklist, role tu dong va backup/export.",
+  "version": "1.11.0",
+  "description": "Multi-store Discord commerce bot for Cenar Store and Cenar Global with secure payments, support, automation and recovery.",
   "type": "module",
   "main": "src/index.js",
   "scripts": {

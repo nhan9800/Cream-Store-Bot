@@ -8,6 +8,7 @@ import {
 import { config } from '../config.js';
 import { handleMemberAdd } from '../services/inviteTrackerService.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
+import { brandForGuild, isInternationalGuild } from '../utils/locale.js';
 
 export const name = Events.GuildMemberAdd;
 export const once = false;
@@ -47,14 +48,15 @@ export function buildWelcomeChatV2({
   accentColor = 0x7C3AED,
 }) {
   const E = createEmojiResolver(guildId);
+  const international = isInternationalGuild(guildId);
   const lines = [
-    `## ${E('icon_fire')} THÀNH VIÊN MỚI GIA NHẬP`,
-    `${E('icon_heart_purple')} Chào mừng <@${userId}> đến với **${brandName}**!`,
+    `## ${E('icon_fire')} ${international ? 'WELCOME TO CENAR GLOBAL' : 'THÀNH VIÊN MỚI GIA NHẬP'}`,
+    `${E('icon_heart_purple')} ${international ? `Welcome <@${userId}> to **${brandName}**!` : `Chào mừng <@${userId}> đến với **${brandName}**!`}`,
     verifyChannelId
-      ? `> ${E('verify_shield')} Ghé <#${verifyChannelId}> để xác minh và mở khóa đầy đủ các kênh.`
+      ? `> ${E('verify_shield')} ${international ? `Complete verification in <#${verifyChannelId}> to unlock the community.` : `Ghé <#${verifyChannelId}> để xác minh và mở khóa đầy đủ các kênh.`}`
       : null,
     '',
-    `-# ${E('icon_group')} Thành viên thứ **#${Number(memberCount).toLocaleString('vi-VN')}** · ${E('icon_sparkle')} Chúc bạn mua sắm vui vẻ`,
+    `-# ${E('icon_group')} ${international ? `Member **#${Number(memberCount).toLocaleString('en-US')}** · ${E('icon_sparkle')} Enjoy secure global shopping` : `Thành viên thứ **#${Number(memberCount).toLocaleString('vi-VN')}** · ${E('icon_sparkle')} Chúc bạn mua sắm vui vẻ`}`,
   ].filter((line) => line !== null).join('\n');
 
   const container = new ContainerBuilder().setAccentColor(accentColor);
@@ -73,7 +75,8 @@ export async function execute(member) {
     const user        = member.user;
     const memberCount = guild.memberCount;
     const isServer1   = guild.id === SERVER1_ID;
-    const brandName   = config.storeName || 'Cenar Store';
+    const international = isInternationalGuild(guild.id);
+    const brandName   = brandForGuild(guild.id, config.storeName || 'Cenar Store');
     const emoji       = createEmojiResolver(guild.id);
     const E = {
       fire: emoji('icon_fire'),
@@ -96,21 +99,26 @@ export async function execute(member) {
 
     // 1. Cấp Auto-Role cho Server 2
     if (guild.id === SERVER2_ID) {
-      const defaultRole = guild.roles.cache.find(r => r.name === '🍃 ｜ Thành Viên Mới');
+      const defaultRole = guild.roles.cache.find(r => ['🍃 ｜ Thành Viên Mới', 'Global Newcomer'].includes(r.name));
       if (defaultRole) {
         await member.roles.add(defaultRole).catch(e => console.error(`[AUTO-ROLE S2] Thất bại: ${e.message}`));
       }
     }
 
     // ─── Tìm channels ─────────────────────────────────────────────────────
-    const welcomeChannel = guild.channels.cache.find(c => c.type === ChannelType.GuildText && c.name.includes('chào-mừng'));
-    const verifyChannel  = guild.channels.cache.find(c => c.name.includes('xác-minh')  && c.type === ChannelType.GuildText);
-    const bangGiaChan    = guild.channels.cache.find(c => c.name.includes('bảng-giá')  && c.type === ChannelType.GuildText);
-    const hoTroChan      = guild.channels.cache.find(c => c.name.includes('hỗ-trợ')    && c.type === ChannelType.GuildText && !c.name.startsWith('ticket'));
-    const thaoLuanChan   = guild.channels.cache.find(c => c.name.includes('thảo-luận') && c.type === ChannelType.GuildText);
+    const welcomeChannel = guild.channels.cache.find(c => c.type === ChannelType.GuildText && (c.name.includes('chào-mừng') || c.name === 'welcome'));
+    const verifyChannel  = guild.channels.cache.find(c => (c.name.includes('xác-minh') || c.name === 'verify') && c.type === ChannelType.GuildText);
+    const bangGiaChan    = guild.channels.cache.find(c => (c.name.includes('bảng-giá') || c.name === 'pricing') && c.type === ChannelType.GuildText);
+    const hoTroChan      = guild.channels.cache.find(c => (c.name.includes('hỗ-trợ') || c.name === 'support-center') && c.type === ChannelType.GuildText && !c.name.startsWith('ticket'));
+    const thaoLuanChan   = guild.channels.cache.find(c => (c.name.includes('thảo-luận') || c.name === 'global-chat') && c.type === ChannelType.GuildText);
 
     const accountAgeDays = Math.floor((Date.now() - user.createdTimestamp) / 86400000);
-    const accountAgeText = accountAgeDays < 1   ? 'Hôm nay'
+    const accountAgeText = international
+      ? (accountAgeDays < 1 ? 'Today'
+        : accountAgeDays < 30 ? `${accountAgeDays} days ago`
+        : accountAgeDays < 365 ? `${Math.floor(accountAgeDays / 30)} months ago`
+        : `${Math.floor(accountAgeDays / 365)} years ago`)
+      : accountAgeDays < 1   ? 'Hôm nay'
       : accountAgeDays < 30  ? `${accountAgeDays} ngày trước`
       : accountAgeDays < 365 ? `${Math.floor(accountAgeDays / 30)} tháng trước`
       : `${Math.floor(accountAgeDays / 365)} năm trước`;
@@ -123,24 +131,26 @@ export async function execute(member) {
     // ═══════════════════════════════════════════════════════════════
     if (welcomeChannel) {
       const header = [
-        `## ${E.fire} CHÀO MỪNG THÀNH VIÊN MỚI`,
-        `${E.heart} Hân hoan chào đón <@${user.id}> đến với **${brandName}**!`,
+        `## ${E.fire} ${international ? 'WELCOME TO CENAR GLOBAL' : 'CHÀO MỪNG THÀNH VIÊN MỚI'}`,
+        `${E.heart} ${international ? `Welcome <@${user.id}> to **${brandName}**!` : `Hân hoan chào đón <@${user.id}> đến với **${brandName}**!`}`,
         ``,
-        `${E.group} **Thành viên thứ:** #${memberCount.toLocaleString('vi-VN')}`,
-        `${E.sparkle} **Tài khoản tạo:** ${accountAgeText}`,
+        `${E.group} **${international ? 'Member' : 'Thành viên thứ'}:** #${memberCount.toLocaleString(international ? 'en-US' : 'vi-VN')}`,
+        `${E.sparkle} **${international ? 'Account age' : 'Tài khoản tạo'}:** ${accountAgeText}`,
       ].join('\n');
 
       const guideItems = [
-        verifyChannel ? `${E.verify} ${verifyChannel} — **Xác minh** để mở khóa toàn bộ server` : null,
-        bangGiaChan   ? `${E.pay} ${bangGiaChan} — Xem bảng giá dịch vụ` : null,
-        hoTroChan     ? `${E.cart} ${hoTroChan} — Mua hàng & hỗ trợ` : null,
+        verifyChannel ? `${E.verify} ${verifyChannel} — **${international ? 'Verify' : 'Xác minh'}** ${international ? 'to unlock the community' : 'để mở khóa toàn bộ server'}` : null,
+        bangGiaChan   ? `${E.pay} ${bangGiaChan} — ${international ? 'Browse live global pricing' : 'Xem bảng giá dịch vụ'}` : null,
+        hoTroChan     ? `${E.cart} ${hoTroChan} — ${international ? 'Orders and customer support' : 'Mua hàng & hỗ trợ'}` : null,
       ].filter(Boolean);
 
       const guide = guideItems.length
-        ? [`${E.shop} **Bắt đầu tại đây:**`, ...guideItems.map(l => `> ${E.arrow} ${l}`)].join('\n')
+        ? [`${E.shop} **${international ? 'Start here' : 'Bắt đầu tại đây'}:**`, ...guideItems.map(l => `> ${E.arrow} ${l}`)].join('\n')
         : null;
 
-      const footer = `-# ${E.heart} ${brandName} — Uy Tín • Chất Lượng • Tự Động 24/7`;
+      const footer = international
+        ? `-# ${E.heart} ${brandName} — Secure • Transparent • Global Support`
+        : `-# ${E.heart} ${brandName} — Uy Tín • Chất Lượng • Tự Động 24/7`;
 
       const container = new ContainerBuilder().setAccentColor(accentColor);
 
@@ -164,7 +174,7 @@ export async function execute(member) {
       const btnRow = new ActionRowBuilder();
       if (verifyChannel) {
         const button = new ButtonBuilder()
-          .setLabel('Xác Minh Ngay')
+          .setLabel(international ? 'Verify Now' : 'Xác Minh Ngay')
           .setStyle(ButtonStyle.Link)
           .setURL(`https://discord.com/channels/${guild.id}/${verifyChannel.id}`);
         const buttonEmoji = emoji.component('verify_shield');
@@ -173,7 +183,7 @@ export async function execute(member) {
       }
       if (bangGiaChan) {
         const button = new ButtonBuilder()
-          .setLabel('Xem Bảng Giá')
+          .setLabel(international ? 'View Pricing' : 'Xem Bảng Giá')
           .setStyle(ButtonStyle.Link)
           .setURL(`https://discord.com/channels/${guild.id}/${bangGiaChan.id}`);
         const buttonEmoji = emoji.component('payment_money');

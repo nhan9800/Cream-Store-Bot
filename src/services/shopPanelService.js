@@ -11,6 +11,8 @@ import { formatCurrency } from '../utils/formatters.js';
 import { getEmojiMap, resolveSelectMenuEmoji, resolveProductEmoji } from './emojiService.js';
 import { fmt, h2, subtext } from '../utils/embedHelpers.js';
 import { config } from '../config.js';
+import { isInternationalGuild } from '../utils/locale.js';
+import { formatInternationalPrice, translateProductName } from '../utils/internationalCatalog.js';
 
 // ═══════════════════════════════════════════════
 // CRUD — shop_panels
@@ -90,6 +92,7 @@ function accentForCategory(category) {
 // ═══════════════════════════════════════════════
 
 export function buildShopPanelV2({ guildId, category, title, imageUrl, features }) {
+  const international = isInternationalGuild(guildId);
   let products = [];
   const activeProducts = getActiveProducts(guildId);
   const catLower = (category || '').toLowerCase();
@@ -123,7 +126,9 @@ export function buildShopPanelV2({ guildId, category, title, imageUrl, features 
   const accentColor = accentForCategory(category);
 
   // ─── Build Embed Description ───
-  let desc = `> ${E('icon_sparkle')} **Dịch vụ số chính hãng — bảo hành uy tín tại ${config.storeName || 'Cenar Store'}**\n\n`;
+  let desc = international
+    ? `> ${E('icon_sparkle')} **Premium digital services with transparent delivery and warranty support from Cenar Global.**\n\n`
+    : `> ${E('icon_sparkle')} **Dịch vụ số chính hãng — bảo hành uy tín tại ${config.storeName || 'Cenar Store'}**\n\n`;
 
   if (features) {
     const featureLines = features.split('\n').filter(l => l.trim());
@@ -131,22 +136,24 @@ export function buildShopPanelV2({ guildId, category, title, imageUrl, features 
       const trimmed = line.trim();
       if (/^[•\-\*]/.test(trimmed)) return trimmed;
       if (/^\p{Emoji}/u.test(trimmed)) return trimmed;
-      return `${E('status_check') || '✅'} ${trimmed}`;
+      return `${E('status_check')} ${trimmed}`.trim();
     }).join('\n');
 
-    desc += `### ${E('icon_sparkle') || '✨'} Quyền Lợi Dịch Vụ\n${formatted}\n\n`;
+    desc += `### ${E('icon_sparkle')} ${international ? 'SERVICE BENEFITS' : 'Quyền Lợi Dịch Vụ'}\n${formatted}\n\n`;
   }
 
   if (products.length > 0) {
     const priceLines = products.map(p => {
-      const priceText = Number(p.price).toLocaleString('vi-VN') + 'đ';
-      const pEmoji = resolveProductEmoji(guildId, p.emoji) || E('muiten') || '•';
-      return `${pEmoji} **${p.name}** — \`${priceText}\` / ${p.duration_months} tháng`;
+      const priceText = international ? formatInternationalPrice(p.price) : Number(p.price).toLocaleString('vi-VN') + 'đ';
+      const pEmoji = resolveProductEmoji(guildId, p.emoji) || E('muiten');
+      return `${pEmoji} **${international ? translateProductName(p.name) : p.name}** — \`${priceText}\` / ${p.duration_months} ${international ? 'month(s)' : 'tháng'}`.trim();
     });
-    desc += `### ${E('icon_price') || '💳'} Bảng Giá Dịch Vụ\n${priceLines.join('\n')}\n\n`;
+    desc += `### ${E('icon_price')} ${international ? 'LIVE PRICING' : 'Bảng Giá Dịch Vụ'}\n${priceLines.join('\n')}\n\n`;
   }
 
-  desc += `-# ${E('icon_heart_purple') || '💜'} Chọn gói bên dưới để đặt hàng · ${config.storeName || 'Cenar Store'}`;
+  desc += international
+    ? `-# ${E('icon_heart_purple')} Select a package below to order · Cenar Global`
+    : `-# ${E('icon_heart_purple')} Chọn gói bên dưới để đặt hàng · ${config.storeName || 'Cenar Store'}`;
 
   const embed = new EmbedBuilder()
     .setColor(accentColor || 0x2f3136)
@@ -162,8 +169,8 @@ export function buildShopPanelV2({ guildId, category, title, imageUrl, features 
   let selectRow = null;
   if (products.length > 0) {
     const selectOptions = products.slice(0, 25).map(p => ({
-      label: `${p.name}`.slice(0, 100),
-      description: `${formatCurrency(p.price)}đ · ${p.duration_months} tháng`.slice(0, 100),
+      label: `${international ? translateProductName(p.name) : p.name}`.slice(0, 100),
+      description: `${international ? formatInternationalPrice(p.price) : `${formatCurrency(p.price)}đ`} · ${p.duration_months} ${international ? 'month(s)' : 'tháng'}`.slice(0, 100),
       value: `${p.id}`,
       emoji: resolveSelectMenuEmoji(guildId, p.emoji, 'order_product') || undefined,
     }));
@@ -171,7 +178,7 @@ export function buildShopPanelV2({ guildId, category, title, imageUrl, features 
     selectRow = new ActionRowBuilder().addComponents(
       new StringSelectMenuBuilder()
         .setCustomId('product:select')
-        .setPlaceholder(`${displayTitle} — Chọn gói phù hợp với bạn`)
+        .setPlaceholder(`${displayTitle} — ${international ? 'Select a package' : 'Chọn gói phù hợp với bạn'}`)
         .addOptions(selectOptions)
     );
   }
@@ -179,7 +186,7 @@ export function buildShopPanelV2({ guildId, category, title, imageUrl, features 
   // ─── Edit button (Admin only) ───
   const editBtn = new ButtonBuilder()
     .setCustomId('shop:panel:edit')
-    .setLabel('Sửa Panel')
+    .setLabel(international ? 'Edit Panel' : 'Sửa Panel')
     .setStyle(ButtonStyle.Secondary);
   const editEmoji = Ecomp('panel_edit');
   if (editEmoji) editBtn.setEmoji(editEmoji);

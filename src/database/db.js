@@ -132,6 +132,7 @@ export function initDatabase() {
       payment_code TEXT UNIQUE,
       payos_order_code INTEGER UNIQUE,
       payment_link_id TEXT,
+      payment_merchant_trade_no TEXT,
       payment_checkout_url TEXT,
       payment_qr_code TEXT,
       payment_qr_url TEXT,
@@ -516,6 +517,10 @@ export function initDatabase() {
   ensureColumn('orders', 'payment_code', 'TEXT');
   ensureColumn('orders', 'payos_order_code', 'INTEGER');
   ensureColumn('orders', 'payment_link_id', 'TEXT');
+  ensureColumn('orders', 'payment_merchant_trade_no', 'TEXT');
+  db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_payment_merchant_trade_no
+    ON orders (payment_merchant_trade_no)
+    WHERE payment_merchant_trade_no IS NOT NULL`);
   ensureColumn('orders', 'payment_checkout_url', 'TEXT');
   ensureColumn('orders', 'payment_qr_code', 'TEXT');
   ensureColumn('orders', 'payment_qr_url', 'TEXT');

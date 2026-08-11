@@ -23,6 +23,8 @@ import { discordCollectibleUrl, getDiscordCollectibleShopPrice } from './discord
 import { getCustomerDiscordRoleSnapshot, getCustomerMembershipProgress } from './roleService.js';
 import { getCustomerActivitySummary, getCustomerRecentActivities } from './customerActivityService.js';
 import { getDiscordNitroEligibility } from '../utils/discordNitro.js';
+import { isInternationalGuild } from '../utils/locale.js';
+import { internationalizeProduct } from '../utils/internationalCatalog.js';
 import { recordStaffLog } from './staffLogService.js';
 import { getLeaderboardRows } from './leaderboardService.js';
 import {
@@ -288,12 +290,13 @@ export const PUBLIC_PRODUCT_COLUMNS = `
 `;
 
 function listPublicProducts() {
-    return db.prepare(`
+    const products = db.prepare(`
         SELECT ${PUBLIC_PRODUCT_COLUMNS}
         FROM product_catalog pc
         WHERE pc.is_active = 1 AND pc.guild_id = 'WEB'
         ORDER BY pc.is_featured DESC, pc.sort_order ASC, pc.name ASC
     `).all();
+    return isInternationalGuild(config.guildId) ? products.map(internationalizeProduct) : products;
 }
 
 function findPublicProduct(query) {
@@ -302,6 +305,7 @@ function findPublicProduct(query) {
         String(product.id) === normalized
         || String(product.product_key || '').toLowerCase() === normalized
         || String(product.name || '').toLowerCase() === normalized
+        || String(product.display_name || '').toLowerCase() === normalized
         || String(product.name || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/gi, 'd').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') === normalized
     )) || null;
 }

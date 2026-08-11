@@ -76,6 +76,7 @@ import { getActiveProducts, getProductById, updateProduct, addProduct, getAllPro
 import { handlePremiumProductInteraction } from '../services/premiumProductSetupService.js';
 import { getCenarHub } from '../services/cenarHub.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
+import { isInternationalGuild } from '../utils/locale.js';
 import { buildVerificationPromptV2, buildVerificationUnavailableV2 } from '../services/verificationPanelService.js';
 import { getRecoveryStatus } from '../services/guildRecoveryService.js';
 import { memberHasVerificationRole, resolveVerificationRole } from '../services/verificationRoleService.js';
@@ -570,7 +571,7 @@ export function registerInteractionHandler(client, commands) {
       // Payment method selection buttons
       if (interaction.isButton() && interaction.customId.startsWith('payment:method:')) {
         const parts = interaction.customId.split(':'); // payment:method:<type>:<orderCode>
-        const method = parts[2]; // 'payos' or 'vietqr'
+        const method = parts[2]; // 'payos', 'vietqr' or 'binance'
         const orderCode = parts[3];
         await interaction.deferReply({ flags: 64 });
         try {
@@ -580,15 +581,22 @@ export function registerInteractionHandler(client, commands) {
           const { sendOrRefreshPaymentQr, sendVietQRPayment } = await import('../services/paymentService.js');
           if (method === 'payos') {
             await sendOrRefreshPaymentQr({ guild: interaction.guild, orderCode });
+          } else if (method === 'binance') {
+            const { sendOrRefreshBinancePay } = await import('../services/binancePayService.js');
+            await sendOrRefreshBinancePay({ guild: interaction.guild, orderCode });
           } else {
             await sendVietQRPayment({ guild: interaction.guild, orderCode });
           }
           const E_pm = createEmojiResolver(interaction.guildId);
-          await interaction.editReply(`${E_pm('status_check')} Đã tạo mã QR thanh toán! Kiểm tra trong ticket nhé.`);
+          await interaction.editReply(isInternationalGuild(interaction.guildId)
+            ? `${E_pm('status_check')} Secure checkout created. Please review it in this ticket.`
+            : `${E_pm('status_check')} Đã tạo mã QR thanh toán! Kiểm tra trong ticket nhé.`);
         } catch (err) {
           console.error('[PAYMENT METHOD]', err);
           const E_pm = createEmojiResolver(interaction.guildId);
-          await interaction.editReply(`${E_pm('status_warn')} Không tạo được QR: ${err.message}`).catch(() => null);
+          await interaction.editReply(isInternationalGuild(interaction.guildId)
+            ? `${E_pm('status_warn')} Checkout could not be created: ${err.message}`
+            : `${E_pm('status_warn')} Không tạo được QR: ${err.message}`).catch(() => null);
         }
         return;
       }

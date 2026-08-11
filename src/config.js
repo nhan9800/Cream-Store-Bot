@@ -85,6 +85,8 @@ export const environmentInfo = {
   envFileExists,
 };
 
+const isStoreTwoEnvironment = getEnv('GUILD_ID') === '1070676180103086132';
+
 export const config = {
   botToken: getEnv('BOT_TOKEN'),
   clientId: getEnv('CLIENT_ID'),
@@ -92,12 +94,22 @@ export const config = {
   databasePath: getEnv('DATABASE_PATH', './data/shopbot.sqlite'),
   feedbackTimeoutHours: Number.parseInt(getEnv('FEEDBACK_TIMEOUT_HOURS', '48'), 10),
   defaultDeliveryNotes: getMultilineEnv(
-    'DEFAULT_DELIVERY_NOTES',
-    'Vui lòng đổi mật khẩu ngay sau khi đăng nhập. Không chia sẻ tài khoản cho người khác. Nếu có vấn đề, hãy mở ticket ngay.',
+    isStoreTwoEnvironment ? 'GLOBAL_DEFAULT_DELIVERY_NOTES' : 'DEFAULT_DELIVERY_NOTES',
+    isStoreTwoEnvironment
+      ? 'Change the password after delivery when the product terms allow it. Never share the account. Open a support ticket if you need help.'
+      : 'Vui lòng đổi mật khẩu ngay sau khi đăng nhập. Không chia sẻ tài khoản cho người khác. Nếu có vấn đề, hãy mở ticket ngay.',
   ),
   defaultDeliveryTerms: getMultilineEnv(
-    'DEFAULT_DELIVERY_TERMS',
-    [
+    isStoreTwoEnvironment ? 'GLOBAL_DEFAULT_DELIVERY_TERMS' : 'DEFAULT_DELIVERY_TERMS',
+    (isStoreTwoEnvironment ? [
+      'DO NOT change the account/profile name or primary language unless the product terms allow it.',
+      'DO NOT change the email, phone number, login details or password unless staff explicitly confirms it is permitted.',
+      'DO NOT add, edit or remove payment methods, users or profiles.',
+      'DO NOT use sign-out-all-devices or share/resell the delivered account.',
+      'DO NOT use the service on more devices than the selected package allows.',
+      '',
+      'Warranty support is available for the eligible duration shown on the order.',
+    ] : [
       'KHÔNG: đổi tên, ngôn ngữ tài khoản/profile (có thể đổi ngôn ngữ phụ đề).',
       'KHÔNG: đổi email, số điện thoại, thông tin đăng nhập và mật khẩu.',
       'KHÔNG: thêm, sửa, xoá phương thức thanh toán.',
@@ -107,20 +119,28 @@ export const config = {
       'KHÔNG: sử dụng 2 thiết bị cùng lúc.',
       '',
       '💬 Hỗ trợ bảo hành sản phẩm suốt thời gian sử dụng.',
-    ].join('\n'),
+    ]).join('\n'),
   ),
   defaultWarrantyNote: getMultilineEnv(
-    'DEFAULT_WARRANTY_NOTE',
-    'Nếu cần bảo hành, hãy sử dụng lệnh /baohanh hoặc nút bảo hành trong ticket.',
+    isStoreTwoEnvironment ? 'GLOBAL_DEFAULT_WARRANTY_NOTE' : 'DEFAULT_WARRANTY_NOTE',
+    isStoreTwoEnvironment
+      ? 'For warranty support, use the /warranty command or the Product Warranty button in the support panel.'
+      : 'Nếu cần bảo hành, hãy sử dụng lệnh /baohanh hoặc nút bảo hành trong ticket.',
   ),
   defaultWarrantyDurationDays: Number.parseInt(getEnv('DEFAULT_WARRANTY_DURATION_DAYS', '30'), 10),
   defaultLoginUrl: getEnv('DEFAULT_LOGIN_URL', 'https://www.netflix.com/login'),
   sendTranscriptToCustomer: getBooleanEnv('SEND_TRANSCRIPT_TO_CUSTOMER', true),
-  storeName: getEnv('STORE_NAME', 'Cenar Store'),
-  storeFooter: getEnv('STORE_FOOTER', 'Cenar Store'),
+  storeName: isStoreTwoEnvironment ? getEnv('GLOBAL_STORE_NAME', 'Cenar Global') : getEnv('STORE_NAME', 'Cenar Store'),
+  storeLocale: isStoreTwoEnvironment ? getEnv('GLOBAL_STORE_LOCALE', 'en-US') : getEnv('STORE_LOCALE', 'vi-VN'),
+  storeCurrency: (isStoreTwoEnvironment ? getEnv('GLOBAL_STORE_CURRENCY', 'USD') : getEnv('STORE_CURRENCY', 'VND') || '').toUpperCase(),
+  storePriceSourceCurrency: (getEnv('STORE_PRICE_SOURCE_CURRENCY', 'VND') || 'VND').toUpperCase(),
+  storeVndPerUsd: parseNumberEnv('STORE_VND_PER_USD', '26000'),
+  storeFooter: isStoreTwoEnvironment
+    ? getEnv('GLOBAL_STORE_FOOTER', 'Cenar Global • International Digital Services')
+    : getEnv('STORE_FOOTER', 'Cenar Store'),
   storeIconUrl: getEnv('STORE_ICON_URL', ''),
-  shipperName: getEnv('SHIPPER_NAME', 'Cenar Shipper'),
-  shipperFooter: getEnv('SHIPPER_FOOTER', 'Cenar Store'),
+  shipperName: isStoreTwoEnvironment ? getEnv('GLOBAL_SHIPPER_NAME', 'Cenar Global Delivery') : getEnv('SHIPPER_NAME', 'Cenar Shipper'),
+  shipperFooter: isStoreTwoEnvironment ? getEnv('GLOBAL_SHIPPER_FOOTER', 'Cenar Global') : getEnv('SHIPPER_FOOTER', 'Cenar Store'),
   shipperIconUrl: getEnv('SHIPPER_ICON_URL', ''),
   paymentImageUrl: getEnv('PAYMENT_IMAGE_URL', ''),
   paymentThumbnailUrl: getEnv('PAYMENT_THUMBNAIL_URL', ''),
@@ -142,10 +162,30 @@ export const config = {
   payosCancelPath: pathWithLeadingSlash('PAYOS_CANCEL_PATH', '/payments/payos/cancel'),
   payosAutoConfirmWebhook: getBooleanEnv('PAYOS_AUTO_CONFIRM_WEBHOOK', false),
   payosExpireMinutes: Number.parseInt(getEnv('PAYOS_EXPIRE_MINUTES', '60'), 10),
+  binancePayEnabled: getBooleanEnv('BINANCE_PAY_ENABLED', false),
+  binancePayApiKey: getEnv('BINANCE_PAY_API_KEY', ''),
+  binancePaySecretKey: getEnv('BINANCE_PAY_SECRET_KEY', ''),
+  binancePayApiBase: getEnv('BINANCE_PAY_API_BASE', 'https://bpay.binanceapi.com'),
+  binancePayCurrency: (getEnv('BINANCE_PAY_CURRENCY', 'USDT') || 'USDT').toUpperCase(),
+  binancePayCurrencies: (getEnv('BINANCE_PAY_CURRENCIES', 'USDT,USDC') || 'USDT,USDC')
+    .split(',').map((value) => value.trim().toUpperCase()).filter(Boolean),
+  binancePayWebhookPath: pathWithLeadingSlash(
+    'BINANCE_PAY_WEBHOOK_PATH',
+    isStoreTwoEnvironment ? '/webhooks/binance-pay-store2' : '/webhooks/binance-pay',
+  ),
+  binancePayReturnPath: pathWithLeadingSlash(
+    'BINANCE_PAY_RETURN_PATH',
+    isStoreTwoEnvironment ? '/payments/binance-pay-store2/return' : '/payments/binance-pay/return',
+  ),
+  binancePayCancelPath: pathWithLeadingSlash(
+    'BINANCE_PAY_CANCEL_PATH',
+    isStoreTwoEnvironment ? '/payments/binance-pay-store2/cancel' : '/payments/binance-pay/cancel',
+  ),
+  binancePayExpireMinutes: Number.parseInt(getEnv('BINANCE_PAY_EXPIRE_MINUTES', '60'), 10),
   // VietQR fallback (dùng khi guild chưa setup-bank)
   vietqrBankBin: getEnv('VIETQR_BANK_BIN', '970418'),
   vietqrAccountNo: getEnv('VIETQR_ACCOUNT_NO', ''),
-  vietqrAccountName: getEnv('VIETQR_ACCOUNT_NAME', 'CREAM STORE'),
+  vietqrAccountName: getEnv('VIETQR_ACCOUNT_NAME', isStoreTwoEnvironment ? 'CENAR GLOBAL' : 'CREAM STORE'),
   customerRoleThreshold: Number.parseInt(getEnv('CUSTOMER_ROLE_THRESHOLD', '1'), 10),
   loyalRoleThreshold: Number.parseInt(getEnv('LOYAL_ROLE_THRESHOLD', '3'), 10),
   vipRoleThreshold: Number.parseInt(getEnv('VIP_ROLE_THRESHOLD', '10'), 10),
@@ -158,7 +198,12 @@ export const config = {
   nitroUserIds: (getEnv('DISCORD_NITRO_USER_IDS', '1138315103821889566') || '').split(',').map(id => id.trim()).filter(Boolean),
   groqApiKey: getEnv('GROQ_API_KEY', getEnv('OPENROUTER_API_KEY', '')), // Dùng chung biến để tiện cho user nếu họ nhác sửa
   aiModel: getEnv('AI_MODEL', 'llama-3.3-70b-versatile'),
-  aiSystemPrompt: getMultilineEnv('AI_SYSTEM_PROMPT', 'Bạn là trợ lý AI thân thiện của Cenar Store. Hãy tư vấn nhiệt tình và ngắn gọn.'),
+  aiSystemPrompt: getMultilineEnv(
+    isStoreTwoEnvironment ? 'GLOBAL_AI_SYSTEM_PROMPT' : 'AI_SYSTEM_PROMPT',
+    isStoreTwoEnvironment
+      ? 'You are the Cenar Global customer assistant. Reply clearly, professionally and concisely in English.'
+      : 'Bạn là trợ lý AI thân thiện của Cenar Store. Hãy tư vấn nhiệt tình và ngắn gọn.',
+  ),
 
 
   ticketOpenCooldownSeconds: Number.parseInt(getEnv('TICKET_OPEN_COOLDOWN_SECONDS', '120'), 10),
@@ -215,14 +260,20 @@ function collectInvalidEnv(mode) {
 export function collectPaymentConfigIssues() {
   const issues = [];
 
-  if (config.paymentProvider !== 'PAYOS') {
-    issues.push('PAYMENT_PROVIDER phải là PAYOS cho bản v7 này.');
+  if (!['PAYOS', 'BINANCE_PAY'].includes(config.paymentProvider)) {
+    issues.push('PAYMENT_PROVIDER must be PAYOS or BINANCE_PAY.');
   }
 
-  if (!config.payosClientId) issues.push('Thiếu PAYOS_CLIENT_ID');
-  if (!config.payosApiKey) issues.push('Thiếu PAYOS_API_KEY');
-  if (!config.payosChecksumKey) issues.push('Thiếu PAYOS_CHECKSUM_KEY');
-  if (!config.publicBaseUrl) issues.push('Thiếu PUBLIC_BASE_URL để PayOS gọi webhook / return / cancel URL');
+  if (config.paymentProvider === 'PAYOS') {
+    if (!config.payosClientId) issues.push('Thiếu PAYOS_CLIENT_ID');
+    if (!config.payosApiKey) issues.push('Thiếu PAYOS_API_KEY');
+    if (!config.payosChecksumKey) issues.push('Thiếu PAYOS_CHECKSUM_KEY');
+  }
+  if (config.paymentProvider === 'BINANCE_PAY' || config.binancePayEnabled) {
+    if (!config.binancePayApiKey) issues.push('Missing BINANCE_PAY_API_KEY');
+    if (!config.binancePaySecretKey) issues.push('Missing BINANCE_PAY_SECRET_KEY');
+  }
+  if (!config.publicBaseUrl) issues.push('Missing PUBLIC_BASE_URL for payment callbacks.');
 
   return issues;
 }
@@ -272,4 +323,16 @@ export function getPayOSReturnUrl() {
 
 export function getPayOSCancelUrl() {
   return getPublicUrl(config.payosCancelPath);
+}
+
+export function getBinancePayWebhookUrl() {
+  return getPublicUrl(config.binancePayWebhookPath);
+}
+
+export function getBinancePayReturnUrl() {
+  return getPublicUrl(config.binancePayReturnPath);
+}
+
+export function getBinancePayCancelUrl() {
+  return getPublicUrl(config.binancePayCancelPath);
 }

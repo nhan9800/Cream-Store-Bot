@@ -1,6 +1,6 @@
 import { Client, Events, REST, Routes } from 'discord.js';
 import { assertRuntimeConfig, config } from './config.js';
-import { initDatabase } from './database/db.js';
+import { db, initDatabase } from './database/db.js';
 import { getClientOptions, loadCommands, registerInteractionHandler } from './events/interactionCreate.js';
 import { startScheduler } from './services/schedulerService.js';
 import { startWebhookServer } from './services/webhookServer.js';
@@ -11,6 +11,8 @@ import { cleanupExpiredTranscripts } from './services/transcriptService.js';
 
 import { initErrorLogger } from './services/errorLogService.js';
 import { autoSetupDiscountBoard } from './services/autoSetupDiscountBoardService.js';
+import { isInternationalGuild } from './utils/locale.js';
+import { localizeCommandsForInternationalStore } from './utils/internationalCommands.js';
 
 export async function buildClient() {
   initDatabase();
@@ -37,7 +39,34 @@ export async function buildClient() {
     startScheduler(readyClient);
     startWebhookServer(readyClient);
     startOtpAutoCheck(readyClient);
-    autoSetupDiscountBoard(readyClient);
+
+    // Store 2 is the international storefront. The migration is idempotent,
+    // preserves Discord IDs/permission overwrites and creates a recovery
+    // snapshot before the first structural rename.
+    try {
+      const { setupInternationalStores } = await import('./services/internationalStoreSetupService.js');
+      await setupInternationalStores(readyClient);
+      if (isInternationalGuild(config.guildId)) {
+        const commandLocaleVersion = '2026-08-global-v1';
+        const settingKey = 'international_command_locale_version';
+        const current = db.prepare('SELECT value FROM system_settings WHERE key = ?').get(settingKey)?.value;
+        if (current !== commandLocaleVersion) {
+          const commandData = localizeCommandsForInternationalStore(
+            [...commands.values()].map((command) => command.data.toJSON()),
+          );
+          const rest = new REST({ version: '10' }).setToken(config.botToken);
+          await rest.put(Routes.applicationGuildCommands(config.clientId, config.guildId), { body: commandData });
+          db.prepare(`INSERT INTO system_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`)
+            .run(settingKey, commandLocaleVersion);
+          console.log(`[GLOBAL-COMMANDS] Published ${commandData.length} English-localized commands.`);
+        }
+      }
+    } catch (error) {
+      console.error('[GLOBAL-SETUP] International storefront migration failed:', error);
+    }
+
+    await autoSetupDiscountBoard(readyClient);
 
     import('./services/roleService.js').then(({ syncCustomerActivityRoles }) => {
       syncCustomerActivityRoles(readyClient)
@@ -133,7 +162,10 @@ export async function deployCommands() {
   initDatabase();
 
   const commands = await loadCommands();
-  const commandData = [...commands.values()].map((command) => command.data.toJSON());
+  const baseCommandData = [...commands.values()].map((command) => command.data.toJSON());
+  const commandData = isInternationalGuild(config.guildId)
+    ? localizeCommandsForInternationalStore(baseCommandData)
+    : baseCommandData;
 
   const rest = new REST({ version: '10' }).setToken(config.botToken);
   await rest.put(Routes.applicationGuildCommands(config.clientId, config.guildId), {

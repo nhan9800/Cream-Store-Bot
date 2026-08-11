@@ -1,6 +1,7 @@
 import { ChannelType } from 'discord.js';
 import { db } from '../database/db.js';
 import { buildCardPanelPayload } from './cardPanelService.js';
+import { isInternationalGuild } from '../utils/locale.js';
 
 export async function autoSetupCardChannel(client) {
   // Get the single guild config
@@ -13,14 +14,15 @@ export async function autoSetupCardChannel(client) {
   if (!guild) return;
 
   // Check if channel already exists
-  let channel = guild.channels.cache.find(c => c.name === '💳・nap-the-tu-dong' || c.name === 'nap-the-tu-dong' || c.name.includes('nap-the'));
+  const international = isInternationalGuild(guildId);
+  let channel = guild.channels.cache.find(c => c.name === 'gift-card-exchange' || c.name === '💳・nap-the-tu-dong' || c.name === 'nap-the-tu-dong' || c.name.includes('nap-the'));
   
   if (!channel) {
     // Create channel
     channel = await guild.channels.create({
-      name: '💳・nap-the-tu-dong',
+      name: international ? 'gift-card-exchange' : '💳・nap-the-tu-dong',
       type: ChannelType.GuildText,
-      reason: 'Tự động tạo kênh Gạch thẻ / Mua thẻ theo yêu cầu',
+      reason: international ? 'Create Cenar Global gift card exchange channel' : 'Tự động tạo kênh Gạch thẻ / Mua thẻ theo yêu cầu',
     }).catch(err => {
       console.error('[AUTO-SETUP-CARD] Failed to create channel:', err.message);
       return null;

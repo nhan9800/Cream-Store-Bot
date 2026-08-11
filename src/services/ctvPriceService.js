@@ -14,6 +14,8 @@ import { resolveProductEmoji } from './emojiService.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { formatCurrency } from '../utils/formatters.js';
 import { accentFor } from '../utils/uiKit.js';
+import { isInternationalGuild } from '../utils/locale.js';
+import { formatInternationalPrice, translateProductName } from '../utils/internationalCatalog.js';
 
 const CUSTOM_EMOJI_RE = /^<a?:[a-zA-Z0-9_]+:\d+>$/;
 
@@ -41,6 +43,7 @@ function splitLines(lines, maxLength = 3600) {
 
 export function buildCtvPricePages(guildId) {
   const E = createEmojiResolver(guildId);
+  const international = isInternationalGuild(guildId);
   const products = getActiveProducts(guildId);
   const lines = products.length
     ? products.map((product) => {
@@ -50,29 +53,29 @@ export function buildCtvPricePages(guildId) {
         const discount = retail > 0 && saving > 0 ? Math.round((saving / retail) * 100) : 0;
         const duration = Number(product.duration_months || 1);
         const suffix = discount > 0 ? ` · -${discount}%` : '';
-        return `${customProductEmoji(guildId, product.emoji, E)} **${product.name}** · **${formatCurrency(ctvPrice)}** · ${duration}T${suffix}`;
+        return `${customProductEmoji(guildId, product.emoji, E)} **${international ? translateProductName(product.name) : product.name}** · **${international ? formatInternationalPrice(ctvPrice) : formatCurrency(ctvPrice)}** · ${duration}${international ? ' mo' : 'T'}${suffix}`;
       })
-    : [`${E('cenar_cooldown')} Bảng giá đang được cập nhật. Vui lòng quay lại sau.`];
+    : [`${E('cenar_cooldown')} ${international ? 'Pricing is being updated. Please check again shortly.' : 'Bảng giá đang được cập nhật. Vui lòng quay lại sau.'}`];
   const chunks = splitLines(lines, 2750);
 
   return chunks.map((chunk, index) => {
     const container = new ContainerBuilder().setAccentColor(accentFor('primary'));
     container.addTextDisplayComponents(new TextDisplayBuilder().setContent([
-      `# ${E('cenar_ctv')} CENAR CTV | Bảng giá nội bộ`,
-      `${E('cenar_verified')} Trang **${index + 1}/${chunks.length}** · ${products.length} sản phẩm đang hoạt động`,
-      `-# Dữ liệu đồng bộ trực tiếp với catalog bán hàng của Cenar Store.`,
+      international ? `# ${E('cenar_ctv')} CENAR AFFILIATE | PRIVATE PRICING` : `# ${E('cenar_ctv')} CENAR CTV | Bảng giá nội bộ`,
+      international ? `${E('cenar_verified')} Page **${index + 1}/${chunks.length}** · ${products.length} active products` : `${E('cenar_verified')} Trang **${index + 1}/${chunks.length}** · ${products.length} sản phẩm đang hoạt động`,
+      international ? `-# Live data synchronized with the Cenar Global catalog.` : `-# Dữ liệu đồng bộ trực tiếp với catalog bán hàng của Cenar Store.`,
     ].join('\n')));
     container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
     container.addTextDisplayComponents(new TextDisplayBuilder().setContent(chunk));
     container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
     container.addTextDisplayComponents(new TextDisplayBuilder().setContent([
-      `${E('cenar_support')} Giá CTV được tự động áp dụng khi tài khoản có role CTV.`,
-      `${E('cenar_wallet')} Giá thay đổi theo nguồn hàng và được đồng bộ sau mỗi lần Admin chỉnh sửa.`,
+      international ? `${E('cenar_support')} Affiliate pricing is applied automatically to approved accounts.` : `${E('cenar_support')} Giá CTV được tự động áp dụng khi tài khoản có role CTV.`,
+      international ? `${E('cenar_wallet')} Prices follow inventory conditions and synchronize after each Admin update.` : `${E('cenar_wallet')} Giá thay đổi theo nguồn hàng và được đồng bộ sau mỗi lần Admin chỉnh sửa.`,
     ].join('\n')));
 
     const buyButton = new ButtonBuilder()
       .setCustomId('ticket:create:ORDER')
-      .setLabel('Tạo đơn CTV')
+      .setLabel(international ? 'Create Affiliate Order' : 'Tạo đơn CTV')
       .setStyle(ButtonStyle.Success);
     const buttonEmoji = E.component('cenar_ctv');
     if (buttonEmoji) buyButton.setEmoji(buttonEmoji);

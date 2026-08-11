@@ -12,6 +12,8 @@ import { T, subtext } from '../utils/embedHelpers.js';
 import { accentFor, brandName } from '../utils/uiKit.js';
 import { config } from '../config.js';
 import { formatProductDisplayName } from './emojiService.js';
+import { isInternationalGuild } from '../utils/locale.js';
+import { formatInternationalPrice, translateProductName } from '../utils/internationalCatalog.js';
 
 /**
  * Dữ liệu form bảo hành từ modal
@@ -95,14 +97,15 @@ export function normalizeWarrantyFormData(order, formData = {}) {
  */
 export function buildWarrantyTicketOpenedV2({ order, ticket, channel, formData, guildId }) {
   const E = createEmojiResolver(guildId);
-  const productDisplay = formatProductDisplayName(guildId, order.product_name, E) || 'Chưa xác định';
+  const international = isInternationalGuild(guildId);
+  const productDisplay = international ? translateProductName(order.product_name) : (formatProductDisplayName(guildId, order.product_name, E) || 'Chưa xác định');
 
   const container = new ContainerBuilder().setAccentColor(accentFor('warning'));
 
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent([
-      `## ${E('warranty_shield')} Hồ Sơ Bảo Hành`,
-      `> ${E('status_check')} Yêu cầu đã được tiếp nhận và đưa vào hàng chờ hỗ trợ riêng tư.`,
+      `## ${E('warranty_shield')} ${international ? 'WARRANTY CASE' : 'Hồ Sơ Bảo Hành'}`,
+      `> ${E('status_check')} ${international ? 'Your request was received and placed in the private support queue.' : 'Yêu cầu đã được tiếp nhận và đưa vào hàng chờ hỗ trợ riêng tư.'}`,
     ].join('\n'))
   );
 
@@ -112,11 +115,11 @@ export function buildWarrantyTicketOpenedV2({ order, ticket, channel, formData, 
 
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent([
-      `### ${E('icon_clipboard')} Hồ Sơ Đơn Hàng`,
-      `${E('order_id')} **Mã đơn** — \`${order.order_code}\``,
-      `${E('order_product')} **Sản phẩm** — ${productDisplay}`,
-      `${E('ticket_user')} **Khách hàng** — <@${order.customer_id}>`,
-      `${E('ticket_open')} **Kênh xử lý** — ${channel}`,
+      `### ${E('icon_clipboard')} ${international ? 'ORDER RECORD' : 'Hồ Sơ Đơn Hàng'}`,
+      `${E('order_id')} **${international ? 'Order' : 'Mã đơn'}** — \`${order.order_code}\``,
+      `${E('order_product')} **${international ? 'Product' : 'Sản phẩm'}** — ${productDisplay}`,
+      `${E('ticket_user')} **${international ? 'Customer' : 'Khách hàng'}** — <@${order.customer_id}>`,
+      `${E('ticket_open')} **${international ? 'Support channel' : 'Kênh xử lý'}** — ${channel}`,
     ].join('\n'))
   );
 
@@ -126,17 +129,17 @@ export function buildWarrantyTicketOpenedV2({ order, ticket, channel, formData, 
     );
 
     const fields = [
-      formData.productType  && `${E('icon_tag')} **Loại Sản Phẩm** — ${formData.productType}`,
-      formData.accountInfo  && `${E('icon_key')} **Tài Khoản** — \`${formData.accountInfo}\``,
-      formData.password     && `${E('icon_unlock')} **Mật Khẩu** — \`${formData.password}\``,
-      formData.purchaseDate && `${E('warranty_purchase')} **Ngày mua** — ${formData.purchaseDate}`,
-      formData.dateExpired  && `${E('warranty_expiry')} **Ngày hết hạn** — ${formData.dateExpired}`,
+      formData.productType  && `${E('icon_tag')} **${international ? 'Product type' : 'Loại Sản Phẩm'}** — ${formData.productType}`,
+      formData.accountInfo  && `${E('icon_key')} **${international ? 'Account' : 'Tài Khoản'}** — \`${formData.accountInfo}\``,
+      formData.password     && `${E('icon_unlock')} **${international ? 'Password' : 'Mật Khẩu'}** — \`${formData.password}\``,
+      formData.purchaseDate && `${E('warranty_purchase')} **${international ? 'Purchase date' : 'Ngày mua'}** — ${formData.purchaseDate}`,
+      formData.dateExpired  && `${E('warranty_expiry')} **${international ? 'Expiry date' : 'Ngày hết hạn'}** — ${formData.dateExpired}`,
     ].filter(Boolean);
 
     if (fields.length) {
       container.addTextDisplayComponents(
         new TextDisplayBuilder().setContent([
-          `### ${E('warranty_shield')} Thông Tin Xác Minh`,
+          `### ${E('warranty_shield')} ${international ? 'VERIFICATION DETAILS' : 'Thông Tin Xác Minh'}`,
           ...fields,
         ].join('\n'))
       );
@@ -149,8 +152,8 @@ export function buildWarrantyTicketOpenedV2({ order, ticket, channel, formData, 
 
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent([
-      `${E('order_processing')} **Trạng thái** — Đang chờ đội ngũ kiểm tra`,
-      subtext(`${E('status_warn')} Không cần tag staff; hệ thống đã chuyển đầy đủ thông tin đến bộ phận bảo hành.`),
+      `${E('order_processing')} **${international ? 'Status' : 'Trạng thái'}** — ${international ? 'Awaiting staff review' : 'Đang chờ đội ngũ kiểm tra'}`,
+      subtext(`${E('status_warn')} ${international ? 'You do not need to mention staff; the warranty team has received the case.' : 'Không cần tag staff; hệ thống đã chuyển đầy đủ thông tin đến bộ phận bảo hành.'}`),
     ].join('\n'))
   );
 
@@ -162,14 +165,15 @@ export function buildWarrantyTicketOpenedV2({ order, ticket, channel, formData, 
  */
 export function buildWarrantyLogV2({ order, ticket, channel, formData, actorId, guildId }) {
   const E = createEmojiResolver(guildId);
-  const productDisplay = formatProductDisplayName(guildId, order.product_name, E) || 'N/A';
+  const international = isInternationalGuild(guildId);
+  const productDisplay = international ? translateProductName(order.product_name) : (formatProductDisplayName(guildId, order.product_name, E) || 'N/A');
 
   const container = new ContainerBuilder().setAccentColor(accentFor('warning'));
 
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent([
-      `## ${E('warranty_shield')} Hồ Sơ Bảo Hành Mới`,
-      `> ${E('status_warn')} Khách hàng vừa mở yêu cầu bảo hành — cần xem xét và xử lý.`,
+      `## ${E('warranty_shield')} ${international ? 'NEW WARRANTY CASE' : 'Hồ Sơ Bảo Hành Mới'}`,
+      `> ${E('status_warn')} ${international ? 'A customer opened a warranty request that requires staff review.' : 'Khách hàng vừa mở yêu cầu bảo hành — cần xem xét và xử lý.'}`,
     ].join('\n'))
   );
 
@@ -179,13 +183,13 @@ export function buildWarrantyLogV2({ order, ticket, channel, formData, actorId, 
 
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent([
-      `${E('ticket_user')} **Khách Hàng** — <@${order.customer_id}>`,
-      `${E('order_id')} **Mã Đơn** — \`${order.order_code}\``,
-      `${E('order_product')} **Sản Phẩm** — ${productDisplay}`,
-      `${E('payment_money')} **Giá Trị** — \`${order.total_amount ? order.total_amount.toLocaleString('vi-VN') + 'đ' : 'N/A'}\``,
-      `${E('ticket_open')} **Kênh Bảo Hành** — ${channel}`,
-      `${E('ticket_staff')} **Mở Bởi** — <@${actorId}>`,
-      `${E('icon_clock')} **Thời Gian** — ${T.rel(new Date().toISOString())}`,
+      `${E('ticket_user')} **${international ? 'Customer' : 'Khách Hàng'}** — <@${order.customer_id}>`,
+      `${E('order_id')} **${international ? 'Order' : 'Mã Đơn'}** — \`${order.order_code}\``,
+      `${E('order_product')} **${international ? 'Product' : 'Sản Phẩm'}** — ${productDisplay}`,
+      `${E('payment_money')} **${international ? 'Value' : 'Giá Trị'}** — \`${order.total_amount ? (international ? formatInternationalPrice(order.total_amount, { includeSource: true }) : order.total_amount.toLocaleString('vi-VN') + 'đ') : 'N/A'}\``,
+      `${E('ticket_open')} **${international ? 'Warranty channel' : 'Kênh Bảo Hành'}** — ${channel}`,
+      `${E('ticket_staff')} **${international ? 'Opened by' : 'Mở Bởi'}** — <@${actorId}>`,
+      `${E('icon_clock')} **${international ? 'Time' : 'Thời Gian'}** — ${T.rel(new Date().toISOString())}`,
     ].join('\n'))
   );
 
@@ -223,14 +227,14 @@ export function buildWarrantyLogV2({ order, ticket, channel, formData, actorId, 
 
   const btnApprove = new ButtonBuilder()
     .setCustomId(`ytb:approve:${ticket.id}`)
-    .setLabel('Duyệt Bảo Hành')
+    .setLabel(international ? 'Approve Warranty' : 'Duyệt Bảo Hành')
     .setStyle(ButtonStyle.Success);
   const approveEmoji = E('status_check')?.match(/^<a?:[^:]+:(\d+)>$/)?.[1];
   if (approveEmoji) btnApprove.setEmoji(approveEmoji);
 
   const btnReject = new ButtonBuilder()
     .setCustomId(`ytb:reject:${ticket.id}`)
-    .setLabel('Từ Chối Bảo Hành')
+    .setLabel(international ? 'Reject Warranty' : 'Từ Chối Bảo Hành')
     .setStyle(ButtonStyle.Danger);
   const rejectEmoji = E('status_cross')?.match(/^<a?:[^:]+:(\d+)>$/)?.[1];
   if (rejectEmoji) btnReject.setEmoji(rejectEmoji);
@@ -245,14 +249,15 @@ export function buildWarrantyLogV2({ order, ticket, channel, formData, actorId, 
  */
 export function buildWarrantyCustomerConfirmV2({ order, channel, guildId }) {
   const E = createEmojiResolver(guildId);
-  const productDisplay = formatProductDisplayName(guildId, order.product_name, E) || 'N/A';
+  const international = isInternationalGuild(guildId);
+  const productDisplay = international ? translateProductName(order.product_name) : (formatProductDisplayName(guildId, order.product_name, E) || 'N/A');
 
   const container = new ContainerBuilder().setAccentColor(accentFor('warning'));
 
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent([
-      `## ${E('warranty_shield')} Yêu Cầu Bảo Hành Đã Ghi Nhận`,
-      `> ${E('icon_sparkle')} Sản phẩm của bạn đang được đưa vào hàng đợi bảo hành. Đội ngũ hỗ trợ sẽ liên hệ sớm nhất có thể.`,
+      `## ${E('warranty_shield')} ${international ? 'WARRANTY REQUEST RECEIVED' : 'Yêu Cầu Bảo Hành Đã Ghi Nhận'}`,
+      `> ${E('icon_sparkle')} ${international ? 'Your purchase is now in the warranty review queue. Support will respond in this case channel.' : 'Sản phẩm của bạn đang được đưa vào hàng đợi bảo hành. Đội ngũ hỗ trợ sẽ liên hệ sớm nhất có thể.'}`,
     ].join('\n'))
   );
 
@@ -262,11 +267,11 @@ export function buildWarrantyCustomerConfirmV2({ order, channel, guildId }) {
 
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent([
-      `${E('order_id')} **Đơn Hàng** — \`${order.order_code}\``,
-      `${E('order_product')} **Sản Phẩm** — ${productDisplay}`,
-      `${E('ticket_open')} **Kênh Hỗ Trợ** — ${channel}`,
+      `${E('order_id')} **${international ? 'Order' : 'Đơn Hàng'}** — \`${order.order_code}\``,
+      `${E('order_product')} **${international ? 'Product' : 'Sản Phẩm'}** — ${productDisplay}`,
+      `${E('ticket_open')} **${international ? 'Support channel' : 'Kênh Hỗ Trợ'}** — ${channel}`,
       '',
-      subtext(`${E('icon_clock')} Thời gian xử lý thường từ 5–30 phút. Cảm ơn bạn đã kiên nhẫn chờ đợi.`),
+      subtext(`${E('icon_clock')} ${international ? 'Response time depends on product verification and supplier status. Thank you for your patience.' : 'Thời gian xử lý thường từ 5–30 phút. Cảm ơn bạn đã kiên nhẫn chờ đợi.'}`),
     ].join('\n'))
   );
 

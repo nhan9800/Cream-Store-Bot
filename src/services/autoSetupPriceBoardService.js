@@ -16,6 +16,8 @@ import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { formatCurrency } from '../utils/formatters.js';
 import { fmt, subtext } from '../utils/embedHelpers.js';
 import { config } from '../config.js';
+import { isInternationalGuild } from '../utils/locale.js';
+import { formatInternationalPrice, translateCatalogGroup, translateProductName } from '../utils/internationalCatalog.js';
 
 export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.1';
 const PRIMARY_GUILD_ID = '1282637033340403754';
@@ -129,7 +131,18 @@ function inferProductSlot(product) {
   return 'order_product';
 }
 
-function getDurationText(product) {
+function getDurationText(product, international = false) {
+  if (international) {
+    if (Number(product.price) === 0) return 'Custom project';
+    if (product.service_type === 'decor') return 'Lifetime';
+    const dayMatch = String(product.name).match(/(\d+)\s*ngày/i);
+    if (dayMatch) return `${dayMatch[1]} day${dayMatch[1] === '1' ? '' : 's'}`;
+    const yearMatch = String(product.name).match(/(\d+)\s*năm/i);
+    if (yearMatch) return `${yearMatch[1]} year${yearMatch[1] === '1' ? '' : 's'}`;
+    if (['SERVICE', 'service'].includes(product.service_type)) return 'Custom scope';
+    const months = Math.max(1, Number(product.duration_months) || 1);
+    return `${months} month${months === 1 ? '' : 's'}`;
+  }
   if (Number(product.price) === 0) return 'Theo dự án';
   if (product.service_type === 'decor') return 'Vĩnh viễn';
   const dayMatch = String(product.name).match(/(\d+)\s*ngày/i);
@@ -173,11 +186,12 @@ export function groupPriceProducts(products) {
 
 export function buildPricePortalPayload(guildId, guildConfig, panels = []) {
   const E = createEmojiResolver(guildId);
+  const international = isInternationalGuild(guildId);
   const container = new ContainerBuilder().setAccentColor(config.accentColorPrimary);
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent([
-      `# ${E('icon_store')} BẢNG GIÁ CENAR STORE`,
-      `> ${E('status_check')} **Đồng bộ trực tiếp từ hệ thống sản phẩm đang hoạt động.**`,
+      international ? `# ${E('icon_store')} CENAR GLOBAL • LIVE PRICING` : `# ${E('icon_store')} BẢNG GIÁ CENAR STORE`,
+      international ? `> ${E('status_check')} **Live catalog synchronized across Discord and the website.**` : `> ${E('status_check')} **Đồng bộ trực tiếp từ hệ thống sản phẩm đang hoạt động.**`,
     ].join('\n'))
   );
   container.addSeparatorComponents(
@@ -185,10 +199,10 @@ export function buildPricePortalPayload(guildId, guildConfig, panels = []) {
   );
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent([
-      `### ${E('icon_search')} HƯỚNG DẪN NHANH`,
-      `${E('icon_search')} **Tra cứu:** Cuộn đến đúng danh mục, sau đó đối chiếu **tên gói · giá bán · thời hạn**.`,
-      `${E('icon_cart')} **Đặt hàng:** Chọn đúng sản phẩm trong menu ngay bên dưới danh mục.`,
-      `${E('warranty_shield')} **Bảo hành:** Áp dụng theo mô tả sản phẩm và thời gian sử dụng của từng gói.`,
+      international ? `### ${E('icon_search')} QUICK GUIDE` : `### ${E('icon_search')} HƯỚNG DẪN NHANH`,
+      international ? `${E('icon_search')} **Compare:** Review the package name, current price and duration.` : `${E('icon_search')} **Tra cứu:** Cuộn đến đúng danh mục, sau đó đối chiếu **tên gói · giá bán · thời hạn**.`,
+      international ? `${E('icon_cart')} **Order:** Select the exact package from the menu below its category.` : `${E('icon_cart')} **Đặt hàng:** Chọn đúng sản phẩm trong menu ngay bên dưới danh mục.`,
+      international ? `${E('warranty_shield')} **Warranty:** Coverage follows the product description and selected duration.` : `${E('warranty_shield')} **Bảo hành:** Áp dụng theo mô tả sản phẩm và thời gian sử dụng của từng gói.`,
     ].join('\n'))
   );
   container.addSeparatorComponents(
@@ -196,7 +210,9 @@ export function buildPricePortalPayload(guildId, guildConfig, panels = []) {
   );
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(
-      subtext(`${E('icon_price')} ${panels.length} danh mục · ${panels.reduce((sum, panel) => sum + panel.items.length, 0)} sản phẩm đang mở bán · ${PRICE_BOARD_VERSION}`)
+      subtext(international
+        ? `${E('icon_price')} ${panels.length} categories · ${panels.reduce((sum, panel) => sum + panel.items.length, 0)} active products · ${PRICE_BOARD_VERSION}`
+        : `${E('icon_price')} ${panels.length} danh mục · ${panels.reduce((sum, panel) => sum + panel.items.length, 0)} sản phẩm đang mở bán · ${PRICE_BOARD_VERSION}`)
     )
   );
 
@@ -204,7 +220,7 @@ export function buildPricePortalPayload(guildId, guildConfig, panels = []) {
   if (guildConfig?.ticket_panel_channel_id) {
     row.addComponents(setButtonEmoji(
       new ButtonBuilder()
-        .setLabel('Mua Hàng & Hỗ Trợ')
+        .setLabel(international ? 'Order & Support' : 'Mua Hàng & Hỗ Trợ')
         .setStyle(ButtonStyle.Link)
         .setURL(`https://discord.com/channels/${guildId}/${guildConfig.ticket_panel_channel_id}`),
       E,
@@ -213,13 +229,13 @@ export function buildPricePortalPayload(guildId, guildConfig, panels = []) {
   }
   if (/^https?:\/\//i.test(config.storeWebsiteUrl || '')) {
     row.addComponents(setButtonEmoji(
-      new ButtonBuilder().setLabel('Mua Trên Website').setStyle(ButtonStyle.Link).setURL(config.storeWebsiteUrl),
+      new ButtonBuilder().setLabel(international ? 'Shop on Website' : 'Mua Trên Website').setStyle(ButtonStyle.Link).setURL(config.storeWebsiteUrl),
       E,
       'icon_cart',
     ));
   }
   row.addComponents(setButtonEmoji(
-    new ButtonBuilder().setCustomId('price_list:admin:edit_portal').setLabel('Quản Lý Bảng Giá').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('price_list:admin:edit_portal').setLabel(international ? 'Manage Catalog' : 'Quản Lý Bảng Giá').setStyle(ButtonStyle.Secondary),
     E,
     'icon_settings',
   ));
@@ -233,12 +249,14 @@ export function buildPricePortalPayload(guildId, guildConfig, panels = []) {
 
 export function buildPriceGroupPayload(guildId, group, products) {
   const E = createEmojiResolver(guildId);
+  const international = isInternationalGuild(guildId);
+  if (international) group = translateCatalogGroup(group);
   const container = new ContainerBuilder().setAccentColor(group.accent || config.accentColorPrimary);
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent([
       `## ${E(group.titleSlot)} ${group.title}`,
       `> ${E('status_info')} ${group.note}`,
-      subtext(`${products.length} lựa chọn · Giá hiển thị là giá bán hiện tại`),
+      subtext(international ? `${products.length} options · Live prices` : `${products.length} lựa chọn · Giá hiển thị là giá bán hiện tại`),
     ].join('\n'))
   );
   container.addSeparatorComponents(
@@ -253,18 +271,18 @@ export function buildPriceGroupPayload(guildId, group, products) {
     }
     const slot = inferProductSlot(product);
     const productIcon = E(slot) || E(group.titleSlot) || E('order_product');
-    const duration = getDurationText(product);
+    const duration = getDurationText(product, international);
     const hasDiscount = Number(product.original_price) > Number(product.price) && Number(product.price) > 0;
     const price = Number(product.price) > 0
       ? (hasDiscount
-        ? `~~${formatCurrency(product.original_price)}~~ → ${fmt.b(formatCurrency(product.price))}`
-        : `\`${formatCurrency(product.price)}\``)
-      : fmt.b('Liên hệ báo giá');
+        ? `~~${international ? formatInternationalPrice(product.original_price) : formatCurrency(product.original_price)}~~ → ${fmt.b(international ? formatInternationalPrice(product.price) : formatCurrency(product.price))}`
+        : `\`${international ? formatInternationalPrice(product.price) : formatCurrency(product.price)}\``)
+      : fmt.b(international ? 'Contact for quote' : 'Liên hệ báo giá');
     container.addTextDisplayComponents(
       new TextDisplayBuilder().setContent([
-        `### ${productIcon} ${product.name}`,
-        `> ${E('payment_money')} **Giá bán:** ${price}`,
-        `> ${E('icon_duration')} **Thời hạn:** \`${duration}\``,
+        `### ${productIcon} ${international ? translateProductName(product.name) : product.name}`,
+        `> ${E('payment_money')} **${international ? 'Price' : 'Giá bán'}:** ${price}`,
+        `> ${E('icon_duration')} **${international ? 'Duration' : 'Thời hạn'}:** \`${duration}\``,
       ].join('\n'))
     );
   });
@@ -274,14 +292,16 @@ export function buildPriceGroupPayload(guildId, group, products) {
   );
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(
-      subtext(`${E('icon_heart_purple')} Cenar Store · Chọn đúng tên gói trong menu để đặt hàng`)
+      subtext(international
+        ? `${E('icon_heart_purple')} Cenar Global · Select the exact package below to order`
+        : `${E('icon_heart_purple')} Cenar Store · Chọn đúng tên gói trong menu để đặt hàng`)
     )
   );
 
   const options = products.slice(0, 25).map((product) => {
     const option = {
-      label: String(product.name).slice(0, 100),
-      description: `${Number(product.price) > 0 ? formatCurrency(product.price) : 'Liên hệ'} · ${getDurationText(product)}`.slice(0, 100),
+      label: String(international ? translateProductName(product.name) : product.name).slice(0, 100),
+      description: `${Number(product.price) > 0 ? (international ? formatInternationalPrice(product.price) : formatCurrency(product.price)) : (international ? 'Contact us' : 'Liên hệ')} · ${getDurationText(product, international)}`.slice(0, 100),
       value: String(product.id),
     };
     const emoji = E.component(inferProductSlot(product)) || E.component(group.titleSlot) || E.component('order_product');
@@ -291,7 +311,7 @@ export function buildPriceGroupPayload(guildId, group, products) {
 
   const select = new StringSelectMenuBuilder()
     .setCustomId('product:select')
-    .setPlaceholder(`Chọn sản phẩm · ${group.title}`.slice(0, 150))
+    .setPlaceholder(`${international ? 'Select a product' : 'Chọn sản phẩm'} · ${group.title}`.slice(0, 150))
     .addOptions(options);
 
   return {

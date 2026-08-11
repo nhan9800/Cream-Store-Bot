@@ -168,6 +168,11 @@ if (process.env.IS_CHILD_BOT === 'true') {
       targetUrl = req.url.slice(7); // Remove '/store2'
     } else if (req.url.startsWith('/webhooks/payos-store2')) {
       targetPort = STORE2_PORT;
+    } else if (
+      req.url.startsWith('/webhooks/binance-pay-store2')
+      || req.url.startsWith('/payments/binance-pay-store2/')
+    ) {
+      targetPort = STORE2_PORT;
     }
 
     if (targetUrl.startsWith('/webhooks/payos')) {

@@ -2,6 +2,7 @@ import express from 'express';
 import path from 'node:path';
 import { registerDashboardRoutes, registerWebSocketUpgrade } from './dashboardMiniServer.js';
 import { handlePayOSWebhook } from './paymentService.js';
+import { handleBinancePayWebhook } from './binancePayService.js';
 import { registerBotApiRoutes } from './botApiRoutes.js';
 import { registerAuthRoutes } from './authApiRoutes.js';
 import { registerAdminRoutes } from './adminApiRoutes.js';
@@ -135,6 +136,35 @@ export function registerPaymentRoutes(app) {
       return res.status(400).send('ERROR');
     }
   });
+
+  app.get(config.binancePayWebhookPath, (req, res) => {
+    res.status(200).json({ ok: true, message: 'Binance Pay webhook endpoint is alive. Use signed POST notifications.' });
+  });
+
+  app.post(config.binancePayWebhookPath, async (req, res) => {
+    try {
+      const result = await handleBinancePayWebhook({
+        client: req.app.locals.discordClient,
+        headers: req.headers,
+        rawBody: req.rawBody,
+        body: req.body,
+      });
+      return res.status(result.status ?? 200).json(result.body);
+    } catch (error) {
+      console.error('[BINANCE-PAY] Webhook processing failed:', error.message);
+      return res.status(500).json({ returnCode: 'FAIL', returnMessage: 'Internal processing error' });
+    }
+  });
+
+  app.get(config.binancePayReturnPath, (req, res) => {
+    const webUrl = process.env.WEBSITE_URL || config.storeWebsiteUrl;
+    return res.redirect(`${webUrl.replace(/\/$/, '')}/payment?provider=binance-pay&status=success`);
+  });
+
+  app.get(config.binancePayCancelPath, (req, res) => {
+    const webUrl = process.env.WEBSITE_URL || config.storeWebsiteUrl;
+    return res.redirect(`${webUrl.replace(/\/$/, '')}/payment?provider=binance-pay&status=cancel`);
+  });
 }
 
 
@@ -154,7 +184,12 @@ export async function startWebhookServer(client = null) {
     next();
   });
 
-  app.use(express.json({ limit: '2mb' }));
+  app.use(express.json({
+    limit: '2mb',
+    verify: (req, res, buffer) => {
+      req.rawBody = buffer.toString('utf8');
+    },
+  }));
   app.use(express.urlencoded({ extended: true }));
 
   // Security headers (helmet-lite — no external dependency)
@@ -188,6 +223,7 @@ export async function startWebhookServer(client = null) {
 
   console.log(`[WEBHOOK] HTTP server listening on port ${port}`);
   console.log(`[WEBHOOK] PayOS path: ${getWebhookPath()}`);
+  console.log(`[WEBHOOK] Binance Pay path: ${config.binancePayWebhookPath} (${config.binancePayEnabled ? 'enabled' : 'disabled'})`);
 
   // Register WebSocket upgrade handler
   registerWebSocketUpgrade(httpServer);

@@ -17,6 +17,7 @@ import { getPartnerSettings, upsertPartnerSettings } from './partnerService.js';
 import { getCtvSettings, upsertCtvSettings } from './ctvService.js';
 import { accentFor } from '../utils/uiKit.js';
 import { publishCtvPricePanel } from './ctvPriceService.js';
+import { isInternationalGuild } from '../utils/locale.js';
 
 const IDS = Object.freeze({
   partnerRole: '1522844528237740066',
@@ -46,6 +47,20 @@ const fruitNames = Object.freeze({
   ctvChat: '🍏-ctv-trò-chuyện',
   ctvOrderLog: '🍐-ctv-log-đơn-hàng',
   ctvPrice: '🍎-ctv-bảng-giá',
+});
+
+const internationalNames = Object.freeze({
+  partnerCategory: 'PARTNER NETWORK',
+  ctvCategory: 'AFFILIATE PROGRAM',
+  partnerRecruit: 'partner-apply',
+  partnerDirectory: 'verified-partners',
+  partnerReview: 'partner-review',
+  partnerBroadcast: 'partner-media',
+  ctvRecruit: 'affiliate-apply',
+  ctvReview: 'affiliate-review',
+  ctvChat: 'affiliate-lounge',
+  ctvOrderLog: 'affiliate-order-log',
+  ctvPrice: 'affiliate-pricing',
 });
 
 const VIEW = PermissionFlagsBits.ViewChannel;
@@ -108,6 +123,7 @@ async function setRoleIcon(role, url) {
 
 async function ensureRole(guild, client, id, { name, colors, iconUrl, mentionable, legacyIds = [] }) {
   let role = guild.roles.cache.get(id);
+  if (!role) role = guild.roles.cache.find((candidate) => !candidate.managed && candidate.name === name);
   if (!role) {
     role = await guild.roles.create({ name, colors, mentionable, reason: 'Cenar Partner/CTV workspace setup' });
   }
@@ -154,9 +170,40 @@ async function postRecruitmentPanel(channel, kind, guildId, references) {
   const latest = await channel.messages.fetch({ limit: 25 }).catch(() => null);
   const E = createEmojiResolver(guildId);
   const isCtv = kind === 'ctv';
+  const international = isInternationalGuild(guildId);
   const container = new ContainerBuilder().setAccentColor(accentFor(isCtv ? 'success' : 'primary'));
-  const title = isCtv ? `${E('cenar_ctv')} CENAR CTV | Đăng ký cộng tác viên` : `${E('cenar_partner')} CENAR PARTNER | Kết nối server`;
-  const details = isCtv
+  const title = international
+    ? (isCtv ? `${E('cenar_ctv')} CENAR AFFILIATE | Apply` : `${E('cenar_partner')} CENAR PARTNER | Connect your community`)
+    : (isCtv ? `${E('cenar_ctv')} CENAR CTV | Đăng ký cộng tác viên` : `${E('cenar_partner')} CENAR PARTNER | Kết nối server`);
+  const details = international
+    ? (isCtv
+      ? [
+          `## ${title}`,
+          `${E('cenar_verified')} Affiliate inventory and pricing stay synchronized between Discord and the website.`,
+          '',
+          `### ${E('cenar_price')} Benefits`,
+          `- Private affiliate pricing and prioritized order records.`,
+          `- Order activity is logged at <#${references.ctvOrderLog}>.`,
+          `- Internal communication is available at <#${references.ctvChat}>.`,
+          '',
+          `### ${E('cenar_staff')} Requirements`,
+          `Operate a transparent sales channel and provide responsible customer support.`,
+          `-# Applications are reviewed manually within 24 hours.`,
+        ].join('\n')
+      : [
+          `## ${title}`,
+          `${E('cenar_verified')} Build a transparent partnership through community promotion and shared benefits.`,
+          '',
+          `### ${E('cenar_partner_ok')} Review criteria`,
+          `- Communities with 500+ members enter the standard review queue.`,
+          `- Smaller communities receive manual review so promising projects are not excluded.`,
+          `- The server must follow Discord policies and maintain a suitable promotion area.`,
+          '',
+          `### ${E('cenar_announce')} After approval`,
+          `The Partner role is granted automatically. Your media channel is <#${references.partnerBroadcast}>.`,
+          `Mention quota: Partner role twice and @everyone once per rolling 24-hour window.`,
+        ].join('\n'))
+    : isCtv
     ? [
         `## ${title}`,
         `${E('cenar_verified')} Nguồn hàng và giá CTV được đồng bộ giữa bot và website.`,
@@ -187,7 +234,7 @@ async function postRecruitmentPanel(channel, kind, guildId, references) {
   container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
   const button = new ButtonBuilder()
     .setCustomId(isCtv ? 'ctv:apply:start' : 'partner:apply:start')
-    .setLabel(isCtv ? 'Đăng ký CTV' : 'Đăng ký Partner')
+    .setLabel(international ? (isCtv ? 'Apply as Affiliate' : 'Apply as Partner') : (isCtv ? 'Đăng ký CTV' : 'Đăng ký Partner'))
     .setStyle(ButtonStyle.Success);
   const emoji = E.component(isCtv ? 'cenar_ctv' : 'cenar_partner');
   if (emoji) button.setEmoji(emoji);
@@ -212,6 +259,33 @@ async function postRecruitmentPanel(channel, kind, guildId, references) {
 export function buildPartnerBroadcastGuidePayload(guildId, { partnerRoleId } = {}) {
   const E = createEmojiResolver(guildId);
   const roleLabel = partnerRoleId ? `<@&${partnerRoleId}>` : '**Role Partner**';
+  if (isInternationalGuild(guildId)) {
+    const guide = new ContainerBuilder().setAccentColor(accentFor('primary'));
+    guide.addTextDisplayComponents(new TextDisplayBuilder().setContent([
+      `# ${E('partner_guide')} CENAR PARTNER | MEDIA CENTER`,
+      `> ${E('cenar_announce')} A verified publishing area for approved community partners.`,
+      '',
+      `### ${E('cenar_partner')} PUBLISHING FLOW`,
+      `${E('partner_guide')} Use \`/partner-post send\` inside this server.`,
+      `${E('icon_link')} Select \`Partner Role\` to notify ${roleLabel}.`,
+      `${E('cenar_announce')} Select \`Everyone\` only for a major and relevant announcement.`,
+      `${E('cenar_verified')} Include the server name, a concise offer and a valid invite link.`,
+      `-# ${E('cenar_support')} The bot validates permissions, deducts quota and records an audit log.`,
+    ].join('\n')));
+    const rules = new ContainerBuilder().setAccentColor(accentFor('warning'));
+    rules.addTextDisplayComponents(new TextDisplayBuilder().setContent([
+      `## ${E('partner_rules')} RULES & ROLLING 24-HOUR QUOTA`,
+      `${E('cenar_partner')} **Partner Role:** \`2 mentions / member / 24 hours\``,
+      `${E('cenar_announce')} **Everyone:** \`1 mention / member / 24 hours\``,
+      `${E('cenar_cooldown')} The rolling window begins with the first mention.`,
+      '',
+      `${E('status_check')} Keep claims accurate and invite links active.`,
+      `${E('status_warn')} Do not repeat posts, bypass limits or directly mention roles outside the command.`,
+      `${E('status_cross')} Scams, prohibited goods, NSFW content and Discord policy violations are forbidden.`,
+      `-# ${E('partner_guide')} Check remaining quota at any time with \`/partner-post quota\`.`,
+    ].join('\n')));
+    return { components: [guide, rules], flags: MessageFlags.IsComponentsV2, allowedMentions: { parse: [] } };
+  }
 
   const guide = new ContainerBuilder().setAccentColor(accentFor('primary'));
   guide.addTextDisplayComponents(new TextDisplayBuilder().setContent([
@@ -257,7 +331,9 @@ export async function publishPartnerBroadcastGuide(channel, guildId, settings = 
   const payload = buildPartnerBroadcastGuidePayload(guildId, {
     partnerRoleId: settings.partner_role_id,
   });
-  const marker = 'CENAR PARTNER | TRUNG TÂM TRUYỀN THÔNG';
+  const marker = isInternationalGuild(guildId)
+    ? 'CENAR PARTNER | MEDIA CENTER'
+    : 'CENAR PARTNER | TRUNG TÂM TRUYỀN THÔNG';
   const latest = await channel.messages.fetch({ limit: 50 }).catch(() => null);
   const existing = latest
     ? [...latest.values()].filter((message) => (
@@ -278,6 +354,7 @@ export async function publishPartnerBroadcastGuide(channel, guildId, settings = 
 export async function autoSetupPartnerAndCtv(client) {
   for (const guild of client.guilds.cache.values()) {
     try {
+      const names = isInternationalGuild(guild.id) ? internationalNames : fruitNames;
       const settings = db.prepare('SELECT support_role_id, manager_role_id FROM guild_settings WHERE guild_id = ?').get(guild.id) || {};
       const staffRoles = [settings.support_role_id, settings.manager_role_id, '1282638119497109524'];
       const enhancedRoleColors = guild.features.includes('ENHANCED_ROLE_COLORS');
@@ -286,25 +363,25 @@ export async function autoSetupPartnerAndCtv(client) {
         legacyIds: ['1367138153735131176'],
       });
       const ctvRole = await ensureRole(guild, client, IDS.ctvRole, {
-        name: 'Cenar CTV', colors: roleColorsFor(IDS.ctvRole, { enhanced: enhancedRoleColors }), iconUrl: ROLE_ICON_URLS.ctv, mentionable: false,
+        name: isInternationalGuild(guild.id) ? 'Cenar Affiliate' : 'Cenar CTV', colors: roleColorsFor(IDS.ctvRole, { enhanced: enhancedRoleColors }), iconUrl: ROLE_ICON_URLS.ctv, mentionable: false,
         legacyIds: ['1514858684151369832'],
       });
 
-      const partnerCategory = await ensureCategory(guild, IDS.partnerCategory, fruitNames.partnerCategory);
+      const partnerCategory = await ensureCategory(guild, IDS.partnerCategory, names.partnerCategory);
       const ctvSettings = getCtvSettings(guild.id);
-      const ctvCategory = await ensureCategory(guild, ctvSettings.category_id, fruitNames.ctvCategory);
+      const ctvCategory = await ensureCategory(guild, ctvSettings.category_id, names.ctvCategory);
       const botId = client.user.id;
 
-      const partnerRecruit = await ensureChannel(guild, { id: IDS.partnerRecruit, name: fruitNames.partnerRecruit, parent: partnerCategory, overwrites: publicReadOverrides(guild, botId, staffRoles) });
-      const partnerDirectory = await ensureChannel(guild, { id: IDS.partnerDirectory, name: fruitNames.partnerDirectory, parent: partnerCategory, overwrites: publicReadOverrides(guild, botId, staffRoles) });
-      const partnerReview = await ensureChannel(guild, { id: IDS.partnerReview, name: fruitNames.partnerReview, parent: partnerCategory, overwrites: staffOverrides(guild, botId, staffRoles) });
-      const partnerBroadcast = await ensureChannel(guild, { id: IDS.partnerBroadcast, name: fruitNames.partnerBroadcast, parent: partnerCategory, overwrites: restrictedOverrides(guild, botId, partnerRole.id, staffRoles, { allowMention: false }) });
+      const partnerRecruit = await ensureChannel(guild, { id: IDS.partnerRecruit, name: names.partnerRecruit, parent: partnerCategory, overwrites: publicReadOverrides(guild, botId, staffRoles) });
+      const partnerDirectory = await ensureChannel(guild, { id: IDS.partnerDirectory, name: names.partnerDirectory, parent: partnerCategory, overwrites: publicReadOverrides(guild, botId, staffRoles) });
+      const partnerReview = await ensureChannel(guild, { id: IDS.partnerReview, name: names.partnerReview, parent: partnerCategory, overwrites: staffOverrides(guild, botId, staffRoles) });
+      const partnerBroadcast = await ensureChannel(guild, { id: IDS.partnerBroadcast, name: names.partnerBroadcast, parent: partnerCategory, overwrites: restrictedOverrides(guild, botId, partnerRole.id, staffRoles, { allowMention: false }) });
 
-      const ctvRecruit = await ensureChannel(guild, { id: IDS.ctvRecruit, name: fruitNames.ctvRecruit, parent: ctvCategory, overwrites: publicReadOverrides(guild, botId, staffRoles) });
-      const ctvReview = await ensureChannel(guild, { name: fruitNames.ctvReview, parent: ctvCategory, overwrites: staffOverrides(guild, botId, staffRoles) });
-      const ctvChat = await ensureChannel(guild, { name: fruitNames.ctvChat, parent: ctvCategory, overwrites: restrictedOverrides(guild, botId, ctvRole.id, staffRoles) });
-      const ctvOrderLog = await ensureChannel(guild, { name: fruitNames.ctvOrderLog, parent: ctvCategory, overwrites: restrictedOverrides(guild, botId, ctvRole.id, staffRoles) });
-      const ctvPrice = await ensureChannel(guild, { name: fruitNames.ctvPrice, parent: ctvCategory, overwrites: restrictedOverrides(guild, botId, ctvRole.id, staffRoles) });
+      const ctvRecruit = await ensureChannel(guild, { id: IDS.ctvRecruit, name: names.ctvRecruit, parent: ctvCategory, overwrites: publicReadOverrides(guild, botId, staffRoles) });
+      const ctvReview = await ensureChannel(guild, { name: names.ctvReview, parent: ctvCategory, overwrites: staffOverrides(guild, botId, staffRoles) });
+      const ctvChat = await ensureChannel(guild, { name: names.ctvChat, parent: ctvCategory, overwrites: restrictedOverrides(guild, botId, ctvRole.id, staffRoles) });
+      const ctvOrderLog = await ensureChannel(guild, { name: names.ctvOrderLog, parent: ctvCategory, overwrites: restrictedOverrides(guild, botId, ctvRole.id, staffRoles) });
+      const ctvPrice = await ensureChannel(guild, { name: names.ctvPrice, parent: ctvCategory, overwrites: restrictedOverrides(guild, botId, ctvRole.id, staffRoles) });
 
       upsertPartnerSettings({
         guild_id: guild.id,
