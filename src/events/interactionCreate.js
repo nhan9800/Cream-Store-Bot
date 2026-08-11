@@ -167,6 +167,7 @@ import {
 import {
   handlePrefixQr,
   handlePrefixDone,
+  handlePrefixThanhChu,
 } from "./prefixHandlers.js";
 import { handleAnnouncementSelect } from "./announcementHandlers.js";
 import { handleOtpInteraction } from "./otpHandlers.js";
@@ -2484,6 +2485,11 @@ export function registerInteractionHandler(client, commands) {
 
       if (parsed.command === '+done') {
         await handlePrefixDone(message, parsed.args);
+        return;
+      }
+
+      if (parsed.command === '+thanchu') {
+        await handlePrefixThanhChu(message);
       }
     } catch (error) {
       console.error('[MESSAGE PREFIX] Lỗi:', error);
