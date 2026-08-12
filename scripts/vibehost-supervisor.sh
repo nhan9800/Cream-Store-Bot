@@ -97,7 +97,6 @@ install_revision() {
   local current_sha
   local installed_sha
   local failed_sha
-  local dependencies_installed=false
 
   current_sha="$(git rev-parse HEAD 2>/dev/null)" || return 1
   installed_sha="$(read_marker "$INSTALLED_REVISION_FILE")"
@@ -115,15 +114,9 @@ install_revision() {
   # The panel may pull the target revision before the supervisor starts. In that
   # first-run case the source is already at target, but the database still needs
   # a verified backup before dependencies and runtime validation can proceed.
+  # Do not install here: package.json still belongs to current_sha when target_sha
+  # is newer. Installing before git reset leaves new runtime packages missing.
   if [[ "$target_sha" != "$current_sha" || -z "$installed_sha" ]]; then
-    log "Installing dependencies before first verified backup"
-    if ! install_dependencies; then
-      fail "Dependency installation failed; refusing to continue"
-      write_marker "$FAILED_REVISION_FILE" "$target_sha"
-      return 1
-    fi
-    dependencies_installed=true
-
     if ! backup_databases "$current_sha"; then
       write_marker "$FAILED_REVISION_FILE" "$target_sha"
       return 1
@@ -134,7 +127,7 @@ install_revision() {
   local install_failed=false
   if ! git reset --hard "$target_sha"; then
     install_failed=true
-  elif [[ "$dependencies_installed" != true ]] && ! install_dependencies; then
+  elif ! install_dependencies; then
     install_failed=true
   elif ! validate_environment; then
     install_failed=true
