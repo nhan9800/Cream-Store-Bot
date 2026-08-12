@@ -1,5 +1,14 @@
 import { createEmojiResolver } from '../utils/emojiHelper.js';
-import { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } from 'discord.js';
+import {
+  SlashCommandBuilder,
+  PermissionFlagsBits,
+  EmbedBuilder,
+  ContainerBuilder,
+  TextDisplayBuilder,
+  SeparatorBuilder,
+  SeparatorSpacingSize,
+  MessageFlags,
+} from 'discord.js';
 import { runDeepNotifications, runSubscriptionNotifications } from '../services/deepNotificationService.js';
 import { getExpiringOrdersRaw } from '../services/v11DbHelpers.js';
 import { getSubscriptionsDueInDays } from '../services/subscriptionService.js';
@@ -42,7 +51,9 @@ export const data = new SlashCommandBuilder()
 export async function execute(interaction) {
   const E = createEmojiResolver(interaction?.guildId);
   const subcommand = interaction.options.getSubcommand();
-  await interaction.deferReply({ ephemeral: false });
+  await interaction.deferReply(subcommand === 'quet-ngay'
+    ? { flags: MessageFlags.IsComponentsV2 }
+    : { ephemeral: false });
 
   try {
     if (subcommand === 'quet-ngay') {
@@ -51,17 +62,29 @@ export async function execute(interaction) {
         runSubscriptionNotifications(interaction.client),
       ]);
 
-      const embed = new EmbedBuilder()
-        .setTitle(`${E('status_check')} Đã Quét Hệ Thống Nhắc Gia Hạn`)
-        .setColor(0x3498DB)
-        .setDescription('Kết quả quét và gửi tin nhắn:')
-        .addFields(
-          { name: `${E('order_product')} Đơn hàng`, value: `3 ngày: ${orderResult?.sent3d || 0}\n2 ngày: ${orderResult?.sent2d || 0}\n1 ngày: ${orderResult?.sent1d || 0}`, inline: true },
-          { name: `${E('icon_cycle')} Subscriptions`, value: `Chủ shop: ${subResult?.sentOwner || 0}\nKhách hàng: ${subResult?.sentCustomer || 0}`, inline: true },
-        )
-        .setTimestamp();
+      const panel = new ContainerBuilder().setAccentColor(0x3498DB);
+      panel.addTextDisplayComponents(new TextDisplayBuilder().setContent([
+        `# ${E('status_check')} QUÉT GIA HẠN HOÀN TẤT`,
+        `> ${E('status_info')} Hệ thống đã rà đơn hàng, subscription và hàng chờ Admin của **Store 1**.`,
+      ].join('\n')));
+      panel.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
+      panel.addTextDisplayComponents(new TextDisplayBuilder().setContent([
+        `### ${E('order_product')} NHẮC ĐƠN HÀNG`,
+        `${E('icon_calendar')} **Trước 3 ngày** — ${orderResult?.sent3d || 0}`,
+        `${E('icon_clock')} **Trước 2 ngày** — ${orderResult?.sent2d || 0}`,
+        `${E('status_warn')} **Trước 1 ngày** — ${orderResult?.sent1d || 0}`,
+        '',
+        `### ${E('cenar_cooldown')} TRUNG TÂM SUBSCRIPTION`,
+        `${E('cenar_admin')} **Panel mới gửi Admin Store 1** — ${subResult?.sentAdmin || 0}`,
+        `${E('cenar_announce')} **Thông báo hệ thống cũ** — ${subResult?.sentOwner || 0}`,
+        `${E('ticket_user')} **Tin nhắn khách hàng** — ${subResult?.sentCustomer || 0}`,
+        subResult?.adminErrors
+          ? `${E('status_cross')} **Lỗi nhắc Admin** — ${subResult.adminErrors}`
+          : `${E('cenar_verified')} **Trạng thái** — Không phát hiện lỗi`,
+        `-# ${E('verify_shield')} Cenar Renewal Control · chống gửi trùng · mật khẩu luôn được ẩn trên Discord`,
+      ].join('\n')));
 
-      await interaction.editReply({ embeds: [embed] });
+      await interaction.editReply({ components: [panel] });
       return;
     }
 

@@ -397,6 +397,14 @@ export function initDatabase() {
       status TEXT NOT NULL DEFAULT 'ACTIVE',
       renewal_remind_sent_at TEXT,
       customer_response TEXT,
+      admin_reminder_stage TEXT,
+      admin_reminder_sent_at TEXT,
+      admin_reminder_message_id TEXT,
+      admin_reminder_channel_id TEXT,
+      admin_claimed_by_id TEXT,
+      admin_claimed_at TEXT,
+      admin_snoozed_until TEXT,
+      admin_last_action_at TEXT,
       note TEXT,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -606,6 +614,18 @@ export function initDatabase() {
   // Existing rows receive v1 so ownerPingGuardService can reset counters that
   // may have been inflated by Discord reply mentions before policy v2.
   ensureColumn('owner_ping_enforcement', 'policy_version', 'INTEGER NOT NULL DEFAULT 1');
+
+  // Subscription admin workflow — staged Store 1 alerts, claim and snooze state.
+  ensureColumn('subscription_accounts', 'admin_reminder_stage', 'TEXT');
+  ensureColumn('subscription_accounts', 'admin_reminder_sent_at', 'TEXT');
+  ensureColumn('subscription_accounts', 'admin_reminder_message_id', 'TEXT');
+  ensureColumn('subscription_accounts', 'admin_reminder_channel_id', 'TEXT');
+  ensureColumn('subscription_accounts', 'admin_claimed_by_id', 'TEXT');
+  ensureColumn('subscription_accounts', 'admin_claimed_at', 'TEXT');
+  ensureColumn('subscription_accounts', 'admin_snoozed_until', 'TEXT');
+  ensureColumn('subscription_accounts', 'admin_last_action_at', 'TEXT');
+  db.exec(`CREATE INDEX IF NOT EXISTS idx_sub_accounts_admin_reminder
+    ON subscription_accounts (guild_id, status, admin_snoozed_until, next_renewal_at, expiry_at)`);
 
   // Thêm ví điện tử
   ensureColumn('customer_profiles', 'wallet_balance', 'INTEGER NOT NULL DEFAULT 0');

@@ -17,6 +17,7 @@ import { transitionOrderStatus } from './orderStateMachine.js';
 import { encrypt, decrypt } from '../utils/crypto.js';
 import { sendCompletedFlow, updateOrderLogMessage } from './notificationService.js';
 import { syncPublishedFeedbackMessage } from './feedbackService.js';
+import { config } from '../config.js';
 
 function catalogKey(value) {
   return String(value || '')
@@ -976,7 +977,7 @@ const fetchWithTimeout = (promise, ms) => {
       }
 
       const newSub = subService.addSubscription({
-        guildId: 'WEB',
+        guildId: config.guildId,
         serviceType: serviceType || 'nitro',
         renewalMode: renewalMode || 'auto_cycle',
         gmailEmail,
@@ -1021,7 +1022,7 @@ const fetchWithTimeout = (promise, ms) => {
         timesRenewed
       } = req.body;
 
-      const existing = db.prepare('SELECT id FROM subscription_accounts WHERE id = ?').get(id);
+      const existing = db.prepare('SELECT * FROM subscription_accounts WHERE id = ?').get(id);
       if (!existing) {
         return res.status(404).json({ ok: false, error: 'Không tìm thấy tài khoản gia hạn' });
       }
@@ -1045,13 +1046,21 @@ const fetchWithTimeout = (promise, ms) => {
             next_renewal_at = ?,
             expiry_at = ?,
             times_renewed = ?,
+            admin_reminder_stage = NULL,
+            admin_reminder_sent_at = NULL,
+            admin_reminder_message_id = NULL,
+            admin_reminder_channel_id = NULL,
+            admin_claimed_by_id = NULL,
+            admin_claimed_at = NULL,
+            admin_snoozed_until = NULL,
+            admin_last_action_at = CURRENT_TIMESTAMP,
             updated_at = CURRENT_TIMESTAMP
          WHERE id = ?
       `).run(
         serviceType || 'nitro',
         renewalMode || 'auto_cycle',
         gmailEmail,
-        gmailPassword != null ? encrypt(gmailPassword) : null,
+        gmailPassword != null ? encrypt(gmailPassword) : existing.gmail_password,
         customerId || null,
         customerDiscordName || null,
         relatedOrderCode || null,

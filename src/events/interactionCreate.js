@@ -170,6 +170,7 @@ import {
   handleSubscriptionAddModal,
   handleSubscriptionRenewButton,
 } from "./subscriptionHandlers.js";
+import { handleAdminRenewalButton } from '../services/adminRenewalReminderService.js';
 import {
   handlePrefixQr,
   handlePrefixDone,
@@ -414,6 +415,11 @@ export function registerInteractionHandler(client, commands) {
       }
 
       // ═══════ Subscription Button Handlers (customer renewal response) ═══════
+
+      if (interaction.isButton() && interaction.customId.startsWith('sub:admin:')) {
+        await handleAdminRenewalButton(interaction);
+        return;
+      }
 
       if (interaction.isButton() && interaction.customId.startsWith('sub:renew:')) {
         await handleSubscriptionRenewButton(interaction);

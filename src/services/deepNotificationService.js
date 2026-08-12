@@ -16,10 +16,10 @@ import {
   ButtonStyle,
   MessageFlags,
 } from 'discord.js';
-import { decrypt } from '../utils/crypto.js';
 import { createEmojiResolver, withButtonEmoji } from '../utils/emojiHelper.js';
-import { isInternationalGuild } from '../utils/locale.js';
+import { isInternationalGuild, STORE_ONE_GUILD_ID } from '../utils/locale.js';
 import { translateProductName } from '../utils/internationalCatalog.js';
+import { runStoreOneAdminRenewalReminders } from './adminRenewalReminderService.js';
 
 // ═══════════════ Helpers ═══════════════
 
@@ -73,7 +73,7 @@ function buildRenewalV2(sub) {
   const lines = [
     `## ${serviceEmoji(E, sub.service_type)} CẦN GIA HẠN ${label.toUpperCase()}`,
     `> ${E('payment_money')} **Gmail:** \`${sub.gmail_email}\``,
-    `> ${E('icon_key')} **Mật khẩu:** \`${decrypt(sub.gmail_password)}\``,
+    `> ${E('icon_key')} **Mật khẩu:** Đã ẩn an toàn · xem trong trang quản trị`,
     `> ${E('ticket_user')} **Khách hàng:** ${customer}`,
     `> ${E('icon_clock')} **Hạn gia hạn:** <t:${renewalTs}:F> (<t:${renewalTs}:R>)`,
     `> ${E('icon_number')} **Lần gia hạn:** ${sub.times_renewed + 1}/${totalRenewals + 1}`,
@@ -142,7 +142,7 @@ function buildOwnerCustomerWantsRenewalV2(sub, customerUser) {
     `## ${serviceEmoji(E, sub.service_type)} ${E('status_check')} KHÁCH MUỐN GIA HẠN`,
     `> ${E('ticket_user')} **Khách hàng:** ${customerUser ? `<@${customerUser.id}> (${customerUser.tag})` : (sub.customer_discord_name || '_Không rõ_')}`,
     `> ${E('payment_money')} **Gmail:** \`${sub.gmail_email}\``,
-    `> ${E('icon_key')} **Mật khẩu:** \`${decrypt(sub.gmail_password)}\``,
+    `> ${E('icon_key')} **Mật khẩu:** Đã ẩn an toàn · xem trong trang quản trị`,
     '',
     `-# ID: ${sub.id}`,
   ];
@@ -300,11 +300,25 @@ export async function runDeepNotifications(client) {
 
 export async function runSubscriptionNotifications(client) {
   let sentOwner = 0, sentCustomer = 0;
+  const adminResult = await runStoreOneAdminRenewalReminders(client).catch((error) => {
+    console.error('[SUB-ADMIN-REMINDER] Lỗi quét nhắc Admin Store 1:', error);
+    return { sent: 0, errors: 1 };
+  });
 
   // 1. auto_cycle — nhắc chủ shop (Nitro dài hạn, Spotify, YouTube tháng)
   const dueSubs = getAllDueForRenewalGlobal(72, 50);
   for (const sub of dueSubs) {
     try {
+      if (sub.guild_id === STORE_ONE_GUILD_ID || sub.guild_id === 'WEB') {
+        if (sub.service_type === 'youtube' && sub.customer_id) {
+          const user = await client.users.fetch(sub.customer_id).catch(() => null);
+          if (user && await safeSendEmbed(user, buildCustomerYoutubeNoticeV2({ ...sub, guild_id: STORE_ONE_GUILD_ID }))) {
+            sentCustomer++;
+          }
+        }
+        markRemindSent(sub.id);
+        continue;
+      }
       const ch = getReminderChannel(client, sub.guild_id);
       if (!ch) continue;
 
@@ -330,6 +344,10 @@ export async function runSubscriptionNotifications(client) {
   for (const sub of expiringSubs) {
     try {
       if (!sub.customer_id) {
+        if (sub.guild_id === STORE_ONE_GUILD_ID || sub.guild_id === 'WEB') {
+          markRemindSent(sub.id);
+          continue;
+        }
         // Không có khách → nhắc chủ shop
         const ch = getReminderChannel(client, sub.guild_id);
         if (ch) {
@@ -354,11 +372,16 @@ export async function runSubscriptionNotifications(client) {
     }
   }
 
-  if (sentOwner > 0 || sentCustomer > 0) {
-    console.log(`[SUB-NOTIFY] Gửi ${sentOwner} nhắc chủ shop, ${sentCustomer} nhắc khách hàng.`);
+  if (sentOwner > 0 || sentCustomer > 0 || adminResult.sent > 0) {
+    console.log(`[SUB-NOTIFY] Gửi ${adminResult.sent || 0} nhắc Admin Store 1, ${sentOwner} nhắc chủ shop cũ, ${sentCustomer} nhắc khách hàng.`);
   }
 
-  return { sentOwner, sentCustomer };
+  return {
+    sentOwner,
+    sentCustomer,
+    sentAdmin: adminResult.sent || 0,
+    adminErrors: adminResult.errors || 0,
+  };
 }
 
 // Re-export for use in interactionCreate button handler

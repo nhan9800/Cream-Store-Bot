@@ -222,6 +222,8 @@ export const config = {
   defaultOrderDurationMonths: Number.parseInt(getEnv('DEFAULT_ORDER_DURATION_MONTHS', '1'), 10),
   expiryReminderDaysBeforeFirst: Number.parseInt(getEnv('EXPIRY_REMINDER_DAYS_BEFORE_FIRST', '2'), 10),
   expiryReminderDaysBeforeSecond: Number.parseInt(getEnv('EXPIRY_REMINDER_DAYS_BEFORE_SECOND', '1'), 10),
+  subscriptionAdminReminderDays: Math.min(30, Math.max(3, Number.parseInt(getEnv('SUBSCRIPTION_ADMIN_REMINDER_DAYS', '7'), 10) || 7)),
+  subscriptionAdminSnoozeHours: Math.min(168, Math.max(1, Number.parseInt(getEnv('SUBSCRIPTION_ADMIN_SNOOZE_HOURS', '24'), 10) || 24)),
   accentColorPrimary: parseNumberEnv('ACCENT_COLOR_PRIMARY', '0xF3A6D7'),
   accentColorSuccess: parseNumberEnv('ACCENT_COLOR_SUCCESS', '0x57F287'),
   accentColorWarning: parseNumberEnv('ACCENT_COLOR_WARNING', '0xFEE75C'),
