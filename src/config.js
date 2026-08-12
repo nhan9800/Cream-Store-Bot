@@ -198,6 +198,14 @@ export const config = {
   nitroUserIds: (getEnv('DISCORD_NITRO_USER_IDS', '1138315103821889566') || '').split(',').map(id => id.trim()).filter(Boolean),
   groqApiKey: getEnv('GROQ_API_KEY', getEnv('OPENROUTER_API_KEY', '')), // Dùng chung biến để tiện cho user nếu họ nhác sửa
   aiModel: getEnv('AI_MODEL', 'llama-3.3-70b-versatile'),
+  antiScamEnabled: getBooleanEnv('ANTI_SCAM_ENABLED', !isStoreTwoEnvironment),
+  antiScamVisionModel: getEnv('ANTI_SCAM_VISION_MODEL', 'gemini-2.5-flash'),
+  antiScamConfidenceThreshold: parseNumberEnv('ANTI_SCAM_CONFIDENCE_THRESHOLD', '0.9'),
+  antiScamQuarantineMinutes: Math.max(5, Number.parseInt(getEnv('ANTI_SCAM_QUARANTINE_MINUTES', '30'), 10) || 30),
+  antiScamMaxImageBytes: Math.max(1, parseNumberEnv('ANTI_SCAM_MAX_IMAGE_MB', '8')) * 1024 * 1024,
+  antiScamDownloadTimeoutMs: Math.max(2000, Number.parseInt(getEnv('ANTI_SCAM_DOWNLOAD_TIMEOUT_MS', '8000'), 10) || 8000),
+  antiScamOcrTimeoutMs: Math.max(10000, Number.parseInt(getEnv('ANTI_SCAM_OCR_TIMEOUT_MS', '30000'), 10) || 30000),
+  antiScamVisionTimeoutMs: Math.max(5000, Number.parseInt(getEnv('ANTI_SCAM_VISION_TIMEOUT_MS', '20000'), 10) || 20000),
   aiSystemPrompt: getMultilineEnv(
     isStoreTwoEnvironment ? 'GLOBAL_AI_SYSTEM_PROMPT' : 'AI_SYSTEM_PROMPT',
     isStoreTwoEnvironment

@@ -323,6 +323,20 @@ export function initDatabase() {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE IF NOT EXISTS scam_image_fingerprints (
+      sha256 TEXT PRIMARY KEY,
+      verdict TEXT NOT NULL,
+      confidence REAL NOT NULL DEFAULT 0,
+      category TEXT,
+      signals_json TEXT,
+      visible_text TEXT,
+      reason TEXT,
+      first_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      last_seen_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      last_scanned_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      hit_count INTEGER NOT NULL DEFAULT 1
+    );
+
     CREATE TABLE IF NOT EXISTS owner_ping_enforcement (
       guild_id TEXT NOT NULL,
       user_id TEXT NOT NULL,
@@ -430,6 +444,8 @@ export function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_orders_queue ON orders (guild_id, queue_group, priority_rank, status, created_at);
     CREATE INDEX IF NOT EXISTS idx_orders_expiry_at ON orders (expiry_at, status);
     CREATE INDEX IF NOT EXISTS idx_abuse_events ON abuse_events (guild_id, user_id, action, created_at);
+    CREATE INDEX IF NOT EXISTS idx_scam_fingerprint_verdict
+      ON scam_image_fingerprints (verdict, last_seen_at);
     CREATE INDEX IF NOT EXISTS idx_owner_ping_enforcement
       ON owner_ping_enforcement (guild_id, last_mention_at);
     CREATE INDEX IF NOT EXISTS idx_product_catalog_guild ON product_catalog (guild_id, is_active, sort_order);

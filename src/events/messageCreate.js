@@ -3,7 +3,8 @@ import { getTicketByChannelId, updateTicketAiStatus, isTicketChannel, touchTicke
 import { processAiMessage } from '../services/aiService.js';
 import { getGuildConfig } from '../services/guildConfigService.js';
 import { moderateMessage } from '../services/aiModerationService.js';
-import { isMrBeastScam, incrementLinkWarningCount, logAbuseEvent } from '../utils/antiScam.js';
+import { scanScamMessage, incrementLinkWarningCount, logAbuseEvent } from '../utils/antiScam.js';
+import { quarantineDetectedScamMessage } from '../services/scamProtectionService.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -312,23 +313,21 @@ export async function execute(message) {
   // ═══════════════════════════════════════════════
   if (!isStaff && message.member) {
     // 1. Kiểm tra MrBeast Scam Image
-    const isScam = await isMrBeastScam(message);
-    if (isScam) {
-      console.log(`[Anti-Scam] MrBeast scam detected from user ${message.author.tag}. Deleting message and banning.`);
-      await message.delete().catch(() => null);
-      
-      logAbuseEvent(message.guildId, message.author.id, 'MRBEAST_SCAM_BAN', `Nội dung: ${message.content || 'chỉ có ảnh'}`);
-      
-      await message.member.ban({ reason: 'Gửi hình ảnh MrBeast scam / lừa đảo.' }).catch(err => {
-        console.error(`[Anti-Scam] Failed to ban user ${message.author.tag}:`, err.message);
-      });
-      
-      await message.channel.send(`${E('status_warn')} **Cảnh báo bảo mật:** Tài khoản của <@${message.author.id}> đã bị cấm khỏi server vì gửi hình ảnh/nội dung lừa đảo giả mạo (MrBeast Scam).`).catch(() => null);
-      return;
+    const isTicketChan = isTicketChannel(message.channel, guildConfig);
+
+    // Quét mọi ảnh ở kênh công khai Store 1, kể cả ảnh không có caption hoặc
+    // tên file đáng ngờ. Kênh ticket được loại trừ vì khách thường gửi ảnh
+    // tài khoản, hóa đơn và dữ liệu hỗ trợ riêng tư tại đó.
+    if (config.antiScamEnabled && !isTicketChan && message.attachments.size > 0) {
+      const detection = await scanScamMessage(message);
+      if (detection.isScam) {
+        console.log(`[ANTI-SCAM] High-confidence image detected user=${message.author.id} category=${detection.category} confidence=${detection.confidence}`);
+        await quarantineDetectedScamMessage(message, detection);
+        return;
+      }
     }
 
     // 2. Kiểm tra chặn Link (Trừ kênh ticket)
-    const isTicketChan = isTicketChannel(message.channel, guildConfig);
     const linkRegex = /(https?:\/\/[^\s]+|discord\.gg\/[^\s]+)/gi;
     const hasLink = linkRegex.test(message.content);
 
