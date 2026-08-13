@@ -720,14 +720,11 @@ export async function handleOrderCancel(interaction, orderCode) {
 
   // Nếu staff hủy đơn của khách khác → DM khách
   if (!isOwner && cancelled.customer_id !== interaction.user.id) {
-    try {
-      const customer = await interaction.client.users.fetch(cancelled.customer_id);
-      const wasPaid = cancelled.payment_status === 'PAID';
-      const dmMsg = wasPaid
-        ? `${E('icon_block')} **Cream Store** — Đơn \`${cancelled.order_code}\` đã được hủy bởi staff. Tiền sẽ được hoàn lại sớm nhất, liên hệ shop nếu chưa nhận được.`
-        : `${E('icon_block')} **Cream Store** — Đơn \`${cancelled.order_code}\` đã được hủy. Bạn có thể đặt đơn mới bất kỳ lúc nào.`;
-      await customer.send(dmMsg).catch(() => null);
-    } catch (e) {}
+    await sendOrderCancelledFlow({
+      guild: interaction.guild,
+      order: cancelled,
+      reason: `Đơn được hủy bởi staff ${interaction.user.tag}`,
+    }).catch(() => null);
   }
 
   await safeReply(interaction, {

@@ -742,6 +742,9 @@ export function buildOrderCancelledCustomerV2(order, reason = null) {
     `${E('payment_money')} ${fmt.b(international ? 'Amount:' : 'Giá trị:')} ${formatCurrency(order.total_amount)}`,
     `${E('status_cross')} ${fmt.b(international ? 'Status:' : 'Trạng thái:')} ${international ? 'Cancelled' : 'Đã hủy'}`,
     reason ? `${E('status_warn')} ${fmt.b(international ? 'Reason:' : 'Lý do:')} ${normalizeV2Text(reason)}` : null,
+    order.payment_status === 'PAID'
+      ? `${E('payment_refund')} ${fmt.b(international ? 'Refund:' : 'Hoàn tiền:')} ${international ? 'The admin team will verify and process the refund.' : 'Admin sẽ kiểm tra và xử lý hoàn tiền sớm nhất.'}`
+      : null,
   )));
   container.addSeparatorComponents(
     new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small),

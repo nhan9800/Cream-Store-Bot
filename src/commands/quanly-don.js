@@ -2,7 +2,7 @@ import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { PermissionFlagsBits, SlashCommandBuilder } from 'discord.js';
 import { getGuildConfig } from '../services/guildConfigService.js';
 import { getOrderByCode, cancelOrder, markOrderPaid, markOrderCompleted, ensureOrderExpiry } from '../services/orderService.js';
-import { updateOrderLogMessage, sendCompletedFlow } from '../services/notificationService.js';
+import { sendOrderCancelledFlow, updateOrderLogMessage, sendCompletedFlow } from '../services/notificationService.js';
 import { emitStaffLog } from '../services/staffLogService.js';
 import { assertStaffCapability } from '../utils/permissions.js';
 
@@ -51,17 +51,13 @@ export async function execute(interaction) {
       await updateOrderLogMessage(interaction.guild, order);
       await emitStaffLog(interaction.client, { guildId: interaction.guildId, actorId: interaction.user.id, targetId: order.customer_id, action: 'ORDER_EDITED', detail: 'Hủy đơn', relatedOrderCode: order.order_code });
 
-      // Thông báo cho khách qua DM
-      try {
-        const customer = await interaction.client.users.fetch(order.customer_id);
-        const wasPaid = order.payment_status === 'PAID';
-        const dmMsg = wasPaid
-          ? `${E('icon_block')} **Cream Store** — Đơn hàng \`${orderCode}\` của bạn đã được hủy bởi staff. Số tiền sẽ được hoàn lại trong thời gian sớm nhất. Liên hệ shop để được hỗ trợ.`
-          : `${E('icon_block')} **Cream Store** — Đơn hàng \`${orderCode}\` của bạn đã được hủy. Bạn có thể tạo đơn mới bất kỳ lúc nào.`;
-        await customer.send(dmMsg).catch(() => null);
-      } catch (e) {}
+      const cancellationNotice = await sendOrderCancelledFlow({
+        guild: interaction.guild,
+        order,
+        reason: `Hủy thủ công bởi staff ${interaction.user.tag}`,
+      });
 
-      await interaction.editReply(`${E('status_check')} Đã hủy đơn \`${orderCode}\` thành công! Đã DM thông báo cho khách.`);
+      await interaction.editReply(`${E('status_check')} Đã hủy đơn \`${orderCode}\` thành công! ${cancellationNotice.dmSent ? 'Đã gửi DM giao diện mới cho khách.' : 'Khách đang tắt DM nên không thể gửi riêng.'}`);
       return;
     }
 

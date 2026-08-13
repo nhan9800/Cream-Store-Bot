@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { config } from '../src/config.js';
 import { selectAgingReminderStage } from '../src/services/adminOrderCenterService.js';
 import { canOpenMultipleOrderTickets } from '../src/utils/permissions.js';
+import { buildOrderCancelledCustomerV2 } from '../src/utils/embeds.js';
 
 function memberWithRoles(roleIds = []) {
   const roles = new Set(roleIds.map(String));
@@ -50,5 +51,21 @@ describe('admin order aging reminders', () => {
         created_at: '2026-07-01T12:00:00.000Z',
       }, now, { weekOneDays: 7, weekTwoDays: 14 })).toBeNull();
     }
+  });
+});
+
+describe('cancelled order customer notification', () => {
+  it('uses a Components V2 cancellation card and includes the reason', () => {
+    const payload = buildOrderCancelledCustomerV2({
+      guild_id: config.storeOneGuildId,
+      order_code: 'CN_123456',
+      quantity: 1,
+      product_name: 'YouTube Premium',
+      total_amount: 100000,
+      payment_status: 'CANCELLED',
+    }, 'Quá hạn thanh toán');
+    expect(payload.components).toHaveLength(1);
+    expect(payload.flags).toBeTruthy();
+    expect(JSON.stringify(payload.components[0].toJSON())).toContain('Quá hạn thanh toán');
   });
 });
