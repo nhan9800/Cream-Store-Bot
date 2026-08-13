@@ -88,6 +88,9 @@ export function initDatabase() {
       price_list_category_configs TEXT,
       custom_emojis TEXT,
       warranty_log_channel_id TEXT,
+      admin_order_category_id TEXT,
+      admin_order_channel_id TEXT,
+      admin_order_panel_message_id TEXT,
       sale_channel_id TEXT,
       sale_message_id TEXT,
       sale_percent INTEGER DEFAULT 0,
@@ -175,6 +178,8 @@ export function initDatabase() {
       non_legit_assigned_at TEXT,
       payment_reminder_sent_at TEXT,
       processing_reminder_sent_at TEXT,
+      admin_age_reminder_1w_sent_at TEXT,
+      admin_age_reminder_2w_sent_at TEXT,
       feedback_reminder_sent_at TEXT,
       warranty_completed_at TEXT,
       warranty_completed_by_id TEXT,
@@ -498,6 +503,9 @@ export function initDatabase() {
   ensureColumn('guild_settings', 'manager_role_id', 'TEXT');
   ensureColumn('guild_settings', 'staff_log_channel_id', 'TEXT');
   ensureColumn('guild_settings', 'reminder_channel_id', 'TEXT');
+  ensureColumn('guild_settings', 'admin_order_category_id', 'TEXT');
+  ensureColumn('guild_settings', 'admin_order_channel_id', 'TEXT');
+  ensureColumn('guild_settings', 'admin_order_panel_message_id', 'TEXT');
   ensureColumn('guild_settings', 'customer_role_id', 'TEXT');
   ensureColumn('guild_settings', 'loyal_role_id', 'TEXT');
   ensureColumn('guild_settings', 'vip_role_id', 'TEXT');
@@ -540,6 +548,8 @@ export function initDatabase() {
 
   ensureColumn('orders', 'total_amount', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn('orders', 'amount_paid', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn('orders', 'admin_age_reminder_1w_sent_at', 'TEXT');
+  ensureColumn('orders', 'admin_age_reminder_2w_sent_at', 'TEXT');
   ensureColumn('orders', 'payment_provider', "TEXT NOT NULL DEFAULT 'PAYOS'");
   ensureColumn('orders', 'payment_code', 'TEXT');
   ensureColumn('orders', 'payos_order_code', 'INTEGER');

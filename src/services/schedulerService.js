@@ -13,6 +13,7 @@ import { processPendingPaymentTickets, processCompletedFeedbackTickets } from '.
 import { autoUpdateDiscountBoard } from './cardSwapService.js';
 import { checkExpiredGiveaways } from './giveawayService.js';
 import { processPendingInviteRewards } from './inviteTrackerService.js';
+import { processAdminOrderAgingReminders } from './adminOrderCenterService.js';
 
 let schedulerHandle = null;
 let backupHandle = null;
@@ -71,6 +72,12 @@ export function startScheduler(client) {
       await processPendingInviteRewards(client);
     } catch (error) {
       console.error('[SCHEDULER] Lỗi processPendingInviteRewards:', error);
+    }
+
+    try {
+      await processAdminOrderAgingReminders(client);
+    } catch (error) {
+      console.error('[SCHEDULER] Lỗi nhắc đơn tồn 7/14 ngày cho admin:', error);
     }
 
     // Tự động cập nhật vinh danh định kỳ mỗi 1 tiếng

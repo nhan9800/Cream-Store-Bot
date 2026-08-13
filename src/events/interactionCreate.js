@@ -179,6 +179,7 @@ import {
 import { handleAnnouncementSelect } from "./announcementHandlers.js";
 import { handleOtpInteraction } from "./otpHandlers.js";
 import { handleCardSwapInteractions } from "./cardHandlers.js";
+import { handleAdminOrderCenterInteraction } from '../services/adminOrderCenterService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -324,6 +325,11 @@ export function registerInteractionHandler(client, commands) {
 
       if (interaction.customId && interaction.customId.startsWith('cardswap:')) {
         const handled = await handleCardSwapInteractions(interaction);
+        if (handled) return;
+      }
+
+      if (interaction.customId && interaction.customId.startsWith('adminorder:')) {
+        const handled = await handleAdminOrderCenterInteraction(interaction);
         if (handled) return;
       }
 

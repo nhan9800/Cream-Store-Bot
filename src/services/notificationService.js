@@ -15,6 +15,7 @@ import {
   buildPublicOrderLogEmbed,
   buildPublicOrderLogV2,
   buildOrderLogV2Update,
+  buildOrderCancelledCustomerV2,
 } from '../utils/embeds.js';
 import { formatCurrency, buildOrderLogContent } from '../utils/formatters.js';
 
@@ -155,4 +156,18 @@ export async function deliverTranscript({ guild, ticket, transcriptResult, close
   })).catch(() => null);
 
   return { delivered: true, customerSent: Boolean(customerMessage), transcriptUrl };
+}
+
+export async function sendOrderCancelledFlow({ guild, order, reason = null }) {
+  if (!guild || !order?.customer_id) return { dmSent: false };
+  const customer = await guild.client.users.fetch(order.customer_id).catch(() => null);
+  if (!customer) return { dmSent: false };
+  const dmMessage = await customer.send(
+    buildOrderCancelledCustomerV2(order, reason || order.payment_cancel_reason),
+  ).catch(() => null);
+  return {
+    dmSent: Boolean(dmMessage),
+    dmChannelId: dmMessage?.channelId ?? null,
+    dmMessageId: dmMessage?.id ?? null,
+  };
 }

@@ -25,12 +25,12 @@ import { db } from '../database/db.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { getGuildConfig } from '../services/guildConfigService.js';
 import { getCustomerFlag, getTicketMuteStatus } from '../services/blacklistService.js';
-import { isStaffMember, isManager, assertStaffCapability, TICKET_MEMBER_PERMISSIONS } from '../utils/permissions.js';
+import { canOpenMultipleOrderTickets, isStaffMember, isManager, assertStaffCapability, TICKET_MEMBER_PERMISSIONS } from '../utils/permissions.js';
 import { emitStaffLog } from '../services/staffLogService.js';
-import { getOrderByCode, cancelOrder, getQueuePosition, setOrderStatus, claimOrder, releaseOrderClaim } from '../services/orderService.js';
+import { getOrderByCode, getLatestOrderByTicketChannel, cancelOrder, getQueuePosition, setOrderStatus, claimOrder, releaseOrderClaim } from '../services/orderService.js';
 import { closeTicket, createTicket, getOpenTicketByCustomer, getTicketByChannelId, getTicketById, keepTicketOpen } from '../services/ticketService.js';
 import { exportTicketTranscript } from '../services/transcriptService.js';
-import { deliverTranscript, updateOrderLogMessage } from '../services/notificationService.js';
+import { deliverTranscript, sendOrderCancelledFlow, updateOrderLogMessage } from '../services/notificationService.js';
 import { cancelPayOSPaymentLink } from '../services/paymentService.js';
 import { ensureRateLimit } from '../services/abuseService.js';
 import { getCenarHub } from '../services/cenarHub.js';
@@ -101,8 +101,22 @@ export async function handleTicketCreate(interaction, ticketType = 'ORDER', gmai
   activeTicketCreations.add(lockKey);
 
   try {
-    ensureRateLimit({ guildId: interaction.guildId, userId: interaction.user.id, action: `OPEN_TICKET_${normalizedType}`, limit: 1, windowSeconds: config.ticketOpenCooldownSeconds, message: `Bạn vừa mở ticket rồi. Vui lòng chờ ${config.ticketOpenCooldownSeconds} giây rồi thử lại.` });
-    const existingTicket = getOpenTicketByCustomer(interaction.guildId, interaction.user.id, normalizedType);
+    const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => interaction.member ?? null);
+    const allowMultipleTickets = normalizedType === 'ORDER'
+      && canOpenMultipleOrderTickets(member, interaction.guildId);
+    ensureRateLimit({
+      guildId: interaction.guildId,
+      userId: interaction.user.id,
+      action: `OPEN_TICKET_${normalizedType}`,
+      limit: allowMultipleTickets ? config.ctvTicketOpenBurstLimit : 1,
+      windowSeconds: allowMultipleTickets ? config.ctvTicketOpenBurstWindowSeconds : config.ticketOpenCooldownSeconds,
+      message: allowMultipleTickets
+        ? `Bạn đã mở quá nhiều ticket liên tiếp. Vui lòng chờ ${config.ctvTicketOpenBurstWindowSeconds} giây.`
+        : `Bạn vừa mở ticket rồi. Vui lòng chờ ${config.ticketOpenCooldownSeconds} giây rồi thử lại.`,
+    });
+    const existingTicket = allowMultipleTickets
+      ? null
+      : getOpenTicketByCustomer(interaction.guildId, interaction.user.id, normalizedType);
     if (existingTicket) {
       // Kiểm tra channel còn tồn tại không
       const existingChannel = await interaction.guild.channels.fetch(existingTicket.channel_id).catch(() => null);
@@ -334,6 +348,12 @@ export async function handleTicketCreate(interaction, ticketType = 'ORDER', gmai
         flags: welcomeV2Flags,
       });
       await channel.send({ content: `<@${interaction.user.id}> — Ticket của bạn đã được tạo!` }).catch(() => null);
+      if (allowMultipleTickets) {
+        await channel.send({
+          content: `${E('cenar_ctv')} **Chế độ CTV nhiều ticket:** ticket này độc lập để bạn note riêng từng đơn và không ảnh hưởng các ticket CTV đang mở khác.`,
+          allowedMentions: { parse: [] },
+        }).catch(() => null);
+      }
     }
 
     await emitStaffLog(interaction.client, {
@@ -536,6 +556,25 @@ export async function handleTicketClose(interaction, ticketId) {
     const transcriptResult = ticketChannel
       ? await exportTicketTranscript(ticketChannel).catch(() => null)
       : null;
+
+    // Nếu Admin đóng ticket khi khách chưa thanh toán, đơn liên kết phải đóng
+    // cùng trạng thái CANCELLED ở log và khách nhận được DM rõ lý do.
+    const linkedOrder = getLatestOrderByTicketChannel(ticket.channel_id || interaction.channelId);
+    if (linkedOrder?.status === 'PENDING_PAYMENT' && linkedOrder.payment_status !== 'PAID') {
+      const cancellationReason = 'Ticket đã đóng do quá hạn/chưa hoàn tất thanh toán';
+      await cancelPayOSPaymentLink(linkedOrder, cancellationReason).catch((error) => {
+        console.error(`[TICKET_CLOSE] Không thể hủy link PayOS ${linkedOrder.order_code}:`, error.message);
+      });
+      const cancelledOrder = cancelOrder(linkedOrder.order_code, cancellationReason);
+      if (cancelledOrder) {
+        await updateOrderLogMessage(interaction.guild, cancelledOrder).catch(() => null);
+        await sendOrderCancelledFlow({
+          guild: interaction.guild,
+          order: cancelledOrder,
+          reason: cancellationReason,
+        }).catch(() => null);
+      }
+    }
 
     await emitStaffLog(interaction.client, {
       guildId: interaction.guildId, actorId: interaction.user.id, targetId: ticket.customer_id, action: 'TICKET_CLOSE',

@@ -9,6 +9,7 @@ import { encrypt } from '../utils/crypto.js';
 import { awardOrderPoints, refundOrderPoints } from './loyaltyService.js';
 import { recordStatusChange } from './orderStateMachine.js';
 import { sendCtvOrderLog } from './ctvOrderLogService.js';
+import { scheduleAdminOrderCenterRefresh } from './adminOrderCenterService.js';
 
 function createOrderStmt() {
   return db.prepare(`
@@ -109,6 +110,7 @@ export function createOrder({ guildId, ticketId, ticketChannelId, customerId, pr
     sendCtvOrderLog(createdOrder).catch((error) => {
       console.error(`[CTV-ORDER-LOG] ${createdOrder.order_code}: ${error.message}`);
     });
+    scheduleAdminOrderCenterRefresh(createdOrder.guild_id);
   });
   return createdOrder;
 }
@@ -160,6 +162,7 @@ export function markOrderCompleted(orderCode, completedById, timeoutHours = conf
     }
   }
 
+  scheduleAdminOrderCenterRefresh(updated.guild_id);
   broadcastDashboardEvent('order_update');
   return updated;
 }
@@ -181,6 +184,7 @@ export function cancelOrder(orderCode, reason = null){
 
   const updated=getOrderByCode(orderCode); 
   syncCustomerStats(updated.guild_id, updated.customer_id); 
+  scheduleAdminOrderCenterRefresh(updated.guild_id);
   return updated;
 }
 export function saveDelivery(orderCode,deliveredById,credentialEmail,credentialPassword,credentialProfile,credentialPin,deliveryLoginUrl,claimNotes,dmChannelId,dmMessageId){const timestamp=nowIso(); saveDeliveryStmt().run(deliveredById,timestamp,credentialEmail!=null?encrypt(credentialEmail):null,credentialPassword!=null?encrypt(credentialPassword):null,credentialProfile!=null?encrypt(credentialProfile):null,credentialPin!=null?encrypt(credentialPin):null,deliveryLoginUrl ?? null,claimNotes ?? null,dmChannelId ?? null,dmMessageId ?? null,timestamp,orderCode); return getOrderByCode(orderCode);}
@@ -216,8 +220,18 @@ export function getQueuePosition(order) {
   return { position: Math.max(position, 1), total: Math.max(total, 1), group };
 }
 
-export function claimOrder(orderCode, actorId) { claimOrderStmt().run(actorId, nowIso(), nowIso(), orderCode); return getOrderByCode(orderCode); }
-export function releaseOrderClaim(orderCode) { clearClaimStmt().run(nowIso(), orderCode); return getOrderByCode(orderCode); }
+export function claimOrder(orderCode, actorId) {
+  claimOrderStmt().run(actorId, nowIso(), nowIso(), orderCode);
+  const updated = getOrderByCode(orderCode);
+  if (updated) scheduleAdminOrderCenterRefresh(updated.guild_id);
+  return updated;
+}
+export function releaseOrderClaim(orderCode) {
+  clearClaimStmt().run(nowIso(), orderCode);
+  const updated = getOrderByCode(orderCode);
+  if (updated) scheduleAdminOrderCenterRefresh(updated.guild_id);
+  return updated;
+}
 
 export function markOrderPaid(orderCode,{amountPaid,transactionId,transactionContent}){
   const order=getOrderByCode(orderCode);
@@ -237,6 +251,7 @@ export function markOrderPaid(orderCode,{amountPaid,transactionId,transactionCon
     recordStatusChange(db, { orderCode, previousStatus: order.status, newStatus: updated.status, changedBy: 'SYSTEM_PAYOS', reason: transactionContent || 'Payment confirmed' });
   }
   syncCustomerStats(updated.guild_id, updated.customer_id);
+  scheduleAdminOrderCenterRefresh(updated.guild_id);
   broadcastDashboardEvent('order_update');
   return updated;
 }
@@ -248,6 +263,7 @@ export function setOrderStatus(orderCode,status){
     recordStatusChange(db, { orderCode, previousStatus: order.status, newStatus: updated.status, changedBy: 'SYSTEM', reason: 'setOrderStatus' });
   }
   syncCustomerStats(updated.guild_id, updated.customer_id); 
+  scheduleAdminOrderCenterRefresh(updated.guild_id);
   
   // Tích luỹ điểm thưởng khi đơn hàng chuyển sang trạng thái COMPLETED
   if (status === 'COMPLETED' && updated && updated.guild_id !== 'WEB' && updated.customer_id !== 'WEB') {

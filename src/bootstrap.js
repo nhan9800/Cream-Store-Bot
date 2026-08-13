@@ -101,6 +101,13 @@ export async function buildClient() {
       const { refreshOpenWarrantyActionPanels } = await import('./services/warrantyService.js');
       const warrantyActions = await refreshOpenWarrantyActionPanels(readyClient);
       console.log(`[WARRANTY-ACTIONS] scanned=${warrantyActions.scanned} published=${warrantyActions.published} current=${warrantyActions.current} missing=${warrantyActions.missingChannels}`);
+
+      const { refreshAdminOrderCenter } = await import('./services/adminOrderCenterService.js');
+      const storeOneGuild = readyClient.guilds.cache.get(config.storeOneGuildId);
+      if (storeOneGuild) {
+        const adminCenter = await refreshAdminOrderCenter(storeOneGuild, { force: true });
+        if (adminCenter) console.log(`[ADMIN-ORDER-CENTER] Ready in #${adminCenter.channel.name}`);
+      }
     } catch (error) {
       console.error('[AUTO-SETUP] Không thể đồng bộ emoji/panel:', error);
     }

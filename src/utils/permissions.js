@@ -56,3 +56,13 @@ export function hasConfiguredOwnerRole(member) {
   if (!member?.roles?.cache) return false;
   return config.ownerRoleIds.some((roleId) => member.roles.cache.has(String(roleId)));
 }
+
+/**
+ * Store 1 collaborators may keep several concurrent order tickets so every
+ * customer order has a separate note trail. This never applies to Store 2.
+ */
+export function canOpenMultipleOrderTickets(member, guildId) {
+  if (!member?.roles?.cache) return false;
+  if (String(guildId) !== String(config.storeOneGuildId)) return false;
+  return config.ctvMultiTicketRoleIds.some((roleId) => member.roles.cache.has(String(roleId)));
+}

@@ -9,7 +9,7 @@ import { createTicket, closeTicket, getOpenTicketByCustomer } from './ticketServ
 import { getTicketCategoryId, activeTicketCreations } from '../events/shared.js';
 import { buildTicketWelcomeV2, buildTicketControlComponents } from '../utils/embeds.js';
 import { buildOrderLogContent, buildTicketChannelName } from '../utils/formatters.js';
-import { TICKET_MEMBER_PERMISSIONS } from '../utils/permissions.js';
+import { canOpenMultipleOrderTickets, TICKET_MEMBER_PERMISSIONS } from '../utils/permissions.js';
 import { isCustomerCtv } from './ctvService.js';
 import { buildCtvPriorityNotice } from './ctvOrderLogService.js';
 import { ensureRateLimit } from './abuseService.js';
@@ -624,9 +624,22 @@ async function handlePremiumBuyOrder(interaction, productName, quantity, totalPr
   activeTicketCreations.add(lockKey);
 
   try {
-    ensureRateLimit({ guildId: interaction.guildId, userId: interaction.user.id, action: `OPEN_TICKET_ORDER`, limit: 1, windowSeconds: config.ticketOpenCooldownSeconds, message: `Bạn vừa mở ticket rồi. Vui lòng chờ.` });
+    const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => interaction.member ?? null);
+    const allowMultipleTickets = canOpenMultipleOrderTickets(member, interaction.guildId);
+    ensureRateLimit({
+      guildId: interaction.guildId,
+      userId: interaction.user.id,
+      action: 'OPEN_TICKET_ORDER',
+      limit: allowMultipleTickets ? config.ctvTicketOpenBurstLimit : 1,
+      windowSeconds: allowMultipleTickets ? config.ctvTicketOpenBurstWindowSeconds : config.ticketOpenCooldownSeconds,
+      message: allowMultipleTickets
+        ? `Bạn đã mở quá nhiều ticket liên tiếp. Vui lòng chờ ${config.ctvTicketOpenBurstWindowSeconds} giây.`
+        : 'Bạn vừa mở ticket rồi. Vui lòng chờ.',
+    });
     
-    const existingTicket = getOpenTicketByCustomer(interaction.guildId, interaction.user.id, normalizedType);
+    const existingTicket = allowMultipleTickets
+      ? null
+      : getOpenTicketByCustomer(interaction.guildId, interaction.user.id, normalizedType);
     if (existingTicket) {
       const existingChannel = await interaction.guild.channels.fetch(existingTicket.channel_id).catch(() => null);
       if (existingChannel) {

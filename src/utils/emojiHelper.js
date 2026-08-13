@@ -48,6 +48,10 @@ const fallbackEmojis = {
   order_pending:      '<a:redload:1459179959158571119>',
   order_id:           '<:cenar_verified:1535618654358736926>',
   order_product:      '<a:Arrow2:1367139234833498113>',
+  admin_order_center: '<:cenar_admin:1535618678853337149>',
+  admin_order_week1:  '<a:Dotyellow:1481134440725090315>',
+  admin_order_week2:  '<a:tick_red51:1384069065626222632>',
+  admin_order_priority: '<a:tsm_fire:1327553120842158111>',
 
   // Payment
   payment_payos:      '<:cr_cardd:1348624271437463552>',

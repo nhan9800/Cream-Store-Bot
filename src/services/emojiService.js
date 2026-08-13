@@ -30,6 +30,10 @@ export const EMOJI_SLOTS = {
   order_pending:      { label: 'Đơn chờ thanh toán',   default: '⏳' },
   order_id:           { label: 'Mã đơn',               default: '🆔' },
   order_product:      { label: 'Sản phẩm',             default: '📦' },
+  admin_order_center: { label: 'Trung tâm đơn admin',  default: '' },
+  admin_order_week1:  { label: 'Đơn tồn 7 ngày',       default: '' },
+  admin_order_week2:  { label: 'Đơn tồn 14 ngày',      default: '' },
+  admin_order_priority: { label: 'Ưu tiên xử lý',      default: '' },
 
   // Payment
   payment_payos:      { label: 'PayOS',                default: '💳' },
@@ -179,6 +183,10 @@ export const SLOT_ALIASES = {
   order_pending: ['order_pending', 'pending', 'cho_thanh_toan'],
   order_id: ['order_id', 'id_don', 'cenar_verified'],
   order_product: ['order_product', 'product', 'san_pham'],
+  admin_order_center: ['cenar_order_center', 'order_center', 'admin_orders'],
+  admin_order_week1: ['cenar_order_week1', 'order_week1', 'order_7d'],
+  admin_order_week2: ['cenar_order_week2', 'order_week2', 'order_14d'],
+  admin_order_priority: ['cenar_order_priority', 'order_priority', 'priority_order'],
 
   // Payment
   payment_payos: ['payos', 'bank_transfer', 'chuyen_khoan'],

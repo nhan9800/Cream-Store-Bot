@@ -193,6 +193,13 @@ export const config = {
   processingReminderMinutes: Number.parseInt(getEnv('PROCESSING_REMINDER_MINUTES', '60'), 10),
   adminDiscordIds: (getEnv('ADMIN_DISCORD_IDS') || '').split(',').map(id => id.trim()).filter(Boolean),
   ownerRoleIds: (getEnv('OWNER_ROLE_IDS', '1282638119497109524') || '').split(',').map(id => id.trim()).filter(Boolean),
+  storeOneGuildId: getEnv('STORE1_GUILD_ID', '1282637033340403754'),
+  ctvMultiTicketRoleIds: (getEnv('CTV_MULTI_TICKET_ROLE_IDS', '1522844530242748446') || '')
+    .split(',').map(id => id.trim()).filter(Boolean),
+  ctvTicketOpenBurstLimit: Math.max(2, Number.parseInt(getEnv('CTV_TICKET_OPEN_BURST_LIMIT', '5'), 10) || 5),
+  ctvTicketOpenBurstWindowSeconds: Math.max(10, Number.parseInt(getEnv('CTV_TICKET_OPEN_BURST_WINDOW_SECONDS', '60'), 10) || 60),
+  adminOrderReminderWeekOneDays: Math.max(1, Number.parseInt(getEnv('ADMIN_ORDER_REMINDER_WEEK_ONE_DAYS', '7'), 10) || 7),
+  adminOrderReminderWeekTwoDays: Math.max(2, Number.parseInt(getEnv('ADMIN_ORDER_REMINDER_WEEK_TWO_DAYS', '14'), 10) || 14),
   protectedOwnerId: getEnv('PROTECTED_OWNER_ID', '1138315103821889566'),
   nitroRoleIds: (getEnv('DISCORD_NITRO_ROLE_IDS') || '').split(',').map(id => id.trim()).filter(Boolean),
   nitroUserIds: (getEnv('DISCORD_NITRO_USER_IDS', '1138315103821889566') || '').split(',').map(id => id.trim()).filter(Boolean),

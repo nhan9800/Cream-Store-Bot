@@ -726,6 +726,38 @@ export function buildOrderLogV2Update(order) {
   return { components: [container], flags: MessageFlags.IsComponentsV2 };
 }
 
+export function buildOrderCancelledCustomerV2(order, reason = null) {
+  const E = createEmojiResolver(order.guild_id);
+  const international = isInternationalGuild(order.guild_id);
+  const container = new ContainerBuilder().setAccentColor(0xEF4444);
+  container.addTextDisplayComponents(new TextDisplayBuilder().setContent(joinLines(
+    `## ${E('order_cancel')} ${international ? 'ORDER CANCELLED' : 'ĐƠN HÀNG ĐÃ HỦY'}`,
+    `> ${E('order_id')} ${international ? 'Order' : 'Mã đơn'}: ${fmt.code(order.order_code)}`,
+  )));
+  container.addSeparatorComponents(
+    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small),
+  );
+  container.addTextDisplayComponents(new TextDisplayBuilder().setContent(joinLines(
+    `${E('order_product')} ${fmt.b(international ? 'Product:' : 'Sản phẩm:')} ${formatOrderProduct(order.quantity, order.product_name)}`,
+    `${E('payment_money')} ${fmt.b(international ? 'Amount:' : 'Giá trị:')} ${formatCurrency(order.total_amount)}`,
+    `${E('status_cross')} ${fmt.b(international ? 'Status:' : 'Trạng thái:')} ${international ? 'Cancelled' : 'Đã hủy'}`,
+    reason ? `${E('status_warn')} ${fmt.b(international ? 'Reason:' : 'Lý do:')} ${normalizeV2Text(reason)}` : null,
+  )));
+  container.addSeparatorComponents(
+    new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small),
+  );
+  container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
+    international
+      ? `-# ${E('ticket_open')} You may open a new ticket whenever you are ready to order again.`
+      : `-# ${E('ticket_open')} Bạn có thể mở ticket mới bất cứ lúc nào khi sẵn sàng đặt lại đơn.`,
+  ));
+  return {
+    components: [container],
+    flags: MessageFlags.IsComponentsV2,
+    allowedMentions: { parse: [] },
+  };
+}
+
 export function buildOrderActionComponents(orderCode) {
   return [
     new ActionRowBuilder().addComponents(

@@ -1,10 +1,10 @@
 import { db, nowIso } from '../database/db.js';
 import { cancelOrder } from './orderService.js';
-import { closeTicket } from './ticketService.js';
+import { closeTicket, getTicketById } from './ticketService.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { emitStaffLog } from './staffLogService.js';
 import { exportTicketTranscript } from './transcriptService.js';
-import { deliverTranscript, updateOrderLogMessage } from './notificationService.js';
+import { deliverTranscript, sendOrderCancelledFlow, updateOrderLogMessage } from './notificationService.js';
 import {
   ContainerBuilder,
   TextDisplayBuilder,
@@ -77,6 +77,25 @@ export function buildPaymentReminderV2({ guildId, customerId, orderCode, stage =
   });
 }
 
+async function cancelPendingOrderEverywhere({ client, guild = null, order, reason }) {
+  const cancelled = cancelOrder(order.order_code, reason);
+  if (!cancelled) return null;
+  const resolvedGuild = guild
+    || client.guilds.cache.get(cancelled.guild_id)
+    || await client.guilds.fetch(cancelled.guild_id).catch(() => null);
+  if (resolvedGuild) {
+    await updateOrderLogMessage(resolvedGuild, cancelled).catch(() => null);
+    await sendOrderCancelledFlow({ guild: resolvedGuild, order: cancelled, reason }).catch(() => null);
+  }
+  return cancelled;
+}
+
+function findOrderTicket(order) {
+  return getTicketById(Number(order.ticket_id))
+    || db.prepare('SELECT * FROM tickets WHERE channel_id = ? ORDER BY id DESC LIMIT 1').get(order.ticket_channel_id)
+    || null;
+}
+
 export async function processPendingPaymentTickets(client) {
   try {
     const pendingOrders = db.prepare(`
@@ -95,7 +114,11 @@ export async function processPendingPaymentTickets(client) {
       // Nếu không có kênh ticket Discord, tự động hủy đơn sau 15 phút
       if (!order.ticket_channel_id) {
         if (ageMinutes >= 15 || order.payment_status === 'CANCELLED') {
-          cancelOrder(order.order_code, order.payment_cancel_reason || 'Tự động hủy đơn hàng không có kênh ticket');
+          await cancelPendingOrderEverywhere({
+            client,
+            order,
+            reason: order.payment_cancel_reason || 'Tự động hủy đơn hàng không có kênh ticket',
+          });
         }
         continue;
       }
@@ -140,14 +163,12 @@ export async function processPendingPaymentTickets(client) {
 
         await channel.send(payload).catch(() => null);
 
-        const cancelled = cancelOrder(order.order_code, order.payment_cancel_reason || 'Thanh toán bị hủy hoặc hết hạn');
-        if (cancelled) {
-          await updateOrderLogMessage(channel.guild, cancelled).catch(() => null);
-        }
+        const cancellationReason = order.payment_cancel_reason || 'Thanh toán bị hủy hoặc hết hạn';
+        await cancelPendingOrderEverywhere({ client, guild: channel.guild, order, reason: cancellationReason });
 
         setTimeout(async () => {
           try {
-            const ticket = db.prepare('SELECT * FROM tickets WHERE related_order_code = ?').get(order.order_code);
+            const ticket = findOrderTicket(order);
             if (ticket) {
               const transcriptResult = await exportTicketTranscript(channel).catch(() => null);
               closeTicket(ticket.id, client.user.id);
@@ -239,11 +260,12 @@ export async function processPendingPaymentTickets(client) {
 
             await channel.send(payload).catch(() => null);
 
-            cancelOrder(order.order_code, 'Tự động hủy do quá 20 phút không phản hồi/thanh toán lần 1');
+            const cancellationReason = 'Tự động hủy do quá 20 phút không phản hồi/thanh toán lần 1';
+            await cancelPendingOrderEverywhere({ client, guild: channel.guild, order, reason: cancellationReason });
             
             setTimeout(async () => {
               try {
-                const ticket = db.prepare('SELECT * FROM tickets WHERE related_order_code = ?').get(order.order_code);
+                const ticket = findOrderTicket(order);
                 if (ticket) {
                   const transcriptResult = await exportTicketTranscript(channel).catch(() => null);
                   closeTicket(ticket.id, client.user.id);
@@ -335,11 +357,12 @@ export async function processPendingPaymentTickets(client) {
 
             await channel.send(payload).catch(() => null);
 
-            cancelOrder(order.order_code, 'Tự động hủy do quá 10 phút không phản hồi/thanh toán lần 2');
+            const cancellationReason = 'Tự động hủy do quá 10 phút không phản hồi/thanh toán lần 2';
+            await cancelPendingOrderEverywhere({ client, guild: channel.guild, order, reason: cancellationReason });
 
             setTimeout(async () => {
               try {
-                const ticket = db.prepare('SELECT * FROM tickets WHERE related_order_code = ?').get(order.order_code);
+                const ticket = findOrderTicket(order);
                 if (ticket) {
                   const transcriptResult = await exportTicketTranscript(channel).catch(() => null);
                   closeTicket(ticket.id, client.user.id);
