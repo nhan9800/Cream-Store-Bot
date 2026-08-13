@@ -76,13 +76,18 @@ describe('admin order aging reminders', () => {
       credential_email: null,
       credential_password: null,
     };
-    const payload = buildAdminOrderDetailPayload(order, { reminderStage: 'week2' });
+    const payload = buildAdminOrderDetailPayload(order, {
+      reminderStage: 'week2',
+      customerIdentity: '**Đức Anh** · `@ducanh368` · ID `869487483015012403`',
+    });
     const rendered = JSON.stringify(payload.components.map((component) => component.toJSON()));
 
     expect(rendered).toContain('Đã đóng / đã xóa');
     expect(rendered).not.toContain('discord.com/channels');
     expect(rendered).not.toContain('Cổng thanh toán');
     expect(rendered).not.toContain('Dữ liệu giao hàng');
+    expect(rendered).toContain('Đức Anh');
+    expect(rendered).not.toContain('<@869487483015012403>');
     expect(rendered.match(/24 NGÀY/g)).toHaveLength(1);
   });
 

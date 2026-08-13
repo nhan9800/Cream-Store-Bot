@@ -37,8 +37,10 @@ const setupCache = new Map();
 const refreshTimers = new Map();
 const lastPanelRefreshAt = new Map();
 const ticketChannelCache = new Map();
+const customerIdentityCache = new Map();
 const TICKET_CHANNEL_CACHE_TTL_MS = 5 * 60 * 1000;
-const COMPACT_CARD_UI_VERSION = '2026-08-14-compact-ticket-v1';
+const CUSTOMER_IDENTITY_CACHE_TTL_MS = 15 * 60 * 1000;
+const COMPACT_CARD_UI_VERSION = '2026-08-14-compact-ticket-v2-customer-name';
 
 const CUSTOM_EMOJIS = [
   { name: 'cenar_order_center', slot: 'admin_order_center', label: 'C', colors: ['#8B5CF6', '#EC4899'], glyph: '▤' },
@@ -126,6 +128,37 @@ export async function resolveOrderTicketChannel(guild, order) {
     if (channel?.isTextBased?.()) return channel;
   }
   return null;
+}
+
+function safeDiscordDisplay(value, max = 48) {
+  return trimText(value, max, 'Tài khoản Discord')
+    .replace(/([\\`*_~|>])/g, '\\$1')
+    .replaceAll('<', '‹')
+    .replaceAll('@', '＠');
+}
+
+export async function resolveOrderCustomerIdentity(guild, order) {
+  const customerId = String(order?.customer_id || '').trim();
+  if (!/^\d{17,20}$/.test(customerId)) return `ID \`${trimText(customerId, 32, 'không hợp lệ')}\``;
+  const cacheKey = `${guild?.id || order?.guild_id}:${customerId}`;
+  const cached = customerIdentityCache.get(cacheKey);
+  if (cached && Date.now() - cached.checkedAt < CUSTOMER_IDENTITY_CACHE_TTL_MS) return cached.label;
+
+  const member = guild?.members?.cache?.get(customerId)
+    || await guild?.members?.fetch?.(customerId).catch(() => null);
+  const user = member?.user
+    || guild?.client?.users?.cache?.get(customerId)
+    || await guild?.client?.users?.fetch?.(customerId).catch(() => null);
+  let label;
+  if (user) {
+    const displayName = safeDiscordDisplay(member?.displayName || user.globalName || user.username);
+    const username = String(user.username || '').replaceAll('`', "'").slice(0, 32);
+    label = `**${displayName}**${username ? ` · \`@${username}\`` : ''} · ID \`${customerId}\``;
+  } else {
+    label = `**Không lấy được hồ sơ Discord** · ID \`${customerId}\``;
+  }
+  customerIdentityCache.set(cacheKey, { label, checkedAt: Date.now() });
+  return label;
 }
 
 function getActiveOrders(guildId, limit = 12) {
@@ -350,7 +383,8 @@ export function buildAdminOrderCenterPanel({ guildId, orders, summary, refreshed
     const ticket = /^\d{17,20}$/.test(String(order.resolved_ticket_channel_id || ''))
       ? `<#${order.resolved_ticket_channel_id}>`
       : '**đã đóng/xóa**';
-    return `${urgency} **${index + 1}. \`${order.order_code}\`** · <@${order.customer_id}> · **${trimText(order.product_name, 44)}** · ${age} ngày · ${getOrderStatusLabel(order.status, guildId)} · ${ticket}`;
+    const customer = order.resolved_customer_identity || `ID \`${order.customer_id}\``;
+    return `${urgency} **${index + 1}. \`${order.order_code}\`** · ${customer} · **${trimText(order.product_name, 44)}** · ${age} ngày · ${getOrderStatusLabel(order.status, guildId)} · ${ticket}`;
   }) : [`${E('status_check')} Không có đơn đang mở. Hàng đợi hiện đã sạch.`];
   container.addTextDisplayComponents(new TextDisplayBuilder().setContent(rows.join('\n')));
   container.addSeparatorComponents(new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small));
@@ -382,6 +416,7 @@ export function buildAdminOrderDetailPayload(order, {
   reminderStage = null,
   roleIds = [],
   ticketChannelId = null,
+  customerIdentity = null,
   suppressRoleNotifications = false,
 } = {}) {
   const E = createEmojiResolver(order.guild_id);
@@ -398,6 +433,7 @@ export function buildAdminOrderDetailPayload(order, {
   const updatedUnix = toUnix(order.updated_at);
   const verifiedTicketId = /^\d{17,20}$/.test(String(ticketChannelId || '')) ? String(ticketChannelId) : null;
   const ticket = verifiedTicketId ? `<#${verifiedTicketId}>` : '**Đã đóng / đã xóa**';
+  const customer = customerIdentity || `ID \`${order.customer_id}\``;
   const note = String(order.note || '').replace(/\s+/g, ' ').trim();
   const claimant = order.claimed_by_id ? `<@${order.claimed_by_id}>` : '**Chưa có Admin claim**';
 
@@ -409,7 +445,8 @@ export function buildAdminOrderDetailPayload(order, {
   container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
   if (reminderStage) {
     container.addTextDisplayComponents(new TextDisplayBuilder().setContent([
-      `${E('ticket_user')} **Khách:** <@${order.customer_id}> · ${E('ticket_open')} **Ticket:** ${ticket}`,
+      `${E('ticket_user')} **Khách:** ${customer}`,
+      `${E('ticket_open')} **Ticket:** ${ticket}`,
       `${E('order_product')} **Sản phẩm:** ${trimText(order.product_name, 120)} · SL **${order.quantity || 1}**`,
       `${E('icon_chart')} **Trạng thái:** ${getOrderStatusLabel(order.status, order.guild_id)} · ${getPaymentStatusLabel(order.payment_status, order.guild_id)}`,
       `${E('payment_money')} **Giá trị:** ${formatCurrency(order.total_amount)} · nhận **${formatCurrency(order.amount_paid)}**`,
@@ -419,7 +456,7 @@ export function buildAdminOrderDetailPayload(order, {
     ].filter(Boolean).join('\n')));
   } else {
     container.addTextDisplayComponents(new TextDisplayBuilder().setContent([
-      `${E('ticket_user')} **Khách hàng:** <@${order.customer_id}> · \`${order.customer_id}\``,
+      `${E('ticket_user')} **Khách hàng:** ${customer}`,
       `${E('ticket_open')} **Ticket:** ${ticket} · ID \`${order.ticket_id}\``,
       `${E('order_product')} **Sản phẩm:** ${trimText(order.product_name, 180)} · SL **${order.quantity || 1}**`,
       note ? `${E('icon_edit')} **Ghi chú:** ${trimText(note, 260)}` : null,
@@ -488,8 +525,12 @@ export async function refreshAdminOrderCenter(guild, { force = false } = {}) {
   const currentConfig = getGuildConfig(guild.id);
   const orders = getActiveOrders(guild.id);
   for (const order of orders) {
-    const ticketChannel = await resolveOrderTicketChannel(guild, order);
+    const [ticketChannel, customerIdentity] = await Promise.all([
+      resolveOrderTicketChannel(guild, order),
+      resolveOrderCustomerIdentity(guild, order),
+    ]);
     order.resolved_ticket_channel_id = ticketChannel?.id || null;
+    order.resolved_customer_identity = customerIdentity;
   }
   const payload = buildAdminOrderCenterPanel({
     guildId: guild.id,
@@ -555,11 +596,15 @@ export async function processAdminOrderAgingReminders(client) {
     if (sent >= 10) break;
     const stage = selectAgingReminderStage(order);
     if (!stage) continue;
-    const ticketChannel = await resolveOrderTicketChannel(guild, order);
+    const [ticketChannel, customerIdentity] = await Promise.all([
+      resolveOrderTicketChannel(guild, order),
+      resolveOrderCustomerIdentity(guild, order),
+    ]);
     const message = await setup.channel.send(buildAdminOrderDetailPayload(order, {
       reminderStage: stage,
       roleIds,
       ticketChannelId: ticketChannel?.id || null,
+      customerIdentity,
     })).catch((error) => {
       console.error(`[ADMIN-ORDER-CENTER] Reminder ${order.order_code} failed:`, error.message);
       return null;
@@ -606,18 +651,23 @@ export async function refreshExistingAdminAgingReminderCards(guild, { force = fa
   for (const message of messages.values()) {
     if (message.author?.id !== guild.client.user.id) continue;
     const componentJson = JSON.stringify(message.components.map((component) => component.toJSON()));
-    const orderCode = componentJson.match(/order:claim:([A-Za-z0-9_-]{3,32})/)?.[1];
+    const orderCode = componentJson.match(/order:claim:([A-Za-z0-9_-]{3,32})/)?.[1]
+      || componentJson.match(/\b(?:CN|CR)_\d{3,20}\b/)?.[0];
     if (!orderCode) continue;
     scanned += 1;
     const order = db.prepare('SELECT * FROM orders WHERE guild_id = ? AND order_code = ?').get(guild.id, orderCode);
     if (!order) continue;
-    const ticketChannel = await resolveOrderTicketChannel(guild, order);
+    const [ticketChannel, customerIdentity] = await Promise.all([
+      resolveOrderTicketChannel(guild, order),
+      resolveOrderCustomerIdentity(guild, order),
+    ]);
     const stage = ageDays(order.created_at) >= config.adminOrderReminderWeekTwoDays ? 'week2' : 'week1';
     try {
       await message.edit(buildAdminOrderDetailPayload(order, {
         reminderStage: stage,
         roleIds,
         ticketChannelId: ticketChannel?.id || null,
+        customerIdentity,
         suppressRoleNotifications: true,
       }));
       updated += 1;
@@ -670,8 +720,14 @@ export async function handleAdminOrderCenterInteraction(interaction) {
       await interaction.editReply({ content: `Không tìm thấy đơn \`${trimText(code, 32)}\` trong Store 1.` });
       return true;
     }
-    const ticketChannel = await resolveOrderTicketChannel(interaction.guild, order);
-    const payload = buildAdminOrderDetailPayload(order, { ticketChannelId: ticketChannel?.id || null });
+    const [ticketChannel, customerIdentity] = await Promise.all([
+      resolveOrderTicketChannel(interaction.guild, order),
+      resolveOrderCustomerIdentity(interaction.guild, order),
+    ]);
+    const payload = buildAdminOrderDetailPayload(order, {
+      ticketChannelId: ticketChannel?.id || null,
+      customerIdentity,
+    });
     await interaction.editReply({ ...payload, flags: payload.flags | MessageFlags.Ephemeral });
     return true;
   }
