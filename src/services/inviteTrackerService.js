@@ -1,180 +1,174 @@
 import { db } from '../database/db.js';
-import { ChannelType, PermissionFlagsBits, ContainerBuilder, TextDisplayBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } from 'discord.js';
-import { createTicket } from './ticketService.js';
-import { withButtonEmoji } from '../utils/emojiHelper.js';
+import {
+  ensureInviteCampaignDiscordSetup,
+  processInviteDecorCampaign,
+  registerInviteCampaignJoin,
+} from './inviteCampaignService.js';
 
-// ─── Emoji custom của Cenar Store ────────────
-const E = (key) => {
-  const map = {
-    icon_sparkle: '<a:tsm_fire:1327553120842158111>',
-    icon_gift:    '🎁',
-    icon_star:    '<:star:1327549089704837142>',
-    icon_arrow_right: '<:muiten:1481124261501337601>',
-    icon_lock:    '🔒',
-  };
-  return map[key] || '⭐';
-};
-
-// Cache to store invites: guildId -> Collection of invites
+// guildId -> Collection<inviteCode, Invite>
 const invitesCache = new Map();
+const guildInviteLocks = new Map();
+const recentlyDeletedInvites = new Map();
+const RECENTLY_DELETED_TTL_MS = 30_000;
 
-/**
- * Initialize invite cache for all guilds
- */
+function snapshotInvite(invite) {
+  if (!invite?.code) return null;
+  return {
+    code: invite.code,
+    uses: Number(invite.uses || 0),
+    maxUses: Number(invite.maxUses || 0),
+    inviter: invite.inviter || null,
+    temporary: Boolean(invite.temporary),
+    createdTimestamp: invite.createdTimestamp || null,
+  };
+}
+
+function snapshotInviteCollection(invites) {
+  const snapshot = new Map();
+  for (const invite of invites?.values?.() || []) {
+    const entry = snapshotInvite(invite);
+    if (entry) snapshot.set(entry.code, entry);
+  }
+  return snapshot;
+}
+
+async function withGuildInviteLock(guildId, task) {
+  const previous = guildInviteLocks.get(guildId) || Promise.resolve();
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const queued = previous.then(() => gate);
+  guildInviteLocks.set(guildId, queued);
+  await previous;
+  try {
+    return await task();
+  } finally {
+    release();
+    if (guildInviteLocks.get(guildId) === queued) guildInviteLocks.delete(guildId);
+  }
+}
+
+function detectUsedInvite(cachedInvites, newInvites) {
+  const candidates = [];
+  for (const invite of newInvites.values()) {
+    const cached = cachedInvites?.get(invite.code);
+    const delta = Number(invite.uses || 0) - Number(cached?.uses || 0);
+    if (cached && delta > 0) candidates.push({ invite, delta });
+  }
+  candidates.sort((a, b) => b.delta - a.delta);
+  if (candidates[0]) return candidates[0].invite;
+
+  // Invite một lần thường biến mất ngay khi được dùng. Cache cũ vẫn giữ đủ
+  // inviter/code để quy lượt chính xác thay vì đánh dấu không xác định.
+  for (const cached of cachedInvites?.values?.() || []) {
+    if (newInvites.has(cached.code)) continue;
+    const maxUses = Number(cached.maxUses || 0);
+    if (maxUses > 0 && Number(cached.uses || 0) + 1 >= maxUses) return cached;
+  }
+  return null;
+}
+
 export async function initInviteCache(client) {
+  const results = [];
   for (const guild of client.guilds.cache.values()) {
     try {
       const invites = await guild.invites.fetch().catch(() => null);
-      if (invites) {
-        invitesCache.set(guild.id, invites);
-      }
-    } catch (err) {
-      console.error(`[INVITE-TRACKER] Could not fetch invites for guild ${guild.id}:`, err.message);
+      if (invites) invitesCache.set(guild.id, snapshotInviteCollection(invites));
+      const setup = await ensureInviteCampaignDiscordSetup(guild).catch((error) => {
+        console.error(`[INVITE-EVENT] Setup ${guild.id} failed:`, error.message);
+        return null;
+      });
+      results.push({ guildId: guild.id, cached: Boolean(invites), campaignReady: Boolean(setup) });
+    } catch (error) {
+      console.error(`[INVITE-TRACKER] Could not initialize guild ${guild.id}:`, error.message);
+      results.push({ guildId: guild.id, cached: false, campaignReady: false });
     }
   }
+  return results;
 }
 
-/**
- * Handle new member joining
- */
 export async function handleMemberAdd(member) {
-  const guild = member.guild;
-  const cachedInvites = invitesCache.get(guild.id);
-  
-  if (!cachedInvites) return; // No cache available
+  if (!member?.guild) return null;
+  return withGuildInviteLock(member.guild.id, async () => {
+    const guild = member.guild;
+    const cachedInvites = invitesCache.get(guild.id);
+    const priorInviteRecord = db.prepare(`
+      SELECT * FROM user_invites WHERE invited_id = ? AND guild_id = ?
+    `).get(member.id, guild.id) || null;
+    let usedInvite = null;
 
-  try {
-    const newInvites = await guild.invites.fetch().catch(() => null);
-    if (!newInvites) return;
-
-    // Find the invite that was used
-    const usedInvite = newInvites.find(inv => {
-      const cachedInv = cachedInvites.get(inv.code);
-      if (!cachedInv) return false;
-      return inv.uses > cachedInv.uses;
-    });
-
-    // Update cache
-    invitesCache.set(guild.id, newInvites);
-
-    if (usedInvite && usedInvite.inviter) {
-      const inviterId = usedInvite.inviter.id;
-      const invitedId = member.id;
-
-      // Don't count self-invites or bots
-      if (inviterId !== invitedId && !member.user.bot) {
-        db.prepare(
-          'INSERT OR IGNORE INTO user_invites (invited_id, inviter_id, guild_id, has_purchased) VALUES (?, ?, ?, 0)'
-        ).run(invitedId, inviterId, guild.id);
-        
-        console.log(`[INVITE-TRACKER] ${member.user.tag} joined using ${usedInvite.inviter.tag}'s invite.`);
+    try {
+      const newInvites = await guild.invites.fetch().catch(() => null);
+      if (newInvites) {
+        usedInvite = detectUsedInvite(cachedInvites, newInvites);
+        if (!usedInvite) {
+          const deleted = recentlyDeletedInvites.get(guild.id);
+          const recent = deleted
+            ? [...deleted.values()]
+              .filter((entry) => Date.now() - entry.deletedAt <= RECENTLY_DELETED_TTL_MS)
+              .sort((a, b) => b.deletedAt - a.deletedAt)[0]
+            : null;
+          if (recent && Number(recent.invite.maxUses || 0) > 0) usedInvite = recent.invite;
+        }
+        invitesCache.set(guild.id, snapshotInviteCollection(newInvites));
       }
+    } catch (error) {
+      console.error(`[INVITE-TRACKER] Fetch on join failed for ${guild.id}:`, error.message);
     }
-  } catch (err) {
-    console.error(`[INVITE-TRACKER] Error in handleMemberAdd:`, err);
-  }
+
+    const inviterId = usedInvite?.inviter?.id || null;
+    if (inviterId && inviterId !== member.id && !member.user.bot) {
+      db.prepare(`
+        INSERT OR IGNORE INTO user_invites (invited_id, inviter_id, guild_id, has_purchased)
+        VALUES (?, ?, ?, 0)
+      `).run(member.id, inviterId, guild.id);
+      console.log(`[INVITE-TRACKER] ${member.user.tag} joined with ${usedInvite.code} from ${usedInvite.inviter.tag}.`);
+    }
+
+    const eventEntry = await registerInviteCampaignJoin({
+      member,
+      inviterId,
+      inviteCode: usedInvite?.code || null,
+      priorInviteRecord,
+    }).catch((error) => {
+      console.error(`[INVITE-EVENT] Could not record ${member.id}:`, error.message);
+      return null;
+    });
+    return { inviterId, inviteCode: usedInvite?.code || null, eventEntry };
+  });
 }
 
-/**
- * Update cache when an invite is created
- */
 export async function handleInviteCreate(invite) {
   const guild = invite.guild;
   if (!guild) return;
   const cachedInvites = invitesCache.get(guild.id);
-  if (cachedInvites) {
-    cachedInvites.set(invite.code, invite);
-  }
+  const snapshot = snapshotInvite(invite);
+  if (cachedInvites && snapshot) cachedInvites.set(invite.code, snapshot);
 }
 
-/**
- * Update cache when an invite is deleted
- */
 export async function handleInviteDelete(invite) {
   const guild = invite.guild;
   if (!guild) return;
   const cachedInvites = invitesCache.get(guild.id);
-  if (cachedInvites) {
-    cachedInvites.delete(invite.code);
+  if (cachedInvites) cachedInvites.delete(invite.code);
+  let deleted = recentlyDeletedInvites.get(guild.id);
+  if (!deleted) {
+    deleted = new Map();
+    recentlyDeletedInvites.set(guild.id, deleted);
+  }
+  deleted.set(invite.code, { invite, deletedAt: Date.now() });
+  for (const [code, entry] of deleted) {
+    if (Date.now() - entry.deletedAt > RECENTLY_DELETED_TTL_MS) deleted.delete(code);
   }
 }
 
-/**
- * Process pending invite rewards (called from scheduler)
- */
 export async function processPendingInviteRewards(client) {
-  // Find users who have at least 5 invites and 1 purchased, but haven't claimed yet
-  const eligibleUsers = db.prepare(`
-    SELECT inviter_id, guild_id
-    FROM user_invites
-    WHERE guild_id IN (SELECT guild_id FROM guild_settings)
-    GROUP BY inviter_id, guild_id
-    HAVING COUNT(invited_id) >= 5 
-       AND SUM(has_purchased) >= 1
-  `).all();
-
-  for (const { inviter_id, guild_id } of eligibleUsers) {
-    const claimed = db.prepare('SELECT id FROM invite_rewards_claimed WHERE user_id = ? AND guild_id = ? LIMIT 1').get(inviter_id, guild_id);
-    if (claimed) continue; // Already claimed
-
-    console.log(`[INVITE-TRACKER] User ${inviter_id} is eligible for the Decor Reward!`);
-
-    // Record the claim
-    db.prepare('INSERT INTO invite_rewards_claimed (user_id, guild_id) VALUES (?, ?)').run(inviter_id, guild_id);
-
-    // Create a reward ticket for the user
-    const guild = client.guilds.cache.get(guild_id);
-    if (!guild) continue;
-
-    try {
-      const inviter = await guild.members.fetch(inviter_id).catch(() => null);
-      if (!inviter) continue;
-
-      const ticketResult = await createTicket(
-        client,
-        guild,
-        inviter.user,
-        'claim-decor',
-        'Tự động tạo ticket nhận thưởng Decor từ Sự kiện Invite.'
-      );
-
-      if (ticketResult && ticketResult.channel) {
-        const ticketChannel = ticketResult.channel;
-
-        const container = new ContainerBuilder()
-          .setBackgroundColor('#ff69b4')
-          .setBorderColor('#ffffff');
-
-        const title = new TextDisplayBuilder()
-          .setText(`🎉 CHÚC MỪNG BẠN ĐÃ TRÚNG THƯỞNG! 🎉`)
-          .setStyle('header1')
-          .setColor('#ffffff');
-          
-        const desc = new TextDisplayBuilder()
-          .setText(`${E('icon_sparkle')} Chào mừng <@${inviter_id}>!\n\n${E('icon_gift')} **Thành tích của bạn:**\n- Đã mời thành công: **5+** khách.\n- Đã có **1+** khách phát sinh đơn hàng!\n\n> ${E('icon_star')} **Phần thưởng của bạn:** 1 x **Hiệu ứng Hồ sơ Discord (Decor Free)**\n\n${E('icon_arrow_right')} Vui lòng nhắn tin tại đây và đợi Admin vào xử lý để nhận Decor nhé!`)
-          .setStyle('paragraph')
-          .setColor('#ffffff');
-
-        container.addText(title).addText(desc);
-
-        const closeBtn = withButtonEmoji(
-          new ButtonBuilder()
-            .setCustomId('ticket:close')
-            .setLabel('Khóa Ticket')
-            .setStyle(ButtonStyle.Danger),
-          E('icon_lock'),
-        );
-
-        const actionRow = new ActionRowBuilder().addComponents(closeBtn);
-
-        await ticketChannel.send({
-          content: `||<@${inviter_id}>|| Admin đã được thông báo!`,
-          components: [container, actionRow],
-          flags: MessageFlags.IsComponentsV2
-        });
-      }
-    } catch (err) {
-      console.error(`[INVITE-TRACKER] Failed to create reward ticket:`, err);
-    }
-  }
+  return processInviteDecorCampaign(client);
 }
+
+export const inviteTrackerInternals = {
+  detectUsedInvite,
+  invitesCache,
+  recentlyDeletedInvites,
+  snapshotInvite,
+  snapshotInviteCollection,
+};

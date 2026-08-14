@@ -6,6 +6,7 @@ import {
 } from 'discord.js';
 import { config } from '../config.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
+import { markInviteCampaignMemberLeft } from '../services/inviteCampaignService.js';
 
 export const name = Events.GuildMemberRemove;
 export const once = false;
@@ -21,6 +22,13 @@ export async function execute(member) {
     const isServer1   = guild.id === SERVER1_ID;
     const brandName   = config.storeName || 'Cenar Store';
     const E           = createEmojiResolver(guild.id);
+
+    // Event invite chỉ công nhận thành viên ở liên tục đủ 48 giờ. Ghi trạng
+    // thái LEFT trước mọi early-return của giao diện tạm biệt.
+    const inviteLeave = markInviteCampaignMemberLeft(member);
+    if (inviteLeave.changed) {
+      console.log(`[INVITE-EVENT] ${user.tag} left before the 48-hour validation point.`);
+    }
 
     const goodbyeChannel = guild.channels.cache.find(
       c => c.type === ChannelType.GuildText && c.name.includes('tạm-biệt')

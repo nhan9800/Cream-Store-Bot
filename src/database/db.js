@@ -241,6 +241,69 @@ export function initDatabase() {
       claimed_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE IF NOT EXISTS invite_campaigns (
+      event_key TEXT PRIMARY KEY,
+      guild_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      starts_at TEXT NOT NULL,
+      ends_at TEXT NOT NULL,
+      required_valid_invites INTEGER NOT NULL DEFAULT 5,
+      min_stay_hours INTEGER NOT NULL DEFAULT 48,
+      min_account_age_days INTEGER NOT NULL DEFAULT 30,
+      reward_name TEXT NOT NULL,
+      reward_value INTEGER NOT NULL DEFAULT 0,
+      announcement_channel_id TEXT,
+      announcement_message_id TEXT,
+      admin_log_channel_id TEXT,
+      status TEXT NOT NULL DEFAULT 'ACTIVE',
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS invite_campaign_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      event_key TEXT NOT NULL,
+      guild_id TEXT NOT NULL,
+      inviter_id TEXT,
+      invited_id TEXT NOT NULL,
+      invite_code TEXT,
+      status TEXT NOT NULL,
+      disqualify_reason TEXT,
+      account_created_at TEXT,
+      account_age_days INTEGER NOT NULL DEFAULT 0,
+      joined_at TEXT NOT NULL,
+      qualifies_at TEXT,
+      validated_at TEXT,
+      left_at TEXT,
+      risk_flags TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(event_key, guild_id, invited_id),
+      FOREIGN KEY (event_key) REFERENCES invite_campaigns(event_key) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS invite_campaign_rewards (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      event_key TEXT NOT NULL,
+      guild_id TEXT NOT NULL,
+      inviter_id TEXT NOT NULL,
+      valid_invites INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'ELIGIBLE',
+      eligible_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      user_notified_at TEXT,
+      notification_method TEXT,
+      admin_notified_at TEXT,
+      admin_message_id TEXT,
+      notification_attempts INTEGER NOT NULL DEFAULT 0,
+      last_notification_error TEXT,
+      claimed_at TEXT,
+      claimed_by_id TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(event_key, guild_id, inviter_id),
+      FOREIGN KEY (event_key) REFERENCES invite_campaigns(event_key) ON DELETE CASCADE
+    );
+
     CREATE TABLE IF NOT EXISTS customer_profiles (
       guild_id TEXT NOT NULL,
       customer_id TEXT NOT NULL,
@@ -461,6 +524,12 @@ export function initDatabase() {
       ON scam_image_fingerprints (verdict, last_seen_at);
     CREATE INDEX IF NOT EXISTS idx_owner_ping_enforcement
       ON owner_ping_enforcement (guild_id, last_mention_at);
+    CREATE INDEX IF NOT EXISTS idx_invite_campaign_entries_due
+      ON invite_campaign_entries (event_key, status, qualifies_at);
+    CREATE INDEX IF NOT EXISTS idx_invite_campaign_entries_inviter
+      ON invite_campaign_entries (event_key, guild_id, inviter_id, status);
+    CREATE INDEX IF NOT EXISTS idx_invite_campaign_rewards_notify
+      ON invite_campaign_rewards (event_key, admin_notified_at, user_notified_at);
     CREATE INDEX IF NOT EXISTS idx_product_catalog_guild ON product_catalog (guild_id, is_active, sort_order);
     CREATE INDEX IF NOT EXISTS idx_sub_accounts_guild_status ON subscription_accounts (guild_id, status, service_type);
     CREATE INDEX IF NOT EXISTS idx_sub_accounts_renewal ON subscription_accounts (next_renewal_at, status);
