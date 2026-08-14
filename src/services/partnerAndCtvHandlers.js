@@ -24,7 +24,20 @@ import {
   PARTNER_PROGRAM,
   updatePartnerStatus,
 } from './partnerService.js';
-import { getCtvSettings, isCustomerCtv, setCustomerCtvStatus } from './ctvService.js';
+import {
+  addCtvApplication,
+  approveCtvApplication,
+  getCtvRecruitmentSnapshot,
+  getCtvSettings,
+  getPendingCtvApplication,
+  isCustomerCtv,
+  rejectCtvApplication,
+  setCustomerCtvStatus,
+} from './ctvService.js';
+import {
+  publishCtvRecruitmentFullNotice,
+  publishCtvRecruitmentPanel,
+} from './ctvRecruitmentPanelService.js';
 import { accentFor, stripDiscordUnicode } from '../utils/uiKit.js';
 
 function cardPayload(guildId, { tone = 'primary', title, lines = [], ephemeral = false } = {}) {
@@ -430,6 +443,18 @@ export async function handleCtvApplyStart(interaction) {
       ephemeral: true,
     }));
   }
+  const recruitment = getCtvRecruitmentSnapshot(interaction.guildId);
+  if (recruitment.isFull) {
+    return interaction.reply(cardPayload(interaction.guildId, {
+      tone: 'danger',
+      title: 'Đợt tuyển CTV đã đủ',
+      lines: [
+        `${E('status_cross')} Shop đã tuyển đủ **${recruitment.capacity}/${recruitment.capacity} CTV** cho đợt hiện tại.`,
+        `${E('cenar_announce')} Form ứng tuyển đang tạm khóa; hãy theo dõi kênh này để nhận thông báo đợt tiếp theo.`,
+      ],
+      ephemeral: true,
+    }));
+  }
   if (isCustomerCtv(interaction.guildId, interaction.user.id)) {
     return interaction.reply(cardPayload(interaction.guildId, {
       tone: 'warning',
@@ -438,8 +463,22 @@ export async function handleCtvApplyStart(interaction) {
       ephemeral: true,
     }));
   }
+  const pendingApplication = getPendingCtvApplication(interaction.guildId, interaction.user.id);
+  if (pendingApplication) {
+    return interaction.reply(cardPayload(interaction.guildId, {
+      tone: 'warning',
+      title: 'Hồ sơ CTV đang chờ duyệt',
+      lines: [
+        `${E('cenar_cooldown')} Hồ sơ \`#${pendingApplication.id}\` đã nằm trong hàng chờ, bạn không cần gửi lại.`,
+        recruitment.active ? `${E('cenar_verified')} Đợt tuyển hiện còn **${recruitment.remaining}/${recruitment.capacity} vị trí**.` : null,
+      ],
+      ephemeral: true,
+    }));
+  }
 
-  const modal = new ModalBuilder().setCustomId('ctv:apply:modal').setTitle('Đăng ký Cenar CTV');
+  const modal = new ModalBuilder().setCustomId('ctv:apply:modal').setTitle(
+    recruitment.active ? `Ứng tuyển CTV · Còn ${recruitment.remaining}/${recruitment.capacity}` : 'Đăng ký Cenar CTV',
+  );
   const sourceInput = new TextInputBuilder()
     .setCustomId('source')
     .setLabel('Kênh hoặc nguồn khách hàng')
@@ -471,21 +510,42 @@ export async function handleCtvApplyModal(interaction) {
     if (!approveChannel?.isTextBased()) throw new Error('Không tìm thấy kênh duyệt CTV.');
     const source = stripDiscordUnicode(interaction.fields.getTextInputValue('source'));
     const reason = stripDiscordUnicode(interaction.fields.getTextInputValue('reason'));
+    const result = addCtvApplication(interaction.guildId, interaction.user.id, source, reason);
+    if (result.reason === 'FULL') {
+      await publishCtvRecruitmentPanel(interaction.guild).catch(() => null);
+      return interaction.editReply(cardPayload(interaction.guildId, {
+        tone: 'danger',
+        title: 'Đợt tuyển CTV vừa đủ slot',
+        lines: [
+          `${E('status_cross')} Shop đã tuyển đủ **${result.snapshot.capacity}/${result.snapshot.capacity} CTV** trước khi hồ sơ được gửi.`,
+          `${E('cenar_announce')} Form đã được khóa tự động. Hãy chờ đợt tuyển tiếp theo nhé.`,
+        ],
+      }));
+    }
+    if (result.reason === 'PENDING') {
+      return interaction.editReply(cardPayload(interaction.guildId, {
+        tone: 'warning',
+        title: 'Hồ sơ CTV đã tồn tại',
+        lines: [`${E('cenar_cooldown')} Hồ sơ \`#${result.application.id}\` của bạn đang chờ Admin xét duyệt.`],
+      }));
+    }
+    const application = result.application;
     const container = new ContainerBuilder().setAccentColor(accentFor('warning'));
-    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(`## ${E('cenar_ctv')} Hồ sơ CTV mới`));
+    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(`## ${E('cenar_ctv')} Hồ sơ CTV #${application.id}`));
     container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
     container.addTextDisplayComponents(new TextDisplayBuilder().setContent([
       `${E('cenar_verified')} **Ứng viên:** <@${interaction.user.id}> · \`${interaction.user.id}\``,
+      result.snapshot.active ? `${E('cenar_price')} **Slot lúc nộp:** còn ${result.snapshot.remaining}/${result.snapshot.capacity} vị trí` : null,
       `${E('cenar_announce')} **Nguồn khách:** ${source}`,
       `${E('cenar_support')} **Kế hoạch:**\n> ${reason.replace(/\n/g, '\n> ')}`,
       `-# Khi duyệt, bot tự cấp role CTV, mở danh mục nội bộ và áp dụng giá CTV vào đơn hàng.`,
-    ].join('\n')));
+    ].filter(Boolean).join('\n')));
     await approveChannel.send({
       components: addReviewButtons(
         container,
         E,
-        `ctv:approve:${interaction.user.id}`,
-        `ctv:reject:${interaction.user.id}`,
+        `ctv:approve-app:${application.id}`,
+        `ctv:reject-app:${application.id}`,
         'Duyệt CTV',
       ),
       flags: MessageFlags.IsComponentsV2,
@@ -495,7 +555,8 @@ export async function handleCtvApplyModal(interaction) {
       tone: 'success',
       title: 'Đã tiếp nhận hồ sơ CTV',
       lines: [
-        `${E('cenar_verified')} Hồ sơ đã được chuyển tới đội ngũ xét duyệt.`,
+        `${E('cenar_verified')} Hồ sơ \`#${application.id}\` đã được chuyển tới đội ngũ xét duyệt.`,
+        result.snapshot.active ? `${E('cenar_price')} Hiện còn **${result.snapshot.remaining}/${result.snapshot.capacity} vị trí**; slot chỉ được giữ khi Admin duyệt.` : null,
         `${E('cenar_cooldown')} Kết quả và quyền truy cập sẽ được gửi qua tin nhắn riêng.`,
       ],
     }));
@@ -505,6 +566,122 @@ export async function handleCtvApplyModal(interaction) {
       title: 'Không thể gửi hồ sơ CTV',
       lines: [`${E('status_cross')} ${error.message}`],
     }));
+  }
+}
+
+export async function handleCtvApplicationApprove(interaction, applicationId) {
+  if (!await reviewerGuard(interaction)) return;
+  const E = createEmojiResolver(interaction.guildId);
+  const decision = approveCtvApplication(interaction.guildId, applicationId, interaction.user.id);
+  if (!decision.approved) {
+    if (decision.reason === 'FULL') {
+      await Promise.all([
+        publishCtvRecruitmentPanel(interaction.guild).catch(() => null),
+        publishCtvRecruitmentFullNotice(interaction.guild).catch(() => null),
+      ]);
+    }
+    const reasonLine = decision.reason === 'FULL'
+      ? `${E('status_cross')} Đợt tuyển đã đủ **${decision.snapshot.capacity}/${decision.snapshot.capacity} CTV**; hồ sơ này chưa chiếm slot.`
+      : decision.reason === 'PROCESSED'
+        ? `${E('cenar_cooldown')} Hồ sơ đã được xử lý với trạng thái **${decision.application?.status || 'không xác định'}**.`
+        : `${E('status_cross')} Không tìm thấy hồ sơ CTV \`#${applicationId}\`.`;
+    return interaction.reply(cardPayload(interaction.guildId, {
+      tone: decision.reason === 'FULL' ? 'danger' : 'warning',
+      title: decision.reason === 'FULL' ? 'Đã tuyển đủ CTV' : 'Không thể duyệt hồ sơ',
+      lines: [reasonLine],
+      ephemeral: true,
+    }));
+  }
+
+  await interaction.deferUpdate();
+  const applicantId = decision.application.applicant_id;
+  const settings = getCtvSettings(interaction.guildId);
+  setCustomerCtvStatus(interaction.guildId, applicantId, true);
+  const member = await interaction.guild.members.fetch(applicantId).catch(() => null);
+  let roleGranted = false;
+  if (member && settings.ctv_role_id) {
+    roleGranted = await member.roles.add(settings.ctv_role_id, `CTV application #${applicationId} approved by ${interaction.user.id}`)
+      .then(() => true)
+      .catch(() => false);
+  }
+
+  await interaction.editReply(cardPayload(interaction.guildId, {
+    tone: 'success',
+    title: `Đã duyệt hồ sơ CTV #${applicationId}`,
+    lines: [
+      `${E('cenar_ctv')} **CTV:** <@${applicantId}>`,
+      `${E('cenar_admin')} **Admin duyệt:** <@${interaction.user.id}>`,
+      `${roleGranted ? E('cenar_verified') : E('cenar_cooldown')} **Role CTV:** ${roleGranted ? 'Đã cấp tự động' : 'Chưa thể cấp tự động'}`,
+      decision.alreadyCtv
+        ? `${E('cenar_cooldown')} Ứng viên đã có trạng thái CTV từ trước nên **không trừ thêm slot**.`
+        : decision.snapshot.active
+          ? `${decision.snapshot.isFull ? E('status_cross') : E('cenar_price')} **Slot còn lại:** ${decision.snapshot.remaining}/${decision.snapshot.capacity}`
+          : null,
+      `${E('cenar_price')} Giá CTV đã được kích hoạt trong catalog và luồng mua hàng.`,
+    ],
+  }));
+
+  await publishCtvRecruitmentPanel(interaction.guild).catch((error) => {
+    console.error('[CTV-RECRUITMENT-PANEL]', error);
+  });
+  if (decision.becameFull) {
+    await publishCtvRecruitmentFullNotice(interaction.guild).catch((error) => {
+      console.error('[CTV-RECRUITMENT-FULL]', error);
+    });
+  }
+
+  const applicant = await interaction.client.users.fetch(applicantId).catch(() => null);
+  if (applicant) {
+    await applicant.send(cardPayload(interaction.guildId, {
+      tone: 'success',
+      title: 'Chúc mừng, bạn đã trở thành Cenar CTV',
+      lines: [
+        `${E('cenar_verified')} Hồ sơ \`#${applicationId}\` đã được duyệt; role và mức giá CTV đã kích hoạt.`,
+        settings.price_channel_id ? `${E('cenar_price')} Bảng giá nội bộ: <#${settings.price_channel_id}>` : null,
+        settings.chat_channel_id ? `${E('cenar_support')} Kênh trao đổi CTV: <#${settings.chat_channel_id}>` : null,
+        settings.order_log_channel_id ? `${E('cenar_announce')} Log đơn CTV: <#${settings.order_log_channel_id}>` : null,
+        `${E('cenar_wallet')} Mỗi đơn mua qua bot sẽ tự áp dụng giá CTV và ghi log riêng.`,
+      ],
+    })).catch(() => null);
+  }
+}
+
+export async function handleCtvApplicationReject(interaction, applicationId) {
+  if (!await reviewerGuard(interaction)) return;
+  const E = createEmojiResolver(interaction.guildId);
+  const decision = rejectCtvApplication(interaction.guildId, applicationId, interaction.user.id);
+  if (!decision.rejected) {
+    return interaction.reply(cardPayload(interaction.guildId, {
+      tone: 'warning',
+      title: 'Không thể từ chối hồ sơ',
+      lines: [decision.reason === 'PROCESSED'
+        ? `${E('cenar_cooldown')} Hồ sơ đã được xử lý với trạng thái **${decision.application?.status || 'không xác định'}**.`
+        : `${E('status_cross')} Không tìm thấy hồ sơ CTV \`#${applicationId}\`.`],
+      ephemeral: true,
+    }));
+  }
+
+  await interaction.deferUpdate();
+  const applicantId = decision.application.applicant_id;
+  await interaction.editReply(cardPayload(interaction.guildId, {
+    tone: 'danger',
+    title: `Đã từ chối hồ sơ CTV #${applicationId}`,
+    lines: [
+      `${E('cenar_ctv')} **Ứng viên:** <@${applicantId}>`,
+      `${E('cenar_admin')} **Người xử lý:** <@${interaction.user.id}>`,
+      `${E('cenar_support')} Hồ sơ bị từ chối **không làm thay đổi số slot tuyển dụng**.`,
+    ],
+  }));
+  const applicant = await interaction.client.users.fetch(applicantId).catch(() => null);
+  if (applicant) {
+    await applicant.send(cardPayload(interaction.guildId, {
+      tone: 'danger',
+      title: 'Hồ sơ CTV chưa được chấp thuận',
+      lines: [
+        `${E('cenar_support')} Hồ sơ \`#${applicationId}\` chưa phù hợp với chương trình tại thời điểm này.`,
+        `${E('cenar_partner_ok')} Bạn có thể hoàn thiện nguồn khách và kế hoạch chăm sóc rồi đăng ký lại sau.`,
+      ],
+    })).catch(() => null);
   }
 }
 

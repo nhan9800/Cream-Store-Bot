@@ -14,9 +14,10 @@ import { db } from '../database/db.js';
 import { roleColorsFor } from '../config/roleColors.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { getPartnerSettings, upsertPartnerSettings } from './partnerService.js';
-import { getCtvSettings, upsertCtvSettings } from './ctvService.js';
+import { ensureCtvRecruitmentCampaign, getCtvSettings, upsertCtvSettings } from './ctvService.js';
 import { accentFor } from '../utils/uiKit.js';
 import { publishCtvPricePanel } from './ctvPriceService.js';
+import { publishCtvRecruitmentPanel } from './ctvRecruitmentPanelService.js';
 import { isInternationalGuild } from '../utils/locale.js';
 
 const IDS = Object.freeze({
@@ -502,7 +503,12 @@ export async function autoSetupPartnerAndCtv(client) {
         partnerDirectory: partnerDirectory.id,
       });
       await publishPartnerBroadcastGuide(partnerBroadcast, guild.id, { partner_role_id: partnerRole.id });
-      await postRecruitmentPanel(ctvRecruit, 'ctv', guild.id, { ctvChat: ctvChat.id, ctvOrderLog: ctvOrderLog.id });
+      if (guild.id === '1282637033340403754') {
+        ensureCtvRecruitmentCampaign(guild.id, 3);
+        await publishCtvRecruitmentPanel(guild);
+      } else {
+        await postRecruitmentPanel(ctvRecruit, 'ctv', guild.id, { ctvChat: ctvChat.id, ctvOrderLog: ctvOrderLog.id });
+      }
       await publishCtvPricePanel(guild).catch((error) => {
         console.warn(`[AUTO-SETUP] CTV price panel ${guild.id}: ${error.message}`);
       });

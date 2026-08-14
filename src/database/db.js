@@ -989,6 +989,22 @@ export function initDatabase() {
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE IF NOT EXISTS ctv_applications (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      guild_id TEXT NOT NULL,
+      applicant_id TEXT NOT NULL,
+      source TEXT NOT NULL,
+      reason TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'PENDING',
+      reviewed_by TEXT,
+      reviewed_at TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE INDEX IF NOT EXISTS idx_ctv_applications_guild_status
+      ON ctv_applications (guild_id, status, created_at);
+    CREATE INDEX IF NOT EXISTS idx_ctv_applications_applicant
+      ON ctv_applications (guild_id, applicant_id, created_at);
+
     CREATE TABLE IF NOT EXISTS partner_mention_usage (
       guild_id TEXT NOT NULL,
       user_id TEXT NOT NULL,
@@ -1093,6 +1109,11 @@ export function initDatabase() {
   ensureColumn('ctv_settings', 'price_channel_id', 'TEXT');
   ensureColumn('ctv_settings', 'price_message_id', 'TEXT');
   ensureColumn('ctv_settings', 'price_message_ids', 'TEXT');
+  ensureColumn('ctv_settings', 'recruitment_capacity', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn('ctv_settings', 'recruitment_filled', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn('ctv_settings', 'recruitment_campaign_started_at', 'TEXT');
+  ensureColumn('ctv_settings', 'recruitment_message_id', 'TEXT');
+  ensureColumn('ctv_settings', 'recruitment_full_notice_message_id', 'TEXT');
   ensureColumn('customer_profiles', 'credit_limit', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn('customer_profiles', 'credit_used', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn('customer_profiles', 'credit_status', "TEXT NOT NULL DEFAULT 'ACTIVE'");

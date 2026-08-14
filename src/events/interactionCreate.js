@@ -55,7 +55,18 @@ import {
   buildWarrantyReviewedStateV2,
 } from '../services/warrantyService.js';
 import { resolveSelectMenuEmoji, resolveProductEmoji, formatProductDisplayName } from '../services/emojiService.js';
-import { handlePartnerApplyStart, handlePartnerApplyModal, handlePartnerApprove, handlePartnerReject, handleCtvApplyStart, handleCtvApplyModal, handleCtvApprove, handleCtvReject } from '../services/partnerAndCtvHandlers.js';
+import {
+  handleCtvApplicationApprove,
+  handleCtvApplicationReject,
+  handleCtvApplyModal,
+  handleCtvApplyStart,
+  handleCtvApprove,
+  handleCtvReject,
+  handlePartnerApplyModal,
+  handlePartnerApplyStart,
+  handlePartnerApprove,
+  handlePartnerReject,
+} from '../services/partnerAndCtvHandlers.js';
 import { isCustomerCtv } from '../services/ctvService.js';
 import {
   buildCloseConfirmComponents,
@@ -2113,6 +2124,18 @@ export function registerInteractionHandler(client, commands) {
 
       if (interaction.customId === 'ctv:apply:start') {
         await handleCtvApplyStart(interaction);
+        return;
+      }
+
+      if (interaction.customId.startsWith('ctv:approve-app:')) {
+        const applicationId = interaction.customId.split(':')[2];
+        await handleCtvApplicationApprove(interaction, applicationId);
+        return;
+      }
+
+      if (interaction.customId.startsWith('ctv:reject-app:')) {
+        const applicationId = interaction.customId.split(':')[2];
+        await handleCtvApplicationReject(interaction, applicationId);
         return;
       }
 
