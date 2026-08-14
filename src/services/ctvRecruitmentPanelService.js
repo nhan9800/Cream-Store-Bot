@@ -18,10 +18,16 @@ import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { isInternationalGuild } from '../utils/locale.js';
 import { accentFor } from '../utils/uiKit.js';
 
+const STORE_ONE_GUILD_ID = '1282637033340403754';
+export const STORE_ONE_MEMBER_ROLE_ID = '1282638730812854345';
+
 export function buildCtvRecruitmentPayload(guildId, references = {}, suppliedSnapshot = null) {
   const E = createEmojiResolver(guildId);
   const snapshot = suppliedSnapshot || getCtvRecruitmentSnapshot(guildId);
   const international = isInternationalGuild(guildId);
+  const announcementRoleId = references.announcementRoleId
+    || (guildId === STORE_ONE_GUILD_ID ? STORE_ONE_MEMBER_ROLE_ID : null);
+  const announcementMention = announcementRoleId ? `<@&${announcementRoleId}>` : null;
   const sparkle = E('ctv_sparkle', '<a:cenar_starxoay:1481141954346483845>');
   const gift = E('ctv_gift', '<:cenar_sale_gift:1534852792295100436>');
   const notes = E('ctv_notes', '<:cenar_34562snoopypencil:1282641307742900225>');
@@ -59,6 +65,7 @@ export function buildCtvRecruitmentPayload(guildId, references = {}, suppliedSna
   } else {
     hero.addTextDisplayComponents(new TextDisplayBuilder().setContent([
       `# ${sparkle} CENAR STORE · TUYỂN THÊM ${totalLabel} CTV`,
+      announcementMention,
       snapshot.active
         ? `> ${snapshot.isFull ? blocked : verified} **${snapshot.isFull ? `ĐÃ TUYỂN ĐỦ · ${totalLabel}/${totalLabel} VỊ TRÍ` : `CÒN ${remainingLabel}/${totalLabel} VỊ TRÍ` }**`
         : `> ${verified} Shop đang tiếp nhận hồ sơ Cộng Tác Viên.`,
@@ -98,7 +105,9 @@ export function buildCtvRecruitmentPayload(guildId, references = {}, suppliedSna
   return {
     components: [hero, rules, new ActionRowBuilder().addComponents(button)],
     flags: MessageFlags.IsComponentsV2,
-    allowedMentions: { parse: [] },
+    allowedMentions: announcementRoleId
+      ? { parse: [], roles: [announcementRoleId] }
+      : { parse: [] },
   };
 }
 

@@ -8,7 +8,10 @@ import {
   rejectCtvApplication,
   startCtvRecruitmentCampaign,
 } from '../src/services/ctvService.js';
-import { buildCtvRecruitmentPayload } from '../src/services/ctvRecruitmentPanelService.js';
+import {
+  buildCtvRecruitmentPayload,
+  STORE_ONE_MEMBER_ROLE_ID,
+} from '../src/services/ctvRecruitmentPanelService.js';
 
 const GUILD_ID = `test_ctv_campaign_${Date.now()}`;
 const DEFAULT_EMOJI = /[\u{1F000}-\u{1FAFF}\u2600-\u27BF]/u;
@@ -102,5 +105,20 @@ describe('CTV recruitment slots', () => {
     expect(fullButton.style).toBe(ButtonStyle.Secondary);
     expect(openText).not.toMatch(DEFAULT_EMOJI);
     expect(openText).toMatch(/<a?:cenar_[a-zA-Z0-9_]+:\d+>/);
+  });
+
+  it('mentions only the large Store 1 community role', () => {
+    const payload = buildCtvRecruitmentPayload('1282637033340403754', {}, {
+      active: true,
+      capacity: 3,
+      filled: 0,
+      remaining: 3,
+      isFull: false,
+    });
+    const text = allDisplayText(payload);
+    expect(payload.allowedMentions).toEqual({ parse: [], roles: [STORE_ONE_MEMBER_ROLE_ID] });
+    expect(text).toContain(`<@&${STORE_ONE_MEMBER_ROLE_ID}>`);
+    expect(text.match(/<@&\d+>/g)).toHaveLength(1);
+    expect(text).not.toContain('@everyone');
   });
 });
