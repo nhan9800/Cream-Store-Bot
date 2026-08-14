@@ -166,8 +166,98 @@ async function ensureChannel(guild, { id, name, parent, overwrites }) {
   return channel;
 }
 
+export function buildPartnerRecruitmentPayload(guildId, references = {}) {
+  const E = createEmojiResolver(guildId);
+  const international = isInternationalGuild(guildId);
+  const sparkle = E('partner_sparkle', '<a:cenar_starxoay:1481141954346483845>');
+  const gift = E('partner_gift', '<:cenar_sale_gift:1534852792295100436>');
+  const notes = E('partner_notes', '<:cenar_34562snoopypencil:1282641307742900225>');
+  const arrow = E('partner_arrow', '<a:cenar_arrow2:1367139234833498113>');
+  const boost = E('brand_boost');
+  const verified = E('cenar_verified');
+  const warning = E('status_warn');
+  const blocked = E('status_cross');
+
+  const hero = new ContainerBuilder().setAccentColor(accentFor('primary'));
+  const terms = new ContainerBuilder().setAccentColor(accentFor('warning'));
+
+  if (international) {
+    hero.addTextDisplayComponents(new TextDisplayBuilder().setContent([
+      `# ${sparkle} CENAR PARTNER · 3K+ COMMUNITY PROGRAM`,
+      `> ${gift} Cenar Store sponsors a community giveaway every week for approved, high-growth partners.`,
+      '',
+      `### ${verified} PARTNER BENEFITS`,
+      `${gift} Weekly giveaway prizes sponsored by Cenar Store, subject to inventory and campaign performance.`,
+      `${notes} Co-branded event copy, artwork guidance and launch support from the Store team.`,
+      `${boost} Verified Partner role, directory placement${references.partnerDirectory ? ` at <#${references.partnerDirectory}>` : ''}, and priority campaigns for strong performers.`,
+      `${arrow} Qualified partners may receive referral perks, exclusive codes and larger campaign budgets.`,
+    ].join('\n')));
+    terms.addTextDisplayComponents(new TextDisplayBuilder().setContent([
+      `## ${warning} ELIGIBILITY & PARTNER COMMITMENT`,
+      `${verified} **Required:** at least **3,000 genuine members**, clear weekly activity, and a growing community.`,
+      `${arrow} Keep a permanent Cenar Store placement and run at least **one co-branded activation per week**.`,
+      `${notes} Provide winner proof and a short reach/engagement report after each giveaway.`,
+      `${blocked} **Not accepted:** competing stores or marketplaces; NSFW, gambling, investment scams, account trading, leaks/cracks, cheats, raids, hate or illegal content.`,
+      `${warning} A 30-day trial and monthly performance review apply. Sponsorship may be adjusted or paused for weak activity, fraud, removed credits or policy breaches.`,
+      `-# Know a strong 3K+ community? Introduce its owner to Cenar Store and ask them to apply below.`,
+    ].join('\n')));
+  } else {
+    hero.addTextDisplayComponents(new TextDisplayBuilder().setContent([
+      `# ${sparkle} CENAR PARTNER · TUYỂN CỘNG ĐỒNG 3K+`,
+      `> ${gift} Cenar Store tài trợ quà **giveaway mỗi tuần** cho các cộng đồng được duyệt và đang phát triển mạnh.`,
+      '',
+      `### ${verified} QUYỀN LỢI DÀNH CHO PARTNER`,
+      `${gift} Quà giveaway hàng tuần do Cenar Store tài trợ theo tồn kho và hiệu suất chiến dịch.`,
+      `${notes} Được hỗ trợ nội dung, cách trình bày và kế hoạch truyền thông đồng thương hiệu.`,
+      `${boost} Nhận role Partner, xuất hiện tại ${references.partnerDirectory ? `<#${references.partnerDirectory}>` : 'danh bạ đối tác'} và được ưu tiên ở các chiến dịch lớn.`,
+      `${arrow} Partner hiệu quả có thể nhận mã ưu đãi riêng, quyền lợi giới thiệu và ngân sách quà cao hơn.`,
+    ].join('\n')));
+    hero.addSeparatorComponents(new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small));
+    hero.addTextDisplayComponents(new TextDisplayBuilder().setContent(
+      `${E('cenar_announce')} Sau khi duyệt, khu truyền thông dành cho Partner nằm tại ${references.partnerBroadcast ? `<#${references.partnerBroadcast}>` : 'kênh Partner riêng'}.`,
+    ));
+
+    terms.addTextDisplayComponents(new TextDisplayBuilder().setContent([
+      `## ${warning} TIÊU CHÍ & CAM KẾT HỢP TÁC`,
+      `${verified} **Bắt buộc:** tối thiểu **3.000 thành viên thực**, có tương tác hàng tuần và dữ liệu tăng trưởng rõ ràng.`,
+      `${arrow} Duy trì vị trí quảng bá Cenar Store; triển khai ít nhất **1 hoạt động đồng thương hiệu/tuần**.`,
+      `${notes} Sau mỗi giveaway phải gửi bằng chứng trao giải và báo cáo ngắn về lượt tiếp cận/tương tác.`,
+      `${blocked} **Không hợp tác:** shop/chợ/dịch vụ cạnh tranh; server NSFW, cờ bạc/cá độ, lừa đảo đầu tư, mua bán tài khoản, leak/crack, cheat, raid, thù ghét hoặc nội dung trái pháp luật.`,
+      `${warning} Áp dụng thử nghiệm 30 ngày và đánh giá hàng tháng. Cenar có quyền điều chỉnh/tạm dừng tài trợ nếu tương tác yếu, gian lận, gỡ credit hoặc vi phạm cam kết.`,
+      `-# Biết cộng đồng 3K+ chất lượng? Hãy giới thiệu chủ server với Cenar Store và mời họ đăng ký ngay bên dưới.`,
+    ].join('\n')));
+  }
+
+  const button = new ButtonBuilder()
+    .setCustomId('partner:apply:start')
+    .setLabel(international ? 'Apply for Partner' : 'Ứng tuyển Partner 3K+')
+    .setStyle(ButtonStyle.Success);
+  const buttonEmoji = E.component('cenar_verified');
+  if (buttonEmoji) button.setEmoji(buttonEmoji);
+
+  return {
+    components: [hero, terms, new ActionRowBuilder().addComponents(button)],
+    flags: MessageFlags.IsComponentsV2,
+    allowedMentions: { parse: [] },
+  };
+}
+
 async function postRecruitmentPanel(channel, kind, guildId, references) {
   const latest = await channel.messages.fetch({ limit: 25 }).catch(() => null);
+  if (kind === 'partner') {
+    const payload = buildPartnerRecruitmentPayload(guildId, references);
+    const existing = latest?.find((message) => (
+      message.author.id === channel.client.user.id
+      && JSON.stringify(message.components.map((component) => component.toJSON())).includes('partner:apply:start')
+    ));
+    if (existing?.flags?.has(MessageFlags.IsComponentsV2)) {
+      await existing.edit(payload);
+    } else {
+      if (existing) await existing.delete('Replace legacy Partner recruitment panel').catch(() => null);
+      await channel.send(payload);
+    }
+    return;
+  }
   const E = createEmojiResolver(guildId);
   const isCtv = kind === 'ctv';
   const international = isInternationalGuild(guildId);
@@ -195,8 +285,8 @@ async function postRecruitmentPanel(channel, kind, guildId, references) {
           `${E('cenar_verified')} Build a transparent partnership through community promotion and shared benefits.`,
           '',
           `### ${E('cenar_partner_ok')} Review criteria`,
-          `- Communities with 500+ members enter the standard review queue.`,
-          `- Smaller communities receive manual review so promising projects are not excluded.`,
+          `- Communities need at least 3,000 genuine members to enter the review queue.`,
+          `- Member count is checked automatically from the submitted Discord invite.`,
           `- The server must follow Discord policies and maintain a suitable promotion area.`,
           '',
           `### ${E('cenar_announce')} After approval`,
@@ -222,8 +312,8 @@ async function postRecruitmentPanel(channel, kind, guildId, references) {
         `${E('cenar_verified')} Cùng phát triển cộng đồng, trao đổi banner và ưu đãi minh bạch.`,
         '',
         `### ${E('cenar_partner_ok')} Tiêu chí xét duyệt`,
-        `- Server từ 500 thành viên: tự động chuyển vào hàng chờ xét duyệt.`,
-        `- Server dưới 500 thành viên: chuyển **duyệt thủ công** để hỗ trợ cộng đồng nhỏ.`,
+        `- Server cần tối thiểu 3.000 thành viên thực để vào hàng chờ xét duyệt.`,
+        `- Bot tự động kiểm tra quy mô từ link mời Discord được gửi.`,
         `- Không vi phạm chính sách Discord và có kênh quảng bá phù hợp.`,
         '',
         `### ${E('cenar_announce')} Sau khi được duyệt`,
@@ -407,7 +497,10 @@ export async function autoSetupPartnerAndCtv(client) {
         price_channel_id: ctvPrice.id,
       });
 
-      await postRecruitmentPanel(partnerRecruit, 'partner', guild.id, { partnerBroadcast: partnerBroadcast.id });
+      await postRecruitmentPanel(partnerRecruit, 'partner', guild.id, {
+        partnerBroadcast: partnerBroadcast.id,
+        partnerDirectory: partnerDirectory.id,
+      });
       await publishPartnerBroadcastGuide(partnerBroadcast, guild.id, { partner_role_id: partnerRole.id });
       await postRecruitmentPanel(ctvRecruit, 'ctv', guild.id, { ctvChat: ctvChat.id, ctvOrderLog: ctvOrderLog.id });
       await publishCtvPricePanel(guild).catch((error) => {

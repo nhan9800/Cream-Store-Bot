@@ -16,9 +16,12 @@ import { db } from '../database/db.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import {
   addPartnerApplication,
+  evaluatePartnerEligibility,
   getPartnerById,
   getPartnerSettings,
+  hasAcceptedPartnerTerms,
   normalizeDiscordInviteUrl,
+  PARTNER_PROGRAM,
   updatePartnerStatus,
 } from './partnerService.js';
 import { getCtvSettings, isCustomerCtv, setCustomerCtvStatus } from './ctvService.js';
@@ -96,23 +99,76 @@ export async function handlePartnerApplyStart(interaction) {
 
   const modal = new ModalBuilder()
     .setCustomId('partner:apply:modal')
-    .setTitle('Đăng ký Cenar Partner');
+    .setTitle('Ứng tuyển Cenar Partner 3K+');
   const inviteInput = new TextInputBuilder()
     .setCustomId('invite_link')
-    .setLabel('Link mời Discord của server bạn')
+    .setLabel('Link mời Discord còn hạn')
     .setStyle(TextInputStyle.Short)
     .setRequired(true)
     .setMinLength(10)
     .setMaxLength(150)
     .setPlaceholder('https://discord.gg/your-server');
-  modal.addComponents(new ActionRowBuilder().addComponents(inviteInput));
+  const profileInput = new TextInputBuilder()
+    .setCustomId('community_profile')
+    .setLabel('Chủ đề và hoạt động của cộng đồng')
+    .setStyle(TextInputStyle.Paragraph)
+    .setRequired(true)
+    .setMinLength(30)
+    .setMaxLength(700)
+    .setPlaceholder('Cộng đồng về chủ đề gì, hoạt động nổi bật và nhóm thành viên chính...');
+  const activityInput = new TextInputBuilder()
+    .setCustomId('weekly_activity')
+    .setLabel('Tương tác thực tế mỗi tuần')
+    .setStyle(TextInputStyle.Paragraph)
+    .setRequired(true)
+    .setMinLength(20)
+    .setMaxLength(400)
+    .setPlaceholder('Số người online, tin nhắn/ngày, tăng trưởng tuần hoặc số liệu Community Insights...');
+  const planInput = new TextInputBuilder()
+    .setCustomId('collaboration_plan')
+    .setLabel('Kế hoạch quảng bá và giveaway')
+    .setStyle(TextInputStyle.Paragraph)
+    .setRequired(true)
+    .setMinLength(30)
+    .setMaxLength(700)
+    .setPlaceholder('Vị trí đặt bài Cenar, lịch giveaway tuần và cách hai bên cùng phát triển...');
+  const termsInput = new TextInputBuilder()
+    .setCustomId('terms_confirmation')
+    .setLabel('Nhập DONG Y để xác nhận điều khoản')
+    .setStyle(TextInputStyle.Short)
+    .setRequired(true)
+    .setMinLength(5)
+    .setMaxLength(10)
+    .setPlaceholder('DONG Y');
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(inviteInput),
+    new ActionRowBuilder().addComponents(profileInput),
+    new ActionRowBuilder().addComponents(activityInput),
+    new ActionRowBuilder().addComponents(planInput),
+    new ActionRowBuilder().addComponents(termsInput),
+  );
   await interaction.showModal(modal);
 }
 
 export async function handlePartnerApplyModal(interaction) {
   const E = createEmojiResolver(interaction.guildId);
   const inviteLink = interaction.fields.getTextInputValue('invite_link').trim();
+  const communityProfile = stripDiscordUnicode(interaction.fields.getTextInputValue('community_profile')).trim();
+  const weeklyActivity = stripDiscordUnicode(interaction.fields.getTextInputValue('weekly_activity')).trim();
+  const collaborationPlan = stripDiscordUnicode(interaction.fields.getTextInputValue('collaboration_plan')).trim();
+  const acceptedTerms = hasAcceptedPartnerTerms(interaction.fields.getTextInputValue('terms_confirmation'));
   await interaction.deferReply({ flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral });
+
+  if (!acceptedTerms) {
+    return interaction.editReply(cardPayload(interaction.guildId, {
+      tone: 'warning',
+      title: 'Bạn chưa xác nhận điều khoản Partner',
+      lines: [
+        `${E('cenar_verified')} Hãy nhập chính xác **DONG Y** ở ô cuối của biểu mẫu.`,
+        `${E('cenar_support')} Xác nhận này áp dụng cho quy định nội dung, quyền lợi tài trợ và nghĩa vụ quảng bá Cenar Store.`,
+      ],
+    }));
+  }
 
   const match = inviteLink.match(/(?:https?:\/\/)?(?:discord\.(?:gg|io|me|li)|discord(?:app)?\.com\/invite)\/([a-zA-Z0-9-]+)/i);
   const inviteCode = match ? match[1] : inviteLink;
@@ -132,6 +188,18 @@ export async function handlePartnerApplyModal(interaction) {
     const applicantId = interaction.user.id;
     const canonicalInviteLink = normalizeDiscordInviteUrl(invite.code || inviteCode);
     if (!canonicalInviteLink) throw new Error('Không thể chuẩn hóa link mời Discord.');
+    const eligibility = evaluatePartnerEligibility({ memberCount, partnerGuildId });
+    if (!eligibility.eligible) {
+      return interaction.editReply(cardPayload(interaction.guildId, {
+        tone: 'danger',
+        title: 'Server chưa đủ điều kiện Partner 3K+',
+        lines: [
+          `${E('cenar_partner')} **${partnerName}** hiện có **${memberCount.toLocaleString('vi-VN')}** thành viên.`,
+          `${E('status_cross')} Chương trình yêu cầu tối thiểu **${PARTNER_PROGRAM.minimumMembers.toLocaleString('vi-VN')} thành viên thực**.`,
+          `${E('cenar_support')} Khi server đạt đủ quy mô, bạn có thể mở lại biểu mẫu và đăng ký ngay.`,
+        ],
+      }));
+    }
     const duplicate = db.prepare(`
       SELECT id, status FROM partners
       WHERE guild_id = ? AND partner_guild_id = ? AND status IN ('PENDING', 'ACTIVE')
@@ -145,7 +213,7 @@ export async function handlePartnerApplyModal(interaction) {
       }));
     }
 
-    const reviewMode = memberCount < 500 ? 'MANUAL_SUPPORT' : 'STANDARD';
+    const reviewMode = 'PROGRAM_3K';
     const appId = addPartnerApplication(
       interaction.guildId,
       partnerGuildId,
@@ -155,23 +223,38 @@ export async function handlePartnerApplyModal(interaction) {
       invite.guild.ownerId || 'UNKNOWN',
       applicantId,
       reviewMode,
+      {
+        communityProfile,
+        weeklyActivity,
+        collaborationPlan,
+        agreedTerms: acceptedTerms,
+        serverCreatedAt: eligibility.createdAt,
+      },
     );
     const settings = getPartnerSettings(interaction.guildId);
     const approveChannel = await interaction.guild.channels.fetch(settings.approve_channel_id).catch(() => null);
     if (!approveChannel?.isTextBased()) throw new Error('Không tìm thấy kênh duyệt Partner.');
 
-    const reviewContainer = new ContainerBuilder().setAccentColor(accentFor(reviewMode === 'MANUAL_SUPPORT' ? 'warning' : 'info'));
+    const reviewContainer = new ContainerBuilder().setAccentColor(accentFor('info'));
     reviewContainer.addTextDisplayComponents(new TextDisplayBuilder().setContent(
-      `## ${reviewMode === 'MANUAL_SUPPORT' ? E('cenar_cooldown') : E('cenar_partner')} Hồ sơ Partner #${appId}`,
+      `## ${E('cenar_partner')} Hồ sơ Partner 3K+ #${appId}`,
     ));
     reviewContainer.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
     reviewContainer.addTextDisplayComponents(new TextDisplayBuilder().setContent([
       `${E('cenar_verified')} **Đại diện:** <@${applicantId}> · \`${applicantId}\``,
       `${E('cenar_partner')} **Server:** ${partnerName} · \`${partnerGuildId}\``,
-      `${E('cenar_announce')} **Thành viên:** ${memberCount.toLocaleString('vi-VN')}`,
-      `${E('cenar_support')} **Chế độ:** ${reviewMode === 'MANUAL_SUPPORT' ? 'Duyệt thủ công · Hỗ trợ cộng đồng dưới 500 thành viên' : 'Xét duyệt tiêu chuẩn'}`,
+      `${E('cenar_announce')} **Quy mô:** ${memberCount.toLocaleString('vi-VN')} thành viên · **Tuổi server:** ${eligibility.serverAgeDays ?? 'Không đọc được'} ngày`,
+      `${E('cenar_verified')} **Điều kiện cứng:** Đạt ngưỡng 3K+ · Đã xác nhận điều khoản`,
       `${E('cenar_partner_ok')} **Tham quan:** [Mở server ứng tuyển](${canonicalInviteLink})`,
-      `-# Bot không tự từ chối server nhỏ. Admin đánh giá nội dung, mức độ hoạt động và tiềm năng cộng đồng.`,
+      eligibility.reviewFlags.length ? `${E('cenar_cooldown')} **Cần kiểm tra:** ${eligibility.reviewFlags.join(' ')}` : null,
+    ].filter(Boolean).join('\n')));
+    reviewContainer.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
+    reviewContainer.addTextDisplayComponents(new TextDisplayBuilder().setContent([
+      `### ${E('cenar_verified')} Dữ liệu cộng đồng`,
+      `**Chủ đề & hoạt động**\n${communityProfile}`,
+      `**Tương tác hàng tuần**\n${weeklyActivity}`,
+      `**Kế hoạch cùng Cenar**\n${collaborationPlan}`,
+      `-# Admin đối chiếu tương tác thật, nội dung server, vị trí quảng bá và khả năng duy trì ít nhất 1 hoạt động/tuần.`,
     ].join('\n')));
     await approveChannel.send({
       components: addReviewButtons(
@@ -179,7 +262,7 @@ export async function handlePartnerApplyModal(interaction) {
         E,
         `partner:approve:${appId}`,
         `partner:reject:${appId}`,
-        reviewMode === 'MANUAL_SUPPORT' ? 'Duyệt hỗ trợ' : 'Duyệt Partner',
+        'Duyệt Partner',
       ),
       flags: MessageFlags.IsComponentsV2,
       allowedMentions: { parse: [] },
@@ -190,9 +273,8 @@ export async function handlePartnerApplyModal(interaction) {
       title: 'Đã tiếp nhận hồ sơ Partner',
       lines: [
         `${E('cenar_partner')} Server **${partnerName}** · ${memberCount.toLocaleString('vi-VN')} thành viên`,
-        reviewMode === 'MANUAL_SUPPORT'
-          ? `${E('cenar_partner_ok')} Server dưới 500 thành viên đã được chuyển sang **duyệt thủ công**, không bị từ chối tự động.`
-          : `${E('cenar_verified')} Hồ sơ đã vào hàng chờ xét duyệt tiêu chuẩn.`,
+        `${E('cenar_verified')} Hồ sơ đã đạt điều kiện quy mô và vào hàng chờ **thẩm định cộng đồng**.`,
+        `${E('cenar_cooldown')} Admin sẽ kiểm tra tương tác thực, nội dung, vị trí quảng bá và kế hoạch giveaway.`,
         `${E('cenar_cooldown')} Kết quả sẽ được thông báo trực tiếp sau khi Admin xử lý.`,
       ],
     }));

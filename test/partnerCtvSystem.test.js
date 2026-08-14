@@ -2,13 +2,19 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { MessageFlags } from 'discord.js';
 import { db, initDatabase } from '../src/database/db.js';
 import { buildCtvPricePages } from '../src/services/ctvPriceService.js';
-import { buildPartnerBroadcastGuidePayload } from '../src/services/autoSetupService.js';
+import {
+  buildPartnerBroadcastGuidePayload,
+  buildPartnerRecruitmentPayload,
+} from '../src/services/autoSetupService.js';
 import { handlePartnerApprove } from '../src/services/partnerAndCtvHandlers.js';
 import {
   addPartnerApplication,
   consumePartnerMentionQuota,
+  evaluatePartnerEligibility,
   getPartnerMentionQuota,
+  hasAcceptedPartnerTerms,
   normalizeDiscordInviteUrl,
+  PARTNER_PROGRAM,
   rollbackPartnerMentionQuota,
 } from '../src/services/partnerService.js';
 
@@ -65,6 +71,44 @@ describe('Partner and CTV system', () => {
     expect(normalizeDiscordInviteUrl('https://discord.com/invite/One-Shield')).toBe('https://discord.gg/One-Shield');
     expect(normalizeDiscordInviteUrl('rawCode123')).toBe('https://discord.gg/rawCode123');
     expect(normalizeDiscordInviteUrl('[fake](javascript:alert(1))')).toBeNull();
+  });
+
+  it('enforces the Partner 3K member threshold and flags very new servers for review', () => {
+    const now = Date.UTC(2026, 7, 14);
+    const recentCreatedAt = Date.UTC(2026, 7, 1);
+    const recentGuildId = ((BigInt(recentCreatedAt - 1420070400000) << 22n) + 1n).toString();
+
+    const tooSmall = evaluatePartnerEligibility({ memberCount: 2999, partnerGuildId: recentGuildId, now });
+    expect(tooSmall.eligible).toBe(false);
+    expect(tooSmall.blockers[0]).toContain(PARTNER_PROGRAM.minimumMembers.toLocaleString('vi-VN'));
+
+    const qualified = evaluatePartnerEligibility({ memberCount: 3000, partnerGuildId: recentGuildId, now });
+    expect(qualified.eligible).toBe(true);
+    expect(qualified.serverAgeDays).toBe(13);
+    expect(qualified.reviewFlags).toHaveLength(1);
+  });
+
+  it('accepts the explicit Vietnamese or ASCII Partner agreement', () => {
+    expect(hasAcceptedPartnerTerms('DONG Y')).toBe(true);
+    expect(hasAcceptedPartnerTerms('ĐỒNG Ý')).toBe(true);
+    expect(hasAcceptedPartnerTerms('dong y ')).toBe(true);
+    expect(hasAcceptedPartnerTerms('OK')).toBe(false);
+  });
+
+  it('builds a polished Partner recruitment event with business safeguards', () => {
+    const payload = buildPartnerRecruitmentPayload('1282637033340403754', {
+      partnerBroadcast: '1535669776628584449',
+      partnerDirectory: '1522844534470348810',
+    });
+    const text = allDisplayText(payload);
+    expect(payload.flags & MessageFlags.IsComponentsV2).toBeTruthy();
+    expect(payload.components).toHaveLength(3);
+    expect(text).toContain('3.000 thành viên thực');
+    expect(text).toContain('giveaway mỗi tuần');
+    expect(text).toContain('Không hợp tác');
+    expect(text).toContain('thử nghiệm 30 ngày');
+    expect(text).not.toMatch(DEFAULT_EMOJI);
+    expect(text).toMatch(/<a?:cenar_[a-zA-Z0-9_]+:\d+>/);
   });
 
   it('builds a compact Components V2 Partner guide using only custom emojis', () => {

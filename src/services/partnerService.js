@@ -2,6 +2,58 @@ import { db } from '../database/db.js';
 
 const DISCORD_INVITE_PATTERN = /(?:https?:\/\/)?(?:www\.)?(?:discord\.(?:gg|io|me|li)|discord(?:app)?\.com\/invite)\/([a-zA-Z0-9-]+)/i;
 
+export const PARTNER_PROGRAM = Object.freeze({
+  minimumMembers: 3000,
+  recommendedServerAgeDays: 90,
+  trialDays: 30,
+  minimumWeeklyActivations: 1,
+});
+
+export function getDiscordSnowflakeTimestamp(snowflake) {
+  try {
+    const value = BigInt(String(snowflake || ''));
+    if (value <= 0n) return null;
+    return Number((value >> 22n) + 1420070400000n);
+  } catch {
+    return null;
+  }
+}
+
+export function evaluatePartnerEligibility({ memberCount, partnerGuildId, now = Date.now() } = {}) {
+  const members = Math.max(0, Number(memberCount || 0));
+  const createdAt = getDiscordSnowflakeTimestamp(partnerGuildId);
+  const serverAgeDays = createdAt
+    ? Math.max(0, Math.floor((Number(now) - createdAt) / 86_400_000))
+    : null;
+  const blockers = [];
+  const reviewFlags = [];
+
+  if (members < PARTNER_PROGRAM.minimumMembers) {
+    blockers.push(`Server cần tối thiểu ${PARTNER_PROGRAM.minimumMembers.toLocaleString('vi-VN')} thành viên.`);
+  }
+  if (serverAgeDays !== null && serverAgeDays < PARTNER_PROGRAM.recommendedServerAgeDays) {
+    reviewFlags.push(`Server mới ${serverAgeDays} ngày; cần đối chiếu dữ liệu tăng trưởng và tương tác thực.`);
+  }
+
+  return {
+    eligible: blockers.length === 0,
+    blockers,
+    reviewFlags,
+    serverAgeDays,
+    createdAt,
+  };
+}
+
+export function hasAcceptedPartnerTerms(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/Đ/g, 'D')
+    .replace(/đ/g, 'd')
+    .trim()
+    .toUpperCase() === 'DONG Y';
+}
+
 export function normalizeDiscordInviteUrl(value) {
   const raw = String(value || '').trim();
   if (!raw) return null;
@@ -41,11 +93,39 @@ export function upsertPartnerSettings({ guild_id, recruit_channel_id, approve_ch
   return getPartnerSettings(guild_id);
 }
 
-export function addPartnerApplication(guildId, partnerGuildId, partnerName, inviteLink, memberCount, ownerId, applicantId, reviewMode = 'STANDARD') {
+export function addPartnerApplication(
+  guildId,
+  partnerGuildId,
+  partnerName,
+  inviteLink,
+  memberCount,
+  ownerId,
+  applicantId,
+  reviewMode = 'STANDARD',
+  details = {},
+) {
   const info = db.prepare(`
-    INSERT INTO partners (guild_id, partner_guild_id, partner_name, invite_link, member_count, owner_id, applicant_id, status, review_mode)
-    VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDING', ?)
-  `).run(guildId, partnerGuildId, partnerName, inviteLink, memberCount, ownerId, applicantId, reviewMode);
+    INSERT INTO partners (
+      guild_id, partner_guild_id, partner_name, invite_link, member_count,
+      owner_id, applicant_id, status, review_mode, community_profile,
+      weekly_activity, collaboration_plan, agreed_terms, server_created_at
+    )
+    VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDING', ?, ?, ?, ?, ?, ?)
+  `).run(
+    guildId,
+    partnerGuildId,
+    partnerName,
+    inviteLink,
+    memberCount,
+    ownerId,
+    applicantId,
+    reviewMode,
+    details.communityProfile ?? null,
+    details.weeklyActivity ?? null,
+    details.collaborationPlan ?? null,
+    details.agreedTerms ? 1 : 0,
+    details.serverCreatedAt ? new Date(details.serverCreatedAt).toISOString() : null,
+  );
   return info.lastInsertRowid;
 }
 

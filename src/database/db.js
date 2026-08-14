@@ -1082,6 +1082,11 @@ export function initDatabase() {
   ensureColumn('product_catalog', 'ctv_price', 'INTEGER DEFAULT NULL');
   ensureColumn('partner_settings', 'partner_channel_id', 'TEXT');
   ensureColumn('partners', 'review_mode', "TEXT NOT NULL DEFAULT 'STANDARD'");
+  ensureColumn('partners', 'community_profile', 'TEXT');
+  ensureColumn('partners', 'weekly_activity', 'TEXT');
+  ensureColumn('partners', 'collaboration_plan', 'TEXT');
+  ensureColumn('partners', 'agreed_terms', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn('partners', 'server_created_at', 'TEXT');
   ensureColumn('ctv_settings', 'category_id', 'TEXT');
   ensureColumn('ctv_settings', 'chat_channel_id', 'TEXT');
   ensureColumn('ctv_settings', 'order_log_channel_id', 'TEXT');
