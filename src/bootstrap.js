@@ -7,6 +7,7 @@ import { startWebhookServer } from './services/webhookServer.js';
 import { startPresenceRotation } from './services/presenceService.js';
 import { startOtpAutoCheck } from './services/otpAutoCheckService.js';
 import { backfillRecentDeliverySubscriptions } from './services/deliverySubscriptionService.js';
+import { migrateSubscriptionMonthlyCycles } from './services/subscriptionService.js';
 import { cleanupExpiredTranscripts } from './services/transcriptService.js';
 
 import { initErrorLogger } from './services/errorLogService.js';
@@ -18,7 +19,9 @@ export async function buildClient() {
   initDatabase();
   const transcriptCleanup = cleanupExpiredTranscripts();
   console.log(`[TRANSCRIPT-CLEANUP] scanned=${transcriptCleanup.scanned} removed=${transcriptCleanup.removed}`);
-  const subscriptionBackfill = backfillRecentDeliverySubscriptions({ lookbackDays: 14 });
+  const subscriptionMigration = migrateSubscriptionMonthlyCycles();
+  console.log(`[SUBSCRIPTION-MIGRATION] scanned=${subscriptionMigration.scanned} normalized=${subscriptionMigration.normalized} needsReview=${subscriptionMigration.needsReview} history=${subscriptionMigration.historyCreated}`);
+  const subscriptionBackfill = backfillRecentDeliverySubscriptions({ lookbackDays: 3650 });
   console.log(`[SUBSCRIPTION-SYNC] scanned=${subscriptionBackfill.scanned} created=${subscriptionBackfill.created} skipped=${subscriptionBackfill.skipped} failed=${subscriptionBackfill.failed.length}`);
   for (const failure of subscriptionBackfill.failed) {
     console.error(`[SUBSCRIPTION-SYNC] ${failure.orderCode}: ${failure.error}`);

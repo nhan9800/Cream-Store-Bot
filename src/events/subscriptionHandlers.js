@@ -1,5 +1,5 @@
 import { EmbedBuilder } from 'discord.js';
-import { addSubscription, getSubscriptionById as getSubById, markCustomerResponse as markSubResponse } from '../services/subscriptionService.js';
+import { addSubscription, getSubscriptionById as getSubById, getSubscriptionProgress, markCustomerResponse as markSubResponse } from '../services/subscriptionService.js';
 import { buildOwnerCustomerWantsRenewalV2, getReminderChannel } from '../services/deepNotificationService.js';
 import { getOrderByCode } from '../services/orderService.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
@@ -24,36 +24,29 @@ export async function handleSubscriptionAddModal(interaction) {
       customerField = interaction.fields.getTextInputValue('customer')?.trim() || null;
       duration = Number.parseInt(interaction.fields.getTextInputValue('duration')?.trim(), 10) || 2;
       purchaseDate = parseDateInput(interaction.fields.getTextInputValue('purchase_date'));
-      // Nitro lẻ (2 tháng) = one_time, dài hạn = auto_cycle (2 tháng/lần)
-      renewalMode = duration <= 2 ? 'one_time' : 'auto_cycle';
-      renewalCycle = duration <= 2 ? 2 : 2; // Nitro luôn gia hạn 2 tháng/lần
+      renewalMode = duration > 1 ? 'auto_cycle' : 'one_time';
+      renewalCycle = duration > 1 ? 1 : 0;
     } else if (type === 'spotify') {
       spotifyFamilyName = interaction.fields.getTextInputValue('family_name')?.trim() || 'Family';
       spotifySlotsUsed = Number.parseInt(interaction.fields.getTextInputValue('slots')?.trim(), 10) || 5;
-      purchaseDate = parseDateInput(interaction.fields.getTextInputValue('purchase_date'));
+      purchaseDate = new Date().toISOString();
       duration = 12; // Spotify Family thường 12 tháng
       renewalMode = 'auto_cycle';
       renewalCycle = 1; // mỗi tháng
     } else if (type === 'youtube') {
       customerField = interaction.fields.getTextInputValue('customer')?.trim() || null;
-      const ytType = (interaction.fields.getTextInputValue('type')?.trim() || 'thang').toLowerCase();
+      interaction.fields.getTextInputValue('type'); // Giữ tương thích modal cũ; hệ thống luôn cấp theo tháng.
       duration = Number.parseInt(interaction.fields.getTextInputValue('duration')?.trim(), 10) || 12;
       purchaseDate = new Date().toISOString();
-      if (ytType.includes('full') || ytType.includes('1lan') || ytType.includes('once')) {
-        renewalMode = 'full_paid';
-        renewalCycle = 0;
-      } else {
-        renewalMode = 'auto_cycle';
-        renewalCycle = 1;
-      }
+      renewalMode = duration > 1 ? 'auto_cycle' : 'one_time';
+      renewalCycle = duration > 1 ? 1 : 0;
     } else if (type === 'netflix') {
       customerField = interaction.fields.getTextInputValue('customer')?.trim() || null;
       const profileName = interaction.fields.getTextInputValue('profile')?.trim() || null;
       duration = Number.parseInt(interaction.fields.getTextInputValue('duration')?.trim(), 10) || 1;
       purchaseDate = new Date().toISOString();
-      // Netflix lẻ (1-2 tháng) = one_time, dài hạn = auto_cycle (1 tháng/lần)
-      renewalMode = duration <= 2 ? 'one_time' : 'auto_cycle';
-      renewalCycle = duration <= 2 ? 0 : 1;
+      renewalMode = duration > 1 ? 'auto_cycle' : 'one_time';
+      renewalCycle = duration > 1 ? 1 : 0;
       if (profileName) note = profileName;
     }
 
@@ -73,11 +66,11 @@ export async function handleSubscriptionAddModal(interaction) {
           if (type !== 'spotify') {
             duration = order.duration_months || duration;
             if (type === 'nitro') {
-               renewalMode = duration <= 2 ? 'one_time' : 'auto_cycle';
-               renewalCycle = 2;
+               renewalMode = duration > 1 ? 'auto_cycle' : 'one_time';
+               renewalCycle = duration > 1 ? 1 : 0;
             } else if (type === 'netflix') {
-               renewalMode = duration <= 2 ? 'one_time' : 'auto_cycle';
-               renewalCycle = duration <= 2 ? 0 : 1;
+               renewalMode = duration > 1 ? 'auto_cycle' : 'one_time';
+               renewalCycle = duration > 1 ? 1 : 0;
             }
           }
         }
@@ -110,7 +103,10 @@ export async function handleSubscriptionAddModal(interaction) {
       spotifyFamilyName,
       spotifySlotsUsed,
       note,
+      actorId: interaction.user.id,
+      source: 'DISCORD_MODAL',
     });
+    const progress = getSubscriptionProgress(sub);
 
     const EMOJI = { nitro: '🚀', spotify: '🎵', youtube: '📺', netflix: '🎬' };
     const LABEL = { nitro: 'Discord Nitro', spotify: 'Spotify Family', youtube: 'YouTube Premium', netflix: 'Netflix' };
@@ -124,6 +120,7 @@ export async function handleSubscriptionAddModal(interaction) {
         `**Gmail:** \`${sub.gmail_email}\``,
         `**Chế độ:** ${MODE_LABEL[sub.renewal_mode]}`,
         `**Thời hạn:** ${sub.total_duration_months} tháng`,
+        `**Tiến độ ban đầu:** ${progress.fulfilledMonths}/${progress.totalMonths} tháng`,
         sub.renewal_cycle_months > 0 ? `**Chu kỳ gia hạn:** ${sub.renewal_cycle_months} tháng/lần` : null,
         sub.next_renewal_at ? `**Kỳ gia hạn đầu:** <t:${Math.floor(new Date(sub.next_renewal_at).getTime() / 1000)}:F>` : null,
         `**Hết hạn:** <t:${Math.floor(new Date(sub.expiry_at).getTime() / 1000)}:F>`,

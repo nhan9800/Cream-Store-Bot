@@ -473,10 +473,32 @@ export function initDatabase() {
       admin_claimed_at TEXT,
       admin_snoozed_until TEXT,
       admin_last_action_at TEXT,
+      progress_status TEXT NOT NULL DEFAULT 'VERIFIED',
+      progress_review_note TEXT,
       note TEXT,
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
+
+    CREATE TABLE IF NOT EXISTS subscription_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      subscription_id INTEGER NOT NULL,
+      guild_id TEXT NOT NULL,
+      event_type TEXT NOT NULL,
+      fulfilled_months INTEGER,
+      total_months INTEGER,
+      scheduled_for TEXT,
+      actor_id TEXT,
+      source TEXT,
+      note TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (subscription_id) REFERENCES subscription_accounts(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_subscription_events_subscription
+      ON subscription_events (subscription_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_subscription_events_guild
+      ON subscription_events (guild_id, event_type, created_at DESC);
 
     CREATE TABLE IF NOT EXISTS web_users (
       id TEXT PRIMARY KEY,
@@ -703,6 +725,8 @@ export function initDatabase() {
   ensureColumn('subscription_accounts', 'admin_claimed_at', 'TEXT');
   ensureColumn('subscription_accounts', 'admin_snoozed_until', 'TEXT');
   ensureColumn('subscription_accounts', 'admin_last_action_at', 'TEXT');
+  ensureColumn('subscription_accounts', 'progress_status', "TEXT NOT NULL DEFAULT 'VERIFIED'");
+  ensureColumn('subscription_accounts', 'progress_review_note', 'TEXT');
   db.exec(`CREATE INDEX IF NOT EXISTS idx_sub_accounts_admin_reminder
     ON subscription_accounts (guild_id, status, admin_snoozed_until, next_renewal_at, expiry_at)`);
 

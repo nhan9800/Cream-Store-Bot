@@ -940,14 +940,14 @@ const fetchWithTimeout = (promise, ms) => {
         params.push(status);
       }
       if (q) {
-        query += ' AND (gmail_email LIKE ? OR customer_discord_name LIKE ? OR customer_id LIKE ?)';
+        query += ' AND (gmail_email LIKE ? OR customer_discord_name LIKE ? OR customer_id LIKE ? OR related_order_code LIKE ?)';
         const likeStr = `%${q}%`;
-        params.push(likeStr, likeStr, likeStr);
+        params.push(likeStr, likeStr, likeStr, likeStr);
       }
       
       query += ' ORDER BY status ASC, next_renewal_at ASC, id DESC';
       const rows = db.prepare(query).all(...params)
-        .map(r => ({ ...r, gmail_password: decrypt(r.gmail_password) }));
+        .map(r => ({ ...r, gmail_password: decrypt(r.gmail_password), ...subService.getSubscriptionProgress(r) }));
       res.json({ ok: true, data: rows });
     } catch (e) {
       console.error('[ADMIN]', e); res.status(500).json({ ok: false, error: 'Lỗi máy chủ nội bộ.' });
@@ -976,21 +976,24 @@ const fetchWithTimeout = (promise, ms) => {
         return res.status(400).json({ ok: false, error: 'Thiếu email, mật khẩu hoặc ngày mua' });
       }
 
+      const duration = Math.max(1, Number(totalDurationMonths || 1));
+      const mode = renewalMode || (duration > 1 ? 'auto_cycle' : 'one_time');
       const newSub = subService.addSubscription({
         guildId: config.guildId,
         serviceType: serviceType || 'nitro',
-        renewalMode: renewalMode || 'auto_cycle',
+        renewalMode: mode,
         gmailEmail,
         gmailPassword,
         customerId: customerId || null,
         customerDiscordName: customerDiscordName || null,
         relatedOrderCode: relatedOrderCode || null,
         purchaseDate,
-        totalDurationMonths: Number(totalDurationMonths || 2),
-        renewalCycleMonths: Number(renewalCycleMonths || 2),
+        totalDurationMonths: duration,
+        renewalCycleMonths: mode === 'auto_cycle' ? 1 : Number(renewalCycleMonths || 0),
         spotifyFamilyName: spotifyFamilyName || null,
         spotifySlotsUsed: Number(spotifySlotsUsed || 0),
-        note: note || null
+        note: note || null,
+        source: 'ADMIN_API'
       });
 
       res.json({ ok: true, data: newSub });
@@ -1066,7 +1069,7 @@ const fetchWithTimeout = (promise, ms) => {
         relatedOrderCode || null,
         purchaseDate,
         Number(totalDurationMonths),
-        Number(renewalCycleMonths),
+        (renewalMode || 'auto_cycle') === 'auto_cycle' ? 1 : Number(renewalCycleMonths || 0),
         spotifyFamilyName || null,
         Number(spotifySlotsUsed || 0),
         note || null,
@@ -1087,7 +1090,11 @@ const fetchWithTimeout = (promise, ms) => {
   app.post('/api/bot/admin/subscriptions/:id/renew', requireAdminRole, (req, res) => {
     try {
       const { id } = req.params;
-      const renewed = subService.markRenewed(Number(id));
+      const before = subService.getSubscriptionById(Number(id));
+      if (before && subService.getSubscriptionProgress(before).nextAction === 'DISCONNECT') {
+        return res.status(409).json({ ok: false, error: 'Gói đã cấp đủ tháng; hãy xác nhận ngắt gói.' });
+      }
+      const renewed = subService.markRenewed(Number(id), { source: 'ADMIN_API' });
       if (!renewed) {
         return res.status(404).json({ ok: false, error: 'Không tìm thấy bản ghi hoặc gia hạn thất bại' });
       }
@@ -1095,6 +1102,36 @@ const fetchWithTimeout = (promise, ms) => {
     } catch (e) {
       console.error('[ADMIN]', e); res.status(500).json({ ok: false, error: 'Lỗi máy chủ nội bộ.' });
     }
+  });
+
+  app.post('/api/bot/admin/subscriptions/:id/progress', requireAdminRole, (req, res) => {
+    try {
+      const updated = subService.setSubscriptionFulfilledMonths(
+        Number(req.params.id),
+        Number(req.body.fulfilledMonths),
+        { source: 'ADMIN_API', note: req.body.note || null },
+      );
+      if (!updated) return res.status(404).json({ ok: false, error: 'Không tìm thấy hồ sơ.' });
+      res.json({ ok: true, data: { ...updated, ...subService.getSubscriptionProgress(updated) } });
+    } catch (e) {
+      res.status(400).json({ ok: false, error: e.message });
+    }
+  });
+
+  app.get('/api/bot/admin/subscriptions/:id/history', requireAdminRole, (req, res) => {
+    const existing = subService.getSubscriptionById(Number(req.params.id));
+    if (!existing) return res.status(404).json({ ok: false, error: 'Không tìm thấy hồ sơ.' });
+    return res.json({ ok: true, data: subService.getSubscriptionHistory(existing.id) });
+  });
+
+  app.post('/api/bot/admin/subscriptions/:id/disconnect', requireAdminRole, (req, res) => {
+    const existing = subService.getSubscriptionById(Number(req.params.id));
+    if (!existing) return res.status(404).json({ ok: false, error: 'Không tìm thấy hồ sơ.' });
+    if (subService.getSubscriptionProgress(existing).nextAction !== 'DISCONNECT') {
+      return res.status(409).json({ ok: false, error: 'Hồ sơ chưa được cấp đủ số tháng.' });
+    }
+    const updated = subService.markDisconnected(existing.id, { source: 'ADMIN_API', note: req.body.note || null });
+    return res.json({ ok: true, data: updated });
   });
 
   app.delete('/api/bot/admin/subscriptions/:id', requireAdminRole, (req, res) => {

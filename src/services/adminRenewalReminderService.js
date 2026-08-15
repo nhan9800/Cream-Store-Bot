@@ -14,8 +14,9 @@ import {
   claimAdminRenewal,
   getAdminRenewalCandidates,
   getSubscriptionById,
-  getTotalRenewalsNeeded,
+  getSubscriptionProgress,
   markAdminReminderSent,
+  markDisconnected,
   markRenewed,
   snoozeAdminRenewal,
 } from './subscriptionService.js';
@@ -145,14 +146,13 @@ function adminTargets(guild, settings) {
 }
 
 function progressText(sub) {
-  if (sub.renewal_mode !== 'auto_cycle') {
-    return `Gói mua lẻ · đã gia hạn ${Number(sub.times_renewed || 0)} lần`;
-  }
-  const required = Math.max(1, getTotalRenewalsNeeded(sub) + 1);
-  return `${Number(sub.times_renewed || 0)}/${required} kỳ đã hoàn tất · chu kỳ ${Number(sub.renewal_cycle_months || 0)} tháng`;
+  const progress = getSubscriptionProgress(sub);
+  return `Đã cấp **${progress.fulfilledMonths}/${progress.totalMonths} tháng** · còn ${progress.remainingMonths} tháng`;
 }
 
 function buildActionRow(sub, E) {
+  const progress = getSubscriptionProgress(sub);
+  const isDisconnect = progress.nextAction === 'DISCONNECT';
   const claim = withButtonEmoji(
     new ButtonBuilder()
       .setCustomId(`sub:admin:claim:${sub.id}`)
@@ -164,10 +164,10 @@ function buildActionRow(sub, E) {
   );
   const completed = withButtonEmoji(
     new ButtonBuilder()
-      .setCustomId(`sub:admin:renew:${sub.id}`)
-      .setLabel('Xác Nhận Đã Gia Hạn')
-      .setStyle(ButtonStyle.Success),
-    E.component('status_check'),
+      .setCustomId(`sub:admin:${isDisconnect ? 'disconnect' : 'renew'}:${sub.id}`)
+      .setLabel(isDisconnect ? 'Xác Nhận Đã Ngắt Gói' : 'Xác Nhận Đã Gia Hạn')
+      .setStyle(isDisconnect ? ButtonStyle.Danger : ButtonStyle.Success),
+    E.component(isDisconnect ? 'status_cross' : 'status_check'),
   );
   const snooze = withButtonEmoji(
     new ButtonBuilder()
@@ -198,6 +198,8 @@ export function buildAdminRenewalReminderV2(sub, {
   const E = createEmojiResolver(presentationGuildId(sub.guild_id));
   const meta = STAGE_META[stage] || STAGE_META.UPCOMING_7D;
   const service = SERVICE_META[sub.service_type] || { label: clean(sub.service_type || 'Dịch vụ'), emoji: 'order_product' };
+  const progress = getSubscriptionProgress(sub);
+  const isDisconnect = progress.nextAction === 'DISCONNECT';
   const dueTs = unix(getSubscriptionAdminDueAt(sub));
   const expiryTs = unix(sub.expiry_at);
   const purchaseTs = unix(sub.purchase_date);
@@ -211,8 +213,8 @@ export function buildAdminRenewalReminderV2(sub, {
   const container = new ContainerBuilder().setAccentColor(accentFor(meta.accent));
   container.addTextDisplayComponents(new TextDisplayBuilder().setContent([
     ping && mentionText ? mentionText : null,
-    `# ${E(meta.emoji)} ${meta.title}`,
-    `> ${E('status_info')} **Mức ưu tiên:** ${meta.badge} · ${meta.summary}`,
+    `# ${E(meta.emoji)} ${isDisconnect ? 'ĐẾN HẠN NGẮT GÓI DỊCH VỤ' : meta.title}`,
+    `> ${E('status_info')} **Mức ưu tiên:** ${meta.badge} · ${isDisconnect ? 'Gói đã được cấp đủ toàn bộ thời hạn. Admin kiểm tra và ngắt gói đúng ngày để tránh cấp thừa.' : meta.summary}`,
   ].filter(Boolean).join('\n')));
   container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
   container.addTextDisplayComponents(new TextDisplayBuilder().setContent([
@@ -224,7 +226,7 @@ export function buildAdminRenewalReminderV2(sub, {
     sub.related_order_code ? `${E('icon_clipboard')} **Đơn gốc** — \`${clean(sub.related_order_code, 40)}\`` : null,
     `${E('icon_history')} **Tiến độ** — ${progressText(sub)}`,
     purchaseTs ? `${E('warranty_purchase')} **Ngày mua** — <t:${purchaseTs}:D>` : null,
-    dueTs ? `${E('icon_clock')} **Kỳ cần xử lý** — <t:${dueTs}:F> · <t:${dueTs}:R>` : null,
+    dueTs ? `${E('icon_clock')} **${isDisconnect ? 'Ngày cần ngắt gói' : `Kỳ ${progress.nextCycleNumber}/${progress.totalMonths} cần cấp`}** — <t:${dueTs}:F> · <t:${dueTs}:R>` : null,
     expiryTs ? `${E('warranty_expiry')} **Hết hạn toàn gói** — <t:${expiryTs}:F>` : null,
     sub.note ? `${E('icon_edit')} **Ghi chú** — ${clean(sub.note, 240)}` : null,
   ].filter(Boolean).join('\n')));
@@ -232,7 +234,7 @@ export function buildAdminRenewalReminderV2(sub, {
   container.addTextDisplayComponents(new TextDisplayBuilder().setContent([
     `### ${E('cenar_admin')} BÀN GIAO XỬ LÝ`,
     `${E('ticket_claim')} **Phụ trách** — ${claim}`,
-    `${E('icon_search')} **Checklist** — Kiểm tra nguồn · đăng nhập · xác nhận thời hạn mới · bấm **Xác Nhận Đã Gia Hạn**.`,
+    `${E('icon_search')} **Checklist** — ${isDisconnect ? 'Kiểm tra đã đủ thời hạn · ngắt quyền/gói trên nguồn · bấm **Xác Nhận Đã Ngắt Gói**.' : 'Kiểm tra nguồn · đăng nhập · cấp thêm đúng 1 tháng · bấm **Xác Nhận Đã Gia Hạn**.'}`,
     `${E('cenar_cooldown')} Nếu chưa thể xử lý, chọn **Nhắc Lại** để hoãn đúng ${config.subscriptionAdminSnoozeHours} giờ; bot sẽ không spam trong thời gian này.`,
     `-# ${E('verify_shield')} Cenar Renewal Control · Không hiển thị mật khẩu trên Discord · Cập nhật tự động với website`,
   ].join('\n')));
@@ -248,16 +250,23 @@ export function buildAdminRenewalReminderV2(sub, {
 
 function buildActionResultV2(sub, { action, adminId, snoozedUntil = null }) {
   const E = createEmojiResolver(presentationGuildId(sub.guild_id));
-  const isComplete = action === 'renewed';
-  const title = isComplete ? 'ĐÃ XÁC NHẬN GIA HẠN' : action === 'snoozed' ? 'ĐÃ TẠM HOÃN NHẮC VIỆC' : 'ADMIN ĐÃ NHẬN XỬ LÝ';
-  const tone = isComplete ? 'success' : action === 'snoozed' ? 'warning' : 'info';
+  const progress = getSubscriptionProgress(sub);
+  const isComplete = action === 'renewed' || action === 'disconnected';
+  const title = action === 'disconnected'
+    ? 'ĐÃ XÁC NHẬN NGẮT GÓI'
+    : action === 'renewed'
+      ? 'ĐÃ XÁC NHẬN GIA HẠN'
+      : action === 'snoozed' ? 'ĐÃ TẠM HOÃN NHẮC VIỆC' : 'ADMIN ĐÃ NHẬN XỬ LÝ';
+  const tone = action === 'disconnected' ? 'danger' : isComplete ? 'success' : action === 'snoozed' ? 'warning' : 'info';
   const container = new ContainerBuilder().setAccentColor(accentFor(tone));
   container.addTextDisplayComponents(new TextDisplayBuilder().setContent([
     `# ${E(isComplete ? 'status_check' : action === 'snoozed' ? 'cenar_cooldown' : 'ticket_claim')} ${title}`,
     `> ${E('cenar_admin')} **Admin:** <@${adminId}>`,
     `${E('icon_id')} **Subscription:** #${sub.id} · \`${clean(sub.gmail_email, 120)}\``,
     isComplete
-      ? `${E('icon_calendar')} **Hạn mới:** <t:${unix(sub.next_renewal_at || sub.expiry_at)}:F>`
+      ? action === 'disconnected'
+        ? `${E('status_cross')} **Trạng thái:** Đã ngắt gói · hồ sơ hoàn tất`
+        : `${E('icon_history')} **Tiến độ:** Đã cấp ${progress.fulfilledMonths}/${progress.totalMonths} tháng · ${progress.nextAction === 'DISCONNECT' ? 'chờ ngắt gói vào ngày hết hạn' : `kỳ tiếp theo <t:${unix(progress.nextActionAt)}:F>`}`
       : action === 'snoozed'
         ? `${E('icon_clock')} Bot sẽ nhắc lại <t:${unix(snoozedUntil)}:R>.`
         : `${E('order_processing')} Hồ sơ đã được khóa người phụ trách; các admin khác vẫn có thể xác nhận hoàn tất.`,
@@ -273,7 +282,7 @@ function buildActionResultV2(sub, { action, adminId, snoozedUntil = null }) {
   }
   const disabled = withButtonEmoji(
     new ButtonBuilder().setCustomId(`sub:admin:done:${sub.id}`).setLabel(title).setStyle(ButtonStyle.Secondary).setDisabled(true),
-    E.component(isComplete ? 'status_check' : 'cenar_cooldown'),
+    E.component(action === 'disconnected' ? 'status_cross' : isComplete ? 'status_check' : 'cenar_cooldown'),
   );
   return {
     components: [container, new ActionRowBuilder().addComponents(disabled)],
@@ -340,6 +349,7 @@ async function sendRenewedCustomerDm(interaction, sub) {
   const user = await interaction.client.users.fetch(sub.customer_id).catch(() => null);
   if (!user) return false;
   const E = createEmojiResolver(presentationGuildId(sub.guild_id));
+  const progress = getSubscriptionProgress(sub);
   const dueTs = unix(sub.next_renewal_at || sub.expiry_at);
   const container = new ContainerBuilder().setAccentColor(accentFor('success'));
   container.addTextDisplayComponents(new TextDisplayBuilder().setContent([
@@ -347,9 +357,30 @@ async function sendRenewedCustomerDm(interaction, sub) {
     `> ${E('cenar_verified')} Cenar Store đã hoàn tất kỳ gia hạn cho dịch vụ của bạn.`,
     `${E(SERVICE_META[sub.service_type]?.emoji || 'order_product')} **Dịch vụ** — ${SERVICE_META[sub.service_type]?.label || clean(sub.service_type)}`,
     sub.related_order_code ? `${E('icon_clipboard')} **Đơn gốc** — \`${sub.related_order_code}\`` : null,
-    dueTs ? `${E('icon_calendar')} **Mốc tiếp theo** — <t:${dueTs}:F>` : null,
+    `${E('icon_history')} **Tiến độ** — Đã cấp **${progress.fulfilledMonths}/${progress.totalMonths} tháng**`,
+    dueTs ? `${E('icon_calendar')} **${progress.nextAction === 'DISCONNECT' ? 'Ngày kết thúc gói' : 'Kỳ cấp tiếp theo'}** — <t:${dueTs}:F>` : null,
     `${E('cenar_support')} Vui lòng kiểm tra tài khoản. Nếu có vấn đề, hãy mở ticket để được hỗ trợ ngay.`,
     `-# ${E('verify_shield')} Cenar Store · Gia hạn được xác nhận bởi bộ phận quản trị`,
+  ].filter(Boolean).join('\n')));
+  return user.send({ components: [container], flags: MessageFlags.IsComponentsV2, allowedMentions: { parse: [] } })
+    .then(() => true)
+    .catch(() => false);
+}
+
+async function sendDisconnectedCustomerDm(interaction, sub) {
+  if (!sub.customer_id) return false;
+  const user = await interaction.client.users.fetch(sub.customer_id).catch(() => null);
+  if (!user) return false;
+  const E = createEmojiResolver(presentationGuildId(sub.guild_id));
+  const progress = getSubscriptionProgress(sub);
+  const container = new ContainerBuilder().setAccentColor(accentFor('info'));
+  container.addTextDisplayComponents(new TextDisplayBuilder().setContent([
+    `# ${E('icon_history')} GÓI DỊCH VỤ ĐÃ KẾT THÚC`,
+    `> ${E('cenar_verified')} Cenar Store đã cấp đủ **${progress.fulfilledMonths}/${progress.totalMonths} tháng** theo đơn của bạn và đã ngắt gói đúng hạn.`,
+    `${E(SERVICE_META[sub.service_type]?.emoji || 'order_product')} **Dịch vụ** — ${SERVICE_META[sub.service_type]?.label || clean(sub.service_type)}`,
+    sub.related_order_code ? `${E('icon_clipboard')} **Đơn gốc** — \`${sub.related_order_code}\`` : null,
+    `${E('cenar_support')} Nếu muốn mua tiếp hoặc cần kiểm tra lại, bạn hãy mở ticket để shop hỗ trợ.`,
+    `-# ${E('verify_shield')} Cenar Store · Hồ sơ đã hoàn tất`,
   ].filter(Boolean).join('\n')));
   return user.send({ components: [container], flags: MessageFlags.IsComponentsV2, allowedMentions: { parse: [] } })
     .then(() => true)
@@ -426,7 +457,17 @@ export async function handleAdminRenewalButton(interaction) {
   }
 
   if (action === 'renew') {
-    const renewed = markRenewed(id);
+    if (getSubscriptionProgress(existing).nextAction === 'DISCONNECT') {
+      await interaction.reply({
+        content: `${E('status_warn')} Gói này đã được cấp đủ tháng. Hãy dùng nút **Xác Nhận Đã Ngắt Gói** ở thông báo mới.`,
+        ephemeral: true,
+      });
+      return true;
+    }
+    const renewed = markRenewed(id, {
+      actorId: interaction.user.id,
+      source: 'DISCORD_ADMIN_BUTTON',
+    });
     await updateInteraction(interaction, buildActionResultV2(renewed, { action: 'renewed', adminId: interaction.user.id }));
     const dmSent = await sendRenewedCustomerDm(interaction, renewed);
     await emitAutomationLog(interaction.client, {
@@ -437,6 +478,32 @@ export async function handleAdminRenewalButton(interaction) {
       summary: `Subscription #${id} đã được xác nhận gia hạn; DM khách hàng: ${dmSent ? 'đã gửi' : 'không gửi được'}.`,
       reference: renewed.related_order_code || String(id),
       status: 'success',
+    });
+    return true;
+  }
+
+  if (action === 'disconnect') {
+    if (getSubscriptionProgress(existing).nextAction !== 'DISCONNECT') {
+      await interaction.reply({
+        content: `${E('status_warn')} Gói này vẫn còn tháng chưa cấp nên chưa thể xác nhận ngắt.`,
+        ephemeral: true,
+      });
+      return true;
+    }
+    const disconnected = markDisconnected(id, {
+      actorId: interaction.user.id,
+      source: 'DISCORD_ADMIN_BUTTON',
+    });
+    await updateInteraction(interaction, buildActionResultV2(disconnected, { action: 'disconnected', adminId: interaction.user.id }));
+    const dmSent = await sendDisconnectedCustomerDm(interaction, disconnected);
+    await emitAutomationLog(interaction.client, {
+      guildId: interaction.guildId,
+      customerId: disconnected.customer_id,
+      action: 'SUBSCRIPTION_DISCONNECTED',
+      title: 'ĐÃ NGẮT GÓI ĐÚNG HẠN',
+      summary: `Subscription #${id} đã cấp đủ thời hạn và được xác nhận ngắt gói; DM khách hàng: ${dmSent ? 'đã gửi' : 'không gửi được'}.`,
+      reference: disconnected.related_order_code || String(id),
+      status: 'info',
     });
     return true;
   }

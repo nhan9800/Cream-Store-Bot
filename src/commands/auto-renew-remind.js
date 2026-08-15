@@ -11,21 +11,13 @@ import {
 } from 'discord.js';
 import { runDeepNotifications, runSubscriptionNotifications } from '../services/deepNotificationService.js';
 import { getExpiringOrdersRaw } from '../services/v11DbHelpers.js';
-import { getSubscriptionsDueInDays } from '../services/subscriptionService.js';
+import { getSubscriptionProgress, getSubscriptionsDueInDays } from '../services/subscriptionService.js';
 
 const SERVICE_LABEL = { nitro: 'Discord Nitro', spotify_family: 'Spotify Family', youtube: 'YouTube Premium', netflix: 'Netflix' };
 const SERVICE_SLOT = { nitro: 'brand_nitro', spotify_family: 'brand_spotify', youtube: 'brand_youtube', netflix: 'brand_netflix' };
 
 function serviceEmoji(E, type) {
   return E(SERVICE_SLOT[type]) || E('order_product');
-}
-
-function modeLabel(E, mode) {
-  return ({
-    auto_cycle: `${E('icon_cycle')} Định kỳ`,
-    one_time: `${E('icon_once')} Mua lẻ`,
-    full_paid: `${E('status_check')} Đã trả hết`,
-  })[mode] || mode;
 }
 
 export const data = new SlashCommandBuilder()
@@ -133,12 +125,12 @@ export async function execute(interaction) {
         let desc = `Tìm thấy **${subs.length}** subscription cần xử lý:\n\n`;
         for (const s of subs.slice(0, 20)) {
           const emoji = serviceEmoji(E, s.service_type);
-          const mode = modeLabel(E, s.renewal_mode);
-          const dateField = s.renewal_mode === 'auto_cycle' ? s.next_renewal_at : s.expiry_at;
+          const progress = getSubscriptionProgress(s);
+          const dateField = progress.nextActionAt;
           const ts = Math.floor(new Date(dateField).getTime() / 1000);
           const customer = s.customer_id ? `<@${s.customer_id}>` : (s.customer_discord_name || '—');
           const extra = s.spotify_family_name ? ` · ${E('icon_home')} ${s.spotify_family_name}` : '';
-          desc += `${emoji} **ID ${s.id}** · \`${s.gmail_email}\`${extra}\n> ${E('ticket_user')} ${customer} · ${mode} · <t:${ts}:R>\n\n`;
+          desc += `${emoji} **ID ${s.id}** · \`${s.gmail_email}\`${extra}\n> ${E('ticket_user')} ${customer} · ${progress.fulfilledMonths}/${progress.totalMonths} tháng · ${progress.nextAction === 'DISCONNECT' ? 'ngắt gói' : `cấp kỳ ${progress.nextCycleNumber}`} · <t:${ts}:R>\n\n`;
         }
         embed.setDescription(desc.slice(0, 4000));
         if (subs.length > 20) embed.setFooter({ text: `Và ${subs.length - 20} mục khác...` });

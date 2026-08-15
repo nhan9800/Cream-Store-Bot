@@ -58,6 +58,26 @@ describe('/giaohang subscription synchronization', () => {
     });
   });
 
+  it('uses a one-month operational cycle even when a Nitro order spans multiple months', () => {
+    const input = buildDeliverySubscriptionInput({
+      order: {
+        ...netflixOrder,
+        order_code: `${ORDER_CODE}_NITRO`,
+        service_type: 'discord',
+        product_name: 'Discord Nitro 12 Tháng',
+        duration_months: 12,
+      },
+      gmailEmail: 'nitro@example.com',
+      gmailPassword: 'nitro-password',
+    });
+    expect(input).toMatchObject({
+      serviceType: 'nitro',
+      renewalMode: 'auto_cycle',
+      renewalCycleMonths: 1,
+      totalDurationMonths: 12,
+    });
+  });
+
   it('upserts by order code instead of creating duplicate website records', () => {
     const first = syncDeliverySubscription({
       order: netflixOrder,

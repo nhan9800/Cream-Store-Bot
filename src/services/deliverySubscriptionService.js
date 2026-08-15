@@ -25,6 +25,8 @@ export function buildDeliverySubscriptionInput({
   gmailPassword,
   profile = null,
   customerDiscordName = null,
+  progressStatus = 'VERIFIED',
+  progressReviewNote = null,
 }) {
   const serviceType = detectDeliverySubscriptionService(order);
   if (!serviceType) return null;
@@ -36,18 +38,9 @@ export function buildDeliverySubscriptionInput({
   let renewalMode = 'one_time';
   let renewalCycleMonths = 0;
 
-  if (serviceType === 'netflix') {
-    renewalMode = totalDurationMonths <= 2 ? 'one_time' : 'auto_cycle';
-    renewalCycleMonths = totalDurationMonths <= 2 ? 0 : 1;
-  } else if (serviceType === 'spotify_family') {
+  if (totalDurationMonths > 1) {
     renewalMode = 'auto_cycle';
     renewalCycleMonths = 1;
-  } else if (serviceType === 'youtube') {
-    renewalMode = totalDurationMonths <= 1 ? 'one_time' : 'auto_cycle';
-    renewalCycleMonths = totalDurationMonths <= 1 ? 0 : 1;
-  } else if (serviceType === 'nitro') {
-    renewalMode = totalDurationMonths <= 2 ? 'one_time' : 'auto_cycle';
-    renewalCycleMonths = 2;
   }
 
   return {
@@ -65,6 +58,9 @@ export function buildDeliverySubscriptionInput({
     spotifyFamilyName: serviceType === 'spotify_family' ? (profile || null) : null,
     spotifySlotsUsed: 0,
     note: serviceType === 'netflix' && profile ? `Profile: ${profile}` : null,
+    source: 'DELIVERY',
+    progressStatus,
+    progressReviewNote,
   };
 }
 
@@ -73,8 +69,8 @@ export function syncDeliverySubscription(input) {
   return subscription ? upsertSubscriptionFromDelivery(subscription) : null;
 }
 
-export function backfillRecentDeliverySubscriptions({ lookbackDays = 14 } = {}) {
-  const safeDays = Math.min(90, Math.max(1, Number.parseInt(String(lookbackDays), 10) || 14));
+export function backfillRecentDeliverySubscriptions({ lookbackDays = 3650 } = {}) {
+  const safeDays = Math.min(3650, Math.max(1, Number.parseInt(String(lookbackDays), 10) || 3650));
   const candidates = db.prepare(`
     SELECT orders.*
     FROM orders
@@ -93,12 +89,21 @@ export function backfillRecentDeliverySubscriptions({ lookbackDays = 14 } = {}) 
   const failed = [];
   for (const order of candidates) {
     try {
+      const deliveredAt = new Date(order.delivered_at);
+      const ageDays = Number.isFinite(deliveredAt.getTime())
+        ? Math.floor((Date.now() - deliveredAt.getTime()) / (24 * 60 * 60 * 1000))
+        : 0;
+      const needsReview = ageDays > 31;
       const result = syncDeliverySubscription({
         order,
         gmailEmail: decrypt(order.credential_email),
         gmailPassword: decrypt(order.credential_password),
         profile: order.credential_profile ? decrypt(order.credential_profile) : null,
         customerDiscordName: null,
+        progressStatus: needsReview ? 'NEEDS_REVIEW' : 'VERIFIED',
+        progressReviewNote: needsReview
+          ? 'Đơn cũ được nhập tự động; Admin cần xác nhận số tháng đã cấp.'
+          : null,
       });
       if (result) created += 1;
       else skipped += 1;

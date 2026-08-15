@@ -10,6 +10,7 @@ import { awardOrderPoints } from './loyaltyService.js';
 import { orderLookupLimiter } from './rateLimitMiddleware.js';
 import { anonymizeCustomerEmail } from '../utils/productFormatting.js';
 import { config } from '../config.js';
+import { getSubscriptionProgress } from './subscriptionService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -704,6 +705,9 @@ export function registerDashboardRoutes(app) {
         spotifySlotsUsed: s.spotify_slots_used,
         status: s.status,
         customerResponse: s.customer_response,
+        progressStatus: s.progress_status,
+        progressReviewNote: s.progress_review_note,
+        ...getSubscriptionProgress(s),
         note: s.note,
         createdAt: s.created_at,
         updatedAt: s.updated_at,
