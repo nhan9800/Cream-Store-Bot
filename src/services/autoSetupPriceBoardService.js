@@ -20,7 +20,7 @@ import { isInternationalGuild } from '../utils/locale.js';
 import { formatInternationalPrice, translateCatalogGroup, translateProductName } from '../utils/internationalCatalog.js';
 import { getNitroTrialEligibility, isNitroTrialProduct } from '../constants/nitroTrial.js';
 
-export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.3';
+export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.4';
 const PRIMARY_GUILD_ID = '1282637033340403754';
 const PRIMARY_PRICE_CHANNEL_ID = '1514606995842273280';
 
@@ -133,12 +133,13 @@ function inferProductSlot(product) {
 }
 
 function getDurationText(product, international = false) {
+  const productName = String(product.name || '');
   if (international) {
     if (Number(product.price) === 0) return 'Custom project';
     if (product.service_type === 'decor') return 'Lifetime';
-    const dayMatch = String(product.name).match(/(\d+)\s*ngày/i);
-    if (dayMatch) return `${dayMatch[1]} day${dayMatch[1] === '1' ? '' : 's'}`;
-    const yearMatch = String(product.name).match(/(\d+)\s*năm/i);
+    const dayMatch = productName.match(/(\d+)\s*ngày/i);
+    if (dayMatch && !/giữ\s*mail/i.test(productName)) return `${dayMatch[1]} day${dayMatch[1] === '1' ? '' : 's'}`;
+    const yearMatch = productName.match(/(\d+)\s*năm/i);
     if (yearMatch) return `${yearMatch[1]} year${yearMatch[1] === '1' ? '' : 's'}`;
     if (['SERVICE', 'service'].includes(product.service_type)) return 'Custom scope';
     const months = Math.max(1, Number(product.duration_months) || 1);
@@ -146,9 +147,9 @@ function getDurationText(product, international = false) {
   }
   if (Number(product.price) === 0) return 'Theo dự án';
   if (product.service_type === 'decor') return 'Vĩnh viễn';
-  const dayMatch = String(product.name).match(/(\d+)\s*ngày/i);
-  if (dayMatch) return `${dayMatch[1]} ngày`;
-  const yearMatch = String(product.name).match(/(\d+)\s*năm/i);
+  const dayMatch = productName.match(/(\d+)\s*ngày/i);
+  if (dayMatch && !/giữ\s*mail/i.test(productName)) return `${dayMatch[1]} ngày`;
+  const yearMatch = productName.match(/(\d+)\s*năm/i);
   if (yearMatch) return `${yearMatch[1]} năm`;
   if (['SERVICE', 'service'].includes(product.service_type)) {
     return /duy trì/i.test(String(product.name))

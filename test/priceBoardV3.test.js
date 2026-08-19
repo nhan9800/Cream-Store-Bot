@@ -104,6 +104,15 @@ describe('Cenar price board V3', () => {
     expect(nitroPayload).toContain('115.000');
     expect(nitroPayload).toContain('140.000');
 
+    const nitroPanel = buildPriceBoardPayloads(GUILD_ID, {}, products)
+      .map((payload) => payload.components[0].toJSON())
+      .find((container) => JSON.stringify(container).includes('Discord Nitro'));
+    const keepMailBlock = nitroPanel.components.find((component) => (
+      component.type === 10 && component.content.includes('Giữ Mail 7 Ngày')
+    ));
+    expect(keepMailBlock.content).toContain('**Thời hạn:** `2 tháng`');
+    expect(keepMailBlock.content).not.toContain('**Thời hạn:** `7 ngày`');
+
     const announcement = buildPriceAnnouncementContent(GUILD_ID, nitroSeedProducts);
     expect(announcement).toContain('115.000');
     expect(announcement).toContain('140.000');
