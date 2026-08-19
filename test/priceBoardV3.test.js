@@ -106,6 +106,32 @@ describe('Cenar price board V3', () => {
     expect(announcement).not.toContain('99k');
   });
 
+  it('shows the complete eligibility for the first-offer Nitro Trial 3-month package', () => {
+    const trial = DEFAULT_PRODUCT_CATALOG.find((product) => (
+      product.product_key === 'discord-nitro-boost-trial-3-months-first-offer'
+    ));
+    expect(trial?.name).toContain('Trial 3 Tháng (Ưu Đãi Lần Đầu)');
+    expect(trial?.price).toBe(50000);
+    expect(trial?.description).toContain('chưa từng sử dụng Nitro');
+    expect(trial?.description).toContain('ít nhất 12 tháng liên tục');
+
+    const products = [
+      ...getActiveProducts(GUILD_ID).filter((product) => !/nitro.*(?:trial|trail)/i.test(product.name)),
+      { ...trial, id: 'nitro-trial-seed' },
+    ];
+    const nitroPayload = buildPriceBoardPayloads(GUILD_ID, {}, products)
+      .map(serialize)
+      .find((json) => json.includes('Discord Nitro'));
+    expect(nitroPayload).toContain('Đối tượng áp dụng');
+    expect(nitroPayload).toContain('Tài khoản được tạo trên 1 tháng và chưa từng sử dụng Nitro.');
+    expect(nitroPayload).toContain('không dùng lại Nitro trong ít nhất 12 tháng liên tục.');
+
+    const announcement = buildPriceAnnouncementContent(GUILD_ID, products);
+    expect(announcement).toContain('Nitro Trial 3 Tháng · Ưu Đãi Lần Đầu');
+    expect(announcement).toContain('50.000');
+    expect(announcement).toContain('ít nhất 12 tháng liên tục.');
+  });
+
   it('renders every product as its own consistently spaced Markdown block', () => {
     const payloads = buildPriceBoardPayloads(GUILD_ID, {}, getActiveProducts(GUILD_ID));
     for (const payload of payloads.slice(1)) {

@@ -6,6 +6,7 @@ import { publishAnnouncement } from '../services/announcementService.js';
 import { getActiveProducts } from '../services/productCatalogService.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { formatCurrency } from '../utils/formatters.js';
+import { getNitroTrialEligibility, isNitroTrialProduct } from '../constants/nitroTrial.js';
 
 const PRIMARY_PRICE_CHANNEL_ID = '1514606995842273280';
 
@@ -21,6 +22,7 @@ export function buildPriceAnnouncementContent(guildId, products) {
   const E = createEmojiResolver(guildId);
   const keepMail = findNitroOption(products, 'Giữ Mail 7 Ngày');
   const guaranteedMail = findNitroOption(products, 'Mail Bao Sống');
+  const nitroTrial = products.find((product) => product.is_active !== 0 && isNitroTrialProduct(product));
   const priceChannelMention = `<#${PRIMARY_PRICE_CHANNEL_ID}>`;
 
   const nitroLines = keepMail && guaranteedMail
@@ -30,6 +32,14 @@ export function buildPriceAnnouncementContent(guildId, products) {
       `- **Mail bao sống:** ${formatCurrency(guaranteedMail.price)}`,
     ]
     : [];
+  const trialLines = nitroTrial
+    ? [
+      `### ${E('brand_nitro')} Nitro Trial 3 Tháng · Ưu Đãi Lần Đầu`,
+      `- **Giá bán:** ${formatCurrency(nitroTrial.price)}`,
+      `${E('status_check')} **Đối tượng áp dụng:**`,
+      ...getNitroTrialEligibility().map((item) => `- ${item}`),
+    ]
+    : [];
 
   return [
     `## ${E('icon_price')} BẢNG GIÁ CENAR ĐÃ ĐƯỢC CẬP NHẬT`,
@@ -37,6 +47,8 @@ export function buildPriceAnnouncementContent(guildId, products) {
     '',
     ...nitroLines,
     nitroLines.length ? '' : null,
+    ...trialLines,
+    trialLines.length ? '' : null,
     `${E('icon_search')} Xem đầy đủ tên gói, giá bán và thời hạn tại ${priceChannelMention}.`,
     `${E('status_info')} Giá trên kênh bảng giá là dữ liệu chính thức mới nhất của shop.`,
   ].filter((line) => line !== null).join('\n');

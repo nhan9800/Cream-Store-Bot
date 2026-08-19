@@ -18,8 +18,9 @@ import { fmt, subtext } from '../utils/embedHelpers.js';
 import { config } from '../config.js';
 import { isInternationalGuild } from '../utils/locale.js';
 import { formatInternationalPrice, translateCatalogGroup, translateProductName } from '../utils/internationalCatalog.js';
+import { getNitroTrialEligibility, isNitroTrialProduct } from '../constants/nitroTrial.js';
 
-export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.2';
+export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.3';
 const PRIMARY_GUILD_ID = '1282637033340403754';
 const PRIMARY_PRICE_CHANNEL_ID = '1514606995842273280';
 
@@ -278,11 +279,18 @@ export function buildPriceGroupPayload(guildId, group, products) {
         ? `~~${international ? formatInternationalPrice(product.original_price) : formatCurrency(product.original_price)}~~ → ${fmt.b(international ? formatInternationalPrice(product.price) : formatCurrency(product.price))}`
         : `\`${international ? formatInternationalPrice(product.price) : formatCurrency(product.price)}\``)
       : fmt.b(international ? 'Contact for quote' : 'Liên hệ báo giá');
+    const trialEligibility = isNitroTrialProduct(product)
+      ? getNitroTrialEligibility(international)
+      : [];
     container.addTextDisplayComponents(
       new TextDisplayBuilder().setContent([
         `### ${productIcon} ${international ? translateProductName(product.name) : product.name}`,
         `> ${E('payment_money')} **${international ? 'Price' : 'Giá bán'}:** ${price}`,
         `> ${E('icon_duration')} **${international ? 'Duration' : 'Thời hạn'}:** \`${duration}\``,
+        ...(trialEligibility.length ? [
+          `> ${E('status_check')} **${international ? 'Eligibility' : 'Đối tượng áp dụng'}:**`,
+          ...trialEligibility.map((item) => `> - ${item}`),
+        ] : []),
       ].join('\n'))
     );
   });

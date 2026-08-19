@@ -1204,8 +1204,8 @@ export const DEFAULT_PRODUCT_CATALOG = [
     { name: 'Discord Nitro Boost 12 Tháng (Login)', description: 'Đăng nhập gia hạn. Vui lòng gửi tài khoản, mật khẩu và 4-5 mã dự phòng khi mua. Gia hạn 2 tháng 1 lần.', price: 680000, duration_months: 12, service_type: 'GAME', emoji: 'brand_nitro', original_price: 0 },
     { name: 'Discord Nitro Boost 1 Năm (Login)', description: 'Đăng nhập gia hạn. Vui lòng gửi tài khoản, mật khẩu và 4-5 mã dự phòng khi mua.', price: 880000, duration_months: 12, service_type: 'GAME', emoji: 'brand_nitro', original_price: 0 },
     { name: 'Gia hạn Discord Nitro Boost 2 Tháng', description: 'Dành cho khách hàng cũ đã từng mua Nitro 2 tháng tại shop. (Gia hạn chỉ 95k). Vui lòng gửi tài khoản, mật khẩu và 4-5 mã dự phòng khi mua.', price: 99000, duration_months: 2, service_type: 'GAME', emoji: 'brand_nitro', original_price: 0 },
-    // Discord Nitro Boost Trail
-    { name: 'Discord Nitro Boost 3 Tháng (Trail)', description: 'Dành cho tài khoản chưa từng sử dụng Nitro và đã tạo trên 1 tháng. Vui lòng gửi tài khoản, mật khẩu và 4-5 mã dự phòng khi mua.', price: 50000, duration_months: 3, service_type: 'GAME', emoji: 'brand_nitro', original_price: 0 },
+    // Discord Nitro Boost Trial
+    { product_key: 'discord-nitro-boost-trial-3-months-first-offer', name: 'Discord Nitro Boost Trial 3 Tháng (Ưu Đãi Lần Đầu)', aliases: ['Discord Nitro Boost 3 Tháng (Trail)'], description: 'Đối tượng áp dụng: tài khoản được tạo trên 1 tháng và chưa từng sử dụng Nitro; hoặc tài khoản đã từng sử dụng Nitro nhưng không dùng lại Nitro trong ít nhất 12 tháng liên tục. Vui lòng gửi tài khoản, mật khẩu và 4-5 mã dự phòng khi mua.', price: 50000, duration_months: 3, service_type: 'GAME', emoji: 'brand_nitro', original_price: 0 },
 
     // Bót Server
     { name: 'Discord Server Boost Level 2 (1 Tháng)', description: 'Nâng cấp Server Boost Level 2 trong 1 tháng. Giao hàng nhanh chóng.', price: 75000, duration_months: 1, service_type: 'GAME', emoji: 'brand_boost', original_price: 0 },
