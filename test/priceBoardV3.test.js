@@ -145,6 +145,39 @@ describe('Cenar price board V3', () => {
     expect(announcement).toContain('ít nhất 12 tháng liên tục.');
   });
 
+  it('shows the full Netflix 35k promotion policy in catalog, board and price announcement', () => {
+    const netflix = DEFAULT_PRODUCT_CATALOG.find((product) => (
+      product.product_key === 'netflix-premium-1-month-non-renewable'
+    ));
+    expect(netflix?.price).toBe(35000);
+    expect(netflix?.duration_months).toBe(1);
+    expect(netflix?.description).toContain('Full HD/4K');
+    expect(netflix?.description).toContain('bảo hành 20 ngày');
+    expect(netflix?.description).toContain('đổi sang tài khoản mới');
+
+    const products = [
+      ...getActiveProducts(GUILD_ID).filter((product) => (
+        product.product_key !== 'netflix-premium-1-month-non-renewable'
+      )),
+      { ...netflix, id: 'netflix-promo-seed' },
+    ];
+    const streamingPanel = buildPriceBoardPayloads(GUILD_ID, {}, products)
+      .map((payload) => serialize(payload))
+      .find((json) => json.includes('YouTube Premium & Giải Trí'));
+    expect(streamingPanel).toContain('Netflix Premium 1 Tháng (Không Gia Hạn)');
+    expect(streamingPanel).toContain('35.000');
+    expect(streamingPanel).toContain('Full HD/4K');
+    expect(streamingPanel).toContain('20 ngày');
+    expect(streamingPanel).toContain('đổi sang tài khoản mới');
+
+    const announcement = buildPriceAnnouncementContent(GUILD_ID, products);
+    expect(announcement).toContain('Netflix Premium 1 Tháng · Không Gia Hạn');
+    expect(announcement).toContain('35.000');
+    expect(announcement).toContain('Full HD/4K');
+    expect(announcement).toContain('20 ngày');
+    expect(announcement).toContain('đổi sang tài khoản mới');
+  });
+
   it('renders every product as its own consistently spaced Markdown block', () => {
     const payloads = buildPriceBoardPayloads(GUILD_ID, {}, getActiveProducts(GUILD_ID));
     for (const payload of payloads.slice(1)) {

@@ -1277,6 +1277,9 @@ export const DEFAULT_PRODUCT_CATALOG = [
     { name: 'YouTube Premium 3 Tháng (Gia Hạn 1 Tháng/Lần)', description: 'Không lo bị giới hạn 12 tháng khi rời Family. Hỗ trợ tốt nhất.', price: 90000, duration_months: 3, service_type: 'STREAMING', emoji: 'brand_youtube', original_price: 0 },
     { name: 'YouTube Premium 6 Tháng (Gia Hạn 1 Tháng/Lần)', description: 'Không lo bị giới hạn 12 tháng khi rời Family. Hỗ trợ tốt nhất.', price: 180000, duration_months: 6, service_type: 'STREAMING', emoji: 'brand_youtube', original_price: 0 },
     { name: 'YouTube Premium 12 Tháng (Gia Hạn 1 Tháng/Lần)', description: 'Không lo bị giới hạn 12 tháng khi rời Family. Hỗ trợ tốt nhất.', price: 250000, duration_months: 12, service_type: 'STREAMING', emoji: 'brand_youtube', original_price: 0 },
+
+    // Netflix Premium
+    { product_key: 'netflix-premium-1-month-non-renewable', name: 'Netflix Premium 1 Tháng (Không Gia Hạn)', description: 'Tài khoản Netflix Premium chất lượng Full HD/4K, sử dụng 1 tháng và bảo hành 20 ngày. Không hỗ trợ gia hạn trên tài khoản đã cấp; khi hết hạn, khách muốn sử dụng tiếp cần đổi sang tài khoản mới.', price: 35000, duration_months: 1, service_type: 'netflix', emoji: 'brand_netflix', original_price: 0, is_featured: 1, virtual_purchase_count: 0 },
  
     // Dịch vụ Discord Setup & Bot Custom & Website Custom
     { name: 'Combo Setup Discord + Bot Custom + Boost Server', description: 'Trọn gói setup máy chủ hoàn chỉnh: bot hệ thống tự động siêu đẹp + Boost Server. Phí duy trì bot chỉ 30k/tháng.', price: 500000, duration_months: 1, service_type: 'SERVICE', emoji: 'brand_discord', original_price: 0 },

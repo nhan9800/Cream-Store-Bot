@@ -19,8 +19,9 @@ import { config } from '../config.js';
 import { isInternationalGuild } from '../utils/locale.js';
 import { formatInternationalPrice, translateCatalogGroup, translateProductName } from '../utils/internationalCatalog.js';
 import { getNitroTrialEligibility, isNitroTrialProduct } from '../constants/nitroTrial.js';
+import { getNetflixPromoDetails, isNetflixPromoProduct } from '../constants/netflixPromotion.js';
 
-export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.4';
+export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.5';
 const PRIMARY_GUILD_ID = '1282637033340403754';
 const PRIMARY_PRICE_CHANNEL_ID = '1514606995842273280';
 
@@ -283,6 +284,9 @@ export function buildPriceGroupPayload(guildId, group, products) {
     const trialEligibility = isNitroTrialProduct(product)
       ? getNitroTrialEligibility(international)
       : [];
+    const netflixPromo = isNetflixPromoProduct(product)
+      ? getNetflixPromoDetails(international)
+      : null;
     container.addTextDisplayComponents(
       new TextDisplayBuilder().setContent([
         `### ${productIcon} ${international ? translateProductName(product.name) : product.name}`,
@@ -291,6 +295,11 @@ export function buildPriceGroupPayload(guildId, group, products) {
         ...(trialEligibility.length ? [
           `> ${E('status_check')} **${international ? 'Eligibility' : 'Đối tượng áp dụng'}:**`,
           ...trialEligibility.map((item) => `> - ${item}`),
+        ] : []),
+        ...(netflixPromo ? [
+          `> ${E('status_check')} **${international ? 'Quality' : 'Chất lượng'}:** ${netflixPromo.quality}`,
+          `> ${E('warranty_shield')} **${international ? 'Warranty' : 'Bảo hành'}:** ${netflixPromo.warranty}`,
+          `> ${E('status_warn')} **${international ? 'Renewal' : 'Gia hạn'}:** ${netflixPromo.renewal}`,
         ] : []),
       ].join('\n'))
     );
