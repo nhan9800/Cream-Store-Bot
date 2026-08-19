@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { beforeAll, describe, expect, it } from 'vitest';
 import { MessageFlags } from 'discord.js';
-import { DEFAULT_PRODUCT_CATALOG } from '../src/database/db.js';
+import { DEFAULT_PRODUCT_CATALOG, initDatabase } from '../src/database/db.js';
 import { getActiveProducts } from '../src/services/productCatalogService.js';
 import {
   PRICE_BOARD_VERSION,
@@ -12,6 +12,10 @@ import { buildPriceAnnouncementContent } from '../src/commands/thong-bao-bang-gi
 const GUILD_ID = '1282637033340403754';
 const NATIVE_EMOJI = /[\u{1F000}-\u{1FAFF}\u2600-\u27BF]/u;
 const RAW_EMOJI_NAME = /(^|[^<a]):[a-zA-Z0-9_]+:/;
+
+beforeAll(() => {
+  initDatabase();
+});
 
 function serialize(payload) {
   return JSON.stringify({
