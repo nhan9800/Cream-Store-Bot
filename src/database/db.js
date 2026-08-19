@@ -44,7 +44,13 @@ function ensureColumn(tableName, columnName, definitionSql) {
   const columns = db.prepare(`PRAGMA table_info(${tableName})`).all();
   const exists = columns.some((column) => column.name === columnName);
   if (!exists) {
-    db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definitionSql}`);
+    try {
+      db.exec(`ALTER TABLE ${tableName} ADD COLUMN ${columnName} ${definitionSql}`);
+    } catch (error) {
+      // Vitest/cluster workers có thể cùng khởi tạo một DB mới: worker khác đã
+      // thêm cột sau lần PRAGMA ở trên thì trạng thái cuối vẫn hợp lệ.
+      if (!/duplicate column name/i.test(String(error?.message || ''))) throw error;
+    }
   }
 }
 
