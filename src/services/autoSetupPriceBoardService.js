@@ -19,7 +19,7 @@ import { config } from '../config.js';
 import { isInternationalGuild } from '../utils/locale.js';
 import { formatInternationalPrice, translateCatalogGroup, translateProductName } from '../utils/internationalCatalog.js';
 
-export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.1';
+export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.2';
 const PRIMARY_GUILD_ID = '1282637033340403754';
 const PRIMARY_PRICE_CHANNEL_ID = '1514606995842273280';
 
@@ -371,7 +371,7 @@ async function clearBotMessages(channel, botId, keepIds = new Set()) {
   return deleted;
 }
 
-export async function publishPriceBoard(guild, { force = false } = {}) {
+export async function publishPriceBoard(guild, { force = false, keepMessageIds = [] } = {}) {
   await guild.channels.fetch().catch(() => null);
   await guild.emojis.fetch().catch(() => null);
   const guildConfig = getGuildConfig(guild.id);
@@ -398,7 +398,11 @@ export async function publishPriceBoard(guild, { force = false } = {}) {
     }
     throw error;
   }
-  const deleted = await clearBotMessages(channel, guild.client.user.id, new Set(sentMessageIds));
+  const deleted = await clearBotMessages(
+    channel,
+    guild.client.user.id,
+    new Set([...sentMessageIds, ...keepMessageIds.map(String)]),
+  );
 
   return {
     guildId: guild.id,

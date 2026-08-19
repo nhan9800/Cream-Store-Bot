@@ -1193,11 +1193,11 @@ export function getDatabasePath() {
   return resolvedDatabasePath;
 }
 
-export function seedProductCatalog(dbInstance) {
-  const products = [
+export const DEFAULT_PRODUCT_CATALOG = [
     // Discord Nitro Boost Log
     { name: 'Discord Nitro Boost 1 Tháng (Login)', description: 'Đăng nhập gia hạn. Vui lòng gửi tài khoản, mật khẩu và 4-5 mã dự phòng khi mua.', price: 90000, duration_months: 1, service_type: 'GAME', emoji: 'brand_nitro', original_price: 0 },
-    { name: 'Discord Nitro Boost 2 Tháng (Login)', description: 'Đăng nhập gia hạn. Vui lòng gửi tài khoản, mật khẩu và 4-5 mã dự phòng khi mua. Gia hạn 2 tháng 1 lần.', price: 110000, duration_months: 2, service_type: 'GAME', emoji: 'brand_nitro', original_price: 0 },
+    { product_key: 'discord-nitro-boost-2-months-login-keep-mail-7-days', name: 'Discord Nitro Boost 2 Tháng (Login · Giữ Mail 7 Ngày)', aliases: ['Discord Nitro Boost 2 Tháng (Login)'], description: 'Gói login Nitro Boost 2 tháng. Khách hàng cần giữ mail tối thiểu 7 ngày, đăng nhập sớm và kiểm tra mail trong 10-30 phút sau khi nhận.', price: 115000, duration_months: 2, service_type: 'GAME', emoji: 'brand_nitro', original_price: 0 },
+    { product_key: 'discord-nitro-boost-2-months-login-mail-guaranteed', name: 'Discord Nitro Boost 2 Tháng (Login · Mail Bao Sống)', description: 'Gói login Nitro Boost 2 tháng kèm mail bao sống. Đăng nhập sớm và kiểm tra mail trong 10-30 phút sau khi nhận; xác minh số điện thoại nếu hệ thống yêu cầu.', price: 140000, duration_months: 2, service_type: 'GAME', emoji: 'brand_nitro', original_price: 0 },
     { name: 'Discord Nitro Boost 4 Tháng (Login)', description: 'Đăng nhập gia hạn. Vui lòng gửi tài khoản, mật khẩu và 4-5 mã dự phòng khi mua. Gia hạn 2 tháng 1 lần.', price: 280000, duration_months: 4, service_type: 'GAME', emoji: 'brand_nitro', original_price: 0 },
     { name: 'Discord Nitro Boost 6 Tháng (Login)', description: 'Đăng nhập gia hạn. Vui lòng gửi tài khoản, mật khẩu và 4-5 mã dự phòng khi mua. Gia hạn 2 tháng 1 lần.', price: 380000, duration_months: 6, service_type: 'GAME', emoji: 'brand_nitro', original_price: 0 },
     { name: 'Discord Nitro Boost 8 Tháng (Login)', description: 'Đăng nhập gia hạn. Vui lòng gửi tài khoản, mật khẩu và 4-5 mã dự phòng khi mua. Gia hạn 2 tháng 1 lần.', price: 480000, duration_months: 8, service_type: 'GAME', emoji: 'brand_nitro', original_price: 0 },
@@ -1281,7 +1281,10 @@ export function seedProductCatalog(dbInstance) {
     // Nâng cấp: Claude API & Locket Gold
     { name: 'Claude API 100M', description: 'Trải nghiệm hệ sinh thái Claude mạnh mẽ, phù hợp cho lập trình, phân tích dữ liệu, viết nội dung, nghiên cứu và xử lý công việc chuyên sâu.', price: 85000, duration_months: 1, service_type: 'AI', emoji: 'claude_ai', original_price: 0, base_price: 85000, base_duration_days: 1, additional_day_price: 5000, minimum_days: 1, maximum_days: 365, quota_value: 100, quota_unit: 'M', activation_method: 'TOKEN', username_required: 0, login_required: 0 },
     { name: 'Locket Gold — 1 năm', description: 'Nâng cấp trải nghiệm Locket với nhiều tính năng cá nhân hóa, kết nối bạn bè và chia sẻ khoảnh khắc tiện lợi hơn.', price: 150000, duration_months: 12, service_type: 'premium', emoji: 'locket_gold', original_price: 0, base_price: 150000, activation_method: 'USERNAME', username_required: 1, login_required: 0 }
-  ];
+];
+
+export function seedProductCatalog(dbInstance) {
+  const products = DEFAULT_PRODUCT_CATALOG;
 
   const productKey = (product) => String(product.product_key || product.name)
     .normalize('NFD')

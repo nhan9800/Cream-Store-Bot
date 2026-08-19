@@ -10,8 +10,39 @@ import {
   TextDisplayBuilder,
 } from 'discord.js';
 import { createEmojiResolver, withButtonEmoji } from '../utils/emojiHelper.js';
+import { publishPriceBoard } from './autoSetupPriceBoardService.js';
 
 const SNOWFLAKE_RE = /^\d{17,20}$/;
+
+export function isPriceRelatedAnnouncement(content) {
+  const normalized = String(content || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/gi, 'd')
+    .toLowerCase()
+    .replace(/\btham\s+gia\b/g, ' ');
+
+  return /\b(?:gia|pricing|price|khuyen\s*mai)\b/.test(normalized)
+    || /\b\d{1,3}(?:[.,]\d{3})*\s*(?:k|nghin|vnd|d)\b/.test(normalized);
+}
+
+async function refreshPricingAnnouncementBoard(guild, content, announcementMessageId) {
+  if (!isPriceRelatedAnnouncement(content)) return null;
+
+  try {
+    return await publishPriceBoard(guild, {
+      force: true,
+      keepMessageIds: announcementMessageId ? [announcementMessageId] : [],
+    });
+  } catch (error) {
+    console.error('[ANNOUNCEMENT] Đã đăng thông báo nhưng không thể làm mới bảng giá:', {
+      guildId: guild.id,
+      message: error?.message,
+      stack: error?.stack,
+    });
+    return { guildId: guild.id, status: 'error', error: error.message };
+  }
+}
 
 function normalizeRoleIds(roleIds) {
   return [...new Set((roleIds || []).map(String).filter((id) => SNOWFLAKE_RE.test(id)))];
@@ -115,5 +146,16 @@ export async function publishAnnouncement({ guild, channelId, ...messageOptions 
   const message = await channel.send(payload);
   if (!message?.id) throw new Error('Discord không trả về tin nhắn sau khi gửi.');
 
-  return { channel, message };
+  const priceBoard = await refreshPricingAnnouncementBoard(
+    guild,
+    messageOptions.content,
+    message.id,
+  );
+
+  return {
+    channel,
+    message,
+    pricingRelated: priceBoard !== null,
+    priceBoard,
+  };
 }

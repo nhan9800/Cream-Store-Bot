@@ -1,188 +1,85 @@
 import {
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
-  ContainerBuilder,
-  MessageFlags,
   PermissionFlagsBits,
-  SeparatorBuilder,
-  SeparatorSpacingSize,
   SlashCommandBuilder,
-  TextDisplayBuilder,
-  AttachmentBuilder
 } from 'discord.js';
-import { createEmojiResolver, withButtonEmoji } from '../utils/emojiHelper.js';
-import fs from 'node:fs';
-import path from 'node:path';
+import { publishAnnouncement } from '../services/announcementService.js';
+import { getActiveProducts } from '../services/productCatalogService.js';
+import { createEmojiResolver } from '../utils/emojiHelper.js';
+import { formatCurrency } from '../utils/formatters.js';
+
+const PRIMARY_PRICE_CHANNEL_ID = '1514606995842273280';
+
+function findNitroOption(products, marker) {
+  return products.find((product) => (
+    product.is_active !== 0
+    && product.name.includes('Discord Nitro Boost 2 Tháng')
+    && product.name.includes(marker)
+  ));
+}
+
+export function buildPriceAnnouncementContent(guildId, products) {
+  const E = createEmojiResolver(guildId);
+  const keepMail = findNitroOption(products, 'Giữ Mail 7 Ngày');
+  const guaranteedMail = findNitroOption(products, 'Mail Bao Sống');
+  const priceChannelMention = `<#${PRIMARY_PRICE_CHANNEL_ID}>`;
+
+  const nitroLines = keepMail && guaranteedMail
+    ? [
+      `### ${E('brand_nitro')} Nitro Boost Login · 2 Tháng`,
+      `- **Giữ mail 7 ngày:** ${formatCurrency(keepMail.price)}`,
+      `- **Mail bao sống:** ${formatCurrency(guaranteedMail.price)}`,
+    ]
+    : [];
+
+  return [
+    `## ${E('icon_price')} BẢNG GIÁ CENAR ĐÃ ĐƯỢC CẬP NHẬT`,
+    '> Toàn bộ mức giá đang mở bán vừa được đồng bộ trực tiếp từ hệ thống sản phẩm.',
+    '',
+    ...nitroLines,
+    nitroLines.length ? '' : null,
+    `${E('icon_search')} Xem đầy đủ tên gói, giá bán và thời hạn tại ${priceChannelMention}.`,
+    `${E('status_info')} Giá trên kênh bảng giá là dữ liệu chính thức mới nhất của shop.`,
+  ].filter((line) => line !== null).join('\n');
+}
 
 export const data = new SlashCommandBuilder()
   .setName('thong-bao-bang-gia')
-  .setDescription('Gửi thông báo quảng bá Bảng Giá mới bằng Component V2 (@everyone).')
+  .setDescription('Đồng bộ bảng giá và gửi thông báo giá mới nhất (@everyone).')
   .setDefaultMemberPermissions(PermissionFlagsBits.Administrator)
-  .addChannelOption((option) =>
-    option
-      .setName('channel')
-      .setDescription('Kênh gửi thông báo (Mặc định: kênh 1515008584549797979 hoặc kênh hiện tại)')
-      .setRequired(false)
-  );
+  .addChannelOption((option) => option
+    .setName('channel')
+    .setDescription('Kênh đăng thông báo; mặc định là kênh hiện tại.')
+    .setRequired(false));
 
 export async function execute(interaction) {
   await interaction.deferReply({ ephemeral: true });
 
-  const targetChannel =
-    interaction.options.getChannel('channel') ||
-    interaction.guild.channels.cache.get('1515008584549797979') ||
-    interaction.channel;
-
-  if (!targetChannel?.isTextBased()) {
-    return interaction.editReply({ content: '❌ Kênh không hợp lệ hoặc không phải kênh tin nhắn.' });
+  const targetChannel = interaction.options.getChannel('channel') || interaction.channel;
+  if (!targetChannel?.isTextBased() || targetChannel.isThread?.()) {
+    return interaction.editReply({ content: 'Kênh đã chọn không hỗ trợ đăng thông báo.' });
   }
-
-  const E = createEmojiResolver(interaction.guildId);
-  const container = new ContainerBuilder().setAccentColor(0x5865F2); // Blurple
-
-  // Header
-  container.addTextDisplayComponents(
-    new TextDisplayBuilder().setContent(
-      `# ${E('icon_gem')} **BẢNG GIÁ KHUYẾN MÃI ĐỘC QUYỀN CENAR STORE** ${E('icon_gem')}\n` +
-      `> Cập nhật giá siêu rẻ tháng 7/2026. Deal cực hời, chốt đơn ngay để thăng hạng trải nghiệm số!`
-    )
-  );
-  container.addSeparatorComponents(
-    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Large)
-  );
-
-  // Nitro
-  container.addTextDisplayComponents(
-    new TextDisplayBuilder().setContent(
-      `## ${E('brand_nitro')} **Nitro Boost Login (Gia Hạn)**\n` +
-      `- 2 Tháng: **99k**\n` +
-      `- 4 Tháng: **250k**\n` +
-      `- 6 Tháng: **380k**\n` +
-      `- 8 Tháng: **450k**\n` +
-      `- 12 Tháng: **590k**\n\n` +
-      `## ${E('brand_nitro')} **Nitro Boost Login (Mua Thẳng)**\n` +
-      `- 1 Tháng: **90k**\n` +
-      `- 12 Tháng: **850k**\n\n` +
-      `## ${E('icon_star')} **Nitro Trial**\n` +
-      `- 3 Tháng: **45k**\n\n` +
-      `## ${E('brand_boost')} **Nâng Cấp Máy Chủ (Boost Server)**\n` +
-      `- 1 Tháng: **150k**\n` +
-      `- 3 Tháng: **320k**\n\n` +
-      `> **Lưu ý Trial:**\n` +
-      `> - Dành cho tài khoản tạo trên 1 tháng\n` +
-      `> - Chưa từng sử dụng Nitro Discord (kể cả Basic, không tính Nitro Trial)`
-    )
-  );
-  container.addSeparatorComponents(
-    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Large)
-  );
-
-  // Entertainment
-  container.addTextDisplayComponents(
-    new TextDisplayBuilder().setContent(
-      `## ${E('brand_spotify')} **Spotify Premium (Add Family)**\n` +
-      `- 3 Tháng: **120k** | 6 Tháng: **230k** | 12 Tháng: **300k**\n\n` +
-      `## ${E('brand_capcut')} **Capcut Pro (Chính Chủ)**\n` +
-      `- 1 Tháng: **85k** | 6 Tháng: **450k**\n\n` +
-      `## ${E('brand_adobe')} **Adobe Full App (Chính Chủ)**\n` +
-      `- 1 Tháng: **90k** | 2 Tháng: **130k**\n` +
-      `- 3 Tháng: **250k** | 4 Tháng: **450k**`
-    )
-  );
-  container.addSeparatorComponents(
-    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Large)
-  );
-
-  // Youtube
-  container.addTextDisplayComponents(
-    new TextDisplayBuilder().setContent(
-      `## ${E('brand_youtube')} **YouTube Premium (Chính Chủ - Ổn định lâu dài)**\n` +
-      `- 3 Tháng: **190k** | 6 Tháng: **300k** | 12 Tháng: **550k**\n\n` +
-      `## ${E('brand_youtube')} **YouTube Premium (Gia Hạn Hàng Tháng)**\n` +
-      `- 3 Tháng: **90k** | 6 Tháng: **180k** | 12 Tháng: **280k**`
-    )
-  );
-  container.addSeparatorComponents(
-    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Large)
-  );
-
-  // Work & AI
-  container.addTextDisplayComponents(
-    new TextDisplayBuilder().setContent(
-      `## ${E('icon_crown')} **Canva Pro (Chính Chủ)**\n` +
-      `- 1 Năm: **150k**\n\n` +
-      `## ${E('brand_office')} **Office 365 + Full Apps + 1TB OneDrive (Chính Chủ)**\n` +
-      `- 1 Năm: **250k**\n\n` +
-      `## ${E('brand_gemini')} **Gemini Pro + 5TB Google One (Chính Chủ)**\n` +
-      `- 12 Tháng: **250k**\n` +
-      `- 18 Tháng: **280k** *(Chỉ còn 20 Slot!)*`
-    )
-  );
-  container.addSeparatorComponents(
-    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Large)
-  );
-
-  // Gaming
-  container.addTextDisplayComponents(
-    new TextDisplayBuilder().setContent(
-      `## ${E('icon_fire')} **Tài Khoản Minecraft**\n` +
-      `**Bedrock Edition: 190k**\n` +
-      `- Chơi Online trên tài khoản Xbox/Microsoft cá nhân\n` +
-      `- Phiên bản Bedrock full update mọi tính năng\n` +
-      `- Sở hữu vĩnh viễn, bảo hành 1 năm\n\n` +
-      `**Java + Bedrock: 450k**\n` +
-      `- Tài khoản Microsoft mua sẵn game (Chỉ việc tải và chơi)\n` +
-      `- Giao toàn bộ thông tin tài khoản + Email đăng ký\n` +
-      `- Đổi mọi thông tin thoải mái (Email, Pass, SĐT)`
-    )
-  );
-  container.addSeparatorComponents(
-    new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Large)
-  );
-
-  // Footer
-  container.addTextDisplayComponents(
-    new TextDisplayBuilder().setContent(
-      `🔗 *Khám phá thêm hàng ngàn sản phẩm siêu ngon khác tại <#1514607020098191393> để được chốt giá mềm nhất!*`
-    )
-  );
-
-  const bannerPath = path.join(process.cwd(), 'assets', 'promo_banner.jpg');
-  let attachment = null;
-  if (fs.existsSync(bannerPath)) {
-    attachment = new AttachmentBuilder(fs.readFileSync(bannerPath), { name: 'banner.jpg' });
-  }
-
-  const row = new ActionRowBuilder().addComponents(
-    withButtonEmoji(
-      new ButtonBuilder()
-        .setLabel('Hỗ Trợ & Mua Hàng')
-        .setStyle(ButtonStyle.Primary)
-        .setCustomId('announce_dummy_1')
-        .setDisabled(true),
-      E.component('icon_store'),
-    ),
-  );
 
   try {
-    const messagePayload = {
-      components: [container, row],
-      flags: MessageFlags.IsComponentsV2,
-    };
-    if (attachment) {
-      messagePayload.files = [attachment];
+    const products = getActiveProducts(interaction.guildId);
+    const result = await publishAnnouncement({
+      guild: interaction.guild,
+      channelId: targetChannel.id,
+      content: buildPriceAnnouncementContent(interaction.guildId, products),
+      tagEveryone: true,
+    });
+
+    const board = result.priceBoard;
+    if (board?.status !== 'published' && board?.status !== 'current') {
+      return interaction.editReply({
+        content: `Thông báo đã đăng tại <#${targetChannel.id}>, nhưng bảng giá chưa thể đồng bộ (${board?.error || board?.status || 'không rõ lỗi'}).`,
+      });
     }
 
-    await targetChannel.send(messagePayload);
-
     return interaction.editReply({
-      content: `✅ Đã gửi thông báo khuyến mãi mới thành công vào kênh <#${targetChannel.id}>!`,
+      content: `Đã đăng thông báo tại <#${targetChannel.id}> và đồng bộ bảng giá tại <#${board.channelId}>.`,
     });
-  } catch (err) {
-    console.error('[THONG-BAO-BANG-GIA] Lỗi:', err);
-    return interaction.editReply({
-      content: `❌ Lỗi gửi thông báo: \`${err.message}\``,
-    });
+  } catch (error) {
+    console.error('[THONG-BAO-BANG-GIA] Lỗi:', error);
+    return interaction.editReply({ content: `Không thể đăng thông báo: ${error.message}` });
   }
 }

@@ -2327,8 +2327,13 @@ export function registerInteractionHandler(client, commands) {
 
            announcementCache.delete(interaction.message.id);
            const E = createEmojiResolver(interaction.guildId);
+           const priceBoardLine = result.pricingRelated
+             ? (result.priceBoard?.status === 'published' || result.priceBoard?.status === 'current'
+               ? `\n${E('status_check')} Bảng giá đã được đồng bộ tại <#${result.priceBoard.channelId}>.`
+               : `\n${E('status_warn')} Thông báo đã lên, nhưng bảng giá chưa thể đồng bộ (${result.priceBoard?.error || result.priceBoard?.status || 'không rõ lỗi'}).`)
+             : '';
            await interaction.editReply({
-             content: `${E('status_check')} Đã đăng thông báo thành công tại <#${result.channel.id}>.`,
+             content: `${E('status_check')} Đã đăng thông báo thành công tại <#${result.channel.id}>.${priceBoardLine}`,
              embeds: [],
              components: [],
            });

@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it } from 'vitest';
 import { ButtonBuilder, ButtonStyle, MessageFlags } from 'discord.js';
-import { buildAnnouncementMessageV2, publishAnnouncement } from '../src/services/announcementService.js';
+import { buildAnnouncementMessageV2, isPriceRelatedAnnouncement, publishAnnouncement } from '../src/services/announcementService.js';
 import { buildCardPanelPayload } from '../src/services/cardPanelService.js';
 import { normalizeButtonEmoji, withButtonEmoji } from '../src/utils/emojiHelper.js';
 
@@ -116,5 +116,11 @@ describe('safe custom emoji components', () => {
       channelId: '123456789012345679',
       content: 'Nội dung kiểm thử',
     })).rejects.toThrow('Unknown Emoji');
+  });
+
+  it('recognizes pricing announcements without treating ordinary participation text as pricing', () => {
+    expect(isPriceRelatedAnnouncement('Thông báo tăng giá Nitro lên 115k từ hôm nay')).toBe(true);
+    expect(isPriceRelatedAnnouncement('Bảng giá mới đã được cập nhật')).toBe(true);
+    expect(isPriceRelatedAnnouncement('Mời mọi người tham gia sự kiện cuối tuần')).toBe(false);
   });
 });
