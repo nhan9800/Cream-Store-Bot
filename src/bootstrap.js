@@ -9,6 +9,7 @@ import { startOtpAutoCheck } from './services/otpAutoCheckService.js';
 import { backfillRecentDeliverySubscriptions } from './services/deliverySubscriptionService.js';
 import { migrateSubscriptionMonthlyCycles } from './services/subscriptionService.js';
 import { cleanupExpiredTranscripts } from './services/transcriptService.js';
+import { reconcileWalletPaidOrders } from './services/orderService.js';
 
 import { initErrorLogger } from './services/errorLogService.js';
 import { autoSetupDiscountBoard } from './services/autoSetupDiscountBoardService.js';
@@ -17,6 +18,11 @@ import { localizeCommandsForInternationalStore } from './utils/internationalComm
 
 export async function buildClient() {
   initDatabase();
+  const walletReconciliation = reconcileWalletPaidOrders();
+  console.log(`[WALLET-RECONCILIATION] scanned=${walletReconciliation.scanned} repaired=${walletReconciliation.repaired.length}`);
+  for (const repaired of walletReconciliation.repaired) {
+    console.log(`[WALLET-RECONCILIATION] restored=${repaired.orderCode} ledger=${repaired.walletTransactionId}`);
+  }
   const transcriptCleanup = cleanupExpiredTranscripts();
   console.log(`[TRANSCRIPT-CLEANUP] scanned=${transcriptCleanup.scanned} removed=${transcriptCleanup.removed}`);
   const subscriptionMigration = migrateSubscriptionMonthlyCycles();

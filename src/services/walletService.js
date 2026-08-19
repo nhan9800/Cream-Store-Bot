@@ -41,6 +41,22 @@ export function getWalletTransactions(guildId, customerId, limit = 20) {
   return stmt.all(guildId, customerId, limit);
 }
 
+export function getWalletSummary(guildId, customerId) {
+  const row = db.prepare(`
+    SELECT
+      COALESCE(SUM(CASE WHEN amount > 0 THEN amount ELSE 0 END), 0) AS total_in,
+      COALESCE(SUM(CASE WHEN amount < 0 THEN -amount ELSE 0 END), 0) AS total_out,
+      COUNT(*) AS transaction_count
+    FROM wallet_transactions
+    WHERE guild_id = ? AND customer_id = ?
+  `).get(guildId, customerId);
+  return {
+    totalIn: Number(row?.total_in ?? 0),
+    totalOut: Number(row?.total_out ?? 0),
+    transactionCount: Number(row?.transaction_count ?? 0),
+  };
+}
+
 export function addWalletBalance(guildId, customerId, amount, type, description, relatedCode = null) {
   if (amount === 0) return getWalletBalance(guildId, customerId);
   

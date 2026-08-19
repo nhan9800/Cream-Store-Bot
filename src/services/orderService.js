@@ -44,6 +44,7 @@ function clearNonLegitAssignedStmt(){return db.prepare('UPDATE orders SET non_le
 function countQueueStmt(){return db.prepare(`SELECT COUNT(*) AS total FROM orders WHERE guild_id=? AND status IN ('PENDING_PAYMENT','PROCESSING','WARRANTY_OPEN') AND queue_group=?`);}
 function countQueueAheadStmt(){return db.prepare(`SELECT COUNT(*) AS total FROM orders WHERE guild_id=? AND status IN ('PENDING_PAYMENT','PROCESSING','WARRANTY_OPEN') AND queue_group=? AND (priority_rank > ? OR (priority_rank = ? AND id <= ?))`);}
 function markOrderPaidStmt(){return db.prepare(`UPDATE orders SET payment_status='PAID', amount_paid=?, paid_at=?, paid_transaction_id=?, paid_transaction_content=?, status=CASE WHEN status='PENDING_PAYMENT' THEN 'PROCESSING' ELSE status END, status_changed_at=?, updated_at=? WHERE order_code=?`);}
+function markWalletOrderPaidStmt(){return db.prepare(`UPDATE orders SET payment_provider='WALLET', payment_status='PAID', amount_paid=?, paid_at=?, paid_transaction_id=?, paid_transaction_content=?, payment_cancel_reason=NULL, status='PROCESSING', status_changed_at=?, updated_at=? WHERE order_code=?`);}
 function setOrderStatusStmt(){return db.prepare('UPDATE orders SET status=?, status_changed_at=?, updated_at=? WHERE order_code=?');}
 function completeWarrantyStmt(){return db.prepare(`UPDATE orders SET status='COMPLETED', status_changed_at=?, warranty_completed_at=?, warranty_completed_by_id=?, warranty_count=COALESCE(warranty_count,0)+1, updated_at=? WHERE order_code=? AND status='WARRANTY_OPEN'`);}
 function getOutstandingOrdersStmt(){return db.prepare(`SELECT * FROM orders WHERE guild_id=? AND status IN ('PENDING_PAYMENT','PROCESSING','WARRANTY_OPEN') AND (? IS NULL OR customer_id=?) ORDER BY priority_rank DESC, created_at ASC LIMIT ? OFFSET ?`);}
@@ -257,6 +258,211 @@ export function markOrderPaid(orderCode,{amountPaid,transactionId,transactionCon
   scheduleAdminOrderCenterRefresh(updated.guild_id);
   broadcastDashboardEvent('order_update');
   return updated;
+}
+
+export class WalletPaymentError extends Error {
+  constructor(code, message) {
+    super(message);
+    this.name = 'WalletPaymentError';
+    this.code = code;
+  }
+}
+
+/**
+ * Trừ ví và xác nhận đơn trong CÙNG một SQLite transaction.
+ * Nếu bất kỳ câu lệnh nào lỗi, cả số dư, ledger và trạng thái đơn đều rollback.
+ */
+export function payOrderWithWallet({ orderCode, guildId, customerId, amount }) {
+  const safeAmount = ensureAmountValue(amount);
+  if (!safeAmount) {
+    throw new WalletPaymentError('INVALID_AMOUNT', 'Tổng thanh toán không hợp lệ.');
+  }
+
+  const timestamp = nowIso();
+  const transactionId = `WALLET_${Date.now()}_${randomDigits(4)}`;
+  const result = db.transaction(() => {
+    const order = getOrderByCodeStmt().get(orderCode);
+    if (!order) throw new WalletPaymentError('ORDER_NOT_FOUND', 'Không tìm thấy đơn hàng.');
+    if (String(order.guild_id) !== String(guildId) || String(order.customer_id) !== String(customerId)) {
+      throw new WalletPaymentError('ORDER_OWNER_MISMATCH', 'Đơn hàng không thuộc ví này.');
+    }
+    if (ensureAmountValue(order.total_amount) !== safeAmount) {
+      throw new WalletPaymentError('AMOUNT_MISMATCH', 'Giá đơn hàng đã thay đổi. Vui lòng thử lại.');
+    }
+
+    const existingPayment = db.prepare(`
+      SELECT * FROM wallet_transactions
+      WHERE guild_id = ? AND customer_id = ? AND type IN ('PAYMENT', 'PAY_ORDER') AND related_code = ?
+      ORDER BY id ASC LIMIT 1
+    `).get(guildId, customerId, orderCode);
+
+    if (existingPayment) {
+      if (order.payment_status === 'PAID' && order.status !== 'CANCELLED') {
+        return { order, walletTransaction: existingPayment, reused: true };
+      }
+      throw new WalletPaymentError(
+        'WALLET_LEDGER_CONFLICT',
+        'Giao dịch ví đã tồn tại nhưng đơn chưa đồng bộ. Hệ thống sẽ tự đối soát, vui lòng không thanh toán lại.',
+      );
+    }
+
+    if (order.status !== 'PENDING_PAYMENT' || order.payment_status !== 'UNPAID') {
+      throw new WalletPaymentError('ORDER_NOT_PAYABLE', 'Đơn hàng không còn ở trạng thái chờ thanh toán.');
+    }
+
+    db.prepare(`
+      INSERT INTO customer_profiles (guild_id, customer_id, wallet_balance)
+      VALUES (?, ?, 0)
+      ON CONFLICT(guild_id, customer_id) DO NOTHING
+    `).run(guildId, customerId);
+
+    const debit = db.prepare(`
+      UPDATE customer_profiles
+      SET wallet_balance = wallet_balance - ?
+      WHERE guild_id = ? AND customer_id = ? AND wallet_balance >= ?
+    `).run(safeAmount, guildId, customerId, safeAmount);
+    if (debit.changes !== 1) {
+      throw new WalletPaymentError('INSUFFICIENT_BALANCE', 'Số dư ví không đủ.');
+    }
+
+    const ledger = db.prepare(`
+      INSERT INTO wallet_transactions (
+        guild_id, customer_id, amount, type, description, related_code, created_at
+      ) VALUES (?, ?, ?, 'PAYMENT', ?, ?, ?)
+    `).run(
+      guildId,
+      customerId,
+      -safeAmount,
+      `Thanh toán đơn ${orderCode}`,
+      orderCode,
+      timestamp,
+    );
+
+    markWalletOrderPaidStmt().run(
+      safeAmount,
+      timestamp,
+      transactionId,
+      'Thanh toán bằng số dư Ví Cenar',
+      timestamp,
+      timestamp,
+      orderCode,
+    );
+    recordStatusChange(db, {
+      orderCode,
+      previousStatus: order.status,
+      newStatus: 'PROCESSING',
+      changedBy: 'SYSTEM_WALLET',
+      reason: 'Wallet debit and order confirmation committed atomically',
+      metadata: { walletTransactionId: Number(ledger.lastInsertRowid) },
+    });
+
+    return {
+      order: getOrderByCodeStmt().get(orderCode),
+      walletTransaction: db.prepare('SELECT * FROM wallet_transactions WHERE id = ?').get(Number(ledger.lastInsertRowid)),
+      reused: false,
+    };
+  })();
+
+  syncCustomerStats(guildId, customerId);
+  scheduleAdminOrderCenterRefresh(guildId);
+  broadcastDashboardEvent('order_update', `Đã thanh toán ví: ${orderCode}`);
+  return result;
+}
+
+/**
+ * Sửa dữ liệu legacy do phiên bản cũ trừ ví trước rồi mới xác nhận đơn.
+ * Chỉ khôi phục khi có đúng 1 PAYMENT bằng đúng tổng đơn và chưa từng REFUND.
+ */
+export function reconcileWalletPaidOrders() {
+  const candidates = db.prepare(`
+    SELECT
+      o.order_code,
+      o.guild_id,
+      o.customer_id,
+      o.status,
+      o.total_amount,
+      wt.id AS wallet_transaction_id,
+      wt.created_at AS wallet_paid_at
+    FROM orders o
+    JOIN wallet_transactions wt
+      ON wt.guild_id = o.guild_id
+     AND wt.customer_id = o.customer_id
+     AND wt.related_code = o.order_code
+     AND wt.type IN ('PAYMENT', 'PAY_ORDER')
+    WHERE o.payment_status != 'PAID'
+      AND o.status IN ('PENDING_PAYMENT', 'CANCELLED')
+      AND wt.amount = -o.total_amount
+      AND NOT EXISTS (
+        SELECT 1 FROM wallet_transactions refund
+        WHERE refund.guild_id = o.guild_id
+          AND refund.customer_id = o.customer_id
+          AND refund.related_code = o.order_code
+          AND refund.type = 'REFUND'
+      )
+      AND 1 = (
+        SELECT COUNT(*) FROM wallet_transactions payment
+        WHERE payment.guild_id = o.guild_id
+          AND payment.customer_id = o.customer_id
+          AND payment.related_code = o.order_code
+          AND payment.type IN ('PAYMENT', 'PAY_ORDER')
+      )
+    ORDER BY o.id ASC
+  `).all();
+
+  const repaired = db.transaction(() => {
+    const rows = [];
+    for (const candidate of candidates) {
+      const timestamp = nowIso();
+      const update = db.prepare(`
+        UPDATE orders
+        SET payment_provider = 'WALLET',
+            payment_status = 'PAID',
+            amount_paid = total_amount,
+            paid_at = COALESCE(paid_at, ?),
+            paid_transaction_id = COALESCE(paid_transaction_id, ?),
+            paid_transaction_content = COALESCE(paid_transaction_content, 'Đối soát thanh toán Ví Cenar'),
+            payment_cancel_reason = NULL,
+            status = 'PROCESSING',
+            status_changed_at = ?,
+            updated_at = ?
+        WHERE order_code = ?
+          AND payment_status != 'PAID'
+          AND status IN ('PENDING_PAYMENT', 'CANCELLED')
+      `).run(
+        candidate.wallet_paid_at || timestamp,
+        `WALLET_RECON_${candidate.wallet_transaction_id}`,
+        timestamp,
+        timestamp,
+        candidate.order_code,
+      );
+      if (update.changes !== 1) continue;
+
+      recordStatusChange(db, {
+        orderCode: candidate.order_code,
+        previousStatus: candidate.status,
+        newStatus: 'PROCESSING',
+        changedBy: 'SYSTEM_WALLET_RECONCILIATION',
+        reason: 'Khôi phục đơn đã trừ ví nhưng phiên bản cũ chưa xác nhận thanh toán',
+        metadata: { walletTransactionId: candidate.wallet_transaction_id },
+      });
+      rows.push({
+        orderCode: candidate.order_code,
+        guildId: candidate.guild_id,
+        customerId: candidate.customer_id,
+        walletTransactionId: candidate.wallet_transaction_id,
+      });
+    }
+    return rows;
+  })();
+
+  for (const item of repaired) {
+    syncCustomerStats(item.guildId, item.customerId);
+    scheduleAdminOrderCenterRefresh(item.guildId);
+  }
+  if (repaired.length > 0) {
+    broadcastDashboardEvent('order_update', `Đối soát ${repaired.length} đơn thanh toán ví`);
+  }
+  return { scanned: candidates.length, repaired };
 }
 export function setOrderStatus(orderCode,status){
   const order=getOrderByCode(orderCode); if(!order) return null; 

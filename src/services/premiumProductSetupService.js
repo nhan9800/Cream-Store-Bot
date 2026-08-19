@@ -2,9 +2,9 @@ import { ChannelType, PermissionFlagsBits, EmbedBuilder, ActionRowBuilder, Butto
 import { db } from '../database/db.js';
 import { getProductByName } from './productCatalogService.js';
 import { createEmojiResolver, withButtonEmoji } from '../utils/emojiHelper.js';
-import { getWalletBalance, addWalletBalance } from './walletService.js';
+import { getWalletBalance } from './walletService.js';
 import { getGuildConfig } from './guildConfigService.js';
-import { createOrder, saveOrderLogMessage } from './orderService.js';
+import { createOrder, payOrderWithWallet, saveOrderLogMessage } from './orderService.js';
 import { createTicket, closeTicket, getOpenTicketByCustomer } from './ticketService.js';
 import { getTicketCategoryId, activeTicketCreations } from '../events/shared.js';
 import { buildTicketWelcomeV2, buildTicketControlComponents } from '../utils/embeds.js';
@@ -692,7 +692,7 @@ async function handlePremiumBuyOrder(interaction, productName, quantity, totalPr
       await channel.setName(buildTicketChannelName(ticket.ticket_code, prefix)).catch(() => null);
     }
 
-    const order = createOrder({
+    let order = createOrder({
       guildId: interaction.guildId,
       ticketId: ticket.id,
       ticketChannelId: channel.id,
@@ -708,19 +708,12 @@ async function handlePremiumBuyOrder(interaction, productName, quantity, totalPr
 
     const currentBalance = getWalletBalance(interaction.guildId, interaction.user.id);
     if (currentBalance >= totalPrice && totalPrice > 0) {
-      addWalletBalance(
-        interaction.guildId, 
-        interaction.user.id, 
-        -totalPrice, 
-        'PAY_ORDER', 
-        `Thanh toán đơn ${order.order_code}: x${quantity} ${productName}`, 
-        order.order_code
-      );
-
-      db.prepare("UPDATE store_orders SET status = 'PAID' WHERE order_code = ?").run(order.order_code);
-      order.status = 'PAID';
-    } else {
-      order.status = 'PENDING';
+      order = payOrderWithWallet({
+        orderCode: order.order_code,
+        guildId: interaction.guildId,
+        customerId: interaction.user.id,
+        amount: totalPrice,
+      }).order;
     }
 
     try {
@@ -759,7 +752,7 @@ async function handlePremiumBuyOrder(interaction, productName, quantity, totalPr
       )).catch(() => null);
     }
 
-    if (totalPrice > 0 && order.status !== 'PAID') {
+    if (totalPrice > 0 && order.payment_status !== 'PAID') {
       await sendOrRefreshPaymentQr({ guild: interaction.guild, orderCode: order.order_code }).catch(err => {
         console.error('[ORDER] Lỗi tạo QR PayOS:', err);
         channel.send(`${E('status_warn', '⚠️')} Lỗi tạo mã QR thanh toán: ${err.message}`).catch(() => null);

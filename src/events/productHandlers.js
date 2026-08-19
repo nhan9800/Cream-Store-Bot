@@ -24,13 +24,13 @@ import { getProductById, updateProduct, addProduct, getProductByName } from '../
 import { refreshAllShopPanels } from '../services/shopPanelService.js';
 import { getCenarHub } from '../services/cenarHub.js';
 import { createTicket, getOpenTicketByCustomer, closeTicket } from '../services/ticketService.js';
-import { createOrder, saveOrderLogMessage } from '../services/orderService.js';
+import { createOrder, payOrderWithWallet, saveOrderLogMessage } from '../services/orderService.js';
 import { buildTicketWelcomeV2, buildTicketControlComponents } from '../utils/embeds.js';
 import { buildTicketChannelName, parseMoneyInput, buildOrderLogContent } from '../utils/formatters.js';
 import { ensureRateLimit } from '../services/abuseService.js';
 import { isCustomerCtv } from '../services/ctvService.js';
 import { buildCtvPriorityNotice } from '../services/ctvOrderLogService.js';
-import { getWalletBalance, addWalletBalance } from '../services/walletService.js';
+import { getWalletBalance } from '../services/walletService.js';
 import { sendOrRefreshPaymentQr } from '../services/paymentService.js';
 import {
   safeReply,
@@ -236,7 +236,7 @@ export async function handleProductPurchaseFlow(interaction, productId) {
         await channel.setName(buildTicketChannelName(ticket.ticket_code, prefix)).catch(() => null);
       }
 
-      const order = createOrder({
+      let order = createOrder({
         guildId: interaction.guildId,
         ticketId: ticket.id,
         ticketChannelId: channel.id,
@@ -252,19 +252,12 @@ export async function handleProductPurchaseFlow(interaction, productId) {
       // Kiểm tra số dư ví trước khi thanh toán
       const currentBalance = getWalletBalance(interaction.guildId, interaction.user.id);
       if (currentBalance >= totalPrice && totalPrice > 0) {
-        addWalletBalance(
-          interaction.guildId, 
-          interaction.user.id, 
-          -totalPrice, 
-          'PAY_ORDER', 
-          `Thanh toán đơn ${order.order_code}: x${quantity} ${product.name}`, 
-          order.order_code
-        );
-
-        db.prepare("UPDATE store_orders SET status = 'PAID' WHERE order_code = ?").run(order.order_code);
-        order.status = 'PAID';
-      } else {
-        order.status = 'PENDING';
+        order = payOrderWithWallet({
+          orderCode: order.order_code,
+          guildId: interaction.guildId,
+          customerId: interaction.user.id,
+          amount: totalPrice,
+        }).order;
       }
 
       // Gửi log đơn hàng vào kênh order log
@@ -306,7 +299,7 @@ export async function handleProductPurchaseFlow(interaction, productId) {
       }
 
       // Nếu có tiền và chưa thanh toán -> tạo QR PayOS
-      if (totalPrice > 0 && order.status !== 'PAID') {
+      if (totalPrice > 0 && order.payment_status !== 'PAID') {
         await sendOrRefreshPaymentQr({ guild: interaction.guild, orderCode: order.order_code }).catch(err => {
           console.error('[ORDER] Lỗi tạo QR PayOS:', err);
           channel.send(`${E('status_warn', '⚠️')} Lỗi tạo mã QR thanh toán: ${err.message}`).catch(() => null);

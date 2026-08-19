@@ -1167,65 +1167,21 @@ export function registerBotApiRoutes(app) {
             
             const guildId = config.guildId;
 
-            // Let's create the ticket channel first
+            // Giữ một channel ID placeholder để phần DB + thanh toán hoàn tất
+            // ngay. Kênh Discord được provision sau khi đã trả response cho web,
+            // tránh website timeout trong lúc Discord API chậm.
             let channelId = `web-${orderCode.toLowerCase().replace('_', '-')}`;
             let ticketId = 0;
             let discordChannel = null;
 
-            try {
-                const client = req.app.locals.discordClient;
-                if (client) {
-                    const guild = await client.guilds.fetch(guildId).catch(() => null);
-                    if (guild) {
-                        const { getGuildConfig } = await import('./guildConfigService.js');
-                        const guildConfig = getGuildConfig(guildId);
-                        if (guildConfig) {
-                            const { ChannelType, PermissionFlagsBits } = await import('discord.js');
-                            const { TICKET_MEMBER_PERMISSIONS } = await import('../utils/permissions.js');
-                            
-                            const overwrites = [
-                                {
-                                    id: guild.roles.everyone.id,
-                                    deny: [PermissionFlagsBits.ViewChannel],
-                                },
-                                {
-                                    id: client.user.id,
-                                    allow: [
-                                        PermissionFlagsBits.ViewChannel,
-                                        PermissionFlagsBits.SendMessages,
-                                        PermissionFlagsBits.ReadMessageHistory,
-                                        PermissionFlagsBits.ManageChannels
-                                    ],
-                                },
-                            ];
-                            
-                            if (guildConfig.support_role_id) {
-                                overwrites.push({ id: guildConfig.support_role_id, allow: TICKET_MEMBER_PERMISSIONS });
-                            }
-                            if (customerId && customerId !== 'web_user') {
-                                const member = await guild.members.fetch(customerId).catch(() => null);
-                                if (member) {
-                                    overwrites.push({ id: customerId, allow: TICKET_MEMBER_PERMISSIONS });
-                                }
-                            }
-                            
-                            const categoryId = guildConfig.ticket_category_id;
-                            const channel = await guild.channels.create({
-                                name: `web-${orderCode.toLowerCase().replace('_', '-')}`,
-                                type: ChannelType.GuildText,
-                                parent: categoryId,
-                                permissionOverwrites: overwrites,
-                            }).catch(() => null);
-                            
-                            if (channel) {
-                                discordChannel = channel;
-                                channelId = channel.id;
-                            }
-                        }
-                    }
+            // Kiểm tra nhanh trước khi tạo đơn/ticket. Việc trừ tiền thật được
+            // thực hiện sau khi đơn tồn tại và nằm cùng transaction xác nhận đơn.
+            if (paymentProvider === 'WALLET') {
+                const { getWalletBalance } = await import('./walletService.js');
+                const balance = getWalletBalance(guildId, customerId);
+                if (balance < totalAmount) {
+                    return res.status(400).json({ ok: false, code: 'INSUFFICIENT_BALANCE', error: 'Số dư ví không đủ.' });
                 }
-            } catch (err) {
-                console.error('[WEB ORDER] Lỗi tạo kênh Discord:', err);
             }
 
             // Tạo ticket trong DB
@@ -1240,17 +1196,6 @@ export function registerBotApiRoutes(app) {
                 supportSource: 'WEBSITE_ORDER',
             });
             ticketId = ticket.id;
-
-            // Nếu thanh toán bằng ví, kiểm tra số dư và trừ tiền
-            if (paymentProvider === 'WALLET') {
-                const { getWalletBalance, addWalletBalance } = await import('./walletService.js');
-                const balance = getWalletBalance(guildId, customerId);
-                if (balance < totalAmount) {
-                    return res.status(400).json({ ok: false, error: 'Số dư ví không đủ.' });
-                }
-                // Trừ tiền ngay
-                addWalletBalance(guildId, customerId, -totalAmount, 'PAYMENT', `Thanh toán đơn ${orderCode}`, orderCode);
-            }
 
             const { getGuildConfig } = await import('./guildConfigService.js');
             const guildConfig = getGuildConfig(guildId);
@@ -1276,20 +1221,31 @@ export function registerBotApiRoutes(app) {
             };
             
             const order = createOrder(orderPayload);
+            let currentOrder = order;
             let payment_qr_code = null;
             let finalStatus = order.status;
 
              let payment_checkout_url = null;
 
              if (paymentProvider === 'WALLET') {
-                // Đánh dấu đã thanh toán
-                const { markOrderPaid } = await import('./orderService.js');
-                markOrderPaid(orderCode, {
-                    amountPaid: totalAmount,
-                    transactionId: `WALLET_${Date.now()}`,
-                    transactionContent: 'Thanh toán bằng số dư Ví',
-                });
-                finalStatus = 'PROCESSING';
+                // Trừ ví + ghi ledger + xác nhận đơn trong một transaction duy nhất.
+                const { payOrderWithWallet, cancelOrder } = await import('./orderService.js');
+                let walletPayment;
+                try {
+                    walletPayment = payOrderWithWallet({
+                        orderCode,
+                        guildId,
+                        customerId,
+                        amount: totalAmount,
+                    });
+                } catch (walletError) {
+                    cancelOrder(orderCode, `Thanh toán ví thất bại: ${walletError.code || 'UNKNOWN'}`);
+                    const { closeTicket } = await import('./ticketService.js');
+                    closeTicket(ticketId, 'SYSTEM_WALLET');
+                    throw walletError;
+                }
+                currentOrder = walletPayment.order;
+                finalStatus = currentOrder.status;
             } else {
                 // Nếu cấu hình chính là PAYOS
                 if (config.paymentProvider === 'PAYOS') {
@@ -1343,6 +1299,62 @@ export function registerBotApiRoutes(app) {
                 }
             });
 
+            // Response đã về tới khách; phần Discord dưới đây là hậu xử lý.
+            // Nếu Discord API tạm chậm/lỗi, thanh toán và đơn vẫn giữ nguyên,
+            // không còn làm trình duyệt báo thất bại sau khi đã trừ ví.
+            try {
+                const client = req.app.locals.discordClient;
+                if (client) {
+                    const guild = await client.guilds.fetch(guildId).catch(() => null);
+                    if (guild && guildConfig) {
+                        const { ChannelType, PermissionFlagsBits } = await import('discord.js');
+                        const { TICKET_MEMBER_PERMISSIONS } = await import('../utils/permissions.js');
+                        const overwrites = [
+                            {
+                                id: guild.roles.everyone.id,
+                                deny: [PermissionFlagsBits.ViewChannel],
+                            },
+                            {
+                                id: client.user.id,
+                                allow: [
+                                    PermissionFlagsBits.ViewChannel,
+                                    PermissionFlagsBits.SendMessages,
+                                    PermissionFlagsBits.ReadMessageHistory,
+                                    PermissionFlagsBits.ManageChannels,
+                                ],
+                            },
+                        ];
+                        if (guildConfig.support_role_id) {
+                            overwrites.push({ id: guildConfig.support_role_id, allow: TICKET_MEMBER_PERMISSIONS });
+                        }
+                        const member = await guild.members.fetch(customerId).catch(() => null);
+                        if (member) {
+                            overwrites.push({ id: customerId, allow: TICKET_MEMBER_PERMISSIONS });
+                        }
+
+                        const channel = await guild.channels.create({
+                            name: `web-${orderCode.toLowerCase().replace('_', '-')}`,
+                            type: ChannelType.GuildText,
+                            parent: guildConfig.ticket_category_id,
+                            permissionOverwrites: overwrites,
+                        }).catch(() => null);
+                        if (channel) {
+                            discordChannel = channel;
+                            channelId = channel.id;
+                            const updatedAt = new Date().toISOString();
+                            db.transaction(() => {
+                                db.prepare('UPDATE tickets SET channel_id = ? WHERE id = ?').run(channelId, ticketId);
+                                db.prepare('UPDATE orders SET ticket_channel_id = ?, updated_at = ? WHERE order_code = ?')
+                                    .run(channelId, updatedAt, orderCode);
+                            })();
+                            currentOrder = db.prepare('SELECT * FROM orders WHERE order_code = ?').get(orderCode) || currentOrder;
+                        }
+                    }
+                }
+            } catch (err) {
+                console.error('[WEB ORDER] Lỗi tạo kênh Discord hậu xử lý:', err);
+            }
+
             // Gửi welcome embed và components vào kênh Discord mới
             if (discordChannel) {
                 try {
@@ -1377,7 +1389,7 @@ export function registerBotApiRoutes(app) {
                             const orderLogChannel = await guild.channels.fetch(guildConfig.order_log_channel_id).catch(() => null);
                             if (orderLogChannel && orderLogChannel.isTextBased()) {
                                 const { buildOrderCreatedV2 } = await import('../utils/embeds.js');
-                                const { container, actionRow, flags } = buildOrderCreatedV2(order, guildConfig.order_log_channel_id);
+                                const { container, actionRow, flags } = buildOrderCreatedV2(currentOrder, guildConfig.order_log_channel_id);
 
                                 const { TextDisplayBuilder } = await import('discord.js');
                                 container.addTextDisplayComponents(
@@ -1404,6 +1416,10 @@ export function registerBotApiRoutes(app) {
             
         } catch (e) {
             console.error('[WEB ORDERS API]', e);
+            if (e?.name === 'WalletPaymentError') {
+                const status = e.code === 'INSUFFICIENT_BALANCE' ? 400 : 409;
+                return res.status(status).json({ ok: false, code: e.code, error: e.message });
+            }
             res.status(500).json({ ok: false, error: 'Lỗi máy chủ nội bộ.' });
         }
     });
