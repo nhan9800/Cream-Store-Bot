@@ -1,14 +1,9 @@
 import {
-  ActionRowBuilder,
-  ButtonBuilder,
-  ButtonStyle,
   ContainerBuilder,
   MessageFlags,
-  SeparatorBuilder,
-  SeparatorSpacingSize,
   TextDisplayBuilder,
 } from 'discord.js';
-import { createEmojiResolver, withButtonEmoji } from '../utils/emojiHelper.js';
+import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { getLatestOrderByTicketChannel } from '../services/orderService.js';
 import { parseMoneyInput } from '../utils/formatters.js';
 import { confirmOrderPaidManually } from '../services/paymentService.js';
@@ -16,81 +11,27 @@ import { completeOrderByCode } from './shared.js';
 import { STORE_ONE_GUILD_ID } from '../utils/locale.js';
 import { accentFor } from '../utils/uiKit.js';
 
-export const GMAIL_APPEAL_PROMPT = [
-  'Bạn là chuyên viên chăm sóc khách hàng có kinh nghiệm xử lý tài khoản Google.',
-  'Hãy soạn một thư kháng cáo bằng tiếng Anh gửi đội ngũ Google để đề nghị xem xét thủ công tài khoản Gmail bị hệ thống nhận diện nhầm là tài khoản được tạo hoặc điều khiển tự động.',
-  '',
-  'Yêu cầu nội dung:',
-  '- Giọng văn lịch sự, chân thành, chuyên nghiệp và tự nhiên.',
-  '- Dài khoảng 150–220 từ, chia thành các đoạn ngắn, dễ đọc.',
-  '- Xác nhận tôi là người thật và là chủ sở hữu hợp pháp của tài khoản.',
-  '- Giải thích rằng hoạt động đăng nhập từ thiết bị, trình duyệt hoặc mạng mới có thể đã gây ra cảnh báo nhầm.',
-  '- Cam kết tuân thủ Điều khoản dịch vụ và Chính sách của Google.',
-  '- Đề nghị Google kiểm tra thủ công và khôi phục quyền truy cập nếu tài khoản không vi phạm.',
-  '- Không bịa đặt tình tiết, không viện dẫn lý do không có thật và không đưa mật khẩu, mã OTP hoặc mã dự phòng vào thư.',
-  '- Kết thư bằng lời cảm ơn trang trọng.',
-  '',
-  'Trả về đúng định dạng sau:',
-  'Appeal message:',
-  '[Nội dung thư tiếng Anh]',
-  '',
-  'Full name: [HỌ VÀ TÊN]',
-  'Account email: [EMAIL CẦN KHÁNG CÁO]',
-  '',
-  'Không thêm Subject nếu biểu mẫu Google không yêu cầu.',
-].join('\n');
+export const GMAIL_APPEAL_PROMPT = 'Hãy viết giúp tôi một đoạn thư kháng cáo gửi đến đội ngũ hỗ trợ Google khi tài khoản Gmail của tôi bị gắn cờ là do máy tính hoặc robot tạo ra. Yêu cầu: Giọng văn lịch sự, chuyên nghiệp và chân thành. Có lời chào mở đầu và lời cảm ơn kết thúc gửi đến đội ngũ Google. Trình bày rõ ràng rằng tài khoản do con người thật sử dụng, không phải bot. Nêu lý do có thể khiến hệ thống hiểu nhầm (ví dụ: hoạt động đăng nhập lạ, dùng nhiều thiết bị, v.v.). Giữ độ dài khoảng 2-3 đoạn ngắn, đủ súc tích và dễ đọc. Bằng tiếng Anh, bỏ Subject, bỏ phần full name và your email.';
 
-export function buildThanhChuPayload(guildId, requesterId) {
+export function buildThanhChuPayload(guildId) {
   const E = createEmojiResolver(guildId);
   const guide = new ContainerBuilder().setAccentColor(accentFor('primary'));
   guide.addTextDisplayComponents(new TextDisplayBuilder().setContent([
-    `# ${E('brand_chatgpt')} THẦN CHÚ KHÁNG CÁO GMAIL`,
-    `> ${E('cenar_support')} Mẫu hướng dẫn dùng ChatGPT để soạn thư kháng cáo rõ ràng, trung thực và chuyên nghiệp.`,
-  ].join('\n')));
-  guide.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
-  guide.addTextDisplayComponents(new TextDisplayBuilder().setContent([
-    `## ${E('icon_link')} BƯỚC 1 · MỞ CHATGPT`,
-    `Bấm **Mở ChatGPT** bên dưới, đăng nhập tài khoản của bạn và tạo một cuộc trò chuyện mới.`,
+    '# HƯỚNG DẪN TẠO VĂN KHÁNG CÁO VỚI CHATGPT',
     '',
-    `## ${E('icon_doc')} BƯỚC 2 · SAO CHÉP PROMPT`,
-    `Sao chép nguyên khối nội dung sau rồi dán vào ChatGPT:`,
+    `## ${E('icon_doc')} Hướng dẫn sử dụng ChatGPT`,
+    '**Bước 1:** Vào https://chatgpt.com/',
+    '**Bước 2:** Nhập prompt sau:',
     '',
-    `\`\`\`text`,
+    '```text',
     GMAIL_APPEAL_PROMPT,
-    `\`\`\``,
+    '```',
+    '',
+    '**Bước 3:** Copy văn kháng cáo được tạo và gửi đến Google Support',
   ].join('\n')));
-
-  const checklist = new ContainerBuilder().setAccentColor(accentFor('success'));
-  checklist.addTextDisplayComponents(new TextDisplayBuilder().setContent([
-    `## ${E('status_check')} BƯỚC 3 · KIỂM TRA VÀ GỬI`,
-    `${E('cenar_verified')} Thay chính xác **họ tên** và **email cần kháng cáo** trước khi gửi.`,
-    `${E('icon_tip')} Chỉnh lại các chi tiết cho đúng tình trạng thực tế của tài khoản; không gửi máy móc nếu nội dung chưa chính xác.`,
-    `${E('status_warn')} Tuyệt đối không cung cấp mật khẩu, mã 2FA, OTP hoặc mã dự phòng cho bất kỳ ai.`,
-    `${E('cenar_support')} Sau đó mở trang Trợ giúp tài khoản Google và gửi nội dung vào biểu mẫu phù hợp.`,
-    `-# ${E('cenar_staff')} Yêu cầu bởi <@${requesterId}> · Cenar Store Support`,
-  ].join('\n')));
-
-  const openChatGpt = withButtonEmoji(
-    new ButtonBuilder()
-      .setLabel('Mở ChatGPT')
-      .setStyle(ButtonStyle.Link)
-      .setURL('https://chatgpt.com/'),
-    E.component('brand_chatgpt'),
-  );
-  const openGoogleHelp = withButtonEmoji(
-    new ButtonBuilder()
-      .setLabel('Trợ Giúp Google')
-      .setStyle(ButtonStyle.Link)
-      .setURL('https://support.google.com/accounts/answer/40695?hl=vi'),
-    E.component('cenar_support'),
-  );
 
   return {
-    components: [
-      guide,
-      checklist,
-      new ActionRowBuilder().addComponents(openChatGpt, openGoogleHelp),
-    ],
+    components: [guide],
     flags: MessageFlags.IsComponentsV2,
     allowedMentions: { parse: [] },
   };
@@ -98,7 +39,7 @@ export function buildThanhChuPayload(guildId, requesterId) {
 
 export async function handlePrefixThanhChu(message) {
   if (message.guild?.id !== STORE_ONE_GUILD_ID) return false;
-  await message.reply(buildThanhChuPayload(message.guild.id, message.author.id));
+  await message.reply(buildThanhChuPayload(message.guild.id));
   return true;
 }
 
