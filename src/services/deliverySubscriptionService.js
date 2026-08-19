@@ -30,6 +30,11 @@ export function buildDeliverySubscriptionInput({
 }) {
   const serviceType = detectDeliverySubscriptionService(order);
   if (!serviceType) return null;
+  if (Number(order?.duration_days || 0) > 0) {
+    // Đơn theo ngày dùng expiry_at + hệ thống nhắc hết hạn của orders.
+    // Không ép vào subscription tháng vì sẽ làm sai hạn thành 1 tháng.
+    return null;
+  }
   if (!String(gmailEmail || '').trim() || !String(gmailPassword || '').trim()) {
     throw new Error('Đơn dịch vụ gia hạn cần đủ Gmail và mật khẩu để đồng bộ lên website.');
   }

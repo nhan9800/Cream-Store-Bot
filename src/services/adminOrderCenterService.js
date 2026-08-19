@@ -17,7 +17,7 @@ import {
 import { config } from '../config.js';
 import { db, nowIso } from '../database/db.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
-import { formatCurrency, getOrderStatusLabel, getPaymentStatusLabel } from '../utils/formatters.js';
+import { formatCurrency, formatOrderDuration, getOrderStatusLabel, getPaymentStatusLabel } from '../utils/formatters.js';
 import { isManager } from '../utils/permissions.js';
 import { autoSyncGuildEmojis } from './emojiService.js';
 import { getGuildConfig } from './guildConfigService.js';
@@ -448,6 +448,7 @@ export function buildAdminOrderDetailPayload(order, {
       `${E('ticket_user')} **Khách:** ${customer}`,
       `${E('ticket_open')} **Ticket:** ${ticket}`,
       `${E('order_product')} **Sản phẩm:** ${trimText(order.product_name, 120)} · SL **${order.quantity || 1}**`,
+      `${E('icon_duration')} **Thời hạn:** ${formatOrderDuration(order)}`,
       `${E('icon_chart')} **Trạng thái:** ${getOrderStatusLabel(order.status, order.guild_id)} · ${getPaymentStatusLabel(order.payment_status, order.guild_id)}`,
       `${E('payment_money')} **Giá trị:** ${formatCurrency(order.total_amount)} · nhận **${formatCurrency(order.amount_paid)}**`,
       `${E('ticket_claim')} **Phụ trách:** ${claimant} · ${E('icon_history')} ${updatedUnix ? `<t:${updatedUnix}:R>` : 'chưa cập nhật'}`,
@@ -459,6 +460,7 @@ export function buildAdminOrderDetailPayload(order, {
       `${E('ticket_user')} **Khách hàng:** ${customer}`,
       `${E('ticket_open')} **Ticket:** ${ticket} · ID \`${order.ticket_id}\``,
       `${E('order_product')} **Sản phẩm:** ${trimText(order.product_name, 180)} · SL **${order.quantity || 1}**`,
+      `${E('icon_duration')} **Thời hạn:** ${formatOrderDuration(order)}`,
       note ? `${E('icon_edit')} **Ghi chú:** ${trimText(note, 260)}` : null,
       `${E('icon_chart')} **Trạng thái:** ${getOrderStatusLabel(order.status, order.guild_id)} · ${getPaymentStatusLabel(order.payment_status, order.guild_id)}`,
       `${E('payment_money')} **Giá trị:** ${formatCurrency(order.total_amount)} · đã nhận **${formatCurrency(order.amount_paid)}**`,

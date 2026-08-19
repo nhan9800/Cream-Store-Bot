@@ -7,7 +7,7 @@ import {
 } from 'discord.js';
 import { getCtvSettings, isCustomerCtv } from './ctvService.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
-import { formatCurrency } from '../utils/formatters.js';
+import { formatCurrency, formatOrderDuration } from '../utils/formatters.js';
 import { accentFor } from '../utils/uiKit.js';
 
 export async function sendCtvOrderLog(order, client = global.discordClient) {
@@ -33,6 +33,7 @@ export async function sendCtvOrderLog(order, client = global.discordClient) {
     `${E('cenar_verified')} **Mã đơn:** \`${order.order_code}\``,
     `${E('cenar_partner_ok')} **CTV:** <@${order.customer_id}>`,
     `${E('cenar_price')} **Sản phẩm:** ${order.product_name}`,
+    `${E('cenar_cooldown')} **Thời hạn:** ${formatOrderDuration(order)}`,
     `${E('cenar_wallet')} **Tổng tiền:** ${formatCurrency(order.total_amount)}`,
     `${E('cenar_cooldown')} **Trạng thái:** ${order.status || order.payment_status}`,
     order.ticket_channel_id ? `${E('cenar_support')} **Ticket:** <#${order.ticket_channel_id}>` : null,

@@ -100,6 +100,8 @@ Mỗi push/merge vào `main` chạy workflow `Bot Production - Verify and Promot
 4. Chỉ khi tất cả thành công mới cập nhật nhánh `bot-production` tới đúng SHA đã kiểm thử.
 5. Supervisor trên VibeHost phát hiện SHA mới, backup hai SQLite, dừng bot, reset source, chạy `npm ci`, kiểm tra
    cả hai file môi trường rồi start lại.
+6. Khi mỗi bot đăng nhập thành công, bot tự đăng ký lại slash commands của đúng source revision vào guild tương
+   ứng. Không cần chạy `npm run deploy` thủ công chỉ để cập nhật option hoặc mô tả lệnh.
 
 Không cần lưu mật khẩu SFTP trong GitHub Actions. Nếu revision mới cài đặt thất bại, supervisor rollback source
 về revision trước và không thử lại SHA lỗi cho đến khi có revision mới hơn.

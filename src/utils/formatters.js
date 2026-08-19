@@ -30,6 +30,39 @@ export function formatOrderProduct(quantity, productName) {
   return `x${safeQty} ${safeName}`.replace(/\s+/g, ' ').trim();
 }
 
+export function resolveOrderDuration(order = {}, fallbackMonths = 1) {
+  const rawDays = Number.parseInt(String(order.duration_days ?? ''), 10);
+  if (Number.isFinite(rawDays) && rawDays > 0) {
+    return { unit: 'day', value: rawDays };
+  }
+
+  const rawMonths = Number.parseInt(String(order.duration_months ?? fallbackMonths), 10);
+  return {
+    unit: 'month',
+    value: Number.isFinite(rawMonths) && rawMonths > 0 ? rawMonths : Math.max(1, Number(fallbackMonths) || 1),
+  };
+}
+
+export function formatOrderDuration(order = {}, fallbackMonths = 1) {
+  const duration = resolveOrderDuration(order, fallbackMonths);
+  return duration.unit === 'day'
+    ? `${duration.value} ngày`
+    : `${duration.value} tháng`;
+}
+
+export function addOrderDuration(baseDate, order = {}, fallbackMonths = 1) {
+  const next = new Date(baseDate);
+  if (Number.isNaN(next.getTime())) return null;
+
+  const duration = resolveOrderDuration(order, fallbackMonths);
+  if (duration.unit === 'day') {
+    next.setUTCDate(next.getUTCDate() + duration.value);
+  } else {
+    next.setUTCMonth(next.getUTCMonth() + duration.value);
+  }
+  return next;
+}
+
 export function formatCurrency(value) {
   const amount = Number(value ?? 0);
   return `${new Intl.NumberFormat('vi-VN').format(amount)} VND`;
@@ -47,7 +80,8 @@ export function buildOrderLogContent(order, guildId = null) {
   // Không bọc trong backtick vì getOrderStatusLabel trả về custom emoji
   const status = getOrderStatusLabel(order.status, guildId || order.guild_id || null);
   const ticket = resolveTicketLabel(order);
-  return `${orderCode} ${customer} ${product} ${status} | ${ticket}`;
+  const duration = formatOrderDuration(order);
+  return `${orderCode} ${customer} ${product} · **${duration}** ${status} | ${ticket}`;
 }
 
 export function toStars(stars, guildId = null) {

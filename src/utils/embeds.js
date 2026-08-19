@@ -17,6 +17,7 @@ import { decrypt } from './crypto.js';
 import { formatDateTime, formatDurationSince } from './time.js';
 import {
   formatCurrency,
+  formatOrderDuration,
   formatOrderProduct,
   getOrderStatusLabel,
   getPaymentStatusLabel,
@@ -618,6 +619,7 @@ export function buildOrderCreatedEmbed(order, orderChannelId) {
         : '> Đơn không cần thanh toán — đưa vào hàng xử lý ngay!')
       .addFields(
         { name: 'San Pham', value: formatOrderProduct(order.quantity, order.product_name), inline: true },
+        { name: 'Thoi Han', value: formatOrderDuration(order), inline: true },
         { name: 'So Tien', value: hasPay ? `**${formatCurrency(order.total_amount)}**` : '_Thương lượng_', inline: true },
         { name: 'Trang Thai', value: getOrderStatusLabel(order.status), inline: true },
         { name: 'Theo Doi Tai', value: `<#${orderChannelId}>`, inline: false },
@@ -652,6 +654,7 @@ export function buildOrderCreatedV2(order, orderChannelId) {
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(joinLines(
       `${E('order_product', '📦')} ${fmt.b('Sản phẩm:')} ${formatOrderProduct(order.quantity, order.product_name)}`,
+      `${E('icon_duration', '📅')} ${fmt.b('Thời hạn:')} ${fmt.b(formatOrderDuration(order))}`,
       `${E('payment_money', '💰')} ${fmt.b('Số tiền:')} ${hasPay ? fmt.b(formatCurrency(order.total_amount)) : `${fmt.i('Miễn phí')}`}`,
       `${E('icon_chart', '📊')} ${fmt.b('Trạng thái:')} ${getOrderStatusLabel(order.status)}`,
       `${E('icon_clock', '🕒')} ${fmt.b('Tạo lúc:')} ${T.rel(order.created_at || new Date())}`,
@@ -706,6 +709,7 @@ export function buildOrderLogV2Update(order) {
 
   const lines = [
     `${E('order_product')} ${fmt.b('Sản phẩm:')} ${formatOrderProduct(order.quantity, order.product_name)}`,
+    `${E('icon_duration')} ${fmt.b('Thời hạn:')} ${fmt.b(formatOrderDuration(order))}`,
     `${E('payment_money')} ${fmt.b('Số tiền:')} ${hasPay ? fmt.b(formatCurrency(order.total_amount)) : fmt.i('Miễn phí')}`,
     `${E('icon_chart')} ${fmt.b('Trạng thái:')} ${getOrderStatusLabel(order.status, order.guild_id)}`,
     order.ticket_channel_id

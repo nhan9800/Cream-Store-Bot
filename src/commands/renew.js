@@ -1,6 +1,6 @@
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { PermissionFlagsBits, SlashCommandBuilder } from 'discord.js';
-import { buildOrderLogContent } from '../utils/formatters.js';
+import { buildOrderLogContent, formatOrderDuration } from '../utils/formatters.js';
 import { getGuildConfig } from '../services/guildConfigService.js';
 import {
   createRenewalOrderRaw,
@@ -16,6 +16,7 @@ export const data = new SlashCommandBuilder()
   .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
   .addStringOption((o) => o.setName('ma_don_cu').setDescription('Mã đơn cũ').setRequired(true))
   .addIntegerOption((o) => o.setName('so_thang').setDescription('Số tháng gia hạn').setRequired(false).setMinValue(1).setMaxValue(36))
+  .addIntegerOption((o) => o.setName('so_ngay').setDescription('Số ngày gia hạn, ví dụ 7').setRequired(false).setMinValue(1).setMaxValue(3650))
   .addIntegerOption((o) => o.setName('gia_tien').setDescription('Giá gia hạn').setRequired(false).setMinValue(0));
 
 export async function execute(interaction) {
@@ -36,7 +37,16 @@ export async function execute(interaction) {
     return;
   }
 
-  const months = interaction.options.getInteger('so_thang') ?? oldOrder.duration_months ?? 1;
+  const selectedMonths = interaction.options.getInteger('so_thang');
+  const selectedDays = interaction.options.getInteger('so_ngay');
+  if (selectedMonths !== null && selectedDays !== null) {
+    await interaction.editReply(`${E('status_warn')} Chỉ chọn **số tháng** hoặc **số ngày**, không nhập cả hai.`);
+    return;
+  }
+  const days = selectedDays ?? (selectedMonths === null ? oldOrder.duration_days : null);
+  const months = days
+    ? 0
+    : (selectedMonths ?? (Number(oldOrder.duration_months) > 0 ? oldOrder.duration_months : 1));
   const price = interaction.options.getInteger('gia_tien') ?? oldOrder.total_amount ?? 0;
   const guildConfig = getGuildConfig(interaction.guildId);
 
@@ -50,6 +60,7 @@ export async function execute(interaction) {
     note: `Gia hạn từ đơn ${oldOrder.order_code}`,
     totalAmount: price,
     durationMonths: months,
+    durationDays: days,
     orderLogChannelId: guildConfig?.order_log_channel_id ?? null,
     createdById: interaction.user.id,
   });
@@ -74,10 +85,10 @@ export async function execute(interaction) {
     orderCode: newOrder.order_code,
     targetCustomerId: newOrder.customer_id,
     beforeJson: JSON.stringify({ source_order_code: oldOrder.order_code }),
-    afterJson: JSON.stringify({ duration_months: newOrder.duration_months, total_amount: newOrder.total_amount }),
+    afterJson: JSON.stringify({ duration_months: newOrder.duration_months, duration_days: newOrder.duration_days, total_amount: newOrder.total_amount }),
   });
 
   await interaction.editReply(
-    `${E('status_check')} Đã tạo đơn gia hạn mới \`${newOrder.order_code}\` từ đơn cũ \`${oldOrder.order_code}\` với thời hạn **${months} tháng**.`,
+    `${E('status_check')} Đã tạo đơn gia hạn mới \`${newOrder.order_code}\` từ đơn cũ \`${oldOrder.order_code}\` với thời hạn **${formatOrderDuration(newOrder)}**.`,
   );
 }

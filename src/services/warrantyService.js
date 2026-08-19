@@ -4,7 +4,7 @@ import { getOrderByCode, setOrderStatus } from './orderService.js';
 import { createTicket, getOpenWarrantyTicket, getTicketByChannelId } from './ticketService.js';
 import { updateOrderLogMessage } from './notificationService.js';
 import { buildTicketControlComponents, buildTicketWelcomeV2 } from '../utils/embeds.js';
-import { buildWarrantyChannelName } from '../utils/formatters.js';
+import { addOrderDuration, buildWarrantyChannelName } from '../utils/formatters.js';
 import { TICKET_MEMBER_PERMISSIONS } from '../utils/permissions.js';
 import { getCenarHub } from './cenarHub.js';
 import { createEmojiResolver, withButtonEmoji } from '../utils/emojiHelper.js';
@@ -45,12 +45,6 @@ function parseWarrantyDate(value) {
     : text;
   const parsed = new Date(normalized);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
-}
-
-function addMonths(date, months) {
-  const result = new Date(date.getTime());
-  result.setUTCMonth(result.getUTCMonth() + Math.max(1, Number(months) || 1));
-  return result;
 }
 
 function displayWarrantyDate(value) {
@@ -110,7 +104,7 @@ export function resolveWarrantyTimeline(order = {}, formData = {}) {
     order.delivered_at || order.completed_at || order.paid_at || order.created_at,
   );
   const computedExpiry = expiryBase
-    ? addMonths(expiryBase, order.duration_months || config.defaultOrderDurationMonths || 1)
+    ? addOrderDuration(expiryBase, order, config.defaultOrderDurationMonths || 1)
     : null;
   const expirySource = meaningful(formData.dateExpired)
     || order.expiry_at

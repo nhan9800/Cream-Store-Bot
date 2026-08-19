@@ -10,12 +10,13 @@ import { getGuildConfig } from '../services/guildConfigService.js';
 
 export const data = new SlashCommandBuilder()
   .setName('sua-don')
-  .setDescription('Sửa lại thông tin đơn hàng, gồm cả số tháng sử dụng.')
+  .setDescription('Sửa thông tin đơn hàng, gồm thời hạn theo tháng hoặc ngày.')
   .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
   .addStringOption((o) => o.setName('ma_don').setDescription('Mã đơn hàng').setRequired(true))
   .addStringOption((o) => o.setName('san_pham').setDescription('Tên sản phẩm mới').setRequired(false))
   .addIntegerOption((o) => o.setName('so_luong').setDescription('Số lượng mới').setRequired(false).setMinValue(1))
   .addIntegerOption((o) => o.setName('so_thang').setDescription('Số tháng mới').setRequired(false).setMinValue(1).setMaxValue(36))
+  .addIntegerOption((o) => o.setName('so_ngay').setDescription('Số ngày mới, ví dụ 7').setRequired(false).setMinValue(1).setMaxValue(3650))
   .addIntegerOption((o) => o.setName('gia_tien').setDescription('Giá mới').setRequired(false).setMinValue(0));
 
 export async function execute(interaction) {
@@ -34,7 +35,13 @@ export async function execute(interaction) {
     const productName = interaction.options.getString('san_pham');
     const quantity = interaction.options.getInteger('so_luong');
     const months = interaction.options.getInteger('so_thang');
+    const days = interaction.options.getInteger('so_ngay');
     const amount = interaction.options.getInteger('gia_tien');
+
+    if (months !== null && days !== null) {
+      await interaction.editReply(`${E('status_warn')} Chỉ chọn **số tháng** hoặc **số ngày**, không nhập cả hai.`);
+      return;
+    }
 
     if (amount !== null && Number(amount) !== Number(before.total_amount ?? 0) && before.payment_status !== 'PAID' && (before.payment_link_id || before.payment_checkout_url || before.payment_qr_code)) {
       await interaction.editReply(`${E('status_warn')} Đơn này đã tạo link/QR PayOS. Hãy giữ nguyên giá hoặc tạo lại flow thanh toán mới để tránh lệch số tiền.`);
@@ -43,7 +50,14 @@ export async function execute(interaction) {
 
     if (productName !== null) payload.product_name = productName;
     if (quantity !== null) payload.quantity = quantity;
-    if (months !== null) payload.duration_months = months;
+    if (months !== null) {
+      payload.duration_months = months;
+      payload.duration_days = null;
+    }
+    if (days !== null) {
+      payload.duration_months = 0;
+      payload.duration_days = days;
+    }
     if (amount !== null) payload.total_amount = amount;
 
     if (Object.keys(payload).length === 0) {
@@ -78,6 +92,7 @@ export async function execute(interaction) {
         quantity: before.quantity,
         total_amount: before.total_amount,
         duration_months: before.duration_months,
+        duration_days: before.duration_days,
         expiry_at: before.expiry_at,
       }),
       afterJson: JSON.stringify({
@@ -85,6 +100,7 @@ export async function execute(interaction) {
         quantity: after.quantity,
         total_amount: after.total_amount,
         duration_months: after.duration_months,
+        duration_days: after.duration_days,
         expiry_at: after.expiry_at,
       }),
     });

@@ -78,6 +78,20 @@ describe('/giaohang subscription synchronization', () => {
     });
   });
 
+  it('does not convert a day-based order into an incorrect one-month subscription', () => {
+    const input = buildDeliverySubscriptionInput({
+      order: {
+        ...netflixOrder,
+        order_code: `${ORDER_CODE}_7D`,
+        duration_months: 0,
+        duration_days: 7,
+      },
+      gmailEmail: 'seven-days@example.com',
+      gmailPassword: 'seven-days-password',
+    });
+    expect(input).toBeNull();
+  });
+
   it('upserts by order code instead of creating duplicate website records', () => {
     const first = syncDeliverySubscription({
       order: netflixOrder,

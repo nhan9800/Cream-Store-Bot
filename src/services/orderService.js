@@ -3,7 +3,7 @@ import { addHours } from '../utils/time.js';
 import { config } from '../config.js';
 import { randomDigits } from '../utils/id.js';
 import { syncCustomerStats, getCustomerProfile } from './customerService.js';
-import { normalizeQueueGroup } from '../utils/formatters.js';
+import { addOrderDuration, normalizeQueueGroup } from '../utils/formatters.js';
 import { broadcastDashboardEvent } from './dashboardMiniServer.js';
 import { encrypt } from '../utils/crypto.js';
 import { awardOrderPoints, refundOrderPoints } from './loyaltyService.js';
@@ -17,9 +17,9 @@ function createOrderStmt() {
       order_code, guild_id, ticket_id, ticket_channel_id, customer_id,
       product_name, quantity, note, total_amount, amount_paid, payment_provider,
       payment_code, payos_order_code, payment_status, status, status_changed_at,
-      queue_group, priority_rank, duration_months, order_log_channel_id, created_by_id, created_at, updated_at, service_type,
+      queue_group, priority_rank, duration_months, duration_days, order_log_channel_id, created_by_id, created_at, updated_at, service_type,
       discord_sku_id, discord_product_url, discord_original_price, discord_nitro_eligible
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 }
 function orderCodeExistsStmt(){return db.prepare('SELECT 1 FROM orders WHERE order_code=? LIMIT 1');}
@@ -83,7 +83,7 @@ function detectServiceType(name) {
   return 'other';
 }
 
-export function createOrder({ guildId, ticketId, ticketChannelId, customerId, productName, quantity, note, totalAmount = 0, durationMonths = config.defaultOrderDurationMonths, orderLogChannelId, createdById, orderCode, discordSkuId = null, discordProductUrl = null, discordOriginalPrice = null, discordNitroEligible = false }) {
+export function createOrder({ guildId, ticketId, ticketChannelId, customerId, productName, quantity, note, totalAmount = 0, durationMonths = config.defaultOrderDurationMonths, durationDays = null, orderLogChannelId, createdById, orderCode, discordSkuId = null, discordProductUrl = null, discordOriginalPrice = null, discordNitroEligible = false }) {
   const timestamp = nowIso();
   const safeAmount = ensureAmountValue(totalAmount);
   const finalOrderCode = orderCode || generateUniqueOrderCode();
@@ -93,12 +93,16 @@ export function createOrder({ guildId, ticketId, ticketChannelId, customerId, pr
   const status = safeAmount > 0 ? 'PENDING_PAYMENT' : 'PROCESSING';
   const queueGroup = normalizeQueueGroup(productName) || 'mac-dinh';
   const priorityRank = computePriority(guildId, customerId, productName);
-  const safeDurationMonths = Math.max(1, Number.parseInt(String(durationMonths ?? config.defaultOrderDurationMonths), 10) || config.defaultOrderDurationMonths);
+  const parsedDurationDays = Number.parseInt(String(durationDays ?? ''), 10);
+  const safeDurationDays = Number.isFinite(parsedDurationDays) && parsedDurationDays > 0 ? parsedDurationDays : null;
+  const safeDurationMonths = safeDurationDays
+    ? 0
+    : Math.max(1, Number.parseInt(String(durationMonths ?? config.defaultOrderDurationMonths), 10) || config.defaultOrderDurationMonths);
   const serviceType = detectServiceType(productName);
 
   let resultId;
   const transaction = db.transaction(() => {
-    const result = createOrderStmt().run(finalOrderCode,guildId,ticketId,ticketChannelId,customerId,productName,quantity,note ?? null,safeAmount,safeAmount > 0 ? 0 : safeAmount,config.paymentProvider,paymentCode,payosOrderCode,paymentStatus,status,timestamp,queueGroup,priorityRank,safeDurationMonths,orderLogChannelId,createdById,timestamp,timestamp,serviceType,discordSkuId,discordProductUrl,discordOriginalPrice,discordNitroEligible ? 1 : 0);
+    const result = createOrderStmt().run(finalOrderCode,guildId,ticketId,ticketChannelId,customerId,productName,quantity,note ?? null,safeAmount,safeAmount > 0 ? 0 : safeAmount,config.paymentProvider,paymentCode,payosOrderCode,paymentStatus,status,timestamp,queueGroup,priorityRank,safeDurationMonths,safeDurationDays,orderLogChannelId,createdById,timestamp,timestamp,serviceType,discordSkuId,discordProductUrl,discordOriginalPrice,discordNitroEligible ? 1 : 0);
     resultId = result.lastInsertRowid;
     syncCustomerStats(guildId, customerId);
   });
@@ -129,9 +133,8 @@ function generateUniquePayosCode(){while(true){const c=Number(randomDigits(6)); 
 // Xoá link PayOS cũ + cấp payos_order_code MỚI để tạo lại hoá đơn (QR đổi theo). Dùng khi đơn hết hạn.
 export function resetPaymentLinkForRegen(orderCode){const order=getOrderByCode(orderCode); if(!order) return null; const newPayosCode=generateUniquePayosCode(); resetPaymentLinkStmt().run(newPayosCode, nowIso(), orderCode); return getOrderByCode(orderCode);}
 
-function addMonthsIso(baseDate, months){ const next = new Date(baseDate); next.setMonth(next.getMonth() + Math.max(1, Number(months || 1))); return next.toISOString(); }
 export function setOrderExpiry(orderCode, expiryAt){ setOrderExpiryStmt().run(expiryAt, nowIso(), orderCode); return getOrderByCode(orderCode); }
-export function ensureOrderExpiry(orderCode, baseDate = new Date()) { const order = getOrderByCode(orderCode); if (!order) return null; if (order.expiry_at) return order; const expiryAt = addMonthsIso(baseDate, order.duration_months ?? config.defaultOrderDurationMonths); return setOrderExpiry(orderCode, expiryAt); }
+export function ensureOrderExpiry(orderCode, baseDate = new Date()) { const order = getOrderByCode(orderCode); if (!order) return null; if (order.expiry_at) return order; const expiryDate = addOrderDuration(baseDate, order, config.defaultOrderDurationMonths); if (!expiryDate) return order; return setOrderExpiry(orderCode, expiryDate.toISOString()); }
 
 export function markOrderCompleted(orderCode, completedById, timeoutHours = config.feedbackTimeoutHours) {
   const order = getOrderByCode(orderCode); if (!order) return null;

@@ -1,5 +1,6 @@
 import { db, nowIso } from '../database/db.js';
 import { syncCustomerStats } from './customerService.js';
+import { addOrderDuration } from '../utils/formatters.js';
 
 export function getOrderByCodeRaw(orderCode) {
   return db.prepare('SELECT * FROM orders WHERE order_code = ?').get(orderCode) ?? null;
@@ -17,16 +18,16 @@ export function updateOrderFieldsRaw(orderCode, payload) {
   const nextQuantity = payload.quantity ?? order.quantity;
   const nextAmount = payload.total_amount ?? order.total_amount;
   const nextMonths = payload.duration_months ?? order.duration_months ?? 1;
+  const nextDays = payload.duration_days !== undefined ? payload.duration_days : order.duration_days;
 
   let nextExpiry = order.expiry_at;
   const baseTime = order.delivered_at ?? order.completed_at ?? null;
 
   if (payload.expiry_at !== undefined) {
     nextExpiry = payload.expiry_at;
-  } else if (payload.duration_months !== undefined && baseTime) {
-    const dt = new Date(baseTime);
-    dt.setMonth(dt.getMonth() + Number(nextMonths || 1));
-    nextExpiry = dt.toISOString();
+  } else if ((payload.duration_months !== undefined || payload.duration_days !== undefined) && baseTime) {
+    const dt = addOrderDuration(baseTime, { duration_months: nextMonths, duration_days: nextDays });
+    nextExpiry = dt?.toISOString() ?? nextExpiry;
   }
 
   db.prepare(`
@@ -35,6 +36,7 @@ export function updateOrderFieldsRaw(orderCode, payload) {
         quantity = ?,
         total_amount = ?,
         duration_months = ?,
+        duration_days = ?,
         expiry_at = ?,
         updated_at = ?
     WHERE order_code = ?
@@ -43,6 +45,7 @@ export function updateOrderFieldsRaw(orderCode, payload) {
     nextQuantity,
     nextAmount,
     nextMonths,
+    nextDays,
     nextExpiry,
     nowIso(),
     orderCode,
@@ -233,6 +236,7 @@ export function createRenewalOrderRaw({
   note,
   totalAmount,
   durationMonths,
+  durationDays = null,
   orderLogChannelId,
   createdById,
 }) {
@@ -257,11 +261,12 @@ export function createRenewalOrderRaw({
       amount_paid,
       order_log_channel_id,
       duration_months,
+      duration_days,
       created_by_id,
       created_at,
       updated_at
     ) VALUES (
-      NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+      NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
     )
   `).run(
     guildId,
@@ -276,7 +281,8 @@ export function createRenewalOrderRaw({
     safeAmount,
     safeAmount > 0 ? 0 : safeAmount,
     orderLogChannelId ?? null,
-    durationMonths ?? 1,
+    durationDays ? 0 : (durationMonths ?? 1),
+    durationDays ?? null,
     createdById,
     timestamp,
     timestamp,

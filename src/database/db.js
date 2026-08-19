@@ -157,6 +157,7 @@ export function initDatabase() {
       paid_transaction_id TEXT,
       paid_transaction_content TEXT,
       duration_months INTEGER NOT NULL DEFAULT 1,
+      duration_days INTEGER,
       expiry_at TEXT,
       expiry_notice_2d_sent_at TEXT,
       expiry_notice_1d_sent_at TEXT,
@@ -661,6 +662,7 @@ export function initDatabase() {
   ensureColumn('orders', 'paid_transaction_id', 'TEXT');
   ensureColumn('orders', 'paid_transaction_content', 'TEXT');
   ensureColumn('orders', 'duration_months', 'INTEGER NOT NULL DEFAULT 1');
+  ensureColumn('orders', 'duration_days', 'INTEGER');
   ensureColumn('orders', 'expiry_at', 'TEXT');
   ensureColumn('orders', 'expiry_notice_3d_sent_at', 'TEXT');
   ensureColumn('orders', 'expiry_notice_2d_sent_at', 'TEXT');

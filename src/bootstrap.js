@@ -1,6 +1,6 @@
 import { Client, Events, REST, Routes } from 'discord.js';
 import { assertRuntimeConfig, config } from './config.js';
-import { db, initDatabase } from './database/db.js';
+import { initDatabase } from './database/db.js';
 import { getClientOptions, loadCommands, registerInteractionHandler } from './events/interactionCreate.js';
 import { startScheduler } from './services/schedulerService.js';
 import { startWebhookServer } from './services/webhookServer.js';
@@ -49,24 +49,23 @@ export async function buildClient() {
     try {
       const { setupInternationalStores } = await import('./services/internationalStoreSetupService.js');
       await setupInternationalStores(readyClient);
-      if (isInternationalGuild(config.guildId)) {
-        const commandLocaleVersion = '2026-08-global-v1';
-        const settingKey = 'international_command_locale_version';
-        const current = db.prepare('SELECT value FROM system_settings WHERE key = ?').get(settingKey)?.value;
-        if (current !== commandLocaleVersion) {
-          const commandData = localizeCommandsForInternationalStore(
-            [...commands.values()].map((command) => command.data.toJSON()),
-          );
-          const rest = new REST({ version: '10' }).setToken(config.botToken);
-          await rest.put(Routes.applicationGuildCommands(config.clientId, config.guildId), { body: commandData });
-          db.prepare(`INSERT INTO system_settings (key, value, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)
-            ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP`)
-            .run(settingKey, commandLocaleVersion);
-          console.log(`[GLOBAL-COMMANDS] Published ${commandData.length} English-localized commands.`);
-        }
-      }
     } catch (error) {
       console.error('[GLOBAL-SETUP] International storefront migration failed:', error);
+    }
+
+    // Slash-command definitions live in Discord, not in the running process.
+    // Republish them on every production restart so newly added options (for
+    // example so_ngay on /order and /oder) always match the deployed source.
+    try {
+      const baseCommandData = [...commands.values()].map((command) => command.data.toJSON());
+      const commandData = isInternationalGuild(config.guildId)
+        ? localizeCommandsForInternationalStore(baseCommandData)
+        : baseCommandData;
+      const rest = new REST({ version: '10' }).setToken(config.botToken);
+      await rest.put(Routes.applicationGuildCommands(config.clientId, config.guildId), { body: commandData });
+      console.log(`[COMMANDS] Published ${commandData.length} guild commands from the active source revision.`);
+    } catch (error) {
+      console.error('[COMMANDS] Failed to publish guild commands:', error);
     }
 
     await autoSetupDiscountBoard(readyClient);

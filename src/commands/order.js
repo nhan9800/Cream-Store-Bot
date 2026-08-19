@@ -22,7 +22,8 @@ export const data = new SlashCommandBuilder()
   .addStringOption((option) => option.setName('san_pham').setDescription('Tên sản phẩm').setRequired(true).setMaxLength(100))
   .addIntegerOption((option) => option.setName('so_luong').setDescription('Số lượng sản phẩm').setRequired(true).setMinValue(1).setMaxValue(999))
   .addStringOption((option) => option.setName('gia_tien').setDescription('Số tiền cần thanh toán, ví dụ 55000 hoặc 55k').setRequired(false))
-  .addIntegerOption((option) => option.setName('so_thang').setDescription('Thời hạn sản phẩm theo tháng').setRequired(false).setMinValue(1).setMaxValue(36))
+  .addIntegerOption((option) => option.setName('so_thang').setDescription('Thời hạn theo tháng (không nhập nếu dùng số ngày)').setRequired(false).setMinValue(1).setMaxValue(36))
+  .addIntegerOption((option) => option.setName('so_ngay').setDescription('Thời hạn theo ngày, ví dụ 7 ngày').setRequired(false).setMinValue(1).setMaxValue(3650))
   .addChannelOption((option) => option.setName('ticket').setDescription('Ticket cần gắn với đơn. Bỏ trống nếu đang đứng trong ticket.').addChannelTypes(ChannelType.GuildText).setRequired(false))
   .addStringOption((option) => option.setName('ghi_chu').setDescription('Ghi chú nội bộ cho đơn').setRequired(false).setMaxLength(250));
 
@@ -50,7 +51,15 @@ export async function execute(interaction) {
     const quantity = interaction.options.getInteger('so_luong', true);
     const note = interaction.options.getString('ghi_chu');
     const amount = parseMoneyInput(interaction.options.getString('gia_tien')) ?? 0;
-    const durationMonths = interaction.options.getInteger('so_thang') ?? config.defaultOrderDurationMonths;
+    const selectedDurationMonths = interaction.options.getInteger('so_thang');
+    const durationDays = interaction.options.getInteger('so_ngay');
+    if (selectedDurationMonths !== null && durationDays !== null) {
+      await interaction.editReply(`${E('status_warn')} Chỉ chọn **số tháng** hoặc **số ngày**, không nhập cả hai.`);
+      return;
+    }
+    const durationMonths = durationDays === null
+      ? (selectedDurationMonths ?? config.defaultOrderDurationMonths)
+      : 0;
     const ticketChannel = interaction.options.getChannel('ticket') ?? interaction.channel;
 
     const ticket = getTicketByChannelId(ticketChannel.id);
@@ -77,6 +86,7 @@ export async function execute(interaction) {
         note,
         totalAmount: amount,
         durationMonths,
+        durationDays,
         orderLogChannelId: guildConfig.order_log_channel_id,
         createdById: interaction.user.id,
       });
@@ -122,6 +132,7 @@ export async function execute(interaction) {
         ticket_channel_id: ticketChannel.id,
         service_type: 'other',
         duration_months: durationMonths,
+        duration_days: durationDays,
         payment_provider: amount > 0 ? 'PAYOS' : 'FREE',
       }).catch(e => console.error('[HUB] Lỗi tạo đơn trên web:', e.message));
     }
