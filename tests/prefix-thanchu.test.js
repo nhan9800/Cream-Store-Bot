@@ -4,6 +4,7 @@ import {
   buildThanhChuPayload,
   GMAIL_APPEAL_PROMPT,
   handlePrefixThanhChu,
+  isPublicPrefixCommand,
 } from '../src/events/prefixHandlers.js';
 import { STORE_ONE_GUILD_ID, STORE_TWO_GUILD_ID } from '../src/utils/locale.js';
 
@@ -39,5 +40,12 @@ describe('+thanchu Store 1 guide', () => {
 
     expect(result).toBe(false);
     expect(reply).not.toHaveBeenCalled();
+  });
+
+  test('allows every Store 1 member to use +thanchu without opening staff commands', () => {
+    expect(isPublicPrefixCommand('+thanchu')).toBe(true);
+    expect(isPublicPrefixCommand('+THANCHU')).toBe(true);
+    expect(isPublicPrefixCommand('+qr')).toBe(false);
+    expect(isPublicPrefixCommand('+done')).toBe(false);
   });
 });

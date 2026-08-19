@@ -186,6 +186,7 @@ import {
   handlePrefixQr,
   handlePrefixDone,
   handlePrefixThanhChu,
+  isPublicPrefixCommand,
 } from "./prefixHandlers.js";
 import { handleAnnouncementSelect } from "./announcementHandlers.js";
 import { handleOtpInteraction } from "./otpHandlers.js";
@@ -2610,6 +2611,11 @@ export function registerInteractionHandler(client, commands) {
       const parsed = parsePrefixCommand(message.content);
       if (!parsed) return;
 
+      if (isPublicPrefixCommand(parsed.command)) {
+        await handlePrefixThanhChu(message);
+        return;
+      }
+
       const guildConfig = getGuildConfig(message.guild.id);
       const member = message.member;
       if (!isStaffMember(member, guildConfig)) return;
@@ -2622,10 +2628,6 @@ export function registerInteractionHandler(client, commands) {
       if (parsed.command === '+done') {
         await handlePrefixDone(message, parsed.args);
         return;
-      }
-
-      if (parsed.command === '+thanchu') {
-        await handlePrefixThanhChu(message);
       }
     } catch (error) {
       console.error('[MESSAGE PREFIX] Lỗi:', error);

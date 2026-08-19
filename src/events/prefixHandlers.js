@@ -13,6 +13,10 @@ import { accentFor } from '../utils/uiKit.js';
 
 export const GMAIL_APPEAL_PROMPT = 'Hãy viết giúp tôi một đoạn thư kháng cáo gửi đến đội ngũ hỗ trợ Google khi tài khoản Gmail của tôi bị gắn cờ là do máy tính hoặc robot tạo ra. Yêu cầu: Giọng văn lịch sự, chuyên nghiệp và chân thành. Có lời chào mở đầu và lời cảm ơn kết thúc gửi đến đội ngũ Google. Trình bày rõ ràng rằng tài khoản do con người thật sử dụng, không phải bot. Nêu lý do có thể khiến hệ thống hiểu nhầm (ví dụ: hoạt động đăng nhập lạ, dùng nhiều thiết bị, v.v.). Giữ độ dài khoảng 2-3 đoạn ngắn, đủ súc tích và dễ đọc. Bằng tiếng Anh, bỏ Subject, bỏ phần full name và your email.';
 
+export function isPublicPrefixCommand(command) {
+  return String(command || '').toLowerCase() === '+thanchu';
+}
+
 export function buildThanhChuPayload(guildId) {
   const E = createEmojiResolver(guildId);
   const guide = new ContainerBuilder().setAccentColor(accentFor('primary'));
