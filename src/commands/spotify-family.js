@@ -5,7 +5,7 @@ import {
   SlashCommandBuilder,
   TextDisplayBuilder,
 } from 'discord.js';
-import { config, getPublicUrl } from '../config.js';
+import { config } from '../config.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { accentFor } from '../utils/uiKit.js';
 import {
@@ -53,7 +53,7 @@ function overviewPayload(guildId) {
   if (families.length > 12) lines.push(`_...và ${families.length - 12} Family khác trên website._`);
   if (!lines.length) lines.push('_Chưa có Spotify Family nào. Hãy tạo Family đầu tiên trên website._');
 
-  const portal = getPublicUrl('/web#spotify-families') || `${String(config.storeWebsiteUrl || 'https://cenarstore.xyz').replace(/\/$/, '')}/web#spotify-families`;
+  const portal = new URL('/admin/spotify-families', config.storeWebsiteUrl || 'https://cenarstore.xyz').toString();
   const container = new ContainerBuilder().setAccentColor(accentFor('success'));
   container.addTextDisplayComponents(new TextDisplayBuilder().setContent([
     `# ${E('brand_spotify')} SPOTIFY FAMILY CONTROL CENTER`,

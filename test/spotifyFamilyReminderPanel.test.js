@@ -38,7 +38,7 @@ describe('Spotify Family Discord panel', () => {
       'spotifyfam:show:9',
       'spotifyfam:renew:9',
       'spotifyfam:snooze:9',
-      'https://cenarstore.xyz/web#spotify-families',
+      'https://cenarstore.xyz/admin/spotify-families',
     ]);
   });
 });

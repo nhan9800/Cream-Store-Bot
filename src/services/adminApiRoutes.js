@@ -18,6 +18,19 @@ import { encrypt, decrypt } from '../utils/crypto.js';
 import { sendCompletedFlow, updateOrderLogMessage } from './notificationService.js';
 import { syncPublishedFeedbackMessage } from './feedbackService.js';
 import { config } from '../config.js';
+import {
+  createSpotifyFamily,
+  createSpotifyFamilyMember,
+  deleteSpotifyFamily,
+  deleteSpotifyFamilyMember,
+  getSpotifyFamily,
+  getSpotifyFamilyStats,
+  listSpotifyFamilies,
+  markSpotifyFamilyRenewed,
+  snoozeSpotifyFamilyReminder,
+  updateSpotifyFamily,
+  updateSpotifyFamilyMember,
+} from './spotifyFamilyService.js';
 
 function catalogKey(value) {
   return String(value || '')
@@ -57,6 +70,17 @@ export function registerAdminRoutes(app) {
 
     req.adminRole = user.role; // 'admin' or 'staff'
     next();
+  }
+
+  function spotifyFamilyBelongsToStore(family) {
+    return family && [String(config.guildId || ''), 'WEB'].includes(String(family.guildId));
+  }
+
+  function sendSpotifyFamilyError(res, error) {
+    console.error('[ADMIN-SPOTIFY-FAMILY]', error);
+    const message = String(error?.message || 'Không thể xử lý Spotify Family.');
+    const isValidation = /thiếu|không hợp lệ|phải sau|đủ slot|không tìm thấy/i.test(message);
+    return res.status(isValidation ? 400 : 500).json({ ok: false, error: message });
   }
 
   // ==== 1. DASHBOARD STATS ====
@@ -1141,6 +1165,151 @@ const fetchWithTimeout = (promise, ms) => {
       res.json({ ok: true, message: 'Đã xóa bản ghi gia hạn thành công!' });
     } catch (e) {
       console.error('[ADMIN]', e); res.status(500).json({ ok: false, error: 'Lỗi máy chủ nội bộ.' });
+    }
+  });
+
+  // ==== 12.1 SPOTIFY FAMILY CONTROL CENTER ====
+  app.get('/api/bot/admin/spotify-families', requireAdminRole, (req, res) => {
+    try {
+      const base = listSpotifyFamilies({
+        guildId: config.guildId || null,
+        status: req.query.status || null,
+        query: req.query.q || null,
+        includeSecrets: true,
+      });
+      const families = base.map((family) => getSpotifyFamily(family.id, { includeSecrets: true }));
+      res.json({
+        ok: true,
+        data: {
+          families,
+          stats: getSpotifyFamilyStats(config.guildId || null),
+        },
+      });
+    } catch (error) {
+      sendSpotifyFamilyError(res, error);
+    }
+  });
+
+  app.get('/api/bot/admin/spotify-families/:id', requireAdminRole, (req, res) => {
+    try {
+      const family = getSpotifyFamily(req.params.id, { includeSecrets: true });
+      if (!spotifyFamilyBelongsToStore(family)) {
+        return res.status(404).json({ ok: false, error: 'Không tìm thấy Spotify Family.' });
+      }
+      return res.json({ ok: true, data: family });
+    } catch (error) {
+      return sendSpotifyFamilyError(res, error);
+    }
+  });
+
+  app.post('/api/bot/admin/spotify-families', requireAdminRole, (req, res) => {
+    try {
+      const family = createSpotifyFamily({ ...req.body, guildId: config.guildId || 'WEB' });
+      return res.status(201).json({ ok: true, data: family });
+    } catch (error) {
+      return sendSpotifyFamilyError(res, error);
+    }
+  });
+
+  app.put('/api/bot/admin/spotify-families/:id', requireAdminRole, (req, res) => {
+    try {
+      const existing = getSpotifyFamily(req.params.id, { includeSecrets: false });
+      if (!spotifyFamilyBelongsToStore(existing)) {
+        return res.status(404).json({ ok: false, error: 'Không tìm thấy Spotify Family.' });
+      }
+      const family = updateSpotifyFamily(req.params.id, req.body || {});
+      return res.json({ ok: true, data: family });
+    } catch (error) {
+      return sendSpotifyFamilyError(res, error);
+    }
+  });
+
+  app.delete('/api/bot/admin/spotify-families/:id', requireAdminRole, (req, res) => {
+    try {
+      const existing = getSpotifyFamily(req.params.id, { includeSecrets: false });
+      if (!spotifyFamilyBelongsToStore(existing)) {
+        return res.status(404).json({ ok: false, error: 'Không tìm thấy Spotify Family.' });
+      }
+      deleteSpotifyFamily(req.params.id);
+      return res.json({ ok: true, message: `Đã xóa ${existing.name}.` });
+    } catch (error) {
+      return sendSpotifyFamilyError(res, error);
+    }
+  });
+
+  app.post('/api/bot/admin/spotify-families/:id/renew', requireAdminRole, (req, res) => {
+    try {
+      const existing = getSpotifyFamily(req.params.id, { includeSecrets: false });
+      if (!spotifyFamilyBelongsToStore(existing)) {
+        return res.status(404).json({ ok: false, error: 'Không tìm thấy Spotify Family.' });
+      }
+      const family = markSpotifyFamilyRenewed(req.params.id);
+      return res.json({ ok: true, data: family });
+    } catch (error) {
+      return sendSpotifyFamilyError(res, error);
+    }
+  });
+
+  app.post('/api/bot/admin/spotify-families/:id/snooze', requireAdminRole, (req, res) => {
+    try {
+      const existing = getSpotifyFamily(req.params.id, { includeSecrets: false });
+      if (!spotifyFamilyBelongsToStore(existing)) {
+        return res.status(404).json({ ok: false, error: 'Không tìm thấy Spotify Family.' });
+      }
+      const family = snoozeSpotifyFamilyReminder(req.params.id, req.body?.hours || 24);
+      return res.json({ ok: true, data: family });
+    } catch (error) {
+      return sendSpotifyFamilyError(res, error);
+    }
+  });
+
+  app.post('/api/bot/admin/spotify-families/:id/members', requireAdminRole, (req, res) => {
+    try {
+      const existing = getSpotifyFamily(req.params.id, { includeSecrets: false });
+      if (!spotifyFamilyBelongsToStore(existing)) {
+        return res.status(404).json({ ok: false, error: 'Không tìm thấy Spotify Family.' });
+      }
+      const member = createSpotifyFamilyMember(req.params.id, req.body || {});
+      return res.status(201).json({
+        ok: true,
+        data: { member, family: getSpotifyFamily(req.params.id, { includeSecrets: true }) },
+      });
+    } catch (error) {
+      return sendSpotifyFamilyError(res, error);
+    }
+  });
+
+  app.put('/api/bot/admin/spotify-families/:id/members/:memberId', requireAdminRole, (req, res) => {
+    try {
+      const existing = getSpotifyFamily(req.params.id, { includeSecrets: false });
+      if (!spotifyFamilyBelongsToStore(existing)) {
+        return res.status(404).json({ ok: false, error: 'Không tìm thấy Spotify Family.' });
+      }
+      const member = updateSpotifyFamilyMember(req.params.id, req.params.memberId, req.body || {});
+      if (!member) return res.status(404).json({ ok: false, error: 'Không tìm thấy thành viên.' });
+      return res.json({
+        ok: true,
+        data: { member, family: getSpotifyFamily(req.params.id, { includeSecrets: true }) },
+      });
+    } catch (error) {
+      return sendSpotifyFamilyError(res, error);
+    }
+  });
+
+  app.delete('/api/bot/admin/spotify-families/:id/members/:memberId', requireAdminRole, (req, res) => {
+    try {
+      const existing = getSpotifyFamily(req.params.id, { includeSecrets: false });
+      if (!spotifyFamilyBelongsToStore(existing)) {
+        return res.status(404).json({ ok: false, error: 'Không tìm thấy Spotify Family.' });
+      }
+      const deleted = deleteSpotifyFamilyMember(req.params.id, req.params.memberId);
+      if (!deleted) return res.status(404).json({ ok: false, error: 'Không tìm thấy thành viên.' });
+      return res.json({
+        ok: true,
+        data: { family: getSpotifyFamily(req.params.id, { includeSecrets: true }) },
+      });
+    } catch (error) {
+      return sendSpotifyFamilyError(res, error);
     }
   });
 

@@ -8,7 +8,7 @@ import {
   SeparatorSpacingSize,
   TextDisplayBuilder,
 } from 'discord.js';
-import { config, getPublicUrl } from '../config.js';
+import { config } from '../config.js';
 import { getGuildConfig } from './guildConfigService.js';
 import { isManager } from '../utils/permissions.js';
 import { createEmojiResolver, withButtonEmoji } from '../utils/emojiHelper.js';
@@ -43,7 +43,7 @@ function money(value) {
 }
 
 function dashboardUrl() {
-  return getPublicUrl('/web#spotify-families') || `${String(config.storeWebsiteUrl || 'https://cenarstore.xyz').replace(/\/$/, '')}/web#spotify-families`;
+  return new URL('/admin/spotify-families', config.storeWebsiteUrl || 'https://cenarstore.xyz').toString();
 }
 
 function adminTargets(guild, settings) {
