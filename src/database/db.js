@@ -1249,9 +1249,55 @@ export const DEFAULT_PRODUCT_CATALOG = [
     { name: 'Decor Discord Combo Gift - Gói 180k', description: 'Trang trí hồ sơ dạng Combo Gift (bấm nhận ngay). Tiết kiệm tối đa.', price: 180000, duration_months: 1, service_type: 'decor', emoji: '🎁', original_price: 220000 },
 
     // AI & Phần Mềm
-    { name: 'Gemini Advanced & 5 TB Google One (1 Năm - Full BH)', description: 'Đăng ký sử dụng gói cước 1 năm, hỗ trợ bảo hành toàn diện từ shop.', price: 200000, duration_months: 12, service_type: 'AI', emoji: 'brand_gemini', original_price: 350000 },
-    { name: 'Gemini Advanced & 5 TB Google One (1 Năm - Không BH)', description: 'Đăng ký sử dụng gói cước 1 năm, không đi kèm chính sách bảo hành.', price: 120000, duration_months: 12, service_type: 'AI', emoji: 'brand_gemini', original_price: 0 },
-    { product_key: 'claude-pro-1-month', name: 'Claude Pro 1 Tháng (Full BH)', aliases: ['Claude Pro Add Team 1 Tháng (Full BH)'], description: 'Claude Pro trong 1 tháng, bảo hành trọn gói tại Cenar Store.', price: 460000, duration_months: 1, service_type: 'AI', emoji: 'brand_claude', original_price: 490000, is_featured: 1, virtual_purchase_count: 126 },
+    {
+      product_key: 'gemini-pro-google-one-5tb-12-months-full-warranty',
+      name: 'Gemini Pro + 5 TB Google One 12 Tháng (Full BH)',
+      aliases: [
+        'Gemini Advanced & 5 TB Google One (1 Năm - Full BH)',
+        'Gemini Pro + 5TB Google Driver (12 Tháng)',
+        'Gemini Pro + 5TB Google Drive (12 Tháng)',
+      ],
+      description: 'Gemini Pro kèm 5 TB Google One trong 12 tháng, bảo hành full suốt thời gian sử dụng.',
+      warranty_policy: 'Full 12 tháng',
+      price: 130000,
+      duration_months: 12,
+      service_type: 'AI',
+      emoji: 'brand_gemini',
+      original_price: 0,
+      is_featured: 1,
+      virtual_purchase_count: 0,
+    },
+    {
+      product_key: 'gemini-pro-google-one-5tb-18-months-full-warranty',
+      name: 'Gemini Pro + 5 TB Google One 18 Tháng (Full BH)',
+      description: 'Gemini Pro kèm 5 TB Google One trong 18 tháng, bảo hành full suốt thời gian sử dụng.',
+      warranty_policy: 'Full 18 tháng',
+      price: 180000,
+      duration_months: 18,
+      service_type: 'AI',
+      emoji: 'brand_gemini',
+      original_price: 0,
+      is_featured: 1,
+      virtual_purchase_count: 0,
+    },
+    {
+      product_key: 'gemini-pro-google-one-5tb-12-months-4-month-warranty',
+      name: 'Gemini Pro + 5 TB Google One 12 Tháng (BH 4 Tháng)',
+      aliases: [
+        'Gemini Advanced & 5 TB Google One (1 Năm - Không BH)',
+        'Gemini Pro + 5TB Google One 12 Tháng Không Bảo Hành',
+      ],
+      description: 'Gói tiết kiệm có thời hạn danh nghĩa 12 tháng và được Cenar bảo hành 4 tháng đầu. Tài khoản có thể duy trì lâu hơn tùy trạng thái hệ thống, nhưng thời gian vượt phạm vi bảo hành không được cam kết.',
+      warranty_policy: 'Bảo hành 4 tháng đầu',
+      price: 69000,
+      duration_months: 12,
+      service_type: 'AI',
+      emoji: 'brand_gemini',
+      original_price: 0,
+      is_featured: 1,
+      virtual_purchase_count: 0,
+    },
+    { product_key: 'claude-pro-1-month', name: 'Claude Pro 1 Tháng (Full BH)', aliases: ['Claude Pro Add Team 1 Tháng (Full BH)'], description: 'Claude Pro trong 1 tháng, bảo hành trọn gói tại Cenar Store.', warranty_policy: 'Full 1 tháng', price: 530000, duration_months: 1, service_type: 'AI', emoji: 'brand_claude', original_price: 0, is_featured: 1, virtual_purchase_count: 126 },
     {
       product_key: 'chatgpt-plus-account-1-month-full-warranty',
       name: 'ChatGPT Plus 1 Tháng (Cấp Tài Khoản · Full BH)',
@@ -1276,7 +1322,7 @@ export const DEFAULT_PRODUCT_CATALOG = [
         'ChatGPT Add Team Business 1 Tháng (Chính Chủ)',
       ],
       description: 'Thêm tài khoản chính chủ của khách vào workspace ChatGPT Business trong 1 tháng, bảo hành full trong suốt thời gian sử dụng.',
-      price: 390000,
+      price: 420000,
       duration_months: 1,
       service_type: 'AI',
       emoji: 'brand_chatgpt',
@@ -1284,7 +1330,6 @@ export const DEFAULT_PRODUCT_CATALOG = [
       is_featured: 1,
       virtual_purchase_count: 0,
     },
-    { name: 'Gemini Pro + 5TB Google Driver (12 Tháng)', description: 'Gói Gemini Pro đi kèm dung lượng 5TB Google Drive trong 12 tháng.', price: 250000, duration_months: 12, service_type: 'AI', emoji: 'brand_gemini', original_price: 0 },
     {
       product_key: 'adobe-creative-cloud-1-month',
       name: 'Adobe Creative Cloud All Apps 1 Tháng (Full BH)',
@@ -1347,16 +1392,16 @@ export function seedProductCatalog(dbInstance) {
 
   const insertStmt = dbInstance.prepare(`
     INSERT INTO product_catalog (
-      guild_id, name, description, price, duration_months, service_type, emoji, is_active, sort_order, original_price,
+      guild_id, name, description, price, duration_months, service_type, emoji, is_active, sort_order, original_price, warranty_policy,
       base_price, base_duration_days, additional_day_price, minimum_days, maximum_days, quota_value, quota_unit, activation_method, username_required, login_required,
       product_key, is_featured, virtual_purchase_count
     )
-    VALUES ('WEB', ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES ('WEB', ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const updateStmt = dbInstance.prepare(`
     UPDATE product_catalog
-    SET name = ?, description = ?, price = ?, duration_months = ?, service_type = ?, emoji = ?, original_price = ?,
+    SET name = ?, description = ?, price = ?, duration_months = ?, service_type = ?, emoji = ?, original_price = ?, warranty_policy = COALESCE(?, warranty_policy),
         base_price = ?, base_duration_days = ?, additional_day_price = ?, minimum_days = ?, maximum_days = ?, quota_value = ?, quota_unit = ?, activation_method = ?, username_required = ?, login_required = ?,
         is_featured = CASE WHEN product_key IS NULL THEN ? ELSE is_featured END,
         virtual_purchase_count = CASE WHEN product_key IS NULL AND virtual_purchase_count = 0 THEN ? ELSE virtual_purchase_count END,
@@ -1385,6 +1430,14 @@ export function seedProductCatalog(dbInstance) {
           LOWER(name) LIKE '%adobe%'
           AND COALESCE(product_key, '') != 'adobe-creative-cloud-1-month'
         )
+        OR (
+          LOWER(REPLACE(name, ' ', '')) LIKE '%gemini%'
+          AND COALESCE(product_key, '') NOT IN (
+            'gemini-pro-google-one-5tb-12-months-full-warranty',
+            'gemini-pro-google-one-5tb-18-months-full-warranty',
+            'gemini-pro-google-one-5tb-12-months-4-month-warranty'
+          )
+        )
       )
   `);
 
@@ -1398,14 +1451,14 @@ export function seedProductCatalog(dbInstance) {
         || names.map((name) => findByNameStmt.get(name, p.duration_months)).find(Boolean);
       if (existing) {
         updateStmt.run(
-          p.name, p.description, p.price, p.duration_months, p.service_type, p.emoji, p.original_price,
+          p.name, p.description, p.price, p.duration_months, p.service_type, p.emoji, p.original_price, p.warranty_policy || null,
           p.base_price || null, p.base_duration_days || null, p.additional_day_price || null, p.minimum_days || null, p.maximum_days || null, p.quota_value || null, p.quota_unit || null, p.activation_method || null, p.username_required || 0, p.login_required || 0,
           p.is_featured ? 1 : 0, Math.max(0, Number(p.virtual_purchase_count || 0)), key, existing.id
         );
         deactivateDuplicatesStmt.run(existing.id, key, JSON.stringify(names), p.duration_months);
       } else {
         insertStmt.run(
-          p.name, p.description, p.price, p.duration_months, p.service_type, p.emoji, currentSort++, p.original_price,
+          p.name, p.description, p.price, p.duration_months, p.service_type, p.emoji, currentSort++, p.original_price, p.warranty_policy || null,
           p.base_price || null, p.base_duration_days || null, p.additional_day_price || null, p.minimum_days || null, p.maximum_days || null, p.quota_value || null, p.quota_unit || null, p.activation_method || null, p.username_required || 0, p.login_required || 0,
           key, p.is_featured ? 1 : 0, Math.max(0, Number(p.virtual_purchase_count || 0))
         );

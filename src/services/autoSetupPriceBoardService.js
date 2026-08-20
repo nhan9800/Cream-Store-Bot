@@ -170,6 +170,9 @@ function setButtonEmoji(button, E, slot) {
 const FULL_WARRANTY_PRODUCT_KEYS = new Set([
   'chatgpt-plus-account-1-month-full-warranty',
   'chatgpt-business-workspace-1-month-full-warranty',
+  'claude-pro-1-month',
+  'gemini-pro-google-one-5tb-12-months-full-warranty',
+  'gemini-pro-google-one-5tb-18-months-full-warranty',
   'adobe-creative-cloud-1-month',
 ]);
 
@@ -302,6 +305,7 @@ export function buildPriceGroupPayload(guildId, group, products) {
       ? getNetflixPromoDetails(international)
       : null;
     const fullDurationWarranty = hasFullDurationWarranty(product);
+    const warrantyPolicy = String(product.warranty_policy || '').trim();
     container.addTextDisplayComponents(
       new TextDisplayBuilder().setContent([
         `### ${productIcon} ${international ? translateProductName(product.name) : product.name}`,
@@ -318,6 +322,8 @@ export function buildPriceGroupPayload(guildId, group, products) {
         ] : []),
         ...(fullDurationWarranty ? [
           `> ${E('warranty_shield')} **${international ? 'Warranty' : 'Bảo hành'}:** ${international ? 'Full coverage for the entire service period' : 'Full trong suốt thời gian sử dụng'}`,
+        ] : warrantyPolicy ? [
+          `> ${E('warranty_shield')} **${international ? 'Warranty' : 'Bảo hành'}:** ${warrantyPolicy}`,
         ] : []),
       ].join('\n'))
     );
