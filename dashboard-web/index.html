@@ -86,10 +86,6 @@
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg>
                 Quản Lý Subscriptions
             </button>
-            <button class="nav-btn" id="nav-spotify-families" onclick="switchView('spotify-families')">
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 1.5A10.5 10.5 0 1 0 12 22.5 10.5 10.5 0 0 0 12 1.5Zm4.82 15.15a.83.83 0 0 1-1.14.28c-3.12-1.9-7.04-2.34-11.66-1.28a.83.83 0 1 1-.37-1.62c5.05-1.15 9.39-.65 12.89 1.49.39.24.52.75.28 1.13Zm1.62-3.6a1.04 1.04 0 0 1-1.43.34c-3.57-2.19-9.02-2.82-13.25-1.54a1.04 1.04 0 1 1-.6-1.99c4.84-1.46 10.85-.76 14.92 1.74.49.3.64.94.36 1.45Zm.14-3.75C14.3 6.76 7.23 6.52 3.16 7.87a1.25 1.25 0 0 1-.78-2.37c4.68-1.54 12.5-1.26 17.47 1.68a1.25 1.25 0 0 1-1.27 2.12Z"/></svg>
-                Spotify Family Center
-            </button>
             <button class="nav-btn" id="nav-system-health" onclick="switchView('system-health')">
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2" ry="2"></rect><rect x="9" y="9" width="6" height="6"></rect><line x1="9" y1="1" x2="9" y2="4"></line><line x1="15" y1="1" x2="15" y2="4"></line><line x1="9" y1="20" x2="9" y2="23"></line><line x1="15" y1="20" x2="15" y2="23"></line><line x1="20" y1="9" x2="23" y2="9"></line><line x1="20" y1="15" x2="23" y2="15"></line><line x1="1" y1="9" x2="4" y2="9"></line><line x1="1" y1="15" x2="4" y2="15"></line></svg>
                 Trạng Thái Hệ Thống
@@ -359,65 +355,6 @@
                 </div>
             </div> <!-- /view-subscriptions -->
 
-            <!-- GÓC NHÌN: SPOTIFY FAMILY CENTER -->
-            <div id="view-spotify-families" class="view-section" style="display: none;">
-                <section class="spotify-family-hero">
-                    <div class="spotify-family-hero-copy">
-                        <div class="spotify-family-eyebrow"><span class="spotify-live-dot"></span> FAMILY OPERATIONS · LIVE</div>
-                        <h1>Spotify Family Control Center</h1>
-                        <p>Theo dõi chu kỳ gia hạn, thẻ thanh toán, slot và thời gian sử dụng của từng profile trong một màn hình.</p>
-                    </div>
-                    <button class="spotify-primary-btn" onclick="openSpotifyFamilyModal()">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 5v14M5 12h14"/></svg>
-                        Tạo Family mới
-                    </button>
-                </section>
-
-                <div class="spotify-stats-grid">
-                    <article class="spotify-stat-card">
-                        <span class="spotify-stat-icon">F</span>
-                        <div><small>Family hoạt động</small><strong id="sf-stat-families">0</strong></div>
-                    </article>
-                    <article class="spotify-stat-card">
-                        <span class="spotify-stat-icon spotify-stat-users">U</span>
-                        <div><small>Thành viên / Slot</small><strong id="sf-stat-members">0 / 0</strong></div>
-                    </article>
-                    <article class="spotify-stat-card spotify-stat-warning">
-                        <span class="spotify-stat-icon spotify-stat-clock">!</span>
-                        <div><small>Cần xử lý ≤ 7 ngày</small><strong id="sf-stat-due">0</strong></div>
-                    </article>
-                    <article class="spotify-stat-card">
-                        <span class="spotify-stat-icon spotify-stat-money">₫</span>
-                        <div><small>Chi phí kỳ tháng</small><strong id="sf-stat-cost">0đ</strong></div>
-                    </article>
-                </div>
-
-                <section class="spotify-family-workspace">
-                    <div class="spotify-toolbar">
-                        <div class="spotify-search-wrap">
-                            <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-                            <input id="sf-search" type="search" placeholder="Tìm tên Family, email owner, tên thẻ..." oninput="handleSpotifyFamilyFilter()">
-                        </div>
-                        <select id="sf-status-filter" onchange="handleSpotifyFamilyFilter()" aria-label="Lọc trạng thái Family">
-                            <option value="all">Tất cả trạng thái</option>
-                            <option value="ACTIVE">Đang hoạt động</option>
-                            <option value="PAUSED">Tạm dừng</option>
-                            <option value="EXPIRED">Đã kết thúc</option>
-                        </select>
-                        <button class="spotify-icon-btn" onclick="loadSpotifyFamilies()" title="Làm mới dữ liệu" aria-label="Làm mới dữ liệu">
-                            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 11a8.1 8.1 0 1 0 2 5.3"/><path d="M20 4v7h-7"/></svg>
-                        </button>
-                    </div>
-                    <div id="spotify-family-grid" class="spotify-family-grid"></div>
-                    <div id="spotify-family-empty" class="spotify-family-empty" style="display:none;">
-                        <div class="spotify-empty-mark">♫</div>
-                        <h3>Chưa có Spotify Family phù hợp</h3>
-                        <p>Tạo Family đầu tiên hoặc thay đổi bộ lọc để xem dữ liệu.</p>
-                        <button class="spotify-primary-btn" onclick="openSpotifyFamilyModal()">Tạo Family mới</button>
-                    </div>
-                </section>
-            </div> <!-- /view-spotify-families -->
-
             <!-- GÓC NHÌN: TRẠNG THÁI HỆ THỐNG -->
             <div id="view-system-health" class="view-section" style="display: none;">
                 <div class="table-container">
@@ -627,120 +564,6 @@
                     <button type="submit" class="btn btn-primary" id="btn-submit-account">Lưu Vào Hệ Thống</button>
                 </div>
             </form>
-        </div>
-    </div>
-</div>
-
-<!-- Spotify Family Add/Edit Modal -->
-<div class="modal-overlay" id="modal-spotify-family" onclick="closeModalOnOverlay(event, 'modal-spotify-family')">
-    <div class="modal spotify-family-modal" onclick="event.stopPropagation()">
-        <div class="modal-header spotify-modal-header">
-            <div>
-                <span class="spotify-modal-kicker">SPOTIFY FAMILY</span>
-                <h2 id="spotify-family-modal-title">Tạo Family mới</h2>
-            </div>
-            <button class="modal-close" onclick="closeModal('modal-spotify-family')">&times;</button>
-        </div>
-        <div class="modal-body">
-            <form id="spotify-family-form" onsubmit="handleSpotifyFamilySubmit(event)">
-                <input type="hidden" id="sf-form-id">
-                <div class="spotify-form-section">
-                    <h3>Thông tin Family Owner</h3>
-                    <div class="form-row">
-                        <div class="form-group"><label>Tên Family</label><input id="sf-form-name" maxlength="100" placeholder="Ví dụ: Cenar Fam 01" required></div>
-                        <div class="form-group"><label>Trạng thái</label><select id="sf-form-status"><option value="ACTIVE">Đang hoạt động</option><option value="PAUSED">Tạm dừng</option><option value="EXPIRED">Đã kết thúc</option></select></div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group"><label>Email đăng nhập</label><input id="sf-form-email" type="email" autocomplete="off" placeholder="owner@spotify.com" required></div>
-                        <div class="form-group"><label>Mật khẩu</label><input id="sf-form-password" type="password" autocomplete="new-password" placeholder="Mật khẩu Family Owner" required></div>
-                    </div>
-                </div>
-                <div class="spotify-form-section">
-                    <h3>Chu kỳ & nhắc hạn</h3>
-                    <div class="form-row">
-                        <div class="form-group"><label>Ngày bắt đầu chu kỳ</label><input id="sf-form-cycle-start" type="date" required></div>
-                        <div class="form-group"><label>Ngày gia hạn tiếp theo</label><input id="sf-form-next-renewal" type="date" required></div>
-                    </div>
-                    <div class="form-row">
-                        <div class="form-group"><label>Tổng số slot</label><input id="sf-form-total-slots" type="number" min="1" max="50" value="6" required></div>
-                        <div class="form-group"><label>Nhắc trước (ngày)</label><input id="sf-form-reminder-days" type="number" min="1" max="30" value="7" required></div>
-                        <div class="form-group"><label>Chi phí gia hạn</label><input id="sf-form-renewal-cost" type="number" min="0" step="1000" placeholder="59000"></div>
-                    </div>
-                </div>
-                <div class="spotify-form-section">
-                    <h3>Thẻ dùng để gia hạn</h3>
-                    <div class="form-row">
-                        <div class="form-group"><label>Tên gợi nhớ của thẻ</label><input id="sf-form-card-label" maxlength="100" placeholder="Ví dụ: Visa ACB · Nhân"></div>
-                        <div class="form-group"><label>Số thẻ / mã tham chiếu</label><input id="sf-form-card-number" autocomplete="off" placeholder="Dữ liệu được mã hóa trong database"></div>
-                    </div>
-                    <div class="form-group"><label>Ghi chú vận hành</label><textarea id="sf-form-note" rows="3" maxlength="1000" placeholder="Nguồn tiền, lưu ý đăng nhập, khu vực thanh toán..."></textarea></div>
-                </div>
-                <div class="form-actions">
-                    <button type="button" class="btn btn-ghost" onclick="closeModal('modal-spotify-family')">Hủy</button>
-                    <button type="submit" class="spotify-primary-btn" id="sf-form-submit">Lưu Family</button>
-                </div>
-            </form>
-        </div>
-    </div>
-</div>
-
-<!-- Spotify Family Detail Modal -->
-<div class="modal-overlay" id="modal-spotify-detail" onclick="closeModalOnOverlay(event, 'modal-spotify-detail')">
-    <div class="modal spotify-detail-modal" onclick="event.stopPropagation()">
-        <div class="modal-header spotify-modal-header">
-            <div><span class="spotify-modal-kicker">FAMILY DETAILS</span><h2 id="spotify-detail-title">Chi tiết Family</h2></div>
-            <button class="modal-close" onclick="closeModal('modal-spotify-detail')">&times;</button>
-        </div>
-        <div class="modal-body" id="spotify-detail-body"></div>
-    </div>
-</div>
-
-<!-- Spotify Member Add/Edit Modal -->
-<div class="modal-overlay" id="modal-spotify-member" onclick="closeModalOnOverlay(event, 'modal-spotify-member')">
-    <div class="modal spotify-member-modal" onclick="event.stopPropagation()">
-        <div class="modal-header spotify-modal-header">
-            <div><span class="spotify-modal-kicker">FAMILY MEMBER</span><h2 id="spotify-member-modal-title">Thêm profile Spotify</h2></div>
-            <button class="modal-close" onclick="closeModal('modal-spotify-member')">&times;</button>
-        </div>
-        <div class="modal-body">
-            <form id="spotify-member-form" onsubmit="handleSpotifyMemberSubmit(event)">
-                <input type="hidden" id="sf-member-family-id"><input type="hidden" id="sf-member-id">
-                <div class="form-row">
-                    <div class="form-group"><label>Username / Profile Spotify</label><input id="sf-member-username" maxlength="120" placeholder="Tên hiển thị trên Spotify" required></div>
-                    <div class="form-group"><label>Email Spotify</label><input id="sf-member-email" type="email" autocomplete="off" placeholder="member@gmail.com"></div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group"><label>Tên khách hàng</label><input id="sf-member-customer" maxlength="160" placeholder="Tên khách / người sở hữu"></div>
-                    <div class="form-group"><label>Discord ID</label><input id="sf-member-discord" maxlength="30" placeholder="123456789..."></div>
-                    <div class="form-group"><label>Mã đơn liên quan</label><input id="sf-member-order" maxlength="80" placeholder="CN_123456"></div>
-                </div>
-                <div class="form-row">
-                    <div class="form-group"><label>Ngày vào Family</label><input id="sf-member-joined" type="date" required></div>
-                    <div class="form-group"><label>Số tháng khách mua</label><input id="sf-member-months" type="number" min="1" max="120" value="1" required></div>
-                    <div class="form-group"><label>Hạn của thành viên</label><input id="sf-member-expiry" type="date"></div>
-                    <div class="form-group"><label>Trạng thái</label><select id="sf-member-status"><option value="ACTIVE">Đang trong Fam</option><option value="LEFT">Đã rời Fam</option><option value="EXPIRED">Hết hạn</option></select></div>
-                </div>
-                <div class="form-group"><label>Ghi chú</label><textarea id="sf-member-note" rows="3" maxlength="1000" placeholder="Thông tin cần nhớ về profile này..."></textarea></div>
-                <div class="form-actions">
-                    <button type="button" class="btn btn-ghost" onclick="closeModal('modal-spotify-member')">Hủy</button>
-                    <button type="submit" class="spotify-primary-btn">Lưu thành viên</button>
-                </div>
-            </form>
-        </div>
-    </div>
-</div>
-
-<!-- Spotify Confirm Modal -->
-<div class="modal-overlay" id="modal-spotify-confirm" onclick="closeModalOnOverlay(event, 'modal-spotify-confirm')">
-    <div class="modal modal-sm spotify-confirm-modal" onclick="event.stopPropagation()">
-        <div class="modal-header"><h2 id="spotify-confirm-title">Xác nhận thao tác</h2><button class="modal-close" onclick="closeModal('modal-spotify-confirm')">&times;</button></div>
-        <div class="modal-body">
-            <div class="spotify-confirm-icon">!</div>
-            <p id="spotify-confirm-message"></p>
-            <div class="form-actions">
-                <button class="btn btn-ghost" onclick="closeModal('modal-spotify-confirm')">Quay lại</button>
-                <button class="btn btn-danger" id="spotify-confirm-action">Xác nhận</button>
-            </div>
         </div>
     </div>
 </div>

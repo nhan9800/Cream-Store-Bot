@@ -507,55 +507,6 @@ export function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_subscription_events_guild
       ON subscription_events (guild_id, event_type, created_at DESC);
 
-    CREATE TABLE IF NOT EXISTS spotify_families (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      guild_id TEXT NOT NULL,
-      name TEXT NOT NULL,
-      login_email TEXT NOT NULL,
-      login_password TEXT NOT NULL,
-      payment_card_label TEXT,
-      payment_card_number TEXT,
-      renewal_cost INTEGER NOT NULL DEFAULT 0,
-      total_slots INTEGER NOT NULL DEFAULT 6,
-      cycle_started_at TEXT NOT NULL,
-      next_renewal_at TEXT NOT NULL,
-      reminder_days_before INTEGER NOT NULL DEFAULT 7,
-      reminder_stage TEXT,
-      reminder_sent_at TEXT,
-      reminder_for_renewal_at TEXT,
-      reminder_message_id TEXT,
-      reminder_channel_id TEXT,
-      snoozed_until TEXT,
-      times_renewed INTEGER NOT NULL DEFAULT 0,
-      status TEXT NOT NULL DEFAULT 'ACTIVE',
-      note TEXT,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
-    );
-
-    CREATE TABLE IF NOT EXISTS spotify_family_members (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      family_id INTEGER NOT NULL,
-      spotify_username TEXT NOT NULL,
-      spotify_email TEXT,
-      customer_name TEXT,
-      discord_id TEXT,
-      related_order_code TEXT,
-      joined_at TEXT NOT NULL,
-      purchased_months INTEGER NOT NULL DEFAULT 1,
-      member_expiry_at TEXT,
-      status TEXT NOT NULL DEFAULT 'ACTIVE',
-      note TEXT,
-      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-      FOREIGN KEY (family_id) REFERENCES spotify_families(id) ON DELETE CASCADE
-    );
-
-    CREATE INDEX IF NOT EXISTS idx_spotify_families_due
-      ON spotify_families (guild_id, status, next_renewal_at, snoozed_until);
-    CREATE INDEX IF NOT EXISTS idx_spotify_family_members_family
-      ON spotify_family_members (family_id, status, joined_at);
-
     CREATE TABLE IF NOT EXISTS web_users (
       id TEXT PRIMARY KEY,
       email TEXT UNIQUE NOT NULL,
