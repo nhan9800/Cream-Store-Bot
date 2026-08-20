@@ -69,6 +69,7 @@ describe('Cenar price board V3', () => {
       .replace(/<a?:[A-Za-z0-9_]+:\d+>/g, '');
     expect(visibleText).not.toMatch(RAW_EMOJI_NAME);
     expect(allJson).toContain('https://cenarstore.xyz');
+    expect(allJson).toContain('<#1515008584549797979>');
 
     for (const payload of payloads.slice(1)) {
       const row = payload.components.at(-1).toJSON();
