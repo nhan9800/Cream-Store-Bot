@@ -112,6 +112,7 @@ export function sanitizeChannelName(input) {
 export function normalizeQueueGroup(productName) {
   return String(productName ?? '')
     .replace(/<a?:[a-zA-Z0-9_]+:\d+>/g, ' ')
+    .replace(/:[a-zA-Z0-9_]+:/g, ' ')
     .replace(/\b\d{15,22}\b/g, ' ')
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')

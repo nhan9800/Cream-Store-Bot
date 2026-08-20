@@ -1,8 +1,14 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import { config } from '../src/config.js';
 import { buildAdminOrderDetailPayload, selectAgingReminderStage } from '../src/services/adminOrderCenterService.js';
 import { canOpenMultipleOrderTickets } from '../src/utils/permissions.js';
 import { buildOrderCancelledCustomerV2 } from '../src/utils/embeds.js';
+
+const previousDiscordClient = global.discordClient;
+
+afterEach(() => {
+  global.discordClient = previousDiscordClient;
+});
 
 function memberWithRoles(roleIds = []) {
   const roles = new Set(roleIds.map(String));
@@ -116,6 +122,45 @@ describe('admin order aging reminders', () => {
 
     expect(rendered).toContain('<#333333333333333333>');
     expect(rendered).toContain(`https://discord.com/channels/${config.storeOneGuildId}/333333333333333333`);
+  });
+
+  it('renders the live Claude emoji instead of exposing a legacy :claude: token', () => {
+    const liveClaude = {
+      id: '1535690552874639531',
+      name: 'cenar_claude',
+      animated: false,
+    };
+    global.discordClient = {
+      guilds: {
+        cache: new Map([[
+          config.storeOneGuildId,
+          { emojis: { cache: new Map([[liveClaude.id, liveClaude]]) } },
+        ]]),
+      },
+      emojis: { cache: new Map([[liveClaude.id, liveClaude]]) },
+    };
+
+    const createdAt = new Date(Date.now() - 14 * 86_400_000).toISOString();
+    const payload = buildAdminOrderDetailPayload({
+      guild_id: config.storeOneGuildId,
+      order_code: 'CN_983047',
+      ticket_id: 1,
+      customer_id: '1273801433145147555',
+      product_name: ':claude: apiclaude100m',
+      quantity: 1,
+      total_amount: 75000,
+      amount_paid: 75000,
+      payment_provider: 'PAYOS',
+      payment_status: 'PAID',
+      status: 'PROCESSING',
+      claimed_by_id: null,
+      created_at: createdAt,
+      updated_at: createdAt,
+    }, { reminderStage: 'week2' });
+    const rendered = JSON.stringify(payload.components.map((component) => component.toJSON()));
+
+    expect(rendered).toContain('<:cenar_claude:1535690552874639531> apiclaude100m');
+    expect(rendered).not.toContain(':claude: apiclaude100m');
   });
 });
 

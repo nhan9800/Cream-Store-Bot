@@ -102,7 +102,7 @@ const fallbackEmojis = {
   brand_discord:      '<:discord_nitro:1384901794475282523>',
   brand_adobe:        '<:cr_adobe:1366632539032125470>',
   brand_capcut:       '<:capcut:1481152550521536615>',
-  brand_claude:       '<:claude:1483324441076301824>',
+  brand_claude:       '<:cenar_claude:1535690552874639531>',
   brand_office:       '<:office365:1459180639390535836>',
   brand_gearup:       '<:gearup:1515216203453432002>',
   brand_gemini:       '<:gemini:1481157054210248864>',

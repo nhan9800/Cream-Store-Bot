@@ -19,7 +19,7 @@ import { db, nowIso } from '../database/db.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { formatCurrency, formatOrderDuration, getOrderStatusLabel, getPaymentStatusLabel } from '../utils/formatters.js';
 import { isManager } from '../utils/permissions.js';
-import { autoSyncGuildEmojis } from './emojiService.js';
+import { autoSyncGuildEmojis, formatProductDisplayName } from './emojiService.js';
 import { getGuildConfig } from './guildConfigService.js';
 
 const CATEGORY_NAME = '⌁ QUẢN TRỊ ĐƠN HÀNG';
@@ -68,6 +68,11 @@ function trimText(value, max = 80, fallback = '—') {
   const text = String(value ?? '').replace(/\s+/g, ' ').trim();
   if (!text) return fallback;
   return text.length <= max ? text : `${text.slice(0, Math.max(1, max - 1))}…`;
+}
+
+function formatAdminProductName(guildId, productName, E, max = 80) {
+  const displayName = formatProductDisplayName(guildId, productName, E);
+  return trimText(displayName, max, 'Dịch vụ Cenar');
 }
 
 function componentEmoji(E, slot) {
@@ -384,7 +389,7 @@ export function buildAdminOrderCenterPanel({ guildId, orders, summary, refreshed
       ? `<#${order.resolved_ticket_channel_id}>`
       : '**đã đóng/xóa**';
     const customer = order.resolved_customer_identity || `ID \`${order.customer_id}\``;
-    return `${urgency} **${index + 1}. \`${order.order_code}\`** · ${customer} · **${trimText(order.product_name, 44)}** · ${age} ngày · ${getOrderStatusLabel(order.status, guildId)} · ${ticket}`;
+    return `${urgency} **${index + 1}. \`${order.order_code}\`** · ${customer} · **${formatAdminProductName(guildId, order.product_name, E, 44)}** · ${age} ngày · ${getOrderStatusLabel(order.status, guildId)} · ${ticket}`;
   }) : [`${E('status_check')} Không có đơn đang mở. Hàng đợi hiện đã sạch.`];
   container.addTextDisplayComponents(new TextDisplayBuilder().setContent(rows.join('\n')));
   container.addSeparatorComponents(new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small));
@@ -447,7 +452,7 @@ export function buildAdminOrderDetailPayload(order, {
     container.addTextDisplayComponents(new TextDisplayBuilder().setContent([
       `${E('ticket_user')} **Khách:** ${customer}`,
       `${E('ticket_open')} **Ticket:** ${ticket}`,
-      `${E('order_product')} **Sản phẩm:** ${trimText(order.product_name, 120)} · SL **${order.quantity || 1}**`,
+      `${E('order_product')} **Sản phẩm:** ${formatAdminProductName(order.guild_id, order.product_name, E, 120)} · SL **${order.quantity || 1}**`,
       `${E('icon_duration')} **Thời hạn:** ${formatOrderDuration(order)}`,
       `${E('icon_chart')} **Trạng thái:** ${getOrderStatusLabel(order.status, order.guild_id)} · ${getPaymentStatusLabel(order.payment_status, order.guild_id)}`,
       `${E('payment_money')} **Giá trị:** ${formatCurrency(order.total_amount)} · nhận **${formatCurrency(order.amount_paid)}**`,
@@ -459,7 +464,7 @@ export function buildAdminOrderDetailPayload(order, {
     container.addTextDisplayComponents(new TextDisplayBuilder().setContent([
       `${E('ticket_user')} **Khách hàng:** ${customer}`,
       `${E('ticket_open')} **Ticket:** ${ticket} · ID \`${order.ticket_id}\``,
-      `${E('order_product')} **Sản phẩm:** ${trimText(order.product_name, 180)} · SL **${order.quantity || 1}**`,
+      `${E('order_product')} **Sản phẩm:** ${formatAdminProductName(order.guild_id, order.product_name, E, 180)} · SL **${order.quantity || 1}**`,
       `${E('icon_duration')} **Thời hạn:** ${formatOrderDuration(order)}`,
       note ? `${E('icon_edit')} **Ghi chú:** ${trimText(note, 260)}` : null,
       `${E('icon_chart')} **Trạng thái:** ${getOrderStatusLabel(order.status, order.guild_id)} · ${getPaymentStatusLabel(order.payment_status, order.guild_id)}`,
@@ -511,7 +516,7 @@ function buildAgingListPayload(guildId) {
   const lines = orders.length ? orders.map((order, index) => {
     const days = ageDays(order.created_at);
     const icon = days >= config.adminOrderReminderWeekTwoDays ? E('admin_order_week2') : E('admin_order_week1');
-    return `${icon} **${index + 1}. \`${order.order_code}\`** · ${days} ngày · <@${order.customer_id}> · ${trimText(order.product_name, 55)} · ${order.claimed_by_id ? `<@${order.claimed_by_id}>` : '**chưa claim**'}`;
+    return `${icon} **${index + 1}. \`${order.order_code}\`** · ${days} ngày · <@${order.customer_id}> · ${formatAdminProductName(guildId, order.product_name, E, 55)} · ${order.claimed_by_id ? `<@${order.claimed_by_id}>` : '**chưa claim**'}`;
   }) : [`${E('status_check')} Hiện không có đơn xử lý nào tồn từ ${config.adminOrderReminderWeekOneDays} ngày.`];
   container.addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join('\n')));
   return { components: [container], flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral, allowedMentions: { parse: [] } };

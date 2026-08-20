@@ -253,7 +253,7 @@ export const SLOT_ALIASES = {
   brand_discord: ['discord', 'brand_discord'],
   brand_adobe: ['adobe', 'cr_adobe', 'photoshop_cc_icon3'],
   brand_capcut: ['capcut', 'cr_capcut'],
-  brand_claude: ['claude', 'cr_claude'],
+  brand_claude: ['claude', 'claude_ai', 'cr_claude'],
   brand_locket: ['tsm_locket', 'locket', 'locket_gold'],
   brand_office: ['office', 'office365', 'tsm_offices'],
   brand_gearup: ['gearup', 'gear_up'],

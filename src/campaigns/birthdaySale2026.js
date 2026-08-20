@@ -29,7 +29,7 @@ const EMOJI = Object.freeze({
   chatgpt: '<:chatgopete:1481154927677014098>',
   gemini: '<:gemini:1481157054210248864>',
   office: '<:office365:1459180639390535836>',
-  claude: '<:claude:1483324441076301824>',
+  claude: '<:cenar_claude:1535690552874639531>',
   codex: '<:cr_chatgpt:1366630325530136726>',
 });
 
