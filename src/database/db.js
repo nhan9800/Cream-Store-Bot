@@ -1356,16 +1356,21 @@ export const DEFAULT_PRODUCT_CATALOG = [
     { name: 'Gearup Booster 6 Tháng', description: 'Gói Gearup Booster giảm giật lag chơi game 6 tháng.', price: 380000, duration_months: 6, service_type: 'gearup', emoji: 'brand_gearup', original_price: 0 },
     { name: 'Gearup Booster 12 Tháng (1 Năm)', description: 'Gói Gearup Booster giảm giật lag chơi game 12 tháng (1 năm).', price: 460000, duration_months: 12, service_type: 'gearup', emoji: 'brand_gearup', original_price: 0 },
 
-    // YouTube Premium
-    { name: 'YouTube Premium 3 Tháng (Gia Hạn Đều)', description: 'Gia hạn gói cước YouTube Premium 3 tháng liên tục không bị ngắt quãng.', price: 180000, duration_months: 3, service_type: 'STREAMING', emoji: 'brand_youtube', original_price: 0 },
-    { name: 'YouTube Premium 6 Tháng (Gia Hạn Đều)', description: 'Gia hạn gói cước YouTube Premium 6 tháng liên tục không bị ngắt quãng.', price: 290000, duration_months: 6, service_type: 'STREAMING', emoji: 'brand_youtube', original_price: 0 },
-    { name: 'YouTube Premium 12 Tháng (Gia Hạn Đều)', description: 'Gia hạn gói cước YouTube Premium 12 tháng liên tục không bị ngắt quãng.', price: 520000, duration_months: 12, service_type: 'STREAMING', emoji: 'brand_youtube', original_price: 0 },
-    { name: 'YouTube Premium 3 Tháng (Gia Hạn 1 Tháng/Lần)', description: 'Không lo bị giới hạn 12 tháng khi rời Family. Hỗ trợ tốt nhất.', price: 90000, duration_months: 3, service_type: 'STREAMING', emoji: 'brand_youtube', original_price: 0 },
-    { name: 'YouTube Premium 6 Tháng (Gia Hạn 1 Tháng/Lần)', description: 'Không lo bị giới hạn 12 tháng khi rời Family. Hỗ trợ tốt nhất.', price: 180000, duration_months: 6, service_type: 'STREAMING', emoji: 'brand_youtube', original_price: 0 },
-    { name: 'YouTube Premium 12 Tháng (Gia Hạn 1 Tháng/Lần)', description: 'Không lo bị giới hạn 12 tháng khi rời Family. Hỗ trợ tốt nhất.', price: 250000, duration_months: 12, service_type: 'STREAMING', emoji: 'brand_youtube', original_price: 0 },
+    // YouTube Premium · gia hạn liên tục, bảo hành toàn thời gian
+    { product_key: 'youtube-premium-continuous-1-month', name: 'YouTube Premium 1 Tháng (Gia Hạn Liên Tục)', description: 'Dòng ổn định, gia hạn YouTube Premium liên tục và bảo hành full trong toàn bộ 1 tháng sử dụng.', warranty_policy: 'Full 1 tháng', price: 55000, duration_months: 1, service_type: 'STREAMING', emoji: 'brand_youtube', original_price: 0 },
+    { product_key: 'youtube-premium-continuous-3-months', name: 'YouTube Premium 3 Tháng (Gia Hạn Liên Tục)', aliases: ['YouTube Premium 3 Tháng (Gia Hạn Đều)'], description: 'Dòng ổn định, gia hạn YouTube Premium liên tục và bảo hành full trong toàn bộ 3 tháng sử dụng.', warranty_policy: 'Full 3 tháng', price: 185000, duration_months: 3, service_type: 'STREAMING', emoji: 'brand_youtube', original_price: 0 },
+    { product_key: 'youtube-premium-continuous-6-months', name: 'YouTube Premium 6 Tháng (Gia Hạn Liên Tục)', aliases: ['YouTube Premium 6 Tháng (Gia Hạn Đều)'], description: 'Dòng ổn định, gia hạn YouTube Premium liên tục và bảo hành full trong toàn bộ 6 tháng sử dụng.', warranty_policy: 'Full 6 tháng', price: 300000, duration_months: 6, service_type: 'STREAMING', emoji: 'brand_youtube', original_price: 0 },
+    { product_key: 'youtube-premium-continuous-12-months', name: 'YouTube Premium 12 Tháng (Gia Hạn Liên Tục)', aliases: ['YouTube Premium 12 Tháng (Gia Hạn Đều)'], description: 'Dòng ổn định, gia hạn YouTube Premium liên tục và bảo hành full trong toàn bộ 12 tháng sử dụng.', warranty_policy: 'Full 12 tháng', price: 550000, duration_months: 12, service_type: 'STREAMING', emoji: 'brand_youtube', original_price: 0 },
 
-    // Netflix Premium
-    { product_key: 'netflix-premium-1-month-non-renewable', name: 'Netflix Premium 1 Tháng (Không Gia Hạn)', description: 'Tài khoản Netflix Premium chất lượng Full HD/4K, sử dụng 1 tháng và bảo hành 20 ngày. Không hỗ trợ gia hạn trên tài khoản đã cấp; khi hết hạn, khách muốn sử dụng tiếp cần đổi sang tài khoản mới.', price: 35000, duration_months: 1, service_type: 'netflix', emoji: 'brand_netflix', original_price: 0, is_featured: 1, virtual_purchase_count: 0 },
+    // YouTube Premium · đổi Family mỗi tháng, bảo hành toàn thời gian
+    { product_key: 'youtube-premium-monthly-family-switch-1-month', name: 'YouTube Premium 1 Tháng (Đổi Family Mỗi Tháng)', description: 'Gói tiết kiệm theo chu kỳ Family tháng. Nếu phát sinh lỗi hoặc giới hạn Family, khách cung cấp email khác để Cenar thêm lại. Shop ghi nhận tỷ lệ phát sinh thấp khoảng 1–2%, nhưng đây không phải cam kết không lỗi. Bảo hành full 1 tháng.', warranty_policy: 'Full 1 tháng', price: 25000, duration_months: 1, service_type: 'STREAMING', emoji: 'brand_youtube', original_price: 0 },
+    { product_key: 'youtube-premium-monthly-family-switch-3-months', name: 'YouTube Premium 3 Tháng (Đổi Family Mỗi Tháng)', aliases: ['YouTube Premium 3 Tháng (Gia Hạn 1 Tháng/Lần)'], description: 'Gói tiết kiệm, đổi Family mỗi tháng. Nếu phát sinh lỗi hoặc giới hạn Family, khách cung cấp email khác để Cenar thêm lại. Shop ghi nhận tỷ lệ phát sinh thấp khoảng 1–2%, nhưng đây không phải cam kết không lỗi. Bảo hành full 3 tháng.', warranty_policy: 'Full 3 tháng', price: 90000, duration_months: 3, service_type: 'STREAMING', emoji: 'brand_youtube', original_price: 0 },
+    { product_key: 'youtube-premium-monthly-family-switch-6-months', name: 'YouTube Premium 6 Tháng (Đổi Family Mỗi Tháng)', aliases: ['YouTube Premium 6 Tháng (Gia Hạn 1 Tháng/Lần)'], description: 'Gói tiết kiệm, đổi Family mỗi tháng. Nếu phát sinh lỗi hoặc giới hạn Family, khách cung cấp email khác để Cenar thêm lại. Shop ghi nhận tỷ lệ phát sinh thấp khoảng 1–2%, nhưng đây không phải cam kết không lỗi. Bảo hành full 6 tháng.', warranty_policy: 'Full 6 tháng', price: 150000, duration_months: 6, service_type: 'STREAMING', emoji: 'brand_youtube', original_price: 0 },
+    { product_key: 'youtube-premium-monthly-family-switch-12-months', name: 'YouTube Premium 12 Tháng (Đổi Family Mỗi Tháng)', aliases: ['YouTube Premium 12 Tháng (Gia Hạn 1 Tháng/Lần)'], description: 'Gói tiết kiệm, đổi Family mỗi tháng. Nếu phát sinh lỗi hoặc giới hạn Family, khách cung cấp email khác để Cenar thêm lại. Shop ghi nhận tỷ lệ phát sinh thấp khoảng 1–2%, nhưng đây không phải cam kết không lỗi. Bảo hành full 12 tháng.', warranty_policy: 'Full 12 tháng', price: 250000, duration_months: 12, service_type: 'STREAMING', emoji: 'brand_youtube', original_price: 0 },
+
+    // Netflix · hai lựa chọn ổn định
+    { product_key: 'netflix-extra-1-month-renewable', name: 'Netflix Extra 1 Tháng (Ổn Định · Có Gia Hạn)', description: 'Gói Netflix Extra ổn định trong 1 tháng và hỗ trợ gia hạn tiếp trên tài khoản đã cấp.', price: 75000, duration_months: 1, service_type: 'netflix', emoji: 'brand_netflix', original_price: 0, is_featured: 1, virtual_purchase_count: 0 },
+    { product_key: 'netflix-premium-1-month-non-renewable', name: 'Netflix Premium 1 Tháng (Ổn Định · Không Gia Hạn)', aliases: ['Netflix Premium 1 Tháng (Không Gia Hạn)'], description: 'Tài khoản Netflix Premium ổn định, chất lượng Full HD/4K, sử dụng 1 tháng và bảo hành 20 ngày. Không hỗ trợ gia hạn trên tài khoản đã cấp; khi hết hạn, khách muốn sử dụng tiếp cần đổi sang tài khoản mới.', warranty_policy: '20 ngày', price: 35000, duration_months: 1, service_type: 'netflix', emoji: 'brand_netflix', original_price: 0, is_featured: 1, virtual_purchase_count: 0 },
  
     // Dịch vụ Discord Setup & Bot Custom & Website Custom
     { name: 'Combo Setup Discord + Bot Custom + Boost Server', description: 'Trọn gói setup máy chủ hoàn chỉnh: bot hệ thống tự động siêu đẹp + Boost Server. Phí duy trì bot chỉ 30k/tháng.', price: 500000, duration_months: 1, service_type: 'SERVICE', emoji: 'brand_discord', original_price: 0 },
@@ -1440,6 +1445,34 @@ export function seedProductCatalog(dbInstance) {
         )
       )
   `);
+  const retireReplacedStreamingCatalogStmt = dbInstance.prepare(`
+    UPDATE product_catalog
+    SET is_active = 0, updated_at = CURRENT_TIMESTAMP
+    WHERE guild_id = 'WEB'
+      AND is_active = 1
+      AND (
+        (
+          LOWER(REPLACE(name, ' ', '')) LIKE '%youtubepremium%'
+          AND COALESCE(product_key, '') NOT IN (
+            'youtube-premium-continuous-1-month',
+            'youtube-premium-continuous-3-months',
+            'youtube-premium-continuous-6-months',
+            'youtube-premium-continuous-12-months',
+            'youtube-premium-monthly-family-switch-1-month',
+            'youtube-premium-monthly-family-switch-3-months',
+            'youtube-premium-monthly-family-switch-6-months',
+            'youtube-premium-monthly-family-switch-12-months'
+          )
+        )
+        OR (
+          LOWER(name) LIKE '%netflix%'
+          AND COALESCE(product_key, '') NOT IN (
+            'netflix-extra-1-month-renewable',
+            'netflix-premium-1-month-non-renewable'
+          )
+        )
+      )
+  `);
 
   let currentSort = 100;
   
@@ -1469,6 +1502,7 @@ export function seedProductCatalog(dbInstance) {
     // Các hàng lịch sử vẫn được giữ trong database để bảo toàn đơn cũ, nhưng
     // không còn xuất hiện trên bot, website hoặc bảng giá Discord.
     retireReplacedAiCatalogStmt.run();
+    retireReplacedStreamingCatalogStmt.run();
 
     dbInstance.prepare(`
       UPDATE product_catalog

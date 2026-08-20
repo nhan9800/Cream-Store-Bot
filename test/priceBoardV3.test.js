@@ -47,7 +47,9 @@ describe('Cenar price board V3', () => {
     expect(panels.find((panel) => panel.group.key === 'chatgpt')?.items.length).toBeGreaterThan(0);
     expect(panels.find((panel) => panel.group.key === 'gemini')?.items.length).toBeGreaterThan(0);
     expect(panels.find((panel) => panel.group.key === 'adobe')?.items.length).toBeGreaterThan(0);
-    expect(panels.find((panel) => panel.group.key === 'streaming')?.items.length).toBeGreaterThan(0);
+    expect(panels.find((panel) => panel.group.key === 'youtube_continuous')?.items).toHaveLength(4);
+    expect(panels.find((panel) => panel.group.key === 'youtube_family_switch')?.items).toHaveLength(4);
+    expect(panels.find((panel) => panel.group.key === 'netflix')?.items).toHaveLength(2);
   });
 
   it('builds custom-emoji-only Components V2 panels with product selectors', () => {
@@ -150,30 +152,36 @@ describe('Cenar price board V3', () => {
     expect(announcement).toContain('ít nhất 12 tháng liên tục.');
   });
 
-  it('shows the full Netflix 35k promotion policy in catalog, board and price announcement', () => {
+  it('shows exactly two Netflix choices with the correct renewal policy', () => {
     const netflix = DEFAULT_PRODUCT_CATALOG.find((product) => (
       product.product_key === 'netflix-premium-1-month-non-renewable'
     ));
+    const netflixExtra = DEFAULT_PRODUCT_CATALOG.find((product) => (
+      product.product_key === 'netflix-extra-1-month-renewable'
+    ));
     expect(netflix?.price).toBe(35000);
     expect(netflix?.duration_months).toBe(1);
+    expect(netflix?.name).toContain('Ổn Định · Không Gia Hạn');
     expect(netflix?.description).toContain('Full HD/4K');
     expect(netflix?.description).toContain('bảo hành 20 ngày');
     expect(netflix?.description).toContain('đổi sang tài khoản mới');
+    expect(netflixExtra?.price).toBe(75000);
+    expect(netflixExtra?.description).toContain('hỗ trợ gia hạn tiếp');
 
-    const products = [
-      ...getActiveProducts(GUILD_ID).filter((product) => (
-        product.product_key !== 'netflix-premium-1-month-non-renewable'
-      )),
-      { ...netflix, id: 'netflix-promo-seed' },
-    ];
-    const streamingPanel = buildPriceBoardPayloads(GUILD_ID, {}, products)
+    const products = getActiveProducts(GUILD_ID);
+    const activeNetflix = products.filter((product) => /netflix/i.test(product.name));
+    expect(activeNetflix).toHaveLength(2);
+
+    const netflixPanel = buildPriceBoardPayloads(GUILD_ID, {}, products)
       .map((payload) => serialize(payload))
-      .find((json) => json.includes('YouTube Premium & Giải Trí'));
-    expect(streamingPanel).toContain('Netflix Premium 1 Tháng (Không Gia Hạn)');
-    expect(streamingPanel).toContain('35.000');
-    expect(streamingPanel).toContain('Full HD/4K');
-    expect(streamingPanel).toContain('20 ngày');
-    expect(streamingPanel).toContain('đổi sang tài khoản mới');
+      .find((json) => json.includes('Netflix Extra & Premium'));
+    expect(netflixPanel).toContain('Netflix Extra 1 Tháng');
+    expect(netflixPanel).toContain('Netflix Premium 1 Tháng');
+    expect(netflixPanel).toContain('75.000');
+    expect(netflixPanel).toContain('35.000');
+    expect(netflixPanel).toContain('Full HD/4K');
+    expect(netflixPanel).toContain('20 ngày');
+    expect(netflixPanel).toContain('đổi sang tài khoản mới');
 
     const announcement = buildPriceAnnouncementContent(GUILD_ID, products);
     expect(announcement).toContain('Netflix Premium 1 Tháng · Không Gia Hạn');
@@ -181,6 +189,37 @@ describe('Cenar price board V3', () => {
     expect(announcement).toContain('Full HD/4K');
     expect(announcement).toContain('20 ngày');
     expect(announcement).toContain('đổi sang tài khoản mới');
+  });
+
+  it('publishes both complete YouTube lines with full-duration warranty', () => {
+    const products = getActiveProducts(GUILD_ID);
+    const youtube = products.filter((product) => /youtube premium/i.test(product.name));
+    expect(youtube).toHaveLength(8);
+    expect(youtube.map((product) => [product.product_key, product.price])).toEqual(expect.arrayContaining([
+      ['youtube-premium-continuous-1-month', 55000],
+      ['youtube-premium-continuous-3-months', 185000],
+      ['youtube-premium-continuous-6-months', 300000],
+      ['youtube-premium-continuous-12-months', 550000],
+      ['youtube-premium-monthly-family-switch-1-month', 25000],
+      ['youtube-premium-monthly-family-switch-3-months', 90000],
+      ['youtube-premium-monthly-family-switch-6-months', 150000],
+      ['youtube-premium-monthly-family-switch-12-months', 250000],
+    ]));
+    expect(youtube.every((product) => String(product.warranty_policy).startsWith('Full '))).toBe(true);
+
+    const panels = buildPriceBoardPayloads(GUILD_ID, {}, products).map(serialize);
+    const continuousPanel = panels.find((json) => json.includes('YouTube Premium · Gia Hạn Liên Tục'));
+    const switchPanel = panels.find((json) => json.includes('YouTube Premium · Đổi Family Mỗi Tháng'));
+    for (const price of ['55.000', '185.000', '300.000', '550.000']) {
+      expect(continuousPanel).toContain(price);
+    }
+    for (const price of ['25.000', '90.000', '150.000', '250.000']) {
+      expect(switchPanel).toContain(price);
+    }
+    expect(continuousPanel).toContain('Full trong suốt thời gian sử dụng');
+    expect(switchPanel).toContain('đổi email để Cenar thêm lại');
+    expect(switchPanel).toContain('1–2%');
+    expect(switchPanel).toContain('Full trong suốt thời gian sử dụng');
   });
 
   it('keeps only the new ChatGPT and Adobe packages across catalog, board and announcement', () => {

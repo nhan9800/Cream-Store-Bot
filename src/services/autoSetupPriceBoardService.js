@@ -21,7 +21,7 @@ import { formatInternationalPrice, translateCatalogGroup, translateProductName }
 import { getNitroTrialEligibility, isNitroTrialProduct } from '../constants/nitroTrial.js';
 import { getNetflixPromoDetails, isNetflixPromoProduct } from '../constants/netflixPromotion.js';
 
-export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.7';
+export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.8';
 const PRIMARY_GUILD_ID = '1282637033340403754';
 const PRIMARY_PRICE_CHANNEL_ID = '1514606995842273280';
 const PRIMARY_PROMOTION_CHANNEL_ID = '1515008584549797979';
@@ -78,9 +78,24 @@ export const PRICE_GROUPS = [
     match: (p) => p.service_type === 'AI' && /(capcut|office)/i.test(p.name),
   },
   {
-    key: 'streaming', titleSlot: 'brand_youtube', title: 'YouTube Premium & Giải Trí', accent: 0xFF0033,
-    note: 'Chu kỳ gia hạn được ghi đúng ở từng sản phẩm; vui lòng đọc kỹ trước khi chọn.',
-    match: (p) => ['STREAMING', 'youtube', 'spotify', 'netflix'].includes(p.service_type),
+    key: 'youtube_continuous', titleSlot: 'brand_youtube', title: 'YouTube Premium · Gia Hạn Liên Tục', accent: 0xFF0033,
+    note: 'Dòng ổn định, gia hạn liên tục và bảo hành full toàn bộ thời gian sử dụng.',
+    match: (p) => String(p.product_key || '').startsWith('youtube-premium-continuous-'),
+  },
+  {
+    key: 'youtube_family_switch', titleSlot: 'brand_youtube', title: 'YouTube Premium · Đổi Family Mỗi Tháng', accent: 0xDC2626,
+    note: 'Dòng tiết kiệm, đổi Family mỗi tháng. Nếu hiếm khi phát sinh lỗi (shop ghi nhận khoảng 1–2%), khách đổi email để Cenar thêm lại; bảo hành full toàn thời gian.',
+    match: (p) => String(p.product_key || '').startsWith('youtube-premium-monthly-family-switch-'),
+  },
+  {
+    key: 'netflix', titleSlot: 'brand_netflix', title: 'Netflix Extra & Premium', accent: 0xE50914,
+    note: 'Netflix Extra 75k hỗ trợ gia hạn; Netflix Premium 35k ổn định nhưng hết hạn cần đổi tài khoản mới.',
+    match: (p) => p.service_type === 'netflix' || /netflix/i.test(p.name),
+  },
+  {
+    key: 'streaming', titleSlot: 'brand_spotify', title: 'Spotify Premium & Giải Trí', accent: 0x1DB954,
+    note: 'Các dịch vụ giải trí còn lại; vui lòng đọc kỹ chu kỳ và chính sách từng sản phẩm.',
+    match: (p) => ['STREAMING', 'youtube', 'spotify'].includes(p.service_type),
   },
   {
     key: 'gearup', titleSlot: 'brand_gearup', title: 'GearUP Booster', accent: 0x00E6FF,
@@ -174,6 +189,14 @@ const FULL_WARRANTY_PRODUCT_KEYS = new Set([
   'gemini-pro-google-one-5tb-12-months-full-warranty',
   'gemini-pro-google-one-5tb-18-months-full-warranty',
   'adobe-creative-cloud-1-month',
+  'youtube-premium-continuous-1-month',
+  'youtube-premium-continuous-3-months',
+  'youtube-premium-continuous-6-months',
+  'youtube-premium-continuous-12-months',
+  'youtube-premium-monthly-family-switch-1-month',
+  'youtube-premium-monthly-family-switch-3-months',
+  'youtube-premium-monthly-family-switch-6-months',
+  'youtube-premium-monthly-family-switch-12-months',
 ]);
 
 function hasFullDurationWarranty(product) {
@@ -322,7 +345,7 @@ export function buildPriceGroupPayload(guildId, group, products) {
         ] : []),
         ...(fullDurationWarranty ? [
           `> ${E('warranty_shield')} **${international ? 'Warranty' : 'Bảo hành'}:** ${international ? 'Full coverage for the entire service period' : 'Full trong suốt thời gian sử dụng'}`,
-        ] : warrantyPolicy ? [
+        ] : !netflixPromo && warrantyPolicy ? [
           `> ${E('warranty_shield')} **${international ? 'Warranty' : 'Bảo hành'}:** ${warrantyPolicy}`,
         ] : []),
       ].join('\n'))
