@@ -497,7 +497,7 @@ export function registerBotApiRoutes(app) {
                     order_code, guild_id, customer_id, product_name, quantity,
                     total_amount, amount_paid, payment_provider, payment_status,
                     payment_code, status, status_changed_at,
-                    duration_months, expiry_at,
+                    duration_months, duration_days, expiry_at,
                     paid_at, completed_at, delivered_at, created_at, updated_at
                 FROM orders
                 WHERE 1=1

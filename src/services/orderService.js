@@ -3,7 +3,7 @@ import { addHours } from '../utils/time.js';
 import { config } from '../config.js';
 import { randomDigits } from '../utils/id.js';
 import { syncCustomerStats, getCustomerProfile } from './customerService.js';
-import { addOrderDuration, normalizeQueueGroup } from '../utils/formatters.js';
+import { addOrderDuration, normalizeOrderDurationStorage, normalizeQueueGroup } from '../utils/formatters.js';
 import { broadcastDashboardEvent } from './dashboardMiniServer.js';
 import { encrypt } from '../utils/crypto.js';
 import { awardOrderPoints, refundOrderPoints } from './loyaltyService.js';
@@ -94,11 +94,12 @@ export function createOrder({ guildId, ticketId, ticketChannelId, customerId, pr
   const status = safeAmount > 0 ? 'PENDING_PAYMENT' : 'PROCESSING';
   const queueGroup = normalizeQueueGroup(productName) || 'mac-dinh';
   const priorityRank = computePriority(guildId, customerId, productName);
-  const parsedDurationDays = Number.parseInt(String(durationDays ?? ''), 10);
-  const safeDurationDays = Number.isFinite(parsedDurationDays) && parsedDurationDays > 0 ? parsedDurationDays : null;
-  const safeDurationMonths = safeDurationDays
-    ? 0
-    : Math.max(1, Number.parseInt(String(durationMonths ?? config.defaultOrderDurationMonths), 10) || config.defaultOrderDurationMonths);
+  const normalizedDuration = normalizeOrderDurationStorage(
+    { durationMonths, durationDays },
+    config.defaultOrderDurationMonths,
+  );
+  const safeDurationDays = normalizedDuration.durationDays;
+  const safeDurationMonths = normalizedDuration.durationMonths;
   const serviceType = detectServiceType(productName);
 
   let resultId;

@@ -4,7 +4,7 @@ import { getOrderByCode, setOrderStatus } from './orderService.js';
 import { createTicket, getOpenWarrantyTicket, getTicketByChannelId } from './ticketService.js';
 import { updateOrderLogMessage } from './notificationService.js';
 import { buildTicketControlComponents, buildTicketWelcomeV2 } from '../utils/embeds.js';
-import { addOrderDuration, buildWarrantyChannelName } from '../utils/formatters.js';
+import { addOrderDuration, buildWarrantyChannelName, resolveOrderDuration } from '../utils/formatters.js';
 import { TICKET_MEMBER_PERMISSIONS } from '../utils/permissions.js';
 import { getCenarHub } from './cenarHub.js';
 import { createEmojiResolver, withButtonEmoji } from '../utils/emojiHelper.js';
@@ -106,9 +106,10 @@ export function resolveWarrantyTimeline(order = {}, formData = {}) {
   const computedExpiry = expiryBase
     ? addOrderDuration(expiryBase, order, config.defaultOrderDurationMonths || 1)
     : null;
+  const isPermanent = resolveOrderDuration(order, config.defaultOrderDurationMonths || 1).unit === 'permanent';
   const expirySource = meaningful(formData.dateExpired)
     || order.expiry_at
-    || computedExpiry;
+    || (isPermanent ? 'Vĩnh viễn' : computedExpiry);
 
   return {
     purchaseDate: displayWarrantyDate(purchaseSource),

@@ -24,6 +24,11 @@ export const data = new SlashCommandBuilder()
   .addStringOption((option) => option.setName('gia_tien').setDescription('Số tiền cần thanh toán, ví dụ 55000 hoặc 55k').setRequired(false))
   .addIntegerOption((option) => option.setName('so_thang').setDescription('Thời hạn theo tháng (không nhập nếu dùng số ngày)').setRequired(false).setMinValue(1).setMaxValue(36))
   .addIntegerOption((option) => option.setName('so_ngay').setDescription('Thời hạn theo ngày, ví dụ 7 ngày').setRequired(false).setMinValue(1).setMaxValue(3650))
+  .addStringOption((option) => option
+    .setName('thoi_han')
+    .setDescription('Chọn Vĩnh viễn nếu đơn không có ngày hết hạn')
+    .setRequired(false)
+    .addChoices({ name: 'Vĩnh viễn', value: 'permanent' }))
   .addChannelOption((option) => option.setName('ticket').setDescription('Ticket cần gắn với đơn. Bỏ trống nếu đang đứng trong ticket.').addChannelTypes(ChannelType.GuildText).setRequired(false))
   .addStringOption((option) => option.setName('ghi_chu').setDescription('Ghi chú nội bộ cho đơn').setRequired(false).setMaxLength(250));
 
@@ -52,14 +57,19 @@ export async function execute(interaction) {
     const note = interaction.options.getString('ghi_chu');
     const amount = parseMoneyInput(interaction.options.getString('gia_tien')) ?? 0;
     const selectedDurationMonths = interaction.options.getInteger('so_thang');
-    const durationDays = interaction.options.getInteger('so_ngay');
-    if (selectedDurationMonths !== null && durationDays !== null) {
-      await interaction.editReply(`${E('status_warn')} Chỉ chọn **số tháng** hoặc **số ngày**, không nhập cả hai.`);
+    const selectedDurationDays = interaction.options.getInteger('so_ngay');
+    const isPermanent = interaction.options.getString('thoi_han') === 'permanent';
+    const selectedDurationCount = [selectedDurationMonths !== null, selectedDurationDays !== null, isPermanent].filter(Boolean).length;
+    if (selectedDurationCount > 1) {
+      await interaction.editReply(`${E('status_warn')} Chỉ chọn một loại thời hạn: **số tháng**, **số ngày** hoặc **Vĩnh viễn**.`);
       return;
     }
-    const durationMonths = durationDays === null
-      ? (selectedDurationMonths ?? config.defaultOrderDurationMonths)
-      : 0;
+    const durationDays = isPermanent ? null : selectedDurationDays;
+    const durationMonths = isPermanent
+      ? 0
+      : durationDays === null
+        ? (selectedDurationMonths ?? config.defaultOrderDurationMonths)
+        : 0;
     const ticketChannel = interaction.options.getChannel('ticket') ?? interaction.channel;
 
     const ticket = getTicketByChannelId(ticketChannel.id);

@@ -30,6 +30,22 @@ export function formatOrderProduct(quantity, productName) {
   return `x${safeQty} ${safeName}`.replace(/\s+/g, ' ').trim();
 }
 
+export function normalizeOrderDurationStorage({ durationMonths, durationDays } = {}, fallbackMonths = 1) {
+  const parsedDays = Number.parseInt(String(durationDays ?? ''), 10);
+  if (Number.isFinite(parsedDays) && parsedDays > 0) {
+    return { durationMonths: 0, durationDays: parsedDays };
+  }
+
+  const parsedMonths = Number.parseInt(String(durationMonths ?? fallbackMonths), 10);
+  if (parsedMonths === 0) {
+    return { durationMonths: 0, durationDays: null };
+  }
+  return {
+    durationMonths: Math.max(1, parsedMonths || Number(fallbackMonths) || 1),
+    durationDays: null,
+  };
+}
+
 export function resolveOrderDuration(order = {}, fallbackMonths = 1) {
   const rawDays = Number.parseInt(String(order.duration_days ?? ''), 10);
   if (Number.isFinite(rawDays) && rawDays > 0) {
@@ -37,6 +53,9 @@ export function resolveOrderDuration(order = {}, fallbackMonths = 1) {
   }
 
   const rawMonths = Number.parseInt(String(order.duration_months ?? fallbackMonths), 10);
+  if (rawMonths === 0) {
+    return { unit: 'permanent', value: 0 };
+  }
   return {
     unit: 'month',
     value: Number.isFinite(rawMonths) && rawMonths > 0 ? rawMonths : Math.max(1, Number(fallbackMonths) || 1),
@@ -45,6 +64,7 @@ export function resolveOrderDuration(order = {}, fallbackMonths = 1) {
 
 export function formatOrderDuration(order = {}, fallbackMonths = 1) {
   const duration = resolveOrderDuration(order, fallbackMonths);
+  if (duration.unit === 'permanent') return 'Vĩnh viễn';
   return duration.unit === 'day'
     ? `${duration.value} ngày`
     : `${duration.value} tháng`;
@@ -55,6 +75,7 @@ export function addOrderDuration(baseDate, order = {}, fallbackMonths = 1) {
   if (Number.isNaN(next.getTime())) return null;
 
   const duration = resolveOrderDuration(order, fallbackMonths);
+  if (duration.unit === 'permanent') return null;
   if (duration.unit === 'day') {
     next.setUTCDate(next.getUTCDate() + duration.value);
   } else {

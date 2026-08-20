@@ -35,6 +35,10 @@ export function buildDeliverySubscriptionInput({
     // Không ép vào subscription tháng vì sẽ làm sai hạn thành 1 tháng.
     return null;
   }
+  if (Number(order?.duration_months) === 0) {
+    // Đơn vĩnh viễn không có chu kỳ gia hạn và không được tạo hạn 1 tháng giả.
+    return null;
+  }
   if (!String(gmailEmail || '').trim() || !String(gmailPassword || '').trim()) {
     throw new Error('Đơn dịch vụ gia hạn cần đủ Gmail và mật khẩu để đồng bộ lên website.');
   }

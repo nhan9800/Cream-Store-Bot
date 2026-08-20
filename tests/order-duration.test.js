@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { addOrderDuration, formatOrderDuration, resolveOrderDuration } from '../src/utils/formatters.js';
+import { addOrderDuration, formatOrderDuration, normalizeOrderDurationStorage, resolveOrderDuration } from '../src/utils/formatters.js';
 import { resolveWarrantyTimeline } from '../src/services/warrantyService.js';
 import { data as orderCommand } from '../src/commands/order.js';
 import { data as legacyOrderCommand } from '../src/commands/oder.js';
@@ -32,12 +32,24 @@ describe('order duration by days', () => {
     expect(formatOrderDuration({ duration_months: 3 })).toBe('3 tháng');
   });
 
+  test('represents permanent orders without generating a fake expiry date', () => {
+    const order = { duration_months: 0, duration_days: null };
+    expect(normalizeOrderDurationStorage({ durationMonths: 0, durationDays: null })).toEqual({ durationMonths: 0, durationDays: null });
+    expect(resolveOrderDuration(order)).toEqual({ unit: 'permanent', value: 0 });
+    expect(formatOrderDuration(order)).toBe('Vĩnh viễn');
+    expect(addOrderDuration('2026-08-20T03:00:00.000Z', order)).toBeNull();
+    expect(resolveWarrantyTimeline(order).dateExpired).toBe('Vĩnh viễn');
+  });
+
   test.each([
     ['/order', orderCommand],
     ['/oder', legacyOrderCommand],
-  ])('%s exposes both month and day duration options', (_name, command) => {
+  ])('%s exposes month, day and permanent duration options', (_name, command) => {
     const optionNames = command.toJSON().options.map((option) => option.name);
     expect(optionNames).toContain('so_thang');
     expect(optionNames).toContain('so_ngay');
+    expect(optionNames).toContain('thoi_han');
+    const permanentOption = command.toJSON().options.find((option) => option.name === 'thoi_han');
+    expect(permanentOption.choices).toContainEqual({ name: 'Vĩnh viễn', value: 'permanent' });
   });
 });
