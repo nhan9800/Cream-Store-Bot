@@ -29,6 +29,8 @@ export const INVITE_DECOR_CAMPAIGN = Object.freeze({
   logChannelName: '🎟・log-event-invite',
 });
 
+const INVITE_ANNOUNCEMENT_MARKER = 'EVENT MỜI BẠN · NHẬN DECOR 66K';
+
 const TERMINAL_REJECTED_STATUSES = [
   'REJECTED_BOT',
   'REJECTED_SELF',
@@ -399,23 +401,76 @@ async function ensureInviteAdminLogChannel(guild, campaign) {
   return channel;
 }
 
+function messageComponentText(message) {
+  try {
+    return JSON.stringify((message?.components || []).map((component) => (
+      typeof component?.toJSON === 'function' ? component.toJSON() : component
+    )));
+  } catch {
+    return '';
+  }
+}
+
+function isInviteCampaignAnnouncementMessage(message, botUserId) {
+  if (!message || String(message.author?.id || '') !== String(botUserId || '')) return false;
+  const searchable = `${message.content || ''}\n${messageComponentText(message)}`;
+  return searchable.includes(INVITE_ANNOUNCEMENT_MARKER) && searchable.includes('/invcheck');
+}
+
+function selectCanonicalInviteCampaignAnnouncement(messages = []) {
+  return [...messages].sort((left, right) => {
+    const leftCreatedAt = Number(left?.createdTimestamp || 0);
+    const rightCreatedAt = Number(right?.createdTimestamp || 0);
+    if (leftCreatedAt !== rightCreatedAt) return leftCreatedAt - rightCreatedAt;
+    return String(left?.id || '').localeCompare(String(right?.id || ''));
+  })[0] || null;
+}
+
+async function findInviteCampaignAnnouncementMessages(channel, botUserId, storedMessage = null) {
+  const matches = new Map();
+  const rememberIfMatching = (candidate) => {
+    if (isInviteCampaignAnnouncementMessage(candidate, botUserId)) {
+      matches.set(candidate.id, candidate);
+    }
+  };
+  rememberIfMatching(storedMessage);
+
+  const pinned = await channel.messages.fetchPins({ limit: 50 }).catch(() => null);
+  for (const item of pinned?.items || []) rememberIfMatching(item.message);
+
+  const recent = await channel.messages.fetch({ limit: 100 }).catch(() => null);
+  for (const candidate of recent?.values?.() || []) rememberIfMatching(candidate);
+  return [...matches.values()];
+}
+
 async function ensureInviteCampaignAnnouncement(guild, campaign) {
   const channel = await guild.channels.fetch(campaign.announcement_channel_id || INVITE_DECOR_CAMPAIGN.announcementChannelId).catch(() => null);
   if (!channel?.isTextBased()) return null;
-  let message = campaign.announcement_message_id
+  const storedMessage = campaign.announcement_message_id
     ? await channel.messages.fetch(campaign.announcement_message_id).catch(() => null)
     : null;
+  const matchingMessages = await findInviteCampaignAnnouncementMessages(channel, guild.client.user.id, storedMessage);
+  let message = selectCanonicalInviteCampaignAnnouncement(matchingMessages);
   const payload = buildInviteCampaignAnnouncementPayload(campaign);
   if (message) {
     await message.edit(payload);
   } else {
     message = await channel.send(payload);
+  }
+  if (!message.pinned) {
     await message.pin('Ghim thể lệ event mời bạn nhận Decor 66K').catch(() => null);
-    db.prepare(`
-      UPDATE invite_campaigns
-      SET announcement_channel_id = ?, announcement_message_id = ?, updated_at = ?
-      WHERE event_key = ?
-    `).run(channel.id, message.id, nowIso(), campaign.event_key);
+  }
+  db.prepare(`
+    UPDATE invite_campaigns
+    SET announcement_channel_id = ?, announcement_message_id = ?, updated_at = ?
+    WHERE event_key = ?
+  `).run(channel.id, message.id, nowIso(), campaign.event_key);
+
+  for (const duplicate of matchingMessages) {
+    if (duplicate.id === message.id) continue;
+    await duplicate.delete().catch((error) => {
+      console.warn(`[INVITE-EVENT] Không thể xóa panel trùng ${duplicate.id}:`, error.message);
+    });
   }
   return message;
 }
@@ -670,5 +725,7 @@ export const inviteCampaignInternals = {
   TERMINAL_REJECTED_STATUSES,
   addHoursIso,
   deriveCampaignPhase,
+  isInviteCampaignAnnouncementMessage,
+  selectCanonicalInviteCampaignAnnouncement,
   toUnix,
 };

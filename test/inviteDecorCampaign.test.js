@@ -7,6 +7,7 @@ import {
   classifyInviteCampaignJoin,
   ensureInviteDecorCampaign,
   getInviteCampaignStats,
+  inviteCampaignInternals,
   markInviteCampaignMemberLeft,
   processInviteDecorCampaign,
 } from '../src/services/inviteCampaignService.js';
@@ -187,5 +188,32 @@ describe('Store 1 invite Decor campaign validation', () => {
     expect(rendered).toContain('30 ngày');
     expect(rendered).toContain('/invcheck');
     expect(rendered).toContain('<t:1788195599:F>');
+  });
+
+  it('recognizes an existing event panel by its stable marker and bot author', () => {
+    const matchingMessage = {
+      id: 'panel-1',
+      author: { id: 'bot-1' },
+      content: '',
+      components: [{
+        toJSON: () => ({
+          components: [{ content: '# EVENT MỜI BẠN · NHẬN DECOR 66K\nDùng /invcheck để kiểm tra.' }],
+        }),
+      }],
+    };
+
+    expect(inviteCampaignInternals.isInviteCampaignAnnouncementMessage(matchingMessage, 'bot-1')).toBe(true);
+    expect(inviteCampaignInternals.isInviteCampaignAnnouncementMessage(matchingMessage, 'bot-2')).toBe(false);
+    expect(inviteCampaignInternals.isInviteCampaignAnnouncementMessage({
+      ...matchingMessage,
+      components: [{ toJSON: () => ({ components: [{ content: '# Một panel khác' }] }) }],
+    }, 'bot-1')).toBe(false);
+  });
+
+  it('keeps the oldest matching event panel as the canonical message', () => {
+    const original = { id: 'panel-old', createdTimestamp: 100 };
+    const duplicate = { id: 'panel-new', createdTimestamp: 200 };
+
+    expect(inviteCampaignInternals.selectCanonicalInviteCampaignAnnouncement([duplicate, original])).toBe(original);
   });
 });
