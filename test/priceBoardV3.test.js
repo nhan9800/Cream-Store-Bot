@@ -217,7 +217,9 @@ describe('Cenar price board V3', () => {
       expect(switchPanel).toContain(price);
     }
     expect(continuousPanel).toContain('Full trong suốt thời gian sử dụng');
-    expect(switchPanel).toContain('đổi email để Cenar thêm lại');
+    expect(switchPanel).toContain('Không bị vướng lỗi giới hạn 12 tháng');
+    expect(switchPanel).toContain('rời/đổi nhóm gia đình Google');
+    expect(switchPanel).toContain('đổi Gmail để Cenar thêm lại');
     expect(switchPanel).toContain('1–2%');
     expect(switchPanel).toContain('Full trong suốt thời gian sử dụng');
   });
