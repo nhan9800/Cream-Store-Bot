@@ -551,6 +551,82 @@ export function initDatabase() {
       FOREIGN KEY (family_id) REFERENCES spotify_families(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS youtube_sources (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      guild_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      contact TEXT,
+      payment_method TEXT,
+      payment_account TEXT,
+      default_cycle_cost INTEGER NOT NULL DEFAULT 0,
+      status TEXT NOT NULL DEFAULT 'ACTIVE',
+      note TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS youtube_memberships (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      guild_id TEXT NOT NULL,
+      source_id INTEGER NOT NULL,
+      customer_gmail TEXT NOT NULL,
+      customer_name TEXT,
+      customer_discord_id TEXT,
+      related_order_code TEXT,
+      plan_type TEXT NOT NULL DEFAULT 'STABLE_FAMILY',
+      current_family_label TEXT,
+      total_months INTEGER NOT NULL DEFAULT 1,
+      cycle_months INTEGER NOT NULL DEFAULT 1,
+      paid_cycles INTEGER NOT NULL DEFAULT 0,
+      sale_price INTEGER NOT NULL DEFAULT 0,
+      source_cost_per_cycle INTEGER NOT NULL DEFAULT 0,
+      started_at TEXT NOT NULL,
+      next_source_payment_at TEXT,
+      customer_expiry_at TEXT NOT NULL,
+      reminder_days_before INTEGER NOT NULL DEFAULT 7,
+      reminder_stage TEXT,
+      reminder_sent_at TEXT,
+      reminder_for_payment_at TEXT,
+      reminder_message_id TEXT,
+      reminder_channel_id TEXT,
+      snoozed_until TEXT,
+      status TEXT NOT NULL DEFAULT 'ACTIVE',
+      note TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (source_id) REFERENCES youtube_sources(id) ON DELETE RESTRICT
+    );
+
+    CREATE TABLE IF NOT EXISTS youtube_renewal_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      membership_id INTEGER NOT NULL,
+      source_id INTEGER,
+      event_type TEXT NOT NULL DEFAULT 'PAYMENT',
+      cycle_number INTEGER,
+      cycles_added INTEGER NOT NULL DEFAULT 0,
+      months_added INTEGER NOT NULL DEFAULT 0,
+      amount_paid INTEGER NOT NULL DEFAULT 0,
+      paid_at TEXT,
+      payment_reference TEXT,
+      family_label TEXT,
+      previous_next_payment_at TEXT,
+      next_payment_at TEXT,
+      actor_id TEXT,
+      note TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (membership_id) REFERENCES youtube_memberships(id) ON DELETE CASCADE,
+      FOREIGN KEY (source_id) REFERENCES youtube_sources(id) ON DELETE SET NULL
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_youtube_sources_guild
+      ON youtube_sources (guild_id, status, name);
+    CREATE INDEX IF NOT EXISTS idx_youtube_memberships_due
+      ON youtube_memberships (guild_id, status, next_source_payment_at, snoozed_until);
+    CREATE INDEX IF NOT EXISTS idx_youtube_memberships_source
+      ON youtube_memberships (source_id, status, customer_expiry_at);
+    CREATE INDEX IF NOT EXISTS idx_youtube_renewal_events_membership
+      ON youtube_renewal_events (membership_id, created_at DESC);
+
     CREATE TABLE IF NOT EXISTS web_users (
       id TEXT PRIMARY KEY,
       email TEXT UNIQUE NOT NULL,

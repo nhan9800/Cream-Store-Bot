@@ -31,6 +31,22 @@ import {
   updateSpotifyFamily,
   updateSpotifyFamilyMember,
 } from './spotifyFamilyService.js';
+import {
+  createYoutubeMembership,
+  createYoutubeSource,
+  deleteYoutubeMembership,
+  deleteYoutubeSource,
+  getYoutubeMembership,
+  getYoutubeRenewalHistory,
+  getYoutubeRenewalStats,
+  getYoutubeSource,
+  listYoutubeMemberships,
+  listYoutubeSources,
+  markYoutubeCyclePaid,
+  snoozeYoutubeReminder,
+  updateYoutubeMembership,
+  updateYoutubeSource,
+} from './youtubeRenewalService.js';
 
 function catalogKey(value) {
   return String(value || '')
@@ -80,6 +96,17 @@ export function registerAdminRoutes(app) {
     console.error('[ADMIN-SPOTIFY-FAMILY]', error);
     const message = String(error?.message || 'Không thể xử lý Spotify Family.');
     const isValidation = /thiếu|không hợp lệ|phải sau|đủ slot|không tìm thấy/i.test(message);
+    return res.status(isValidation ? 400 : 500).json({ ok: false, error: message });
+  }
+
+  function youtubeRecordBelongsToStore(record) {
+    return record && [String(config.guildId || ''), 'WEB'].includes(String(record.guildId));
+  }
+
+  function sendYoutubeRenewalError(res, error) {
+    console.error('[ADMIN-YOUTUBE-RENEWAL]', error);
+    const message = String(error?.message || 'Không thể xử lý hồ sơ gia hạn YouTube.');
+    const isValidation = /thiếu|không hợp lệ|không tìm thấy|không thuộc|đã thanh toán đủ|đã kết thúc|đang có hồ sơ|phải sau/i.test(message);
     return res.status(isValidation ? 400 : 500).json({ ok: false, error: message });
   }
 
@@ -1310,6 +1337,148 @@ const fetchWithTimeout = (promise, ms) => {
       });
     } catch (error) {
       return sendSpotifyFamilyError(res, error);
+    }
+  });
+
+  // ==== 12.2 YOUTUBE RENEWAL CONTROL CENTER ====
+  app.get('/api/bot/admin/youtube-renewals', requireAdminRole, (req, res) => {
+    try {
+      return res.json({
+        ok: true,
+        data: {
+          sources: listYoutubeSources({ guildId: config.guildId || null, includeSecrets: true }),
+          memberships: listYoutubeMemberships({
+            guildId: config.guildId || null,
+            sourceId: req.query.source_id || null,
+            status: req.query.status || null,
+            query: req.query.q || null,
+            includeSecrets: true,
+          }),
+          stats: getYoutubeRenewalStats(config.guildId || null),
+        },
+      });
+    } catch (error) {
+      return sendYoutubeRenewalError(res, error);
+    }
+  });
+
+  app.get('/api/bot/admin/youtube-renewals/sources', requireAdminRole, (req, res) => {
+    try {
+      return res.json({ ok: true, data: listYoutubeSources({ guildId: config.guildId || null, includeSecrets: true }) });
+    } catch (error) {
+      return sendYoutubeRenewalError(res, error);
+    }
+  });
+
+  app.post('/api/bot/admin/youtube-renewals/sources', requireAdminRole, (req, res) => {
+    try {
+      const source = createYoutubeSource({ ...req.body, guildId: config.guildId || 'WEB' });
+      return res.status(201).json({ ok: true, data: source });
+    } catch (error) {
+      return sendYoutubeRenewalError(res, error);
+    }
+  });
+
+  app.put('/api/bot/admin/youtube-renewals/sources/:id', requireAdminRole, (req, res) => {
+    try {
+      const existing = getYoutubeSource(req.params.id, { includeSecrets: false });
+      if (!youtubeRecordBelongsToStore(existing)) return res.status(404).json({ ok: false, error: 'Không tìm thấy nguồn YouTube.' });
+      return res.json({ ok: true, data: updateYoutubeSource(req.params.id, req.body || {}) });
+    } catch (error) {
+      return sendYoutubeRenewalError(res, error);
+    }
+  });
+
+  app.delete('/api/bot/admin/youtube-renewals/sources/:id', requireAdminRole, (req, res) => {
+    try {
+      const existing = getYoutubeSource(req.params.id, { includeSecrets: false });
+      if (!youtubeRecordBelongsToStore(existing)) return res.status(404).json({ ok: false, error: 'Không tìm thấy nguồn YouTube.' });
+      deleteYoutubeSource(req.params.id);
+      return res.json({ ok: true, message: `Đã xóa nguồn ${existing.name}.` });
+    } catch (error) {
+      return sendYoutubeRenewalError(res, error);
+    }
+  });
+
+  app.get('/api/bot/admin/youtube-renewals/:id', requireAdminRole, (req, res) => {
+    try {
+      const membership = getYoutubeMembership(req.params.id, { includeSecrets: true, includeHistory: true });
+      if (!youtubeRecordBelongsToStore(membership)) return res.status(404).json({ ok: false, error: 'Không tìm thấy hồ sơ YouTube.' });
+      return res.json({ ok: true, data: membership });
+    } catch (error) {
+      return sendYoutubeRenewalError(res, error);
+    }
+  });
+
+  app.post('/api/bot/admin/youtube-renewals', requireAdminRole, (req, res) => {
+    try {
+      const membership = createYoutubeMembership({
+        ...req.body,
+        guildId: config.guildId || 'WEB',
+        actorId: req.header('x-discord-id') || req.header('x-user-id') || 'WEB_ADMIN',
+      });
+      return res.status(201).json({ ok: true, data: membership });
+    } catch (error) {
+      return sendYoutubeRenewalError(res, error);
+    }
+  });
+
+  app.put('/api/bot/admin/youtube-renewals/:id', requireAdminRole, (req, res) => {
+    try {
+      const existing = getYoutubeMembership(req.params.id, { includeSecrets: false, includeHistory: false });
+      if (!youtubeRecordBelongsToStore(existing)) return res.status(404).json({ ok: false, error: 'Không tìm thấy hồ sơ YouTube.' });
+      const membership = updateYoutubeMembership(req.params.id, {
+        ...req.body,
+        actorId: req.header('x-discord-id') || req.header('x-user-id') || 'WEB_ADMIN',
+      });
+      return res.json({ ok: true, data: membership });
+    } catch (error) {
+      return sendYoutubeRenewalError(res, error);
+    }
+  });
+
+  app.delete('/api/bot/admin/youtube-renewals/:id', requireAdminRole, (req, res) => {
+    try {
+      const existing = getYoutubeMembership(req.params.id, { includeSecrets: false, includeHistory: false });
+      if (!youtubeRecordBelongsToStore(existing)) return res.status(404).json({ ok: false, error: 'Không tìm thấy hồ sơ YouTube.' });
+      deleteYoutubeMembership(req.params.id);
+      return res.json({ ok: true, message: `Đã xóa hồ sơ #${existing.id}.` });
+    } catch (error) {
+      return sendYoutubeRenewalError(res, error);
+    }
+  });
+
+  app.get('/api/bot/admin/youtube-renewals/:id/history', requireAdminRole, (req, res) => {
+    try {
+      const existing = getYoutubeMembership(req.params.id, { includeSecrets: false, includeHistory: false });
+      if (!youtubeRecordBelongsToStore(existing)) return res.status(404).json({ ok: false, error: 'Không tìm thấy hồ sơ YouTube.' });
+      return res.json({ ok: true, data: getYoutubeRenewalHistory(existing.id) });
+    } catch (error) {
+      return sendYoutubeRenewalError(res, error);
+    }
+  });
+
+  app.post('/api/bot/admin/youtube-renewals/:id/pay', requireAdminRole, (req, res) => {
+    try {
+      const existing = getYoutubeMembership(req.params.id, { includeSecrets: false, includeHistory: false });
+      if (!youtubeRecordBelongsToStore(existing)) return res.status(404).json({ ok: false, error: 'Không tìm thấy hồ sơ YouTube.' });
+      const membership = markYoutubeCyclePaid(req.params.id, {
+        ...(req.body || {}),
+        actorId: req.header('x-discord-id') || req.header('x-user-id') || 'WEB_ADMIN',
+      });
+      return res.json({ ok: true, data: membership });
+    } catch (error) {
+      return sendYoutubeRenewalError(res, error);
+    }
+  });
+
+  app.post('/api/bot/admin/youtube-renewals/:id/snooze', requireAdminRole, (req, res) => {
+    try {
+      const existing = getYoutubeMembership(req.params.id, { includeSecrets: false, includeHistory: false });
+      if (!youtubeRecordBelongsToStore(existing)) return res.status(404).json({ ok: false, error: 'Không tìm thấy hồ sơ YouTube.' });
+      return res.json({ ok: true, data: snoozeYoutubeReminder(req.params.id, req.body?.hours || 24) });
+    } catch (error) {
+      return sendYoutubeRenewalError(res, error);
     }
   });
 

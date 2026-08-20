@@ -15,6 +15,7 @@ import { checkExpiredGiveaways } from './giveawayService.js';
 import { processPendingInviteRewards } from './inviteTrackerService.js';
 import { processAdminOrderAgingReminders } from './adminOrderCenterService.js';
 import { runSpotifyFamilyReminders } from './spotifyFamilyReminderService.js';
+import { runYoutubeRenewalReminders } from './youtubeRenewalReminderService.js';
 
 let schedulerHandle = null;
 let backupHandle = null;
@@ -85,6 +86,12 @@ export function startScheduler(client) {
       await runSpotifyFamilyReminders(client);
     } catch (error) {
       console.error('[SCHEDULER] Lỗi nhắc hạn Spotify Family:', error);
+    }
+
+    try {
+      await runYoutubeRenewalReminders(client);
+    } catch (error) {
+      console.error('[SCHEDULER] Lỗi nhắc thanh toán nguồn YouTube:', error);
     }
 
     // Tự động cập nhật vinh danh định kỳ mỗi 1 tiếng

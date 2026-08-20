@@ -183,6 +183,7 @@ import {
 } from "./subscriptionHandlers.js";
 import { handleAdminRenewalButton } from '../services/adminRenewalReminderService.js';
 import { handleSpotifyFamilyButton } from '../services/spotifyFamilyReminderService.js';
+import { handleYoutubeRenewalButton } from '../services/youtubeRenewalReminderService.js';
 import {
   handlePrefixQr,
   handlePrefixDone,
@@ -348,6 +349,11 @@ export function registerInteractionHandler(client, commands) {
 
       if (interaction.customId && interaction.customId.startsWith('spotifyfam:')) {
         const handled = await handleSpotifyFamilyButton(interaction);
+        if (handled) return;
+      }
+
+      if (interaction.customId && interaction.customId.startsWith('ytrenew:')) {
+        const handled = await handleYoutubeRenewalButton(interaction);
         if (handled) return;
       }
 
