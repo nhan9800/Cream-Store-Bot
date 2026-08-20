@@ -11,6 +11,19 @@ import { orderLookupLimiter } from './rateLimitMiddleware.js';
 import { anonymizeCustomerEmail } from '../utils/productFormatting.js';
 import { config } from '../config.js';
 import { getSubscriptionProgress } from './subscriptionService.js';
+import {
+  createSpotifyFamily,
+  createSpotifyFamilyMember,
+  deleteSpotifyFamily,
+  deleteSpotifyFamilyMember,
+  getSpotifyFamily,
+  getSpotifyFamilyStats,
+  listSpotifyFamilies,
+  markSpotifyFamilyRenewed,
+  snoozeSpotifyFamilyReminder,
+  updateSpotifyFamily,
+  updateSpotifyFamilyMember,
+} from './spotifyFamilyService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -753,6 +766,144 @@ export function registerDashboardRoutes(app) {
       res.status(500).json({ ok: false, error: 'Lỗi máy chủ nội bộ.' });
     }
   });
+
+  // ═══════ Spotify Family Control Center API ═══════
+
+  function spotifyFamilyBelongsToDashboard(family) {
+    return family && [String(config.guildId || ''), 'WEB'].includes(String(family.guildId));
+  }
+
+  function sendSpotifyFamilyError(res, error) {
+    console.error('[SPOTIFY-FAMILY-DASHBOARD]', error);
+    const message = String(error?.message || 'Không thể xử lý Spotify Family.');
+    const isValidation = /thiếu|không hợp lệ|phải sau|đủ slot|không tìm thấy/i.test(message);
+    return res.status(isValidation ? 400 : 500).json({ ok: false, error: message });
+  }
+
+  app.get('/dashboard/api/spotify-families', (req, res) => {
+    try {
+      const base = listSpotifyFamilies({
+        guildId: config.guildId || null,
+        status: req.query.status || null,
+        query: req.query.q || null,
+        includeSecrets: true,
+      });
+      const families = base.map((family) => getSpotifyFamily(family.id, { includeSecrets: true }));
+      res.json({ ok: true, families, stats: getSpotifyFamilyStats(config.guildId || null) });
+    } catch (error) {
+      sendSpotifyFamilyError(res, error);
+    }
+  });
+
+  app.get('/dashboard/api/spotify-families/:id', (req, res) => {
+    try {
+      const family = getSpotifyFamily(req.params.id, { includeSecrets: true });
+      if (!spotifyFamilyBelongsToDashboard(family)) return res.status(404).json({ ok: false, error: 'Không tìm thấy Spotify Family.' });
+      res.json({ ok: true, family });
+    } catch (error) {
+      sendSpotifyFamilyError(res, error);
+    }
+  });
+
+  app.post('/dashboard/api/spotify-families', (req, res) => {
+    try {
+      const family = createSpotifyFamily({ ...req.body, guildId: config.guildId || 'WEB' });
+      broadcastDashboardEvent('spotify_family_update', `Đã tạo ${family.name}`);
+      res.status(201).json({ ok: true, family });
+    } catch (error) {
+      sendSpotifyFamilyError(res, error);
+    }
+  });
+
+  app.put('/dashboard/api/spotify-families/:id', (req, res) => {
+    try {
+      const existing = getSpotifyFamily(req.params.id, { includeSecrets: false });
+      if (!spotifyFamilyBelongsToDashboard(existing)) return res.status(404).json({ ok: false, error: 'Không tìm thấy Spotify Family.' });
+      const family = updateSpotifyFamily(req.params.id, req.body);
+      broadcastDashboardEvent('spotify_family_update', `Đã cập nhật ${family.name}`);
+      res.json({ ok: true, family });
+    } catch (error) {
+      sendSpotifyFamilyError(res, error);
+    }
+  });
+
+  app.delete('/dashboard/api/spotify-families/:id', (req, res) => {
+    try {
+      const existing = getSpotifyFamily(req.params.id, { includeSecrets: false });
+      if (!spotifyFamilyBelongsToDashboard(existing)) return res.status(404).json({ ok: false, error: 'Không tìm thấy Spotify Family.' });
+      deleteSpotifyFamily(req.params.id);
+      broadcastDashboardEvent('spotify_family_update', `Đã xóa ${existing.name}`);
+      res.json({ ok: true });
+    } catch (error) {
+      sendSpotifyFamilyError(res, error);
+    }
+  });
+
+  app.post('/dashboard/api/spotify-families/:id/renew', (req, res) => {
+    try {
+      const existing = getSpotifyFamily(req.params.id, { includeSecrets: false });
+      if (!spotifyFamilyBelongsToDashboard(existing)) return res.status(404).json({ ok: false, error: 'Không tìm thấy Spotify Family.' });
+      const family = markSpotifyFamilyRenewed(req.params.id);
+      broadcastDashboardEvent('spotify_family_update', `${family.name} đã được gia hạn 1 tháng`);
+      res.json({ ok: true, family });
+    } catch (error) {
+      sendSpotifyFamilyError(res, error);
+    }
+  });
+
+  app.post('/dashboard/api/spotify-families/:id/snooze', (req, res) => {
+    try {
+      const existing = getSpotifyFamily(req.params.id, { includeSecrets: false });
+      if (!spotifyFamilyBelongsToDashboard(existing)) return res.status(404).json({ ok: false, error: 'Không tìm thấy Spotify Family.' });
+      const family = snoozeSpotifyFamilyReminder(req.params.id, req.body?.hours || 24);
+      broadcastDashboardEvent('spotify_family_update', `${family.name} đã hoãn nhắc hạn`);
+      res.json({ ok: true, family });
+    } catch (error) {
+      sendSpotifyFamilyError(res, error);
+    }
+  });
+
+  app.post('/dashboard/api/spotify-families/:id/members', (req, res) => {
+    try {
+      const existing = getSpotifyFamily(req.params.id, { includeSecrets: false });
+      if (!spotifyFamilyBelongsToDashboard(existing)) return res.status(404).json({ ok: false, error: 'Không tìm thấy Spotify Family.' });
+      const member = createSpotifyFamilyMember(req.params.id, req.body || {});
+      const family = getSpotifyFamily(req.params.id, { includeSecrets: true });
+      broadcastDashboardEvent('spotify_family_update', `Đã thêm ${member.spotifyUsername} vào ${family.name}`);
+      res.status(201).json({ ok: true, member, family });
+    } catch (error) {
+      sendSpotifyFamilyError(res, error);
+    }
+  });
+
+  app.put('/dashboard/api/spotify-families/:id/members/:memberId', (req, res) => {
+    try {
+      const existing = getSpotifyFamily(req.params.id, { includeSecrets: false });
+      if (!spotifyFamilyBelongsToDashboard(existing)) return res.status(404).json({ ok: false, error: 'Không tìm thấy Spotify Family.' });
+      const member = updateSpotifyFamilyMember(req.params.id, req.params.memberId, req.body || {});
+      if (!member) return res.status(404).json({ ok: false, error: 'Không tìm thấy thành viên.' });
+      const family = getSpotifyFamily(req.params.id, { includeSecrets: true });
+      broadcastDashboardEvent('spotify_family_update', `Đã cập nhật ${member.spotifyUsername}`);
+      res.json({ ok: true, member, family });
+    } catch (error) {
+      sendSpotifyFamilyError(res, error);
+    }
+  });
+
+  app.delete('/dashboard/api/spotify-families/:id/members/:memberId', (req, res) => {
+    try {
+      const existing = getSpotifyFamily(req.params.id, { includeSecrets: false });
+      if (!spotifyFamilyBelongsToDashboard(existing)) return res.status(404).json({ ok: false, error: 'Không tìm thấy Spotify Family.' });
+      const deleted = deleteSpotifyFamilyMember(req.params.id, req.params.memberId);
+      if (!deleted) return res.status(404).json({ ok: false, error: 'Không tìm thấy thành viên.' });
+      const family = getSpotifyFamily(req.params.id, { includeSecrets: true });
+      broadcastDashboardEvent('spotify_family_update', `Đã xóa một thành viên khỏi ${family.name}`);
+      res.json({ ok: true, family });
+    } catch (error) {
+      sendSpotifyFamilyError(res, error);
+    }
+  });
+
   // ═══════ Revenue Chart API ═══════
 
   app.get('/dashboard/api/revenue-chart', (req, res) => {
