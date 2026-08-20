@@ -249,7 +249,7 @@ function safeQuery(fn) {
 export const PUBLIC_PRODUCT_COLUMNS = `
     pc.id, pc.guild_id, pc.name, pc.description, pc.price, pc.duration_months,
     pc.service_type, pc.emoji, pc.is_active, pc.sort_order, pc.original_price,
-    pc.product_key, pc.is_featured, pc.image_url,
+    pc.product_key, pc.is_featured, pc.image_url, pc.warranty_policy,
     (
       SELECT COUNT(*)
       FROM account_stock stock

@@ -10,7 +10,7 @@ describe('public product purchase metrics', () => {
         id INTEGER, guild_id TEXT, name TEXT, description TEXT, price INTEGER,
         duration_months INTEGER, service_type TEXT, emoji TEXT, is_active INTEGER,
         sort_order INTEGER, original_price INTEGER, product_key TEXT,
-        is_featured INTEGER, image_url TEXT
+        is_featured INTEGER, image_url TEXT, warranty_policy TEXT
       );
       CREATE TABLE account_stock (status TEXT, service_type TEXT);
       CREATE TABLE orders (
@@ -22,7 +22,7 @@ describe('public product purchase metrics', () => {
       );
       INSERT INTO product_catalog VALUES (
         1, 'WEB', 'Claude API 100M', '', 85000, 1, 'AI', 'brand_claude',
-        1, 1, 120000, 'claude-api-100m', 1, NULL
+        1, 1, 120000, 'claude-api-100m', 1, NULL, 'Bảo hành 4 tháng đầu'
       );
       INSERT INTO orders VALUES
         (2, 'COMPLETED', 'PAID', 'Claude API 100M', '2026-08-05 10:00:00'),
@@ -36,6 +36,7 @@ describe('public product purchase metrics', () => {
     expect(product.purchase_count).toBe(3);
     expect(product.completed_purchase_count).toBe(2);
     expect(product.last_paid_at).toBe('2026-08-05 11:00:00');
+    expect(product.warranty_policy).toBe('Bảo hành 4 tháng đầu');
     expect(product).not.toHaveProperty('virtual_purchase_count');
     database.close();
   });
