@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { Client, GatewayIntentBits } from 'discord.js';
+import { Client, Events, GatewayIntentBits } from 'discord.js';
 import { initDatabase } from '../src/database/db.js';
 import { getActiveProducts } from '../src/services/productCatalogService.js';
 import {
@@ -20,8 +20,11 @@ initDatabase();
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 try {
+  const ready = new Promise((resolve) => client.once(Events.ClientReady, resolve));
   await client.login(process.env.BOT_TOKEN);
-  const guild = await client.guilds.fetch(AI_CREATIVE_PRICING_UPDATE.guildId);
+  await ready;
+  const guild = client.guilds.cache.get(AI_CREATIVE_PRICING_UPDATE.guildId)
+    || await client.guilds.fetch(AI_CREATIVE_PRICING_UPDATE.guildId);
   await guild.channels.fetch();
   await guild.emojis.fetch().catch(() => null);
   global.discordClient = client;

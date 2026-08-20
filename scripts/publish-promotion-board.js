@@ -1,5 +1,5 @@
 import 'dotenv/config';
-import { Client, GatewayIntentBits } from 'discord.js';
+import { Client, Events, GatewayIntentBits } from 'discord.js';
 import {
   PROMOTION_BOARD,
   buildPromotionBoardPayload,
@@ -31,8 +31,11 @@ async function fetchAllMessages(channel, limit = 500) {
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 try {
+  const ready = new Promise((resolve) => client.once(Events.ClientReady, resolve));
   await client.login(process.env.BOT_TOKEN);
-  const guild = await client.guilds.fetch(PROMOTION_BOARD.guildId);
+  await ready;
+  const guild = client.guilds.cache.get(PROMOTION_BOARD.guildId)
+    || await client.guilds.fetch(PROMOTION_BOARD.guildId);
   await guild.emojis.fetch().catch(() => null);
   global.discordClient = client;
 
