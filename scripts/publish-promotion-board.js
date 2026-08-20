@@ -57,8 +57,11 @@ try {
     console.warn(`[PROMOTION] Không thể ghim tin ${message.id}: ${error.message}`);
   });
 
+  // Fetch lại sau khi ghim vì Discord tự tạo thêm một system message "đã ghim".
+  // Chỉ giữ đúng bảng khuyến mãi mới; tin thành viên (nếu có) luôn được bảo toàn.
+  const cleanupMessages = await fetchAllMessages(channel);
   let deleted = 0;
-  for (const oldMessage of oldMessages) {
+  for (const oldMessage of cleanupMessages) {
     if (oldMessage.author.id !== client.user.id || oldMessage.id === message.id) continue;
     if (await oldMessage.delete().then(() => true).catch(() => false)) deleted += 1;
   }
@@ -71,7 +74,7 @@ try {
     messageId: message.id,
     messageUrl: `https://discord.com/channels/${guild.id}/${channel.id}/${message.id}`,
     deletedOldBotMessages: deleted,
-    preservedNonBotMessages: oldMessages.filter((item) => item.author.id !== client.user.id).length,
+    preservedNonBotMessages: cleanupMessages.filter((item) => item.author.id !== client.user.id).length,
     priceBoard,
   }, null, 2));
 } finally {
