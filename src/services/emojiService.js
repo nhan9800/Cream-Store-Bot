@@ -71,6 +71,14 @@ export const EMOJI_SLOTS = {
   recovery_backup:    { label: 'Backup mã hóa (GIF)', default: '' },
   recovery_restore:   { label: 'Khôi phục server', default: '' },
 
+  // Bảng khuyến mãi
+  promo_discount:     { label: 'Khuyến mãi Cenar', default: '' },
+  promo_nitro:        { label: 'Nitro khuyến mãi', default: '' },
+  promo_boost:        { label: 'Boost Server khuyến mãi', default: '' },
+  promo_netflix:      { label: 'Netflix khuyến mãi', default: '' },
+  promo_decor:        { label: 'Decor / Frames khuyến mãi', default: '' },
+  promo_legend:       { label: 'Quà Tặng Huyền Thoại', default: '' },
+
   // Status
   status_check:       { label: 'Tích xanh',            default: '✅' },
   status_cross:       { label: 'Dấu X',                default: '❌' },
@@ -221,6 +229,12 @@ export const SLOT_ALIASES = {
   verify_shield: ['cenar_verify_shield', 'verify_shield'],
   recovery_backup: ['cenar_recovery_backup', 'recovery_backup'],
   recovery_restore: ['cenar_recovery_restore', 'recovery_restore'],
+  promo_discount: ['cenar_promo_discount', 'promo_discount'],
+  promo_nitro: ['cenar_promo_nitro', 'promo_nitro'],
+  promo_boost: ['cenar_promo_boost', 'promo_boost'],
+  promo_netflix: ['cenar_promo_netflix', 'promo_netflix'],
+  promo_decor: ['cenar_promo_decor', 'promo_decor'],
+  promo_legend: ['cenar_promo_legend', 'promo_legend'],
 
   // Status
   status_check: ['check', 'tick', 'success', 'tich_xanh'],

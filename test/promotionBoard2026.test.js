@@ -31,6 +31,13 @@ describe('Cenar promotion board 2026', () => {
     expect(json).toContain('~~66.000đ~~ → **24.000đ**');
     expect(json).toContain('~~79.000đ~~ → **34.000đ**');
     expect(json).toContain('HUY HIỆU QUÀ TẶNG HUYỀN THOẠI DISCORD');
+    expect(json).toContain('cenar_promo_discount');
+    expect(json).toContain('cenar_promo_nitro');
+    expect(json).toContain('cenar_promo_boost');
+    expect(json).toContain('cenar_promo_netflix');
+    expect(json).toContain('cenar_promo_decor');
+    expect(json).toContain('cenar_promo_legend');
+    expect(payload.components).toHaveLength(5);
     expect(payload.allowedMentions.parse).toContain('everyone');
     expect(payload.allowedMentions.roles).toEqual(PROMOTION_BOARD.audienceRoleIds);
   });

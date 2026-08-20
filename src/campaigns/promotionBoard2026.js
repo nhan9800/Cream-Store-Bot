@@ -59,30 +59,36 @@ export function buildPromotionBoardPayload() {
   const E = createEmojiResolver(campaign.guildId);
   const mentions = ['@everyone', ...campaign.audienceRoleIds.map((id) => `<@&${id}>`)].join(' ');
 
-  const container = new ContainerBuilder()
-    .setAccentColor(0xEC4899)
+  const header = new ContainerBuilder()
+    .setAccentColor(0xF72585)
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(normalizeV2Text([
       mentions,
-      `# ${E('icon_fire')} CENAR DEAL ZONE · BẢNG KHUYẾN MÃI`,
-      `> ${E('icon_sparkle')} Danh sách ưu đãi đang áp dụng dành riêng cho cộng đồng Cenar. Chọn đúng gói và mở ticket để staff xác nhận trước khi thanh toán.`,
-    ].join('\n'))))
-    .addSeparatorComponents(divider())
+      `# ${E('promo_discount')} CENAR HOT DEALS`,
+      `### BẢNG GIÁ KHUYẾN MÃI ĐANG ÁP DỤNG`,
+      `> ${E('icon_sparkle')} **Giá tốt · Xử lý nhanh · Staff xác nhận rõ ràng**`,
+      `> Chọn gói phù hợp bên dưới, sau đó mở ticket để kiểm tra điều kiện và nguồn hàng trước khi thanh toán.`,
+    ].join('\n'))));
+
+  const discordDeals = new ContainerBuilder()
+    .setAccentColor(0x7C3AED)
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(normalizeV2Text([
-      `## ${E('brand_nitro')} NITRO BOOST LOGIN`,
+      `## ${E('promo_nitro')} NITRO BOOST LOGIN`,
       ...priceLines(campaign.prices.nitroLogin, E('cenar_price')),
       '',
-      `> ${E('status_info')} Gói **Trial 4 Tháng** áp dụng theo điều kiện tài khoản; staff sẽ kiểm tra trước khi nhận đơn.`,
+      `> ${E('status_info')} **Trial 4 Tháng** áp dụng theo điều kiện tài khoản; staff sẽ kiểm tra trước khi nhận đơn.`,
     ].join('\n'))))
     .addSeparatorComponents(divider())
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(normalizeV2Text([
-      `## ${E('brand_boost')} BOOST SERVER`,
+      `## ${E('promo_boost')} BOOST SERVER`,
       ...priceLines(campaign.prices.serverBoost, E('cenar_price')),
       '',
-      `> ${E('status_check')} Vui lòng gửi link hoặc ID server trong ticket để staff kiểm tra và xác nhận gói phù hợp.`,
-    ].join('\n'))))
-    .addSeparatorComponents(divider())
+      `> ${E('status_check')} Gửi **link hoặc ID server** trong ticket để staff kiểm tra và xác nhận gói phù hợp.`,
+    ].join('\n'))));
+
+  const entertainmentDeals = new ContainerBuilder()
+    .setAccentColor(0xE50914)
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(normalizeV2Text([
-      `## ${E('brand_netflix')} NETFLIX PREMIUM`,
+      `## ${E('promo_netflix')} NETFLIX PREMIUM`,
       `${E('cenar_price')} **${campaign.prices.netflix.duration}:** \`${money(campaign.prices.netflix.price)}\``,
       `${E('status_check')} **Chất lượng:** Full HD / 4K`,
       `${E('warranty_shield')} **Bảo hành:** 20 ngày`,
@@ -90,18 +96,20 @@ export function buildPromotionBoardPayload() {
     ].join('\n'))))
     .addSeparatorComponents(divider())
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(normalizeV2Text([
-      `## ${E('icon_sparkle')} DECOR / NPL / FRAMES LOGIN`,
-      `> ${E('status_loading')} **Xử lý siêu tốc · Done nhanh sau khi xác nhận**`,
+      `## ${E('promo_decor')} DECOR / NPL / FRAMES LOGIN`,
+      `> ${E('status_loading')} **Done siêu tốc sau khi xác nhận**`,
       ...campaign.prices.decor.map((item) => (
         `${E('icon_price')} ~~${money(item.originalPrice)}~~ → **${money(item.salePrice)}**`
       )),
-    ].join('\n'))))
-    .addSeparatorComponents(divider())
+    ].join('\n'))));
+
+  const legendDeal = new ContainerBuilder()
+    .setAccentColor(0xF59E0B)
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(normalizeV2Text([
-      `## ${E('icon_gift')} HUY HIỆU QUÀ TẶNG HUYỀN THOẠI DISCORD`,
-      `> ${E('icon_gem')} Cenar có nhận hỗ trợ lấy **Huy hiệu Quà Tặng Huyền Thoại** với mức giá ưu đãi. Khách có nhu cầu vui lòng mở ticket để được kiểm tra điều kiện và báo giá.`,
+      `## ${E('promo_legend')} HUY HIỆU QUÀ TẶNG HUYỀN THOẠI DISCORD`,
+      `> ${E('icon_gem')} Cenar nhận hỗ trợ lấy **Huy hiệu Quà Tặng Huyền Thoại Discord** với mức giá ưu đãi. Mở ticket để được kiểm tra điều kiện và báo giá riêng.`,
       '',
-      `${E('status_warn')} **Lưu ý chung:** Giá khuyến mãi được áp dụng sau khi staff xác nhận trong ticket và có thể kết thúc khi nguồn hàng thay đổi.`,
+      `${E('status_warn')} **Lưu ý:** Ưu đãi chỉ được chốt sau khi staff xác nhận và có thể kết thúc khi nguồn hàng thay đổi.`,
       `${E('icon_search')} Bảng giá sản phẩm tiêu chuẩn: <#${campaign.priceChannelId}>`,
       `-# ${campaign.marker}`,
     ].join('\n'))));
@@ -123,7 +131,13 @@ export function buildPromotionBoardPayload() {
   );
 
   return {
-    components: [container, new ActionRowBuilder().addComponents(orderButton, priceButton)],
+    components: [
+      header,
+      discordDeals,
+      entertainmentDeals,
+      legendDeal,
+      new ActionRowBuilder().addComponents(orderButton, priceButton),
+    ],
     flags: campaign.flags,
     allowedMentions: {
       parse: ['everyone'],

@@ -30,6 +30,14 @@ const fallbackEmojis = {
   recovery_restore: '<:cenar_recovery_restore:1535887322304880671>',
   brand_locket: '<:cenar_tsm_locket:1282651426459226155>',
 
+  // Promotion board · Emoji.gg Basic License (2026-08-20)
+  promo_discount: '<:cenar_promo_discount:1539948477562490912>',
+  promo_nitro: '<a:cenar_promo_nitro:1539948481714593853>',
+  promo_boost: '<a:cenar_promo_boost:1539948484885479455>',
+  promo_netflix: '<a:cenar_promo_netflix:1539948487846662194>',
+  promo_decor: '<a:cenar_promo_decor:1539948490203992085>',
+  promo_legend: '<:cenar_promo_legend:1539948492905250846>',
+
   // Panel Ticket buttons
   panel_order:        '<:cr_muahang:1348622828152426528>',
   panel_support:      '<:cenar_staff:1535618674885402684>',
