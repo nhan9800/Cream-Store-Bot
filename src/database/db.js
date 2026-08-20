@@ -551,11 +551,6 @@ export function initDatabase() {
       FOREIGN KEY (family_id) REFERENCES spotify_families(id) ON DELETE CASCADE
     );
 
-    CREATE INDEX IF NOT EXISTS idx_spotify_families_due
-      ON spotify_families (guild_id, status, next_renewal_at, snoozed_until);
-    CREATE INDEX IF NOT EXISTS idx_spotify_family_members_family
-      ON spotify_family_members (family_id, status, joined_at);
-
     CREATE TABLE IF NOT EXISTS web_users (
       id TEXT PRIMARY KEY,
       email TEXT UNIQUE NOT NULL,
@@ -643,6 +638,71 @@ export function initDatabase() {
       sold_at TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_account_stock_service ON account_stock (service_type, status);
+  `);
+
+  // Một số database Store 1 cũ đã có bảng Spotify Family thử nghiệm với ít
+  // cột hơn. CREATE TABLE IF NOT EXISTS không nâng cấp bảng đó, vì vậy phải
+  // bổ sung cột trước khi tạo index. Nếu làm ngược thứ tự, SQLite dừng toàn bộ
+  // quá trình boot với lỗi "no such column" trong khi database mới vẫn chạy.
+  ensureColumn('spotify_families', 'guild_id', "TEXT NOT NULL DEFAULT ''");
+  ensureColumn('spotify_families', 'name', "TEXT NOT NULL DEFAULT ''");
+  ensureColumn('spotify_families', 'login_email', "TEXT NOT NULL DEFAULT ''");
+  ensureColumn('spotify_families', 'login_password', "TEXT NOT NULL DEFAULT ''");
+  ensureColumn('spotify_families', 'payment_card_label', 'TEXT');
+  ensureColumn('spotify_families', 'payment_card_number', 'TEXT');
+  ensureColumn('spotify_families', 'renewal_cost', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn('spotify_families', 'total_slots', 'INTEGER NOT NULL DEFAULT 6');
+  ensureColumn('spotify_families', 'cycle_started_at', "TEXT NOT NULL DEFAULT ''");
+  ensureColumn('spotify_families', 'next_renewal_at', "TEXT NOT NULL DEFAULT ''");
+  ensureColumn('spotify_families', 'reminder_days_before', 'INTEGER NOT NULL DEFAULT 7');
+  ensureColumn('spotify_families', 'reminder_stage', 'TEXT');
+  ensureColumn('spotify_families', 'reminder_sent_at', 'TEXT');
+  ensureColumn('spotify_families', 'reminder_for_renewal_at', 'TEXT');
+  ensureColumn('spotify_families', 'reminder_message_id', 'TEXT');
+  ensureColumn('spotify_families', 'reminder_channel_id', 'TEXT');
+  ensureColumn('spotify_families', 'snoozed_until', 'TEXT');
+  ensureColumn('spotify_families', 'times_renewed', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn('spotify_families', 'status', "TEXT NOT NULL DEFAULT 'ACTIVE'");
+  ensureColumn('spotify_families', 'note', 'TEXT');
+  ensureColumn('spotify_families', 'created_at', 'TEXT');
+  ensureColumn('spotify_families', 'updated_at', 'TEXT');
+
+  ensureColumn('spotify_family_members', 'family_id', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn('spotify_family_members', 'spotify_username', "TEXT NOT NULL DEFAULT ''");
+  ensureColumn('spotify_family_members', 'spotify_email', 'TEXT');
+  ensureColumn('spotify_family_members', 'customer_name', 'TEXT');
+  ensureColumn('spotify_family_members', 'discord_id', 'TEXT');
+  ensureColumn('spotify_family_members', 'related_order_code', 'TEXT');
+  ensureColumn('spotify_family_members', 'joined_at', "TEXT NOT NULL DEFAULT ''");
+  ensureColumn('spotify_family_members', 'purchased_months', 'INTEGER NOT NULL DEFAULT 1');
+  ensureColumn('spotify_family_members', 'member_expiry_at', 'TEXT');
+  ensureColumn('spotify_family_members', 'status', "TEXT NOT NULL DEFAULT 'ACTIVE'");
+  ensureColumn('spotify_family_members', 'note', 'TEXT');
+  ensureColumn('spotify_family_members', 'created_at', 'TEXT');
+  ensureColumn('spotify_family_members', 'updated_at', 'TEXT');
+
+  const spotifyMigrationNow = nowIso();
+  db.prepare(`
+    UPDATE spotify_families
+    SET guild_id = CASE WHEN guild_id IS NULL OR guild_id = '' THEN ? ELSE guild_id END,
+        name = CASE WHEN name IS NULL OR name = '' THEN 'Spotify Family #' || id ELSE name END,
+        cycle_started_at = CASE WHEN cycle_started_at IS NULL OR cycle_started_at = '' THEN ? ELSE cycle_started_at END,
+        next_renewal_at = CASE WHEN next_renewal_at IS NULL OR next_renewal_at = '' THEN datetime(?, '+1 month') ELSE next_renewal_at END,
+        created_at = COALESCE(created_at, ?),
+        updated_at = COALESCE(updated_at, ?)
+  `).run(String(config.guildId || 'WEB'), spotifyMigrationNow, spotifyMigrationNow, spotifyMigrationNow, spotifyMigrationNow);
+  db.prepare(`
+    UPDATE spotify_family_members
+    SET joined_at = CASE WHEN joined_at IS NULL OR joined_at = '' THEN ? ELSE joined_at END,
+        created_at = COALESCE(created_at, ?),
+        updated_at = COALESCE(updated_at, ?)
+  `).run(spotifyMigrationNow, spotifyMigrationNow, spotifyMigrationNow);
+
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_spotify_families_due
+      ON spotify_families (guild_id, status, next_renewal_at, snoozed_until);
+    CREATE INDEX IF NOT EXISTS idx_spotify_family_members_family
+      ON spotify_family_members (family_id, status, joined_at);
   `);
 
   ensureColumn('guild_settings', 'warranty_category_id', 'TEXT');
