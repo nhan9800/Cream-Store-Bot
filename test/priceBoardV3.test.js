@@ -8,6 +8,10 @@ import {
   groupPriceProducts,
 } from '../src/services/autoSetupPriceBoardService.js';
 import { buildPriceAnnouncementContent } from '../src/commands/thong-bao-bang-gia.js';
+import {
+  AI_CREATIVE_PRICING_UPDATE,
+  buildAiCreativePricingAnnouncement,
+} from '../src/campaigns/aiCreativePricingUpdate2026.js';
 
 const GUILD_ID = '1282637033340403754';
 const NATIVE_EMOJI = /[\u{1F000}-\u{1FAFF}\u2600-\u27BF]/u;
@@ -176,6 +180,44 @@ describe('Cenar price board V3', () => {
     expect(announcement).toContain('Full HD/4K');
     expect(announcement).toContain('20 ngày');
     expect(announcement).toContain('đổi sang tài khoản mới');
+  });
+
+  it('keeps only the new ChatGPT and Adobe packages across catalog, board and announcement', () => {
+    const products = getActiveProducts(GUILD_ID);
+    const chatgptProducts = products.filter((product) => /chat\s*gpt/i.test(product.name));
+    const adobeProducts = products.filter((product) => /adobe/i.test(product.name));
+
+    expect(chatgptProducts).toHaveLength(2);
+    expect(chatgptProducts.map((product) => product.product_key)).toEqual(expect.arrayContaining([
+      AI_CREATIVE_PRICING_UPDATE.productKeys.chatgptAccount,
+      AI_CREATIVE_PRICING_UPDATE.productKeys.chatgptBusiness,
+    ]));
+    expect(chatgptProducts.find((product) => (
+      product.product_key === AI_CREATIVE_PRICING_UPDATE.productKeys.chatgptAccount
+    ))?.price).toBe(250000);
+    expect(chatgptProducts.find((product) => (
+      product.product_key === AI_CREATIVE_PRICING_UPDATE.productKeys.chatgptBusiness
+    ))?.price).toBe(390000);
+    expect(adobeProducts).toHaveLength(1);
+    expect(adobeProducts[0].product_key).toBe(AI_CREATIVE_PRICING_UPDATE.productKeys.adobe);
+    expect(adobeProducts[0].price).toBe(150000);
+
+    const payloadJson = buildPriceBoardPayloads(GUILD_ID, {}, products).map(serialize).join('\n');
+    expect(payloadJson).toContain('ChatGPT Plus & Business');
+    expect(payloadJson).toContain('250.000');
+    expect(payloadJson).toContain('390.000');
+    expect(payloadJson).toContain('150.000');
+    expect(payloadJson).toContain('Full trong suốt thời gian sử dụng');
+    expect(payloadJson).not.toContain('Adobe Creative Cloud Trial');
+    expect(payloadJson).not.toContain('Adobe Creative Cloud All Apps (2 Tháng');
+
+    const announcement = buildAiCreativePricingAnnouncement(GUILD_ID, products);
+    expect(announcement).toContain('CHATGPT · 2 LỰA CHỌN');
+    expect(announcement).toContain('ChatGPT Business · Tài khoản chính chủ');
+    expect(announcement).toContain('250.000');
+    expect(announcement).toContain('390.000');
+    expect(announcement).toContain('150.000');
+    expect(announcement).toContain(AI_CREATIVE_PRICING_UPDATE.marker);
   });
 
   it('renders every product as its own consistently spaced Markdown block', () => {

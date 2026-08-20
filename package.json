@@ -13,6 +13,7 @@
     "check:env": "node scripts/check-env.js",
     "confirm:webhook": "node scripts/confirm-payos-webhook.js",
     "publish:birthday-sale": "node scripts/publish-birthday-sale.js",
+    "publish:ai-creative-pricing": "node scripts/publish-ai-creative-pricing-update.js",
     "publish:boost-level3-sale": "node scripts/publish-server-boost-level3-sale.js",
     "audit:emojis": "node scripts/audit-guild-emojis.js",
     "audit:emojis:apply": "node scripts/audit-guild-emojis.js --apply",

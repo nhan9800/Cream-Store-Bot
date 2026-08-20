@@ -1252,14 +1252,55 @@ export const DEFAULT_PRODUCT_CATALOG = [
     { name: 'Gemini Advanced & 5 TB Google One (1 Năm - Full BH)', description: 'Đăng ký sử dụng gói cước 1 năm, hỗ trợ bảo hành toàn diện từ shop.', price: 200000, duration_months: 12, service_type: 'AI', emoji: 'brand_gemini', original_price: 350000 },
     { name: 'Gemini Advanced & 5 TB Google One (1 Năm - Không BH)', description: 'Đăng ký sử dụng gói cước 1 năm, không đi kèm chính sách bảo hành.', price: 120000, duration_months: 12, service_type: 'AI', emoji: 'brand_gemini', original_price: 0 },
     { product_key: 'claude-pro-1-month', name: 'Claude Pro 1 Tháng (Full BH)', aliases: ['Claude Pro Add Team 1 Tháng (Full BH)'], description: 'Claude Pro trong 1 tháng, bảo hành trọn gói tại Cenar Store.', price: 460000, duration_months: 1, service_type: 'AI', emoji: 'brand_claude', original_price: 490000, is_featured: 1, virtual_purchase_count: 126 },
-    { name: 'ChatGPT Plus 1 Tháng (Cấp Tài Khoản)', description: 'Nhận tài khoản ChatGPT Plus đã kích hoạt sẵn trong 1 tháng.', price: 280000, duration_months: 1, service_type: 'AI', emoji: 'brand_chatgpt', original_price: 350000 },
-    { name: 'ChatGPT Plus 1 Tháng (Chính Chủ - Full BH)', description: 'Nâng cấp chính chủ tài khoản ChatGPT của bạn trong 1 tháng.', price: 390000, duration_months: 1, service_type: 'AI', emoji: 'brand_chatgpt', original_price: 490000 },
-    { name: 'Chat GPT Plus Cấp Acc FULL bảo Hành 1 tháng', description: 'Tài khoản ChatGPT Plus cấp sẵn FULL bảo hành 1 tháng.', price: 230000, duration_months: 1, service_type: 'AI', emoji: 'brand_chatgpt', original_price: 0 },
+    {
+      product_key: 'chatgpt-plus-account-1-month-full-warranty',
+      name: 'ChatGPT Plus 1 Tháng (Cấp Tài Khoản · Full BH)',
+      aliases: [
+        'ChatGPT Plus 1 Tháng (Cấp Tài Khoản)',
+        'Chat GPT Plus Cấp Acc FULL bảo Hành 1 tháng',
+      ],
+      description: 'Cấp tài khoản ChatGPT Plus đã kích hoạt sẵn trong 1 tháng, bảo hành full trong suốt thời gian sử dụng.',
+      price: 250000,
+      duration_months: 1,
+      service_type: 'AI',
+      emoji: 'brand_chatgpt',
+      original_price: 0,
+      is_featured: 1,
+      virtual_purchase_count: 0,
+    },
+    {
+      product_key: 'chatgpt-business-workspace-1-month-full-warranty',
+      name: 'ChatGPT Business 1 Tháng (Thêm Vào Workspace · Chính Chủ · Full BH)',
+      aliases: [
+        'ChatGPT Plus 1 Tháng (Chính Chủ - Full BH)',
+        'ChatGPT Add Team Business 1 Tháng (Chính Chủ)',
+      ],
+      description: 'Thêm tài khoản chính chủ của khách vào workspace ChatGPT Business trong 1 tháng, bảo hành full trong suốt thời gian sử dụng.',
+      price: 390000,
+      duration_months: 1,
+      service_type: 'AI',
+      emoji: 'brand_chatgpt',
+      original_price: 0,
+      is_featured: 1,
+      virtual_purchase_count: 0,
+    },
     { name: 'Gemini Pro + 5TB Google Driver (12 Tháng)', description: 'Gói Gemini Pro đi kèm dung lượng 5TB Google Drive trong 12 tháng.', price: 250000, duration_months: 12, service_type: 'AI', emoji: 'brand_gemini', original_price: 0 },
-    { product_key: 'adobe-creative-cloud-1-month', name: 'Adobe Creative Cloud 1 Tháng', aliases: ['Adobe Creative Cloud All Apps (1 Tháng - 2 Thiết Bị)'], description: 'Adobe Creative Cloud All Apps trong 1 tháng, phù hợp cho thiết kế, dựng phim và sáng tạo nội dung.', price: 120000, duration_months: 1, service_type: 'AI', emoji: 'brand_adobe', original_price: 150000, is_featured: 1, virtual_purchase_count: 214 },
-    { product_key: 'adobe-creative-cloud-trial-3-months', name: 'Adobe Creative Cloud Trial 3 Tháng', description: 'Gói Adobe Creative Cloud Trial 3 tháng, đầy đủ bộ công cụ sáng tạo phổ biến.', price: 250000, duration_months: 3, service_type: 'AI', emoji: 'brand_adobe', original_price: 320000, is_featured: 1, virtual_purchase_count: 87 },
-    { product_key: 'adobe-creative-cloud-trial-4-months', name: 'Adobe Creative Cloud Trial 4 Tháng', description: 'Gói Adobe Creative Cloud Trial 4 tháng, tối ưu chi phí cho nhu cầu sử dụng dài hơn.', price: 350000, duration_months: 4, service_type: 'AI', emoji: 'brand_adobe', original_price: 450000, is_featured: 1, virtual_purchase_count: 63 },
-    { name: 'Adobe Creative Cloud All Apps (2 Tháng - 2 Thiết Bị)', description: 'Kích hoạt bộ công cụ Adobe All Apps dùng cho 2 thiết bị trong 2 tháng.', price: 180000, duration_months: 2, service_type: 'AI', emoji: 'brand_adobe', original_price: 240000 },
+    {
+      product_key: 'adobe-creative-cloud-1-month',
+      name: 'Adobe Creative Cloud All Apps 1 Tháng (Full BH)',
+      aliases: [
+        'Adobe Creative Cloud 1 Tháng',
+        'Adobe Creative Cloud All Apps (1 Tháng - 2 Thiết Bị)',
+      ],
+      description: 'Adobe Creative Cloud All Apps trong 1 tháng, bảo hành full trong suốt thời gian sử dụng.',
+      price: 150000,
+      duration_months: 1,
+      service_type: 'AI',
+      emoji: 'brand_adobe',
+      original_price: 0,
+      is_featured: 1,
+      virtual_purchase_count: 214,
+    },
     { product_key: 'office-365-onedrive-12-months', name: 'Office 365 & 1 TB OneDrive (12 Tháng)', aliases: ['Office 365 + 1 TB One Driver (12 Tháng)'], description: 'Tài khoản bản quyền Office 365 + 1 TB lưu trữ OneDrive trong 1 năm.', price: 200000, duration_months: 12, service_type: 'AI', emoji: 'brand_office', original_price: 300000 },
     { name: 'CapCut Pro 1 Tháng (2 Thiết Bị - Cấp Acc)', description: 'Sử dụng CapCut Pro trong 1 tháng, cấp tài khoản riêng dùng tối đa 2 thiết bị.', price: 100000, duration_months: 1, service_type: 'AI', emoji: 'brand_capcut', original_price: 0 },
     { name: 'CapCut Pro 7 Ngày (2 Thiết Bị - Cấp Acc)', description: 'Sử dụng CapCut Pro trong 7 ngày, cấp tài khoản riêng dùng tối đa 2 thiết bị.', price: 20000, duration_months: 1, service_type: 'AI', emoji: 'brand_capcut', original_price: 0 },
@@ -1327,6 +1368,25 @@ export function seedProductCatalog(dbInstance) {
   const findByKeyStmt = dbInstance.prepare(`SELECT id FROM product_catalog WHERE guild_id = 'WEB' AND product_key = ? ORDER BY id LIMIT 1`);
   const findByNameStmt = dbInstance.prepare(`SELECT id FROM product_catalog WHERE guild_id = 'WEB' AND LOWER(TRIM(name)) = LOWER(TRIM(?)) AND duration_months = ? ORDER BY id LIMIT 1`);
   const deactivateDuplicatesStmt = dbInstance.prepare(`UPDATE product_catalog SET is_active = 0, updated_at = CURRENT_TIMESTAMP WHERE guild_id = 'WEB' AND id != ? AND (product_key = ? OR (LOWER(TRIM(name)) IN (SELECT LOWER(TRIM(value)) FROM json_each(?)) AND duration_months = ?))`);
+  const retireReplacedAiCatalogStmt = dbInstance.prepare(`
+    UPDATE product_catalog
+    SET is_active = 0, updated_at = CURRENT_TIMESTAMP
+    WHERE guild_id = 'WEB'
+      AND is_active = 1
+      AND (
+        (
+          LOWER(REPLACE(name, ' ', '')) LIKE '%chatgpt%'
+          AND COALESCE(product_key, '') NOT IN (
+            'chatgpt-plus-account-1-month-full-warranty',
+            'chatgpt-business-workspace-1-month-full-warranty'
+          )
+        )
+        OR (
+          LOWER(name) LIKE '%adobe%'
+          AND COALESCE(product_key, '') != 'adobe-creative-cloud-1-month'
+        )
+      )
+  `);
 
   let currentSort = 100;
   
@@ -1351,6 +1411,11 @@ export function seedProductCatalog(dbInstance) {
         );
       }
     }
+
+    // Danh mục mới chỉ mở bán đúng 2 gói ChatGPT và 1 gói Adobe.
+    // Các hàng lịch sử vẫn được giữ trong database để bảo toàn đơn cũ, nhưng
+    // không còn xuất hiện trên bot, website hoặc bảng giá Discord.
+    retireReplacedAiCatalogStmt.run();
 
     dbInstance.prepare(`
       UPDATE product_catalog

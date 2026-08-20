@@ -21,7 +21,7 @@ import { formatInternationalPrice, translateCatalogGroup, translateProductName }
 import { getNitroTrialEligibility, isNitroTrialProduct } from '../constants/nitroTrial.js';
 import { getNetflixPromoDetails, isNetflixPromoProduct } from '../constants/netflixPromotion.js';
 
-export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.5';
+export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.6';
 const PRIMARY_GUILD_ID = '1282637033340403754';
 const PRIMARY_PRICE_CHANNEL_ID = '1514606995842273280';
 
@@ -52,8 +52,8 @@ export const PRICE_GROUPS = [
     match: (p) => p.service_type === 'decor' && /gift/i.test(p.name),
   },
   {
-    key: 'chatgpt', titleSlot: 'brand_chatgpt', title: 'ChatGPT Plus', accent: 0x10A37F,
-    note: 'Tách rõ tài khoản cấp sẵn và gói chính chủ có bảo hành.',
+    key: 'chatgpt', titleSlot: 'brand_chatgpt', title: 'ChatGPT Plus & Business', accent: 0x10A37F,
+    note: 'Chỉ mở bán 2 lựa chọn: cấp tài khoản Plus hoặc thêm tài khoản chính chủ vào workspace Business.',
     match: (p) => p.service_type === 'AI' && /chat\s*gpt/i.test(p.name),
   },
   {
@@ -68,7 +68,7 @@ export const PRICE_GROUPS = [
   },
   {
     key: 'adobe', titleSlot: 'brand_adobe', title: 'Adobe Creative Cloud', accent: 0xFF0000,
-    note: 'Creative Cloud All Apps, trial và số thiết bị ghi riêng từng gói.',
+    note: 'Chỉ mở bán Adobe Creative Cloud All Apps 1 tháng, bảo hành full trong thời gian sử dụng.',
     match: (p) => p.service_type === 'AI' && /adobe/i.test(p.name),
   },
   {
@@ -164,6 +164,16 @@ function setButtonEmoji(button, E, slot) {
   const emoji = E.component(slot);
   if (emoji) button.setEmoji(emoji);
   return button;
+}
+
+const FULL_WARRANTY_PRODUCT_KEYS = new Set([
+  'chatgpt-plus-account-1-month-full-warranty',
+  'chatgpt-business-workspace-1-month-full-warranty',
+  'adobe-creative-cloud-1-month',
+]);
+
+function hasFullDurationWarranty(product) {
+  return FULL_WARRANTY_PRODUCT_KEYS.has(String(product.product_key || ''));
 }
 
 export function groupPriceProducts(products) {
@@ -287,6 +297,7 @@ export function buildPriceGroupPayload(guildId, group, products) {
     const netflixPromo = isNetflixPromoProduct(product)
       ? getNetflixPromoDetails(international)
       : null;
+    const fullDurationWarranty = hasFullDurationWarranty(product);
     container.addTextDisplayComponents(
       new TextDisplayBuilder().setContent([
         `### ${productIcon} ${international ? translateProductName(product.name) : product.name}`,
@@ -300,6 +311,9 @@ export function buildPriceGroupPayload(guildId, group, products) {
           `> ${E('status_check')} **${international ? 'Quality' : 'Chất lượng'}:** ${netflixPromo.quality}`,
           `> ${E('warranty_shield')} **${international ? 'Warranty' : 'Bảo hành'}:** ${netflixPromo.warranty}`,
           `> ${E('status_warn')} **${international ? 'Renewal' : 'Gia hạn'}:** ${netflixPromo.renewal}`,
+        ] : []),
+        ...(fullDurationWarranty ? [
+          `> ${E('warranty_shield')} **${international ? 'Warranty' : 'Bảo hành'}:** ${international ? 'Full coverage for the entire service period' : 'Full trong suốt thời gian sử dụng'}`,
         ] : []),
       ].join('\n'))
     );
