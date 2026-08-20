@@ -25,7 +25,7 @@ export const INVITE_DECOR_CAMPAIGN = Object.freeze({
   minAccountAgeDays: 30,
   rewardName: '01 Decor / Hiệu ứng hồ sơ Discord',
   rewardValue: 66_000,
-  announcementChannelId: '1515008584549797979',
+  announcementChannelId: '1514606987839672563',
   logChannelName: '🎟・log-event-invite',
 });
 
@@ -83,7 +83,7 @@ export function ensureInviteDecorCampaign(guildId = INVITE_DECOR_CAMPAIGN.guildI
       min_account_age_days = excluded.min_account_age_days,
       reward_name = excluded.reward_name,
       reward_value = excluded.reward_value,
-      announcement_channel_id = COALESCE(invite_campaigns.announcement_channel_id, excluded.announcement_channel_id),
+      announcement_channel_id = excluded.announcement_channel_id,
       updated_at = excluded.updated_at
   `).run(
     INVITE_DECOR_CAMPAIGN.eventKey,

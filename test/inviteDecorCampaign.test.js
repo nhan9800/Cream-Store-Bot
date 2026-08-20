@@ -55,6 +55,11 @@ afterEach(() => {
 });
 
 describe('Store 1 invite Decor campaign validation', () => {
+  it('publishes the invite event in the dedicated event channel, not promotions', () => {
+    expect(INVITE_DECOR_CAMPAIGN.announcementChannelId).toBe('1514606987839672563');
+    expect(INVITE_DECOR_CAMPAIGN.announcementChannelId).not.toBe('1515008584549797979');
+  });
+
   it('uses immutable invite-use snapshots so Discord cache mutation cannot hide a join', () => {
     const liveInvite = {
       code: 'event-test',
