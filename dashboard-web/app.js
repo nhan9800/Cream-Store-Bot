@@ -21,6 +21,7 @@ async function checkPassword() {
             document.getElementById('password-gate').style.display = 'none';
             await loadData();
             renderAll();
+            if (location.hash === '#spotify-families') switchView('spotify-families');
         } else {
             throw new Error(data.error || 'Sai mật khẩu!');
         }
@@ -58,6 +59,11 @@ let customersData = [];
 let currentCustomerPage = 1;
 let totalCustomerPages = 1;
 let customerSearchQuery = '';
+let spotifyFamiliesData = [];
+let spotifyFamilyStats = null;
+let currentSpotifyFamilyId = null;
+let spotifyConfirmHandler = null;
+let activeDashboardView = 'accounts';
 
 // ===== SERVICE CONFIG =====
 const SVC_SVG = {
@@ -1161,15 +1167,18 @@ function removeToast(el) {
 
 // ===== CUSTOMER TAB LOGIC =====
 function switchView(viewName) {
+    activeDashboardView = viewName;
     document.getElementById('nav-accounts').classList.toggle('active', viewName === 'accounts');
     document.getElementById('nav-customers').classList.toggle('active', viewName === 'customers');
     document.getElementById('nav-subscriptions').classList.toggle('active', viewName === 'subscriptions');
+    document.getElementById('nav-spotify-families').classList.toggle('active', viewName === 'spotify-families');
     document.getElementById('nav-system-health').classList.toggle('active', viewName === 'system-health');
     document.getElementById('nav-audit-log').classList.toggle('active', viewName === 'audit-log');
     
     document.getElementById('view-accounts').style.display = viewName === 'accounts' ? 'block' : 'none';
     document.getElementById('view-customers').style.display = viewName === 'customers' ? 'block' : 'none';
     document.getElementById('view-subscriptions').style.display = viewName === 'subscriptions' ? 'block' : 'none';
+    document.getElementById('view-spotify-families').style.display = viewName === 'spotify-families' ? 'block' : 'none';
     document.getElementById('view-system-health').style.display = viewName === 'system-health' ? 'block' : 'none';
     document.getElementById('view-audit-log').style.display = viewName === 'audit-log' ? 'block' : 'none';
 
@@ -1177,11 +1186,15 @@ function switchView(viewName) {
         loadCustomers();
     } else if (viewName === 'subscriptions') {
         loadSubscriptions();
+    } else if (viewName === 'spotify-families') {
+        if (location.hash !== '#spotify-families') history.replaceState(null, '', '#spotify-families');
+        loadSpotifyFamilies();
     } else if (viewName === 'system-health') {
         loadSystemHealth();
     } else if (viewName === 'audit-log') {
         loadAuditLog();
     } else {
+        if (location.hash === '#spotify-families') history.replaceState(null, '', location.pathname + location.search);
         renderAll();
     }
 }
@@ -1332,7 +1345,7 @@ setInterval(() => { renderAll(); }, 60000);
 // ===== KEYBOARD =====
 document.addEventListener('keydown', e => {
     if (e.key === 'Escape') {
-        ['modal-account','modal-renew','modal-history','modal-delete','modal-detail'].forEach(id => closeModal(id));
+        ['modal-account','modal-renew','modal-history','modal-delete','modal-detail','modal-spotify-family','modal-spotify-detail','modal-spotify-member','modal-spotify-confirm'].forEach(id => closeModal(id));
     }
 });
 
@@ -1342,6 +1355,7 @@ document.addEventListener('DOMContentLoaded', async () => {
     if (isLoggedIn) {
         await loadData();
         renderAll();
+        if (location.hash === '#spotify-families') switchView('spotify-families');
     }
 });
 
@@ -1470,6 +1484,441 @@ function renderSubscriptions() {
     }).join('');
 }
 
+// ═══════════════ SPOTIFY FAMILY CONTROL CENTER ═══════════════
+
+async function spotifyFamilyRequest(path, options = {}) {
+    const response = await fetch(`${API_BASE_URL}/dashboard/api/spotify-families${path}`, {
+        ...options,
+        headers: {
+            'x-dashboard-token': API_TOKEN,
+            ...(options.body ? { 'Content-Type': 'application/json' } : {}),
+            ...(options.headers || {}),
+        },
+    });
+    const json = await response.json().catch(() => ({ ok: false, error: 'Phản hồi máy chủ không hợp lệ.' }));
+    if (!response.ok || !json.ok) throw new Error(json.error || `HTTP ${response.status}`);
+    return json;
+}
+
+function spotifyDateInput(value) {
+    if (!value) return '';
+    const date = new Date(value);
+    return Number.isFinite(date.getTime()) ? date.toISOString().slice(0, 10) : '';
+}
+
+function spotifyDateIso(value) {
+    return value ? new Date(`${value}T12:00:00`).toISOString() : null;
+}
+
+function spotifyFormatDate(value) {
+    if (!value) return '—';
+    const date = new Date(value);
+    return Number.isFinite(date.getTime()) ? date.toLocaleDateString('vi-VN') : '—';
+}
+
+function spotifyFormatMoney(value) {
+    return `${Number(value || 0).toLocaleString('vi-VN')}đ`;
+}
+
+function spotifyInitial(value) {
+    const words = String(value || '?').trim().split(/\s+/).filter(Boolean);
+    return words.slice(0, 2).map(word => word[0] || '').join('').toUpperCase() || '?';
+}
+
+function spotifyFamilyState(family) {
+    if (family.status === 'PAUSED') return { cls: 'is-paused', pill: 'paused', label: 'Tạm dừng' };
+    if (family.status === 'EXPIRED') return { cls: 'is-paused', pill: 'paused', label: 'Đã kết thúc' };
+    if (family.dueState === 'OVERDUE') return { cls: 'is-overdue', pill: 'overdue', label: `Quá hạn ${family.overdueDays} ngày` };
+    if (family.dueState === 'URGENT') return { cls: 'is-due', pill: 'overdue', label: 'Gia hạn hôm nay' };
+    if (family.dueState === 'DUE_SOON') return { cls: 'is-due', pill: 'due', label: `Còn ${family.daysRemaining} ngày` };
+    return { cls: '', pill: '', label: 'Ổn định' };
+}
+
+async function loadSpotifyFamilies({ quiet = false } = {}) {
+    if (!quiet) showLoader('Đang đồng bộ Spotify Family...');
+    try {
+        const json = await spotifyFamilyRequest('');
+        spotifyFamiliesData = json.families || [];
+        spotifyFamilyStats = json.stats || null;
+        renderSpotifyFamilyStats();
+        renderSpotifyFamilies();
+    } catch (error) {
+        showToast(`Lỗi tải Spotify Family: ${error.message}`, 'error');
+    } finally {
+        if (!quiet) hideLoader();
+    }
+}
+
+function renderSpotifyFamilyStats() {
+    const stats = spotifyFamilyStats || {};
+    const families = document.getElementById('sf-stat-families');
+    const members = document.getElementById('sf-stat-members');
+    const due = document.getElementById('sf-stat-due');
+    const cost = document.getElementById('sf-stat-cost');
+    if (families) families.textContent = stats.activeFamilies || 0;
+    if (members) members.textContent = `${stats.activeMembers || 0} / ${stats.totalSlots || 0}`;
+    if (due) due.textContent = stats.dueIn7Days || 0;
+    if (cost) cost.textContent = spotifyFormatMoney(stats.monthlyRenewalCost || 0);
+}
+
+function handleSpotifyFamilyFilter() {
+    renderSpotifyFamilies();
+}
+
+function renderSpotifyFamilies() {
+    const grid = document.getElementById('spotify-family-grid');
+    const empty = document.getElementById('spotify-family-empty');
+    if (!grid || !empty) return;
+    const query = String(document.getElementById('sf-search')?.value || '').trim().toLocaleLowerCase('vi-VN');
+    const status = document.getElementById('sf-status-filter')?.value || 'all';
+    const filtered = spotifyFamiliesData.filter(family => {
+        if (status !== 'all' && family.status !== status) return false;
+        if (!query) return true;
+        return [family.name, family.loginEmail, family.paymentCardLabel, family.note]
+            .some(value => String(value || '').toLocaleLowerCase('vi-VN').includes(query));
+    });
+
+    empty.style.display = filtered.length ? 'none' : 'flex';
+    grid.innerHTML = filtered.map(family => {
+        const state = spotifyFamilyState(family);
+        const activeMembers = (family.members || []).filter(member => member.status === 'ACTIVE');
+        const avatars = activeMembers.slice(0, 5).map(member =>
+            `<span class="spotify-member-avatar" title="Profile Spotify">${escHtml(spotifyInitial(member.spotifyUsername))}</span>`
+        ).join('');
+        const overflow = activeMembers.length > 5
+            ? `<span class="spotify-member-avatar">+${activeMembers.length - 5}</span>`
+            : '';
+        const dueCopy = family.overdueDays > 0
+            ? `Quá hạn ${family.overdueDays} ngày`
+            : `Còn ${family.daysRemaining} ngày`;
+        const progress = Math.min(100, Math.max(0, Number(family.progressPercent || 0)));
+        return `<article class="spotify-family-card ${state.cls}">
+            <div class="spotify-card-top">
+                <div class="spotify-family-name">
+                    <div class="spotify-family-logo">♫</div>
+                    <div><h3>${escHtml(family.name)}</h3><p>FAM #${family.id} · đã gia hạn ${family.timesRenewed || 0} kỳ</p></div>
+                </div>
+                <span class="spotify-status-pill ${state.pill}">${escHtml(state.label)}</span>
+            </div>
+            <div class="spotify-cycle-line"><span>Chu kỳ hiện tại</span><strong class="${state.pill}">${escHtml(dueCopy)}</strong></div>
+            <div class="spotify-progress-track"><div class="spotify-progress-fill" style="width:${progress}%"></div></div>
+            <div class="spotify-cycle-meta"><span>${spotifyFormatDate(family.cycleStartedAt)}</span><span>${spotifyFormatDate(family.nextRenewalAt)}</span></div>
+            <div class="spotify-card-facts">
+                <div class="spotify-fact"><small>Family Owner</small><strong>${escHtml(family.loginEmail)}</strong></div>
+                <div class="spotify-fact"><small>Thẻ gia hạn</small><strong>${escHtml(family.paymentCardLabel || 'Chưa đặt tên')} · ${escHtml(family.paymentCardMasked)}</strong></div>
+                <div class="spotify-fact"><small>Slot đang dùng</small><strong>${family.slotsUsed}/${family.totalSlots} · còn ${family.slotsAvailable}</strong></div>
+                <div class="spotify-fact"><small>Chi phí kỳ này</small><strong>${spotifyFormatMoney(family.renewalCost)}</strong></div>
+            </div>
+            <div class="spotify-member-preview">
+                <div class="spotify-member-stack">${avatars}${overflow || (!avatars ? '<span class="spotify-slot-copy">Chưa có profile</span>' : '')}</div>
+                <span class="spotify-slot-copy">${activeMembers.length} profile đang hoạt động</span>
+            </div>
+            <div class="spotify-card-actions">
+                <button class="spotify-card-btn primary" onclick="openSpotifyFamilyDetail(${family.id})">Mở chi tiết</button>
+                <button class="spotify-card-btn" onclick="openSpotifyFamilyModal(${family.id})">Chỉnh sửa</button>
+                <button class="spotify-card-btn renew" onclick="confirmSpotifyFamilyRenewal(${family.id})">Gia hạn</button>
+            </div>
+        </article>`;
+    }).join('');
+}
+
+function openSpotifyFamilyModal(id = null) {
+    const family = id ? spotifyFamiliesData.find(item => item.id === Number(id)) : null;
+    const form = document.getElementById('spotify-family-form');
+    form.reset();
+    document.getElementById('sf-form-id').value = family?.id || '';
+    document.getElementById('spotify-family-modal-title').textContent = family ? `Chỉnh sửa ${family.name}` : 'Tạo Family mới';
+    document.getElementById('sf-form-submit').textContent = family ? 'Lưu thay đổi' : 'Lưu Family';
+
+    const today = new Date();
+    const nextMonth = new Date(today.getTime());
+    nextMonth.setMonth(nextMonth.getMonth() + 1);
+    document.getElementById('sf-form-name').value = family?.name || '';
+    document.getElementById('sf-form-status').value = family?.status || 'ACTIVE';
+    document.getElementById('sf-form-email').value = family?.loginEmail || '';
+    document.getElementById('sf-form-password').value = family?.loginPassword || '';
+    document.getElementById('sf-form-cycle-start').value = family ? spotifyDateInput(family.cycleStartedAt) : today.toISOString().slice(0, 10);
+    document.getElementById('sf-form-next-renewal').value = family ? spotifyDateInput(family.nextRenewalAt) : nextMonth.toISOString().slice(0, 10);
+    document.getElementById('sf-form-total-slots').value = family?.totalSlots || 6;
+    document.getElementById('sf-form-reminder-days').value = family?.reminderDaysBefore || 7;
+    document.getElementById('sf-form-renewal-cost').value = family?.renewalCost || '';
+    document.getElementById('sf-form-card-label').value = family?.paymentCardLabel || '';
+    document.getElementById('sf-form-card-number').value = family?.paymentCardNumber || '';
+    document.getElementById('sf-form-note').value = family?.note || '';
+    openModal('modal-spotify-family');
+}
+
+async function handleSpotifyFamilySubmit(event) {
+    event.preventDefault();
+    const id = document.getElementById('sf-form-id').value;
+    const payload = {
+        name: document.getElementById('sf-form-name').value.trim(),
+        status: document.getElementById('sf-form-status').value,
+        loginEmail: document.getElementById('sf-form-email').value.trim(),
+        loginPassword: document.getElementById('sf-form-password').value,
+        cycleStartedAt: spotifyDateIso(document.getElementById('sf-form-cycle-start').value),
+        nextRenewalAt: spotifyDateIso(document.getElementById('sf-form-next-renewal').value),
+        totalSlots: Number(document.getElementById('sf-form-total-slots').value || 6),
+        reminderDaysBefore: Number(document.getElementById('sf-form-reminder-days').value || 7),
+        renewalCost: Number(document.getElementById('sf-form-renewal-cost').value || 0),
+        paymentCardLabel: document.getElementById('sf-form-card-label').value.trim(),
+        paymentCardNumber: document.getElementById('sf-form-card-number').value.trim(),
+        note: document.getElementById('sf-form-note').value.trim(),
+    };
+    const button = document.getElementById('sf-form-submit');
+    button.disabled = true;
+    button.textContent = 'Đang lưu...';
+    try {
+        await spotifyFamilyRequest(id ? `/${id}` : '', { method: id ? 'PUT' : 'POST', body: JSON.stringify(payload) });
+        closeModal('modal-spotify-family');
+        showToast(id ? 'Đã cập nhật Spotify Family!' : 'Đã tạo Spotify Family mới!', 'success');
+        await loadSpotifyFamilies({ quiet: true });
+    } catch (error) {
+        showToast(error.message, 'error');
+    } finally {
+        button.disabled = false;
+        button.textContent = id ? 'Lưu thay đổi' : 'Lưu Family';
+    }
+}
+
+function spotifySecretValue(family, type) {
+    if (type === 'password') return family.loginPassword || '';
+    if (type === 'card') return family.paymentCardNumber || '';
+    return family.loginEmail || '';
+}
+
+function toggleSpotifySecret(familyId, type, button) {
+    const family = spotifyFamiliesData.find(item => item.id === Number(familyId));
+    const target = document.getElementById(`sf-secret-${type}-${familyId}`);
+    if (!family || !target) return;
+    const isHidden = target.dataset.visible !== 'true';
+    target.textContent = isHidden ? (spotifySecretValue(family, type) || 'Chưa có') : (type === 'card' ? family.paymentCardMasked : '••••••••••');
+    target.dataset.visible = isHidden ? 'true' : 'false';
+    button.textContent = isHidden ? 'Ẩn' : 'Hiện';
+}
+
+function copySpotifySecret(familyId, type) {
+    const family = spotifyFamiliesData.find(item => item.id === Number(familyId));
+    if (!family) return;
+    const value = spotifySecretValue(family, type);
+    if (!value) return showToast('Chưa có dữ liệu để sao chép.', 'warning');
+    copyText(value);
+}
+
+async function openSpotifyFamilyDetail(id) {
+    try {
+        const json = await spotifyFamilyRequest(`/${id}`);
+        const family = json.family;
+        const index = spotifyFamiliesData.findIndex(item => item.id === family.id);
+        if (index >= 0) spotifyFamiliesData[index] = family;
+        else spotifyFamiliesData.push(family);
+        currentSpotifyFamilyId = family.id;
+        renderSpotifyFamilyDetail(family);
+        openModal('modal-spotify-detail');
+    } catch (error) {
+        showToast(error.message, 'error');
+    }
+}
+
+function renderSpotifyFamilyDetail(family) {
+    document.getElementById('spotify-detail-title').textContent = family.name;
+    const members = family.members || [];
+    const activeMembers = members.filter(member => member.status === 'ACTIVE');
+    const state = spotifyFamilyState(family);
+    const progress = Math.min(100, Math.max(0, Number(family.progressPercent || 0)));
+    const memberRows = members.map(member => {
+        const monthsUsed = Number(member.monthsUsed || 0).toLocaleString('vi-VN', { maximumFractionDigits: 1 });
+        const memberStatus = member.status === 'ACTIVE' ? 'Đang trong Fam' : member.status === 'LEFT' ? 'Đã rời Fam' : 'Hết hạn';
+        return `<div class="spotify-member-row">
+            <div class="spotify-member-identity">
+                <span class="spotify-member-avatar">${escHtml(spotifyInitial(member.spotifyUsername))}</span>
+                <div>
+                    <strong>${escHtml(member.spotifyUsername)}</strong>
+                    <small>${escHtml(member.spotifyEmail || member.customerName || 'Chưa có email')}</small>
+                    <span class="spotify-member-status status-${member.status.toLowerCase()}">${escHtml(memberStatus)}</span>
+                </div>
+            </div>
+            <div class="spotify-member-cell"><small>Khách / mã đơn</small><strong>${escHtml(member.customerName || member.relatedOrderCode || '—')}</strong></div>
+            <div class="spotify-member-cell"><small>Đã sử dụng</small><strong>${monthsUsed} tháng</strong><div class="spotify-member-mini-progress"><i style="width:${Math.min(100, member.progressPercent || 0)}%"></i></div></div>
+            <div class="spotify-member-cell"><small>Gói & hạn</small><strong>${member.purchasedMonths} tháng · ${spotifyFormatDate(member.memberExpiryAt)}</strong></div>
+            <div class="spotify-member-actions">
+                <button title="Chỉnh sửa" onclick="openSpotifyMemberModal(${family.id}, ${member.id})">✎</button>
+                <button class="danger" title="Xóa" onclick="confirmSpotifyMemberDelete(${family.id}, ${member.id})">×</button>
+            </div>
+        </div>`;
+    }).join('');
+    document.getElementById('spotify-detail-body').innerHTML = `
+        <div class="spotify-detail-hero">
+            <section class="spotify-detail-panel">
+                <h3>Thông tin vận hành được mã hóa</h3>
+                <div class="spotify-secret-row"><span>Email owner</span><code>${escHtml(family.loginEmail)}</code><button class="spotify-secret-action" onclick="copySpotifySecret(${family.id}, 'email')">Sao chép</button></div>
+                <div class="spotify-secret-row"><span>Mật khẩu</span><code id="sf-secret-password-${family.id}" data-visible="false">••••••••••</code><span><button class="spotify-secret-action" onclick="toggleSpotifySecret(${family.id}, 'password', this)">Hiện</button> · <button class="spotify-secret-action" onclick="copySpotifySecret(${family.id}, 'password')">Copy</button></span></div>
+                <div class="spotify-secret-row"><span>Thẻ gia hạn</span><code id="sf-secret-card-${family.id}" data-visible="false">${escHtml(family.paymentCardMasked)}</code><span><button class="spotify-secret-action" onclick="toggleSpotifySecret(${family.id}, 'card', this)">Hiện</button> · <button class="spotify-secret-action" onclick="copySpotifySecret(${family.id}, 'card')">Copy</button></span></div>
+                <div class="spotify-secret-row"><span>Tên thẻ</span><code>${escHtml(family.paymentCardLabel || 'Chưa đặt tên')}</code><span></span></div>
+                <div class="spotify-secret-row"><span>Ghi chú</span><code>${escHtml(family.note || 'Không có')}</code><span></span></div>
+            </section>
+            <section class="spotify-detail-panel">
+                <h3>Chu kỳ gia hạn</h3>
+                <div class="spotify-detail-progress-number">${family.overdueDays > 0 ? family.overdueDays : family.daysRemaining}<small> ${family.overdueDays > 0 ? 'ngày quá hạn' : 'ngày còn lại'}</small></div>
+                <div class="spotify-progress-track" style="margin-top:15px"><div class="spotify-progress-fill" style="width:${progress}%"></div></div>
+                <div class="spotify-cycle-meta"><span>${spotifyFormatDate(family.cycleStartedAt)}</span><span>${spotifyFormatDate(family.nextRenewalAt)}</span></div>
+                <div class="spotify-card-facts" style="margin:14px 0 0">
+                    <div class="spotify-fact"><small>Slot</small><strong>${activeMembers.length}/${family.totalSlots}</strong></div>
+                    <div class="spotify-fact"><small>Chi phí</small><strong>${spotifyFormatMoney(family.renewalCost)}</strong></div>
+                </div>
+                <div class="spotify-detail-actions">
+                    <button class="spotify-card-btn primary" onclick="confirmSpotifyFamilyRenewal(${family.id})">Đã gia hạn 1 tháng</button>
+                    <button class="spotify-card-btn" onclick="snoozeSpotifyFamily(${family.id})">Nhắc lại sau 24h</button>
+                    <button class="spotify-card-btn" onclick="openSpotifyFamilyModal(${family.id})">Chỉnh sửa</button>
+                    <button class="spotify-card-btn" style="color:#fb7185" onclick="confirmSpotifyFamilyDelete(${family.id})">Xóa Family</button>
+                </div>
+                <span class="spotify-status-pill ${state.pill}" style="display:inline-flex;margin-top:14px">${escHtml(state.label)}</span>
+            </section>
+        </div>
+        <div class="spotify-members-heading">
+            <div><h3>Profile trong Family · ${activeMembers.length}/${family.totalSlots} slot</h3></div>
+            <button class="spotify-primary-btn" onclick="openSpotifyMemberModal(${family.id})">+ Thêm profile</button>
+        </div>
+        <div class="spotify-members-list">${memberRows || '<div class="spotify-detail-empty">Chưa có profile Spotify nào trong Family này.</div>'}</div>`;
+}
+
+function openSpotifyMemberModal(familyId, memberId = null) {
+    const family = spotifyFamiliesData.find(item => item.id === Number(familyId));
+    if (!family) return;
+    const member = memberId ? (family.members || []).find(item => item.id === Number(memberId)) : null;
+    document.getElementById('spotify-member-form').reset();
+    document.getElementById('sf-member-family-id').value = family.id;
+    document.getElementById('sf-member-id').value = member?.id || '';
+    document.getElementById('spotify-member-modal-title').textContent = member ? `Chỉnh sửa ${member.spotifyUsername}` : `Thêm profile vào ${family.name}`;
+    document.getElementById('sf-member-username').value = member?.spotifyUsername || '';
+    document.getElementById('sf-member-email').value = member?.spotifyEmail || '';
+    document.getElementById('sf-member-customer').value = member?.customerName || '';
+    document.getElementById('sf-member-discord').value = member?.discordId || '';
+    document.getElementById('sf-member-order').value = member?.relatedOrderCode || '';
+    document.getElementById('sf-member-joined').value = member ? spotifyDateInput(member.joinedAt) : new Date().toISOString().slice(0, 10);
+    document.getElementById('sf-member-months').value = member?.purchasedMonths || 1;
+    document.getElementById('sf-member-expiry').value = member ? spotifyDateInput(member.memberExpiryAt) : '';
+    document.getElementById('sf-member-status').value = member?.status || 'ACTIVE';
+    document.getElementById('sf-member-note').value = member?.note || '';
+    openModal('modal-spotify-member');
+}
+
+async function handleSpotifyMemberSubmit(event) {
+    event.preventDefault();
+    const familyId = document.getElementById('sf-member-family-id').value;
+    const memberId = document.getElementById('sf-member-id').value;
+    const payload = {
+        spotifyUsername: document.getElementById('sf-member-username').value.trim(),
+        spotifyEmail: document.getElementById('sf-member-email').value.trim(),
+        customerName: document.getElementById('sf-member-customer').value.trim(),
+        discordId: document.getElementById('sf-member-discord').value.trim(),
+        relatedOrderCode: document.getElementById('sf-member-order').value.trim(),
+        joinedAt: spotifyDateIso(document.getElementById('sf-member-joined').value),
+        purchasedMonths: Number(document.getElementById('sf-member-months').value || 1),
+        status: document.getElementById('sf-member-status').value,
+        note: document.getElementById('sf-member-note').value.trim(),
+    };
+    const expiry = document.getElementById('sf-member-expiry').value;
+    if (expiry) payload.memberExpiryAt = spotifyDateIso(expiry);
+    try {
+        await spotifyFamilyRequest(`/${familyId}/members${memberId ? `/${memberId}` : ''}`, {
+            method: memberId ? 'PUT' : 'POST',
+            body: JSON.stringify(payload),
+        });
+        closeModal('modal-spotify-member');
+        showToast(memberId ? 'Đã cập nhật profile Spotify!' : 'Đã thêm profile vào Family!', 'success');
+        await loadSpotifyFamilies({ quiet: true });
+        await openSpotifyFamilyDetail(Number(familyId));
+    } catch (error) {
+        showToast(error.message, 'error');
+    }
+}
+
+function openSpotifyConfirm(title, message, handler, actionLabel = 'Xác nhận') {
+    document.getElementById('spotify-confirm-title').textContent = title;
+    document.getElementById('spotify-confirm-message').textContent = message;
+    const button = document.getElementById('spotify-confirm-action');
+    button.textContent = actionLabel;
+    spotifyConfirmHandler = handler;
+    button.onclick = async () => {
+        button.disabled = true;
+        try { await spotifyConfirmHandler?.(); }
+        finally { button.disabled = false; spotifyConfirmHandler = null; closeModal('modal-spotify-confirm'); }
+    };
+    openModal('modal-spotify-confirm');
+}
+
+function confirmSpotifyFamilyRenewal(id) {
+    const family = spotifyFamiliesData.find(item => item.id === Number(id));
+    if (!family) return;
+    openSpotifyConfirm(
+        'Xác nhận đã gia hạn',
+        `Bạn đã nạp đúng thẻ và gia hạn ${family.name} thêm 1 tháng? Ngày gia hạn tiếp theo sẽ được tự động tính lại.`,
+        () => renewSpotifyFamily(id),
+        'Đã gia hạn 1 tháng',
+    );
+}
+
+async function renewSpotifyFamily(id) {
+    try {
+        const json = await spotifyFamilyRequest(`/${id}/renew`, { method: 'POST', body: JSON.stringify({}) });
+        showToast(`Đã gia hạn ${json.family.name} đến ${spotifyFormatDate(json.family.nextRenewalAt)}.`, 'success');
+        await loadSpotifyFamilies({ quiet: true });
+        if (currentSpotifyFamilyId === Number(id)) await openSpotifyFamilyDetail(Number(id));
+    } catch (error) {
+        showToast(error.message, 'error');
+    }
+}
+
+async function snoozeSpotifyFamily(id) {
+    try {
+        await spotifyFamilyRequest(`/${id}/snooze`, { method: 'POST', body: JSON.stringify({ hours: 24 }) });
+        showToast('Đã hoãn nhắc hạn trong 24 giờ.', 'success');
+        await loadSpotifyFamilies({ quiet: true });
+        if (currentSpotifyFamilyId === Number(id)) await openSpotifyFamilyDetail(Number(id));
+    } catch (error) {
+        showToast(error.message, 'error');
+    }
+}
+
+function confirmSpotifyFamilyDelete(id) {
+    const family = spotifyFamiliesData.find(item => item.id === Number(id));
+    if (!family) return;
+    openSpotifyConfirm(
+        'Xóa Spotify Family?',
+        `Family ${family.name} và toàn bộ danh sách profile bên trong sẽ bị xóa khỏi hệ thống.`,
+        async () => {
+            try {
+                await spotifyFamilyRequest(`/${id}`, { method: 'DELETE' });
+                closeModal('modal-spotify-detail');
+                currentSpotifyFamilyId = null;
+                showToast('Đã xóa Spotify Family.', 'success');
+                await loadSpotifyFamilies({ quiet: true });
+            } catch (error) { showToast(error.message, 'error'); }
+        },
+        'Xóa Family',
+    );
+}
+
+function confirmSpotifyMemberDelete(familyId, memberId) {
+    const family = spotifyFamiliesData.find(item => item.id === Number(familyId));
+    const member = family?.members?.find(item => item.id === Number(memberId));
+    if (!family || !member) return;
+    openSpotifyConfirm(
+        'Xóa profile khỏi hệ thống?',
+        `Profile ${member.spotifyUsername} sẽ bị xóa khỏi ${family.name}.`,
+        async () => {
+            try {
+                await spotifyFamilyRequest(`/${familyId}/members/${memberId}`, { method: 'DELETE' });
+                showToast('Đã xóa profile Spotify.', 'success');
+                await loadSpotifyFamilies({ quiet: true });
+                await openSpotifyFamilyDetail(Number(familyId));
+            } catch (error) { showToast(error.message, 'error'); }
+        },
+        'Xóa profile',
+    );
+}
+
 // ═══════════════ WEBSOCKET REALTIME ═══════════════
 
 let ws = null;
@@ -1504,7 +1953,10 @@ function connectWebSocket() {
         try {
             const msg = JSON.parse(event.data);
             console.log('[WS] Event:', msg.type);
-            if (['order_update', 'account_update', 'subscription_update', 'data_refresh'].includes(msg.type)) {
+            if (msg.type === 'spotify_family_update') {
+                if (activeDashboardView === 'spotify-families') loadSpotifyFamilies({ quiet: true });
+                showToast(`⚡ ${msg.message || 'Spotify Family vừa được cập nhật!'}`, 'info');
+            } else if (['order_update', 'account_update', 'subscription_update', 'data_refresh'].includes(msg.type)) {
                 // Auto-refresh data
                 loadData().then(() => renderAll());
                 showToast(`⚡ ${msg.message || 'Dữ liệu đã được cập nhật realtime!'}`, 'info');
