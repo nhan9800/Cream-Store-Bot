@@ -632,14 +632,34 @@ export function cleanupExpiredTranscripts({
   const cutoff = now - days * 86_400_000;
   let scanned = 0;
   let removed = 0;
-  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+  let entries;
+  try {
+    entries = fs.readdirSync(directory, { withFileTypes: true });
+  } catch (error) {
+    // Thư mục có thể vừa bị tác vụ backup/cleanup khác di chuyển hoặc xóa.
+    // Dọn transcript chỉ là bảo trì, tuyệt đối không được chặn bot khởi động.
+    if (error?.code !== 'ENOENT') {
+      console.warn(`[TRANSCRIPT-CLEANUP] Không thể đọc thư mục ${directory}:`, error.message);
+    }
+    return { scanned: 0, removed: 0 };
+  }
+
+  for (const entry of entries) {
     if (!entry.isFile() || !entry.name.toLowerCase().endsWith('.html')) continue;
     scanned++;
     const filePath = path.join(directory, entry.name);
-    const stat = fs.statSync(filePath);
-    if (stat.mtimeMs >= cutoff) continue;
-    fs.rmSync(filePath);
-    removed++;
+    try {
+      const stat = fs.statSync(filePath);
+      if (stat.mtimeMs >= cutoff) continue;
+      fs.rmSync(filePath, { force: true });
+      removed++;
+    } catch (error) {
+      // File có thể biến mất giữa readdirSync và statSync/rmSync khi hai tiến
+      // trình Store cùng dọn thư mục. ENOENT là trạng thái bình thường của race.
+      if (error?.code !== 'ENOENT') {
+        console.warn(`[TRANSCRIPT-CLEANUP] Bỏ qua file ${filePath}:`, error.message);
+      }
+    }
   }
   return { scanned, removed };
 }

@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 import { resolveWarrantyTimeline } from '../src/services/warrantyService.js';
 import { getCustomerMembershipProgress } from '../src/services/roleService.js';
 import { cleanupExpiredTranscripts, exportTicketTranscript } from '../src/services/transcriptService.js';
@@ -74,6 +74,37 @@ describe('compact transcript storage', () => {
       expect(fs.existsSync(recent)).toBe(true);
       expect(fs.existsSync(unrelated)).toBe(true);
     } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
+    }
+  });
+
+  test('does not crash when another process deletes a transcript during cleanup', () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'cenar-retention-race-'));
+    const transcript = path.join(directory, 'transcript_ticket-460322_1784645598452.html');
+    fs.writeFileSync(transcript, 'race');
+    const originalStatSync = fs.statSync;
+    const statSpy = vi.spyOn(fs, 'statSync').mockImplementationOnce((filePath, options) => {
+      fs.rmSync(filePath, { force: true });
+      return originalStatSync(filePath, options);
+    });
+
+    try {
+      let result;
+      expect(() => {
+        result = cleanupExpiredTranscripts({
+          directory,
+          retentionDays: 30,
+          now: Date.UTC(2026, 7, 20),
+        });
+      }).not.toThrow();
+      expect(result).toEqual({ scanned: 1, removed: 0 });
+      expect(cleanupExpiredTranscripts({
+        directory,
+        retentionDays: 30,
+        now: Date.UTC(2026, 7, 20),
+      })).toEqual({ scanned: 0, removed: 0 });
+    } finally {
+      statSpy.mockRestore();
       fs.rmSync(directory, { recursive: true, force: true });
     }
   });
