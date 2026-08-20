@@ -14,6 +14,7 @@ import { createCoupon, listCoupons, deactivateCoupon } from './couponService.js'
 import * as subService from './subscriptionService.js';
 import { getAiKnowledge, updateAiKnowledge } from './aiKnowledgeService.js';
 import { transitionOrderStatus } from './orderStateMachine.js';
+import { OrderLinkError, resolveOrderLink } from './orderLinkService.js';
 import { encrypt, decrypt } from '../utils/crypto.js';
 import { sendCompletedFlow, updateOrderLogMessage } from './notificationService.js';
 import { syncPublishedFeedbackMessage } from './feedbackService.js';
@@ -95,7 +96,7 @@ export function registerAdminRoutes(app) {
   function sendSpotifyFamilyError(res, error) {
     console.error('[ADMIN-SPOTIFY-FAMILY]', error);
     const message = String(error?.message || 'Không thể xử lý Spotify Family.');
-    const isValidation = /thiếu|không hợp lệ|phải sau|đủ slot|không tìm thấy/i.test(message);
+    const isValidation = /thiếu|không hợp lệ|phải sau|đủ slot|không tìm thấy|không phải|không thuộc|mã đơn/i.test(message);
     return res.status(isValidation ? 400 : 500).json({ ok: false, error: message });
   }
 
@@ -106,8 +107,21 @@ export function registerAdminRoutes(app) {
   function sendYoutubeRenewalError(res, error) {
     console.error('[ADMIN-YOUTUBE-RENEWAL]', error);
     const message = String(error?.message || 'Không thể xử lý hồ sơ gia hạn YouTube.');
-    const isValidation = /thiếu|không hợp lệ|không tìm thấy|không thuộc|đã thanh toán đủ|đã kết thúc|đang có hồ sơ|phải sau/i.test(message);
+    const isValidation = /thiếu|không hợp lệ|không tìm thấy|không thuộc|không phải|mã đơn|đã thanh toán đủ|đã kết thúc|đang có hồ sơ|phải sau/i.test(message);
     return res.status(isValidation ? 400 : 500).json({ ok: false, error: message });
+  }
+
+  function sendOrderLinkError(res, error) {
+    console.error('[ADMIN-ORDER-LINK]', error);
+    if (!(error instanceof OrderLinkError)) {
+      return res.status(500).json({ ok: false, error: 'Không thể tra cứu mã đơn lúc này.' });
+    }
+    const status = error.code === 'ORDER_NOT_FOUND'
+      ? 404
+      : ['ORDER_SERVICE_MISMATCH', 'ORDER_WRONG_STORE'].includes(error.code)
+        ? 409
+        : 400;
+    return res.status(status).json({ ok: false, error: error.message, code: error.code });
   }
 
   // ==== 1. DASHBOARD STATS ====
@@ -314,6 +328,18 @@ export function registerAdminRoutes(app) {
   });
 
   // ==== 3. ORDERS ====
+  app.get('/api/bot/admin/order-links/:code', requireAdminRole, (req, res) => {
+    try {
+      const order = resolveOrderLink(req.params.code, {
+        expectedService: req.query.service || null,
+        guildId: config.guildId || null,
+      });
+      return res.json({ ok: true, data: order });
+    } catch (error) {
+      return sendOrderLinkError(res, error);
+    }
+  });
+
   app.get('/api/bot/admin/orders', requireAdminRole, (req, res) => {
     try {
       const limit = Number(req.query.limit) || 50;

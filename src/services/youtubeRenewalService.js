@@ -1,5 +1,6 @@
 import { db, nowIso } from '../database/db.js';
 import { decrypt, encrypt } from '../utils/crypto.js';
+import { normalizeLinkedOrderCode, resolveOrderLink } from './orderLinkService.js';
 import {
   addYoutubeCalendarMonths,
   calculateYoutubeMembership,
@@ -321,15 +322,19 @@ function assertSourceForGuild(sourceId, guildId = null) {
 
 export function createYoutubeMembership(data) {
   const source = assertSourceForGuild(data.sourceId, data.guildId);
-  const gmail = clean(data.customerGmail, 240);
+  const relatedOrderCode = normalizeLinkedOrderCode(data.relatedOrderCode);
+  const linkedOrder = relatedOrderCode
+    ? resolveOrderLink(relatedOrderCode, { expectedService: 'YOUTUBE', guildId: data.guildId || source.guild_id })
+    : null;
+  const gmail = clean(data.customerGmail, 240) || linkedOrder?.customerEmail;
   if (!gmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(gmail)) throw new Error('Gmail khách hàng không hợp lệ.');
-  const totalMonths = integer(data.totalMonths, 1, 1, 120);
+  const totalMonths = integer(data.totalMonths ?? linkedOrder?.durationMonths, 1, 1, 120);
   const cycleMonths = integer(data.cycleMonths, 1, 1, 12);
   const totalCycles = Math.ceil(totalMonths / cycleMonths);
   const paidCycles = integer(data.paidCycles, 1, 0, totalCycles);
-  const startedAt = isoDate(data.startedAt || nowIso(), 'Ngày bắt đầu');
+  const startedAt = isoDate(data.startedAt || linkedOrder?.startedAt || nowIso(), 'Ngày bắt đầu');
   const customerExpiryAt = isoDate(
-    data.customerExpiryAt || addYoutubeCalendarMonths(startedAt, totalMonths),
+    data.customerExpiryAt || linkedOrder?.expiresAt || addYoutubeCalendarMonths(startedAt, totalMonths),
     'Ngày hết hạn khách hàng',
   );
   if (new Date(customerExpiryAt) <= new Date(startedAt)) throw new Error('Ngày hết hạn phải sau ngày bắt đầu.');
@@ -340,7 +345,9 @@ export function createYoutubeMembership(data) {
       'Kỳ thanh toán nguồn',
     );
   const requestedPlan = String(data.planType || '').toUpperCase();
-  const planType = PLAN_TYPES.has(requestedPlan) ? requestedPlan : 'STABLE_FAMILY';
+  const planType = PLAN_TYPES.has(requestedPlan)
+    ? requestedPlan
+    : linkedOrder?.suggestedYoutubePlan || 'STABLE_FAMILY';
   const requestedStatus = String(data.status || '').toUpperCase();
   const status = MEMBERSHIP_STATUSES.has(requestedStatus) ? requestedStatus : 'ACTIVE';
   const sourceCost = money(data.sourceCostPerCycle ?? source.default_cycle_cost);
@@ -358,15 +365,15 @@ export function createYoutubeMembership(data) {
       String(data.guildId || source.guild_id || 'WEB'),
       source.id,
       encrypt(gmail),
-      clean(data.customerName, 160),
-      clean(data.customerDiscordId, 30),
-      clean(data.relatedOrderCode, 80),
+      clean(data.customerName, 160) || linkedOrder?.customerName,
+      clean(data.customerDiscordId, 30) || linkedOrder?.discordId,
+      relatedOrderCode,
       planType,
       clean(data.currentFamilyLabel, 160),
       totalMonths,
       cycleMonths,
       paidCycles,
-      money(data.salePrice),
+      money(data.salePrice ?? linkedOrder?.totalAmount),
       sourceCost,
       startedAt,
       nextSourcePaymentAt,
@@ -409,7 +416,13 @@ export function updateYoutubeMembership(id, data) {
   const existing = membershipRow(id);
   if (!existing) return null;
   const source = assertSourceForGuild(data.sourceId ?? existing.source_id, existing.guild_id);
-  const gmail = clean(data.customerGmail ?? decrypt(existing.customer_gmail), 240);
+  const relatedOrderCode = normalizeLinkedOrderCode(
+    data.relatedOrderCode !== undefined ? data.relatedOrderCode : existing.related_order_code,
+  );
+  const linkedOrder = relatedOrderCode
+    ? resolveOrderLink(relatedOrderCode, { expectedService: 'YOUTUBE', guildId: existing.guild_id })
+    : null;
+  const gmail = clean(data.customerGmail ?? decrypt(existing.customer_gmail), 240) || linkedOrder?.customerEmail;
   if (!gmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(gmail)) throw new Error('Gmail khách hàng không hợp lệ.');
   const totalMonths = integer(data.totalMonths ?? existing.total_months, existing.total_months, 1, 120);
   const cycleMonths = integer(data.cycleMonths ?? existing.cycle_months, existing.cycle_months, 1, 12);
@@ -451,9 +464,9 @@ export function updateYoutubeMembership(id, data) {
     `).run(
       source.id,
       encrypt(gmail),
-      clean(data.customerName ?? existing.customer_name, 160),
-      clean(data.customerDiscordId ?? existing.customer_discord_id, 30),
-      clean(data.relatedOrderCode ?? existing.related_order_code, 80),
+      clean(data.customerName ?? existing.customer_name, 160) || linkedOrder?.customerName,
+      clean(data.customerDiscordId ?? existing.customer_discord_id, 30) || linkedOrder?.discordId,
+      relatedOrderCode,
       planType,
       clean(data.currentFamilyLabel ?? existing.current_family_label, 160),
       totalMonths,

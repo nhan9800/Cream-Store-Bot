@@ -1,5 +1,6 @@
 import { db, nowIso } from '../database/db.js';
 import { decrypt, encrypt } from '../utils/crypto.js';
+import { normalizeLinkedOrderCode, resolveOrderLink } from './orderLinkService.js';
 import {
   addCalendarMonths,
   calculateFamilyProgress,
@@ -279,11 +280,18 @@ export function snoozeSpotifyFamilyReminder(id, hours = 24) {
 export function createSpotifyFamilyMember(familyId, data) {
   const family = familyRow(familyId);
   if (!family) throw new Error('Không tìm thấy Spotify Family.');
+  const relatedOrderCode = normalizeLinkedOrderCode(data.relatedOrderCode);
+  const linkedOrder = relatedOrderCode
+    ? resolveOrderLink(relatedOrderCode, { expectedService: 'SPOTIFY', guildId: family.guild_id })
+    : null;
   const username = clean(data.spotifyUsername, 120);
   if (!username) throw new Error('Thiếu username/profile Spotify.');
-  const joinedAt = isoDate(data.joinedAt || nowIso(), 'Ngày tham gia');
-  const purchasedMonths = integer(data.purchasedMonths, 1, 1, 120);
-  const expiryAt = isoDate(data.memberExpiryAt || addCalendarMonths(joinedAt, purchasedMonths), 'Hạn thành viên');
+  const joinedAt = isoDate(data.joinedAt || linkedOrder?.startedAt || nowIso(), 'Ngày tham gia');
+  const purchasedMonths = integer(data.purchasedMonths ?? linkedOrder?.durationMonths, 1, 1, 120);
+  const expiryAt = isoDate(
+    data.memberExpiryAt || linkedOrder?.expiresAt || addCalendarMonths(joinedAt, purchasedMonths),
+    'Hạn thành viên',
+  );
   const requestedStatus = String(data.status || 'ACTIVE').toUpperCase();
   const status = MEMBER_STATUSES.has(requestedStatus) ? requestedStatus : 'ACTIVE';
   if (status === 'ACTIVE' && familyMemberCount(family.id) >= Number(family.total_slots || 6)) {
@@ -299,10 +307,12 @@ export function createSpotifyFamilyMember(familyId, data) {
   `).run(
     family.id,
     username,
-    data.spotifyEmail ? encrypt(clean(data.spotifyEmail, 200)) : null,
-    clean(data.customerName, 160),
-    clean(data.discordId, 30),
-    clean(data.relatedOrderCode, 80),
+    clean(data.spotifyEmail, 200) || linkedOrder?.customerEmail
+      ? encrypt(clean(data.spotifyEmail, 200) || linkedOrder.customerEmail)
+      : null,
+    clean(data.customerName, 160) || linkedOrder?.customerName,
+    clean(data.discordId, 30) || linkedOrder?.discordId,
+    relatedOrderCode,
     joinedAt,
     purchasedMonths,
     expiryAt,
@@ -317,6 +327,13 @@ export function createSpotifyFamilyMember(familyId, data) {
 export function updateSpotifyFamilyMember(familyId, memberId, data) {
   const existing = memberRow(memberId);
   if (!existing || existing.family_id !== Number(familyId)) return null;
+  const family = familyRow(familyId);
+  const relatedOrderCode = normalizeLinkedOrderCode(
+    data.relatedOrderCode !== undefined ? data.relatedOrderCode : existing.related_order_code,
+  );
+  const linkedOrder = relatedOrderCode
+    ? resolveOrderLink(relatedOrderCode, { expectedService: 'SPOTIFY', guildId: family?.guild_id })
+    : null;
   const joinedAt = isoDate(data.joinedAt ?? existing.joined_at, 'Ngày tham gia');
   const purchasedMonths = integer(data.purchasedMonths ?? existing.purchased_months, 1, 1, 120);
   const memberExpiryAt = data.memberExpiryAt !== undefined
@@ -334,7 +351,9 @@ export function updateSpotifyFamilyMember(familyId, memberId, data) {
   }
   const email = data.spotifyEmail === undefined
     ? existing.spotify_email
-    : data.spotifyEmail ? encrypt(clean(data.spotifyEmail, 200)) : null;
+    : clean(data.spotifyEmail, 200) || linkedOrder?.customerEmail
+      ? encrypt(clean(data.spotifyEmail, 200) || linkedOrder.customerEmail)
+      : null;
   const username = clean(data.spotifyUsername ?? existing.spotify_username, 120);
   if (!username) throw new Error('Thiếu username/profile Spotify.');
 
@@ -347,9 +366,9 @@ export function updateSpotifyFamilyMember(familyId, memberId, data) {
   `).run(
     username,
     email,
-    clean(data.customerName ?? existing.customer_name, 160),
-    clean(data.discordId ?? existing.discord_id, 30),
-    clean(data.relatedOrderCode ?? existing.related_order_code, 80),
+    clean(data.customerName ?? existing.customer_name, 160) || linkedOrder?.customerName,
+    clean(data.discordId ?? existing.discord_id, 30) || linkedOrder?.discordId,
+    relatedOrderCode,
     joinedAt,
     purchasedMonths,
     memberExpiryAt,
