@@ -245,9 +245,43 @@ export function rejectCtvApplication(guildId, applicationId, reviewerId) {
   }).immediate();
 }
 
-export function isCustomerCtv(guildId, customerId) {
+export function memberHasCtvRole(member, roleId) {
+  if (!member || !roleId) return false;
+  if (member.roles?.cache?.has) return member.roles.cache.has(String(roleId));
+  if (Array.isArray(member.roles)) return member.roles.map(String).includes(String(roleId));
+  return false;
+}
+
+export function isCustomerCtv(guildId, customerId, member = null) {
   const row = db.prepare('SELECT is_ctv FROM customer_profiles WHERE guild_id = ? AND customer_id = ?').get(guildId, customerId);
-  return row ? row.is_ctv === 1 : false;
+  if (row?.is_ctv === 1) return true;
+
+  const settings = getCtvSettings(guildId);
+  const cachedMember = member
+    || global.discordClient?.guilds?.cache?.get(String(guildId))?.members?.cache?.get(String(customerId))
+    || null;
+  if (!memberHasCtvRole(cachedMember, settings?.ctv_role_id)) return false;
+
+  // Role Discord cũng là nguồn dữ liệu hợp lệ. Trường hợp role được cấp thủ
+  // công vẫn phải nhận giá CTV và xuất hiện trong log đơn hàng.
+  setCustomerCtvStatus(guildId, customerId, true);
+  return true;
+}
+
+export async function resolveCustomerCtvStatus(guildId, customerId, client = global.discordClient) {
+  if (isCustomerCtv(guildId, customerId)) return true;
+  if (!client) return false;
+
+  let guild = client.guilds?.cache?.get(String(guildId)) || null;
+  if (!guild && client.guilds?.fetch) {
+    guild = await client.guilds.fetch(String(guildId)).catch(() => null);
+  }
+  if (!guild) return false;
+  let member = guild.members?.cache?.get(String(customerId)) || null;
+  if (!member && guild.members?.fetch) {
+    member = await guild.members.fetch(String(customerId)).catch(() => null);
+  }
+  return isCustomerCtv(guildId, customerId, member);
 }
 
 export function setCustomerCtvStatus(guildId, customerId, isCtv) {

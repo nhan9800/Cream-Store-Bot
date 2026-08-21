@@ -5,7 +5,7 @@ import {
   SeparatorSpacingSize,
   TextDisplayBuilder,
 } from 'discord.js';
-import { getCtvSettings, isCustomerCtv } from './ctvService.js';
+import { getCtvSettings, resolveCustomerCtvStatus } from './ctvService.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { formatCurrency, formatOrderDuration } from '../utils/formatters.js';
 import { accentFor } from '../utils/uiKit.js';
@@ -124,11 +124,11 @@ async function syncCtvOrderLogInternal(order, client) {
   if (!order?.order_code || !client) return null;
   const latestOrder = db.prepare('SELECT * FROM orders WHERE order_code = ?').get(order.order_code) || order;
   if (!latestOrder.guild_id || !latestOrder.customer_id) return null;
-  if (!isCustomerCtv(latestOrder.guild_id, latestOrder.customer_id)) return null;
 
   const guild = client.guilds.cache.get(latestOrder.guild_id)
     || await client.guilds.fetch(latestOrder.guild_id).catch(() => null);
   if (!guild) return null;
+  if (!await resolveCustomerCtvStatus(latestOrder.guild_id, latestOrder.customer_id, client)) return null;
   const settings = getCtvSettings(latestOrder.guild_id);
   const savedChannelId = latestOrder.ctv_order_log_channel_id;
   let channel = savedChannelId
@@ -178,13 +178,29 @@ export async function reconcileRecentCtvOrderLogs(client, guildId, { limit = 100
     ? await guild.channels.fetch(settings.order_log_channel_id).catch(() => null)
     : null;
   if (!channel?.isTextBased()) {
-    return { scanned: 0, linked: 0, updated: 0, missingOrders: 0 };
+    return {
+      scanned: 0,
+      linked: 0,
+      updated: 0,
+      missingOrders: 0,
+      eligibleOrders: 0,
+      backfilled: 0,
+      failed: 0,
+    };
   }
 
   const messages = await channel.messages.fetch({
     limit: Math.min(100, Math.max(1, Number(limit) || 100)),
   });
-  const result = { scanned: 0, linked: 0, updated: 0, missingOrders: 0 };
+  const result = {
+    scanned: 0,
+    linked: 0,
+    updated: 0,
+    missingOrders: 0,
+    eligibleOrders: 0,
+    backfilled: 0,
+    failed: 0,
+  };
   for (const message of messages.values()) {
     if (message.author?.id !== client.user?.id) continue;
     const text = [message.content || '', ...readComponentText(message.components)].join('\n');
@@ -203,6 +219,28 @@ export async function reconcileRecentCtvOrderLogs(client, guildId, { limit = 100
     if (ctvOrderLogNeedsSync(message, order)) {
       await message.edit(buildCtvOrderLogPayload(order));
       result.updated += 1;
+    }
+  }
+
+  // Sau khi liên kết các tin nhắn cũ, quét thêm đơn gần đây để khôi phục những
+  // đơn của thành viên có role CTV nhưng trước đó thiếu cờ is_ctv trong DB.
+  const recentOrders = db.prepare(`
+    SELECT *
+    FROM orders
+    WHERE guild_id = ?
+    ORDER BY id DESC
+    LIMIT ?
+  `).all(String(guildId), Math.min(100, Math.max(1, Number(limit) || 100)));
+  for (const order of recentOrders) {
+    try {
+      if (!await resolveCustomerCtvStatus(guildId, order.customer_id, client)) continue;
+      result.eligibleOrders += 1;
+      const hadReference = Boolean(order.ctv_order_log_channel_id && order.ctv_order_log_message_id);
+      const syncedMessage = await syncCtvOrderLog(order, client);
+      if (syncedMessage && !hadReference) result.backfilled += 1;
+    } catch (error) {
+      result.failed += 1;
+      console.error(`[CTV-ORDER-LOG] Không thể backfill ${order.order_code}:`, error);
     }
   }
   return result;

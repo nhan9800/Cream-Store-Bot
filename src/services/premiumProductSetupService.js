@@ -687,7 +687,7 @@ async function handlePremiumBuyOrder(interaction, productName, quantity, totalPr
       }).catch(e => console.error('[HUB] Lỗi upsertUser:', e.message));
     }
 
-    const isCtv = isCustomerCtv(interaction.guildId, interaction.user.id);
+    const isCtv = isCustomerCtv(interaction.guildId, interaction.user.id, interaction.member);
     const prefix = (productObj?.service_type || 'ticket').toLowerCase();
     
     if (isCtv) {

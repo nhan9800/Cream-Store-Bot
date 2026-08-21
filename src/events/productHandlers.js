@@ -145,7 +145,7 @@ export async function handleProductPurchaseFlow(interaction, productId) {
     return;
   }
 
-  const isCtv = isCustomerCtv(interaction.guildId, interaction.user.id);
+  const isCtv = isCustomerCtv(interaction.guildId, interaction.user.id, interaction.member);
   const unitPrice = (isCtv && product.ctv_price !== null) ? product.ctv_price : product.price;
   const totalPrice = unitPrice * quantity;
 
@@ -227,7 +227,7 @@ export async function handleProductPurchaseFlow(interaction, productId) {
         }).catch(e => console.error('[HUB] Lỗi upsertUser:', e.message));
       }
 
-      const isCtv = isCustomerCtv(interaction.guildId, interaction.user.id);
+      const isCtv = isCustomerCtv(interaction.guildId, interaction.user.id, interaction.member);
       const prefix = (product.service_type || 'ticket').toLowerCase();
       
       if (isCtv) {

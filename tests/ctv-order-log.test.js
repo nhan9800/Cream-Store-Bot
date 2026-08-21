@@ -4,6 +4,7 @@ import {
   ctvOrderLogNeedsSync,
   getCtvOrderDisplayState,
 } from '../src/services/ctvOrderLogService.js';
+import { memberHasCtvRole } from '../src/services/ctvService.js';
 
 const baseOrder = {
   order_code: 'CN_349871',
@@ -17,6 +18,13 @@ const baseOrder = {
 };
 
 describe('CTV order log synchronization', () => {
+  test('recognizes a member from the configured Discord role', () => {
+    const roleId = '1522844530242748446';
+    expect(memberHasCtvRole({ roles: { cache: new Map([[roleId, {}]]) } }, roleId)).toBe(true);
+    expect(memberHasCtvRole({ roles: [roleId] }, roleId)).toBe(true);
+    expect(memberHasCtvRole({ roles: { cache: new Map() } }, roleId)).toBe(false);
+  });
+
   test('shows paid and processing independently after payment confirmation', () => {
     const order = { ...baseOrder, payment_status: 'PAID', status: 'PROCESSING' };
     const state = getCtvOrderDisplayState(order);

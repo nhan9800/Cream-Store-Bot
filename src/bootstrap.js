@@ -99,7 +99,7 @@ export async function buildClient() {
       for (const guild of readyClient.guilds.cache.values()) {
         try {
           const ctvLogs = await reconcileRecentCtvOrderLogs(readyClient, guild.id);
-          console.log(`[CTV-ORDER-LOG] guild=${guild.id} scanned=${ctvLogs.scanned} linked=${ctvLogs.linked} updated=${ctvLogs.updated} missing=${ctvLogs.missingOrders}`);
+          console.log(`[CTV-ORDER-LOG] guild=${guild.id} scanned=${ctvLogs.scanned} linked=${ctvLogs.linked} updated=${ctvLogs.updated} eligible=${ctvLogs.eligibleOrders} backfilled=${ctvLogs.backfilled} failed=${ctvLogs.failed} missing=${ctvLogs.missingOrders}`);
         } catch (error) {
           console.error(`[CTV-ORDER-LOG] guild=${guild.id} reconciliation failed:`, error);
         }
