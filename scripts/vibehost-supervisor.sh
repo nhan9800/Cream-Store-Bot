@@ -196,6 +196,19 @@ if [[ "$APP_ROOT" != /* || "$APP_ROOT" == "/" ]]; then
 fi
 
 mkdir -p "$STATE_DIR"
+
+# VibeHost can overlap startup commands during a panel restart. Keep a
+# supervisor-level advisory lock where util-linux flock is available; the Node
+# launcher also owns an atomic PID lock as a portable second layer.
+if command -v flock >/dev/null 2>&1; then
+  SUPERVISOR_LOCK_FILE="${STATE_DIR}/supervisor.lock"
+  exec 9>"$SUPERVISOR_LOCK_FILE"
+  if ! flock -n 9; then
+    log "Another VibeHost supervisor is already active; duplicate startup stopped"
+    exit 0
+  fi
+fi
+
 cd "$APP_ROOT" || exit 1
 
 git config --global --add safe.directory "$APP_ROOT" >/dev/null 2>&1 || true
@@ -263,8 +276,13 @@ while [[ "$STOPPING" == false ]]; do
   fi
 
   if [[ "$UPDATE_REQUESTED" == false && -n "$BOT_PID" ]]; then
-    wait "$BOT_PID" 2>/dev/null || true
+    BOT_EXIT_CODE=0
+    wait "$BOT_PID" 2>/dev/null || BOT_EXIT_CODE=$?
     BOT_PID=""
+    if [[ "$BOT_EXIT_CODE" -eq 75 ]]; then
+      log "Launcher lock is owned by another active supervisor; stopping this duplicate supervisor"
+      exit 0
+    fi
     log "Bot exited; restarting after ${RESTART_DELAY_SECONDS}s"
   fi
 

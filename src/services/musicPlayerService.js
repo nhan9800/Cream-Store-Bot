@@ -41,6 +41,7 @@ let musicPlayer = null;
 let initializePromise = null;
 let runtimeError = null;
 let initializedAt = null;
+let daveProtocolVersion = null;
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, Number(value) || 0));
@@ -170,6 +171,8 @@ export function getMusicRuntimeStatus() {
     engine: 'Discord Player 7 · yt-dlp · FFmpeg',
     audioProfile: '48 kHz stereo · bitrate tự động theo phòng thoại',
     ffmpegAvailable: Boolean(ffmpegPath && fs.existsSync(ffmpegPath)),
+    daveAvailable: Number.isInteger(daveProtocolVersion),
+    daveProtocolVersion,
     error: runtimeError ? String(runtimeError.message || runtimeError) : null,
   };
 }
@@ -308,6 +311,12 @@ export async function initializeMusicPlayer(client) {
       if (!ffmpegPath || !fs.existsSync(ffmpegPath)) {
         throw new Error('Không tìm thấy FFmpeg runtime.');
       }
+      const daveyModule = await import('@snazzah/davey');
+      const davey = daveyModule.default || daveyModule;
+      if (!Number.isInteger(davey.DAVE_PROTOCOL_VERSION) || typeof davey.DAVESession !== 'function') {
+        throw new Error('Discord DAVE runtime không hợp lệ.');
+      }
+      daveProtocolVersion = davey.DAVE_PROTOCOL_VERSION;
       setExtractorFFmpegPath(ffmpegPath);
       const instance = new Player(client, {
         ffmpegPath,
@@ -338,7 +347,7 @@ export async function initializeMusicPlayer(client) {
       musicPlayer = instance;
       runtimeError = null;
       initializedAt = new Date().toISOString();
-      console.log(`[MUSIC] Cenar Music ready · FFmpeg=${ffmpegPath}`);
+      console.log(`[MUSIC] Cenar Music ready · DAVE=v${daveProtocolVersion} · FFmpeg=${ffmpegPath}`);
       return instance;
     } catch (error) {
       runtimeError = error;

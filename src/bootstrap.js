@@ -51,7 +51,18 @@ export async function buildClient() {
 
     startPresenceRotation(readyClient);
     startScheduler(readyClient);
-    startWebhookServer(readyClient);
+    try {
+      await startWebhookServer(readyClient);
+    } catch (error) {
+      // A port collision means another launcher/store process is already
+      // serving this instance. Staying logged in would create two Discord bot
+      // sessions with the same token, so fail this child fast and let the
+      // supervisor recover cleanly.
+      console.error(`[WEBHOOK] Không thể mở HTTP server trên cổng ${config.httpPort}:`, error);
+      readyClient.destroy();
+      setTimeout(() => process.exit(1), 50).unref();
+      return;
+    }
     startOtpAutoCheck(readyClient);
 
     // Store 2 is the international storefront. The migration is idempotent,

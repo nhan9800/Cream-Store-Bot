@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import path from 'path';
 import { timingSafeEqual } from 'node:crypto';
 import { resolveLauncherPorts } from './utils/ports.js';
+import { acquireProcessLock } from './utils/processLock.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -66,6 +67,21 @@ if (process.env.IS_CHILD_BOT === 'true') {
     console.error('[LAUNCHER] Error loading .env:', e.message);
   }
 
+  const launcherLockPath = process.env.CENAR_LAUNCHER_LOCK_FILE
+    || path.join(process.cwd(), '.vibehost', 'launcher.lock');
+  let releaseLauncherLock;
+  try {
+    releaseLauncherLock = acquireProcessLock(launcherLockPath);
+  } catch (error) {
+    if (error?.code === 'EALREADY') {
+      console.error(`[LAUNCHER] ${error.message}. Duplicate startup aborted before forking stores.`);
+      // EX_TEMPFAIL lets the VibeHost supervisor distinguish a duplicate
+      // launcher from a normal bot crash and stop the redundant supervisor.
+      process.exit(75);
+    }
+    throw error;
+  }
+
   const {
     publicPort: PORT,
     store1Port: STORE1_PORT,
@@ -109,14 +125,17 @@ if (process.env.IS_CHILD_BOT === 'true') {
     console.log('[LAUNCHER] SIGTERM received. Killing child processes...');
     child1.kill();
     child2.kill();
+    releaseLauncherLock();
     process.exit(0);
   });
   process.on('SIGINT', () => {
     console.log('[LAUNCHER] SIGINT received. Killing child processes...');
     child1.kill();
     child2.kill();
+    releaseLauncherLock();
     process.exit(0);
   });
+  process.on('exit', releaseLauncherLock);
 
   // Create reverse proxy server for webhooks and dashboard
   const server = http.createServer(async (req, res) => {
