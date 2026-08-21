@@ -16,6 +16,9 @@ describe('Store 1 channel aesthetic', () => {
     expect(new Set(emojis).size).toBe(emojis.length);
     for (const emoji of emojis) {
       expect(PROSETTINGS_EMOJI_INDEX[emoji]).toBeGreaterThanOrEqual(442);
+      const baseEmoji = [...emoji].filter((character) => character !== '\uFE0F').join('');
+      const hasNativeColorPresentation = /^\p{Emoji_Presentation}+$/u.test(baseEmoji);
+      expect(hasNativeColorPresentation || emoji.endsWith('\uFE0F')).toBe(true);
     }
   });
 
@@ -23,6 +26,6 @@ describe('Store 1 channel aesthetic', () => {
     expect(STORE_ONE_CHANNEL_NAMES.premiumCategory).toBe('💎 ｜ ──・ SẢN PHẨM PREMIUM');
     expect(STORE_ONE_CHANNEL_NAMES.partnerCategory).toBe('🔗 ｜ ──・ CENAR PARTNER');
     expect(STORE_ONE_CHANNEL_NAMES.ctvCategory).toBe('🐝 ｜ ──・ CENAR CTV');
-    expect(STORE_ONE_CHANNEL_NAMES.adminOrderCategory).toBe('🗂 ｜ ──・ QUẢN TRỊ ĐƠN HÀNG');
+    expect(STORE_ONE_CHANNEL_NAMES.adminOrderCategory).toBe('🗂️ ｜ ──・ QUẢN TRỊ ĐƠN HÀNG');
   });
 });
