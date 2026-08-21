@@ -22,12 +22,39 @@ if (process.env.IS_CHILD_BOT === 'true') {
   // --- CHILD PROCESS MODE ---
   // Import and run the actual bot bootstrap
   const { startBot } = await import('./bootstrap.js');
-  const { startWebhookServer } = await import('./services/webhookServer.js');
+  const { startWebhookServer, stopWebhookServer } = await import('./services/webhookServer.js');
   const { initDatabase } = await import('./database/db.js');
+  let activeClient = null;
+  let childStopping = false;
+
+  async function stopChild(signal) {
+    if (childStopping) return;
+    childStopping = true;
+    console.log(`[BOOT] [${process.env.ENV_FILE}] ${signal} received; closing Discord and HTTP server...`);
+
+    // Do not let an open WebSocket/HTTP keepalive block a deploy forever.
+    const forceExit = setTimeout(() => {
+      console.error(`[BOOT] [${process.env.ENV_FILE}] Graceful shutdown timed out; forcing exit.`);
+      process.exit(0);
+    }, 4_000);
+    forceExit.unref();
+
+    try {
+      activeClient?.destroy();
+      await stopWebhookServer();
+    } catch (error) {
+      console.error(`[BOOT] [${process.env.ENV_FILE}] Shutdown warning:`, error?.message || error);
+    }
+    clearTimeout(forceExit);
+    process.exit(0);
+  }
+
+  process.once('SIGTERM', () => void stopChild('SIGTERM'));
+  process.once('SIGINT', () => void stopChild('SIGINT'));
 
   async function main() {
     try {
-      await startBot();
+      activeClient = await startBot();
     } catch (error) {
       // Log lỗi thật để debug
       console.error(`[BOOT] [${process.env.ENV_FILE}] Lỗi khởi động:`, error.code, error.message);
@@ -120,21 +147,41 @@ if (process.env.IS_CHILD_BOT === 'true') {
     console.log(`[LAUNCHER] Store 2 exited with code ${code} and signal ${signal}`);
   });
 
-  // Handle process shutdown
-  process.on('SIGTERM', () => {
-    console.log('[LAUNCHER] SIGTERM received. Killing child processes...');
-    child1.kill();
-    child2.kill();
+  let launcherStopping = false;
+
+  function waitForChildExit(child, timeoutMs) {
+    if (!child || child.exitCode != null || child.signalCode != null) return Promise.resolve(true);
+    return Promise.race([
+      new Promise((resolve) => child.once('exit', () => resolve(true))),
+      new Promise((resolve) => setTimeout(() => resolve(false), timeoutMs)),
+    ]);
+  }
+
+  async function terminateChild(child, label) {
+    if (!child || child.exitCode != null || child.signalCode != null) return;
+    child.kill('SIGTERM');
+    if (await waitForChildExit(child, 5_000)) return;
+    console.warn(`[LAUNCHER] ${label} ignored SIGTERM; sending SIGKILL to PID ${child.pid}`);
+    child.kill('SIGKILL');
+    await waitForChildExit(child, 2_000);
+  }
+
+  async function shutdownLauncher(signal) {
+    if (launcherStopping) return;
+    launcherStopping = true;
+    console.log(`[LAUNCHER] ${signal} received. Stopping child processes...`);
+    await Promise.allSettled([
+      terminateChild(child1, 'Store 1'),
+      terminateChild(child2, 'Store 2'),
+    ]);
     releaseLauncherLock();
     process.exit(0);
-  });
-  process.on('SIGINT', () => {
-    console.log('[LAUNCHER] SIGINT received. Killing child processes...');
-    child1.kill();
-    child2.kill();
-    releaseLauncherLock();
-    process.exit(0);
-  });
+  }
+
+  // Handle process shutdown and wait until both internal HTTP ports are free
+  // before the supervisor installs/starts the next revision.
+  process.once('SIGTERM', () => void shutdownLauncher('SIGTERM'));
+  process.once('SIGINT', () => void shutdownLauncher('SIGINT'));
   process.on('exit', releaseLauncherLock);
 
   // Create reverse proxy server for webhooks and dashboard
