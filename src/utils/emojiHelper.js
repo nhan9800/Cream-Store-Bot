@@ -94,8 +94,8 @@ const fallbackEmojis = {
 
   // Brands
   brand_netflix:      '<:cenar_price_netflix:1535910620828803113>',
-  brand_spotify:      '<:spotify:1459181297288220704>',
-  brand_youtube:      '<:youtube:1373734824342327297>',
+  brand_spotify:      '<:cenar_spotify:1535690966911025262>',
+  brand_youtube:      '<:cenar_youtube:1535691301343858739>',
   brand_chatgpt:      '<:cenar_price_chatgpt:1535910616748007464>',
   brand_nitro:        '<:cenar_price_nitro:1535910618782240768>',
   brand_boost:        '<:boost:1327543332171284532>',

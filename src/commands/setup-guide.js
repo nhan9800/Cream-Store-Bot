@@ -15,6 +15,7 @@ export const data = new SlashCommandBuilder()
 const GUIDE_CHANNELS = [
   {
     key: 'nitro',
+    emojiSlot: 'brand_nitro',
     name: STORE_ONE_CHANNEL_NAMES.nitroGuide,
     topic: 'Hướng dẫn mua và sử dụng Discord Nitro & Server Boost',
     content: [
@@ -37,6 +38,7 @@ const GUIDE_CHANNELS = [
   },
   {
     key: 'youtube',
+    emojiSlot: 'brand_youtube',
     name: STORE_ONE_CHANNEL_NAMES.youtubeGuide,
     topic: 'Hướng dẫn mua và sử dụng YouTube Premium',
     content: [
@@ -59,6 +61,7 @@ const GUIDE_CHANNELS = [
   },
   {
     key: 'spotify',
+    emojiSlot: 'brand_spotify',
     name: STORE_ONE_CHANNEL_NAMES.spotifyGuide,
     topic: 'Hướng dẫn mua và sử dụng Spotify Premium',
     content: [
@@ -81,6 +84,7 @@ const GUIDE_CHANNELS = [
   },
   {
     key: 'netflix',
+    emojiSlot: 'brand_netflix',
     name: STORE_ONE_CHANNEL_NAMES.netflixGuide,
     topic: 'Hướng dẫn mua và sử dụng Netflix Premium',
     content: [
@@ -102,6 +106,20 @@ const GUIDE_CHANNELS = [
     ],
   },
 ];
+
+export function buildGuideContent(channelConfig, emojiResolver) {
+  const lines = [...channelConfig.content];
+  const brandEmoji = channelConfig.emojiSlot
+    ? emojiResolver(channelConfig.emojiSlot)
+    : '';
+
+  if (brandEmoji && lines[0]?.startsWith('## ')) {
+    const title = lines[0].slice(3);
+    lines[0] = `## ${brandEmoji} ${title} ${brandEmoji}`;
+  }
+
+  return lines.join('\n');
+}
 
 export async function execute(interaction) {
   const E = createEmojiResolver(interaction.guildId);
@@ -174,7 +192,7 @@ export async function execute(interaction) {
       // Gửi nội dung hướng dẫn vào kênh
       const contentContainer = new ContainerBuilder().setAccentColor(0x7C3AED);
       contentContainer.addTextDisplayComponents(
-        new TextDisplayBuilder().setContent(ch.content.join('\n'))
+        new TextDisplayBuilder().setContent(buildGuideContent(ch, E))
       );
       contentContainer.addSeparatorComponents(
         new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
