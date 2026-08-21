@@ -24,7 +24,7 @@ describe('Store 1 channel aesthetic', () => {
 
   test('keeps bot-managed workspaces on the shared naming source', () => {
     expect(STORE_ONE_CHANNEL_NAMES.premiumCategory).toBe('💎 ｜ ──・ SẢN PHẨM PREMIUM');
-    expect(STORE_ONE_CHANNEL_NAMES.partnerCategory).toBe('🔗 ｜ ──・ CENAR PARTNER');
+    expect(STORE_ONE_CHANNEL_NAMES.partnerCategory).toBe('🦄 ｜ ──・ CENAR PARTNER');
     expect(STORE_ONE_CHANNEL_NAMES.ctvCategory).toBe('🐝 ｜ ──・ CENAR CTV');
     expect(STORE_ONE_CHANNEL_NAMES.adminOrderCategory).toBe('🐙 ｜ ──・ QUẢN TRỊ ĐƠN HÀNG');
   });
@@ -33,6 +33,7 @@ describe('Store 1 channel aesthetic', () => {
     const mutedSymbols = new Set([
       '🛰️', '🗂️', '🛠️', '🎖️', '🗃️', '🕰️', '🎟️', '🖥️',
       '🕸️', '🎧', '🎞️', '⚙️', '⌨️', '🖼️', '🎙️', '🛡️',
+      '🔊', '🔗', '🗺️', '🦅', '🧷',
     ]);
     const emojis = Object.values(STORE_ONE_CHANNEL_DESIGN).map(channelLeadingEmoji);
 
