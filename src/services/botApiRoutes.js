@@ -42,6 +42,12 @@ import {
 } from './supportIdentity.js';
 import fs from 'node:fs';
 import path from 'node:path';
+import {
+    createQuestRequest,
+    getQuestRequest,
+    listCustomerQuestRequests,
+    listQuestPlans,
+} from './questService.js';
 
 let storeInviteCache = { url: '', expiresAt: 0 };
 const websiteSupportProvisioning = new Map();
@@ -808,6 +814,74 @@ export function registerBotApiRoutes(app) {
         }
     });
 
+
+    // ── QUEST ASSIST — OAuth Discord, không thu token tài khoản ──────────
+    app.get('/api/bot/quest-service/plans', (req, res) => {
+        try {
+            return res.json({ ok: true, data: listQuestPlans() });
+        } catch (error) {
+            console.error('[QUEST-SERVICE] List plans failed:', error);
+            return res.status(500).json({ ok: false, error: 'Không thể tải bảng giá Quest lúc này.' });
+        }
+    });
+
+    app.get('/api/bot/quest-service/requests', (req, res) => {
+        try {
+            const discordId = String(req.header('x-discord-id') || '').trim();
+            if (!/^\d{15,22}$/.test(discordId)) {
+                return res.status(401).json({ ok: false, error: 'Vui lòng đăng nhập và liên kết Discord.' });
+            }
+            return res.json({ ok: true, data: listCustomerQuestRequests(discordId) });
+        } catch (error) {
+            console.error('[QUEST-SERVICE] List customer requests failed:', error);
+            return res.status(400).json({ ok: false, error: String(error?.message || 'Không thể tải yêu cầu Quest.') });
+        }
+    });
+
+    app.get('/api/bot/quest-service/requests/:id', (req, res) => {
+        try {
+            const discordId = String(req.header('x-discord-id') || '').trim();
+            if (!/^\d{15,22}$/.test(discordId)) {
+                return res.status(401).json({ ok: false, error: 'Vui lòng đăng nhập và liên kết Discord.' });
+            }
+            const request = getQuestRequest(req.params.id, { customerDiscordId: discordId });
+            if (!request) return res.status(404).json({ ok: false, error: 'Không tìm thấy yêu cầu Quest.' });
+            return res.json({ ok: true, data: request });
+        } catch (error) {
+            console.error('[QUEST-SERVICE] Read customer request failed:', error);
+            return res.status(400).json({ ok: false, error: String(error?.message || 'Không thể tải yêu cầu Quest.') });
+        }
+    });
+
+    app.post('/api/bot/quest-service/requests', (req, res) => {
+        try {
+            const discordId = String(req.header('x-discord-id') || '').trim();
+            const webUserId = String(req.header('x-user-id') || '').trim();
+            if (!/^\d{15,22}$/.test(discordId) || !webUserId) {
+                return res.status(401).json({ ok: false, error: 'Vui lòng đăng nhập và liên kết Discord.' });
+            }
+            const webUser = db.prepare('SELECT discord_username FROM web_users WHERE id = ? AND discord_id = ?').get(webUserId, discordId);
+            if (!webUser) return res.status(403).json({ ok: false, error: 'Liên kết Discord không khớp tài khoản website.' });
+            const request = createQuestRequest({
+                clientRequestId: req.body?.clientRequestId,
+                webUserId,
+                discordId,
+                discordUsername: webUser.discord_username,
+                planCode: req.body?.planCode,
+                questName: req.body?.questName,
+                gameName: req.body?.gameName,
+                rewardName: req.body?.rewardName,
+                region: req.body?.region,
+                questDeadlineAt: req.body?.questDeadlineAt,
+                customerNote: req.body?.customerNote,
+                relatedOrderCode: req.body?.relatedOrderCode,
+            });
+            return res.status(201).json({ ok: true, data: request });
+        } catch (error) {
+            console.error('[QUEST-SERVICE] Create request failed:', error);
+            return res.status(400).json({ ok: false, error: String(error?.message || 'Không thể tạo yêu cầu Quest.') });
+        }
+    });
 
     // ── PRODUCTS — bảng giá sản phẩm bot bán ───────────────
     app.get('/api/bot/products', (req, res) => {

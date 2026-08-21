@@ -55,6 +55,14 @@ import {
   playYoutube,
   updateMusicSettings,
 } from './musicPlayerService.js';
+import {
+  getQuestRequest,
+  getQuestStats,
+  listQuestPlans,
+  listQuestRequests,
+  updateQuestProgress,
+  updateQuestRequestStatus,
+} from './questService.js';
 
 function catalogKey(value) {
   return String(value || '')
@@ -1607,6 +1615,95 @@ const fetchWithTimeout = (promise, ms) => {
     } catch (error) {
       console.error('[ADMIN-MUSIC-SETTINGS]', error);
       return res.status(400).json({ ok: false, error: String(error?.message || 'Không thể lưu cấu hình Music.') });
+    }
+  });
+
+  // ==== QUEST ASSIST — hàng đợi duyệt thủ công, tiến độ đồng bộ web + bot ====
+  app.get('/api/bot/admin/quest-service', requireAdminRole, (req, res) => {
+    try {
+      return res.json({
+        ok: true,
+        data: {
+          requests: listQuestRequests({
+            status: sanitizeString(req.query?.status, 30),
+            query: sanitizeString(req.query?.q, 100),
+            limit: sanitizePositiveInt(req.query?.limit, 100),
+          }),
+          plans: listQuestPlans({ includeInactive: true }),
+          stats: getQuestStats(),
+        },
+      });
+    } catch (error) {
+      console.error('[ADMIN-QUEST-SERVICE]', error);
+      return res.status(400).json({ ok: false, error: String(error?.message || 'Không thể tải hàng đợi Quest.') });
+    }
+  });
+
+  app.get('/api/bot/admin/quest-service/:id', requireAdminRole, (req, res) => {
+    try {
+      const request = getQuestRequest(req.params.id);
+      if (!request) return res.status(404).json({ ok: false, error: 'Không tìm thấy yêu cầu Quest.' });
+      return res.json({ ok: true, data: request });
+    } catch (error) {
+      console.error('[ADMIN-QUEST-SERVICE]', error);
+      return res.status(400).json({ ok: false, error: String(error?.message || 'Không thể tải yêu cầu Quest.') });
+    }
+  });
+
+  app.post('/api/bot/admin/quest-service/:id/action', requireAdminRole, async (req, res) => {
+    try {
+      const action = sanitizeString(req.body?.action, 30).toLowerCase();
+      const actorId = sanitizeString(req.header('x-discord-id') || req.header('x-user-id') || 'WEB_ADMIN', 128);
+      const request = action === 'progress'
+        ? updateQuestProgress(req.params.id, {
+            progressPercent: req.body?.progressPercent,
+            currentStep: req.body?.currentStep,
+            detail: req.body?.detail,
+          }, actorId)
+        : updateQuestRequestStatus(req.params.id, {
+            status: {
+              approve: 'APPROVED',
+              start: 'IN_PROGRESS',
+              waiting_customer: 'WAITING_CUSTOMER',
+              complete: 'COMPLETED',
+              reject: 'REJECTED',
+            }[action],
+            progressPercent: req.body?.progressPercent,
+            currentStep: req.body?.currentStep,
+            detail: req.body?.detail,
+            rejectionReason: req.body?.reason,
+          }, actorId);
+
+      const client = req.app.locals.discordClient;
+      const user = /^\d{15,22}$/.test(request.discordId)
+        ? await client?.users.fetch(request.discordId).catch(() => null)
+        : null;
+      if (user) {
+        const statusLabels = {
+          PENDING_REVIEW: 'Đang chờ duyệt',
+          APPROVED: 'Đã duyệt',
+          IN_PROGRESS: 'Đang tiến hành',
+          WAITING_CUSTOMER: 'Cần bổ sung thông tin',
+          COMPLETED: 'Đã hoàn tất',
+          REJECTED: 'Không thể tiếp nhận',
+        };
+        await user.send({
+          content: [
+            `✨ **Cenar Quest · ${request.requestCode}**`,
+            `Trạng thái: **${statusLabels[request.status] || request.status}** · Tiến độ **${request.progressPercent}%**`,
+            `Bước hiện tại: ${request.currentStep}`,
+            request.rejectionReason ? `Lý do: ${request.rejectionReason}` : '',
+            `Theo dõi chi tiết: ${String(config.storeWebsiteUrl || 'https://cenarstore.xyz').replace(/\/$/, '')}/quest`,
+            '-# Cenar không yêu cầu token hoặc mật khẩu Discord.',
+          ].filter(Boolean).join('\n'),
+        }).catch(() => null);
+      }
+
+      return res.json({ ok: true, data: request });
+    } catch (error) {
+      console.error('[ADMIN-QUEST-SERVICE]', error);
+      const message = String(error?.message || 'Không thể cập nhật yêu cầu Quest.');
+      return res.status(/không tìm thấy|không hợp lệ|vui lòng|đã kết thúc|chỉ yêu cầu/i.test(message) ? 400 : 500).json({ ok: false, error: message });
     }
   });
 

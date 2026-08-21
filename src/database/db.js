@@ -629,6 +629,70 @@ export function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_youtube_renewal_events_membership
       ON youtube_renewal_events (membership_id, created_at DESC);
 
+    CREATE TABLE IF NOT EXISTS quest_service_plans (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      code TEXT UNIQUE NOT NULL,
+      name TEXT NOT NULL,
+      description TEXT,
+      price INTEGER NOT NULL,
+      regions_json TEXT NOT NULL DEFAULT '[]',
+      estimated_days INTEGER NOT NULL DEFAULT 3,
+      sort_order INTEGER NOT NULL DEFAULT 0,
+      is_active INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS quest_service_requests (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      request_code TEXT UNIQUE NOT NULL,
+      client_request_id TEXT UNIQUE,
+      guild_id TEXT NOT NULL,
+      web_user_id TEXT,
+      discord_id TEXT NOT NULL,
+      discord_username TEXT,
+      plan_code TEXT NOT NULL,
+      quoted_price INTEGER NOT NULL,
+      quest_name TEXT NOT NULL,
+      game_name TEXT,
+      reward_name TEXT,
+      region TEXT,
+      quest_deadline_at TEXT,
+      customer_note TEXT,
+      related_order_code TEXT,
+      status TEXT NOT NULL DEFAULT 'PENDING_REVIEW',
+      progress_percent INTEGER NOT NULL DEFAULT 0,
+      current_step TEXT NOT NULL DEFAULT 'Đã tiếp nhận yêu cầu',
+      rejection_reason TEXT,
+      reviewed_by TEXT,
+      reviewed_at TEXT,
+      started_at TEXT,
+      completed_at TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (plan_code) REFERENCES quest_service_plans(code) ON UPDATE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS quest_service_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      request_id INTEGER NOT NULL,
+      event_type TEXT NOT NULL,
+      title TEXT NOT NULL,
+      detail TEXT,
+      progress_percent INTEGER,
+      actor_id TEXT,
+      customer_visible INTEGER NOT NULL DEFAULT 1,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY (request_id) REFERENCES quest_service_requests(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_quest_service_requests_customer
+      ON quest_service_requests (discord_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_quest_service_requests_queue
+      ON quest_service_requests (status, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_quest_service_events_request
+      ON quest_service_events (request_id, created_at ASC);
+
     CREATE TABLE IF NOT EXISTS web_users (
       id TEXT PRIMARY KEY,
       email TEXT UNIQUE NOT NULL,
@@ -1408,6 +1472,8 @@ export function initDatabase() {
     })();
     console.log(`[DB-MIGRATION] Đã mã hóa ${legacyOauthRows.length} bản ghi OAuth recovery legacy.`);
   }
+
+  db.pragma('optimize');
 
 }
 
