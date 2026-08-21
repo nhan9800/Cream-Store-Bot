@@ -269,7 +269,14 @@ function schedulePanelRefresh(guildId) {
 function wirePlayerEvents(player) {
   player.events.on(GuildQueueEvent.PlayerStart, (queue, track) => {
     saveTrackStart(queue, track);
-    queue.node.setBitrate('auto');
+    // The Opus encoder is guaranteed only after PlayerStart. Calling this
+    // immediately after player.play() can race the voice handshake and throw
+    // applyEncoderCTL on a null encoder.
+    try {
+      queue.node.setBitrate('auto');
+    } catch (error) {
+      console.warn(`[MUSIC] Không thể tối ưu bitrate cho ${queue.guild.name}; giữ bitrate mặc định:`, error?.message || error);
+    }
     schedulePanelRefresh(queue.guild.id);
   });
   player.events.on(GuildQueueEvent.PlayerFinish, (queue, track) => {
@@ -397,7 +404,6 @@ export async function playYoutube({ guild, voiceChannel, url, requestedBy = null
     requestedById: requestedBy?.id || null,
     requestedByLabel: requestedBy?.username || requestedByLabel,
   });
-  result.queue.node.setBitrate('auto');
   schedulePanelRefresh(guild.id);
   return { track: serializeTrack(result.track), state: getMusicState(guild.id) };
 }
