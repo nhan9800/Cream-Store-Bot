@@ -34,6 +34,7 @@ const YOUTUBE_HOSTS = new Set([
   'www.youtube-nocookie.com',
 ]);
 const VOLUME_STEPS = ['20', '40', '60', '80', '100'];
+const DAVE_HANDSHAKE_TIMEOUT_MS = 8_000;
 const panelMessages = new Map();
 const refreshTimers = new Map();
 
@@ -62,6 +63,42 @@ function formatDuration(milliseconds) {
   return hours > 0
     ? `${hours}:${String(minutes).padStart(2, '0')}:${String(seconds).padStart(2, '0')}`
     : `${minutes}:${String(seconds).padStart(2, '0')}`;
+}
+
+function resolveDaveState(queue) {
+  const voiceConnection = queue?.dispatcher?.voiceConnection;
+  const voiceState = voiceConnection?.state;
+  const networkingState = voiceState?.networking?.state;
+  return {
+    voiceStatus: voiceState?.status || null,
+    dave: networkingState?.dave || null,
+  };
+}
+
+export function isDaveVoiceReady(queue) {
+  const { voiceStatus, dave } = resolveDaveState(queue);
+  if (voiceStatus !== 'ready') return false;
+  // Stage channels and voice servers that negotiate protocol v0 can be ready
+  // without a DAVE session. When DAVE exists, wait for the initial MLS
+  // commit/welcome to set lastTransitionId (0 is a valid transition id).
+  if (!dave) return true;
+  return Number.isInteger(dave.lastTransitionId) && !dave.reinitializing;
+}
+
+export async function waitForDaveVoiceReady(queue, {
+  timeoutMs = DAVE_HANDSHAKE_TIMEOUT_MS,
+  pollMs = 50,
+} = {}) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const { voiceStatus } = resolveDaveState(queue);
+    if (voiceStatus === 'destroyed' || voiceStatus === 'disconnected') {
+      throw new Error('Kết nối phòng thoại đã đóng trước khi phiên mã hoá DAVE sẵn sàng.');
+    }
+    if (isDaveVoiceReady(queue)) return Date.now() - startedAt;
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+  }
+  throw new Error('Discord DAVE/MLS chưa sẵn sàng sau 8 giây; đã chặn phát sớm để tránh mất bài.');
 }
 
 function readSettings(guildId) {
@@ -392,6 +429,9 @@ export async function playYoutube({ guild, voiceChannel, url, requestedBy = null
   }
   const result = await player.play(voiceChannel, normalizedUrl, {
     requestedBy: requestedBy || undefined,
+    connectionOptions: {
+      daveEncryption: true,
+    },
     nodeOptions: {
       volume: settings.defaultVolume,
       maxSize: settings.maxQueueSize,
@@ -404,6 +444,16 @@ export async function playYoutube({ guild, voiceChannel, url, requestedBy = null
       leaveOnStop: true,
       leaveOnStopCooldown: 5_000,
       metadata: { textChannelId, requestedByLabel },
+      // discord-player 7.2.0 may start consuming the audio resource before
+      // Discord has processed the initial DAVE MLS commit. The stream then
+      // reaches Idle at 0s and disappears from the dashboard. Holding the
+      // extracted stream here keeps yt-dlp back-pressured until encryption is
+      // genuinely ready, without consuming or recreating the audio stream.
+      onStreamExtracted: async (stream, track, queue) => {
+        const waitedMs = await waitForDaveVoiceReady(queue);
+        console.log(`[MUSIC] DAVE ready in ${waitedMs}ms; starting ${track?.title || track?.url || 'track'}`);
+        return stream;
+      },
     },
   });
   result.track.setMetadata({
