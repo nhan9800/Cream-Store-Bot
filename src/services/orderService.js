@@ -8,7 +8,7 @@ import { broadcastDashboardEvent } from './dashboardMiniServer.js';
 import { encrypt } from '../utils/crypto.js';
 import { awardOrderPoints, refundOrderPoints } from './loyaltyService.js';
 import { recordStatusChange } from './orderStateMachine.js';
-import { sendCtvOrderLog } from './ctvOrderLogService.js';
+import { syncCtvOrderLog } from './ctvOrderLogService.js';
 import { scheduleAdminOrderCenterRefresh } from './adminOrderCenterService.js';
 
 function createOrderStmt() {
@@ -84,6 +84,15 @@ function detectServiceType(name) {
   return 'other';
 }
 
+function scheduleCtvOrderLogSync(order) {
+  if (!order?.order_code) return;
+  queueMicrotask(() => {
+    syncCtvOrderLog(order).catch((error) => {
+      console.error(`[CTV-ORDER-LOG] ${order.order_code}: ${error.message}`);
+    });
+  });
+}
+
 export function createOrder({ guildId, ticketId, ticketChannelId, customerId, productName, quantity, note, totalAmount = 0, durationMonths = config.defaultOrderDurationMonths, durationDays = null, orderLogChannelId, createdById, orderCode, discordSkuId = null, discordProductUrl = null, discordOriginalPrice = null, discordNitroEligible = false }) {
   const timestamp = nowIso();
   const safeAmount = ensureAmountValue(totalAmount);
@@ -112,12 +121,8 @@ export function createOrder({ guildId, ticketId, ticketChannelId, customerId, pr
   transaction();
   broadcastDashboardEvent('order_update', `Đơn hàng mới: ${finalOrderCode}`);
   const createdOrder = getOrderById(Number(resultId));
-  queueMicrotask(() => {
-    sendCtvOrderLog(createdOrder).catch((error) => {
-      console.error(`[CTV-ORDER-LOG] ${createdOrder.order_code}: ${error.message}`);
-    });
-    scheduleAdminOrderCenterRefresh(createdOrder.guild_id);
-  });
+  scheduleCtvOrderLogSync(createdOrder);
+  scheduleAdminOrderCenterRefresh(createdOrder.guild_id);
   return createdOrder;
 }
 
@@ -149,6 +154,7 @@ export function markOrderCompleted(orderCode, completedById, timeoutHours = conf
     recordStatusChange(db, { orderCode, previousStatus: order.status, newStatus: updated.status, changedBy: completedById || 'SYSTEM', reason: 'Order completed and delivered' });
   }
   syncCustomerStats(updated.guild_id, updated.customer_id);
+  scheduleCtvOrderLogSync(updated);
 
   // Tích lũy điểm khi đơn hàng hoàn thành
   if (updated && updated.guild_id !== 'WEB' && updated.customer_id !== 'WEB') {
@@ -189,6 +195,7 @@ export function cancelOrder(orderCode, reason = null){
 
   const updated=getOrderByCode(orderCode); 
   syncCustomerStats(updated.guild_id, updated.customer_id); 
+  scheduleCtvOrderLogSync(updated);
   scheduleAdminOrderCenterRefresh(updated.guild_id);
   return updated;
 }
@@ -256,6 +263,7 @@ export function markOrderPaid(orderCode,{amountPaid,transactionId,transactionCon
     recordStatusChange(db, { orderCode, previousStatus: order.status, newStatus: updated.status, changedBy: 'SYSTEM_PAYOS', reason: transactionContent || 'Payment confirmed' });
   }
   syncCustomerStats(updated.guild_id, updated.customer_id);
+  scheduleCtvOrderLogSync(updated);
   scheduleAdminOrderCenterRefresh(updated.guild_id);
   broadcastDashboardEvent('order_update');
   return updated;
@@ -365,6 +373,7 @@ export function payOrderWithWallet({ orderCode, guildId, customerId, amount }) {
   })();
 
   syncCustomerStats(guildId, customerId);
+  scheduleCtvOrderLogSync(result.order);
   scheduleAdminOrderCenterRefresh(guildId);
   broadcastDashboardEvent('order_update', `Đã thanh toán ví: ${orderCode}`);
   return result;
@@ -473,6 +482,7 @@ export function setOrderStatus(orderCode,status){
     recordStatusChange(db, { orderCode, previousStatus: order.status, newStatus: updated.status, changedBy: 'SYSTEM', reason: 'setOrderStatus' });
   }
   syncCustomerStats(updated.guild_id, updated.customer_id); 
+  scheduleCtvOrderLogSync(updated);
   scheduleAdminOrderCenterRefresh(updated.guild_id);
   
   // Tích luỹ điểm thưởng khi đơn hàng chuyển sang trạng thái COMPLETED
@@ -506,6 +516,7 @@ export function completeWarranty(orderCode, completedById){
   })();
   const updated = getOrderByCode(orderCode);
   if (result.changes > 0) {
+    scheduleCtvOrderLogSync(updated);
     try { syncCustomerStats(updated.guild_id, updated.customer_id); }
     catch (error) { console.error('[WARRANTY] Customer stats sync failed:', error.message); }
     try { broadcastDashboardEvent('order_update', `Warranty completed: ${orderCode}`); }

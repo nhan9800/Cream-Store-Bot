@@ -95,6 +95,16 @@ export async function buildClient() {
       const { autoSetupPartnerAndCtv } = await import('./services/autoSetupService.js');
       await autoSetupPartnerAndCtv(readyClient);
 
+      const { reconcileRecentCtvOrderLogs } = await import('./services/ctvOrderLogService.js');
+      for (const guild of readyClient.guilds.cache.values()) {
+        try {
+          const ctvLogs = await reconcileRecentCtvOrderLogs(readyClient, guild.id);
+          console.log(`[CTV-ORDER-LOG] guild=${guild.id} scanned=${ctvLogs.scanned} linked=${ctvLogs.linked} updated=${ctvLogs.updated} missing=${ctvLogs.missingOrders}`);
+        } catch (error) {
+          console.error(`[CTV-ORDER-LOG] guild=${guild.id} reconciliation failed:`, error);
+        }
+      }
+
       const { autoSetupCardChannel } = await import('./services/autoSetupCardService.js');
       await autoSetupCardChannel(readyClient);
 

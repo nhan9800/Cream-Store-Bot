@@ -157,6 +157,8 @@ export function initDatabase() {
       claimed_at TEXT,
       order_log_channel_id TEXT NOT NULL,
       order_log_message_id TEXT,
+      ctv_order_log_channel_id TEXT,
+      ctv_order_log_message_id TEXT,
       payment_message_id TEXT,
       created_by_id TEXT NOT NULL,
       paid_at TEXT,
@@ -847,6 +849,8 @@ export function initDatabase() {
   ensureColumn('orders', 'payment_qr_text', 'TEXT');
   ensureColumn('orders', 'payment_status', "TEXT NOT NULL DEFAULT 'UNPAID'");
   ensureColumn('orders', 'payment_message_id', 'TEXT');
+  ensureColumn('orders', 'ctv_order_log_channel_id', 'TEXT');
+  ensureColumn('orders', 'ctv_order_log_message_id', 'TEXT');
   ensureColumn('orders', 'payment_expired_at', 'TEXT');
   ensureColumn('orders', 'payment_cancel_reason', 'TEXT');
   ensureColumn('orders', 'paid_at', 'TEXT');

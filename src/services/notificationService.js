@@ -18,8 +18,12 @@ import {
   buildOrderCancelledCustomerV2,
 } from '../utils/embeds.js';
 import { formatCurrency, buildOrderLogContent } from '../utils/formatters.js';
+import { syncCtvOrderLog } from './ctvOrderLogService.js';
 
 export async function updateOrderLogMessage(guild, order) {
+  await syncCtvOrderLog(order, guild?.client).catch((error) => {
+    console.error(`[CTV-ORDER-LOG] Không thể đồng bộ ${order?.order_code}: ${error.message}`);
+  });
   const orderLogChannel = await guild.channels.fetch(order.order_log_channel_id).catch(() => null);
   if (!orderLogChannel?.isTextBased() || !order.order_log_message_id) return;
 
