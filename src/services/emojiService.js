@@ -79,6 +79,21 @@ export const EMOJI_SLOTS = {
   promo_decor:        { label: 'Decor / Frames khuyến mãi', default: '' },
   promo_legend:       { label: 'Quà Tặng Huyền Thoại', default: '' },
 
+  // Cenar Music · custom controls (resolve về emoji thật trong guild)
+  music_wave:         { label: 'Cenar Music',           default: '' },
+  music_now:          { label: 'Đang phát',             default: '' },
+  music_add:          { label: 'Thêm bài',              default: '' },
+  music_play:         { label: 'Phát nhạc',             default: '' },
+  music_pause:        { label: 'Tạm dừng',              default: '' },
+  music_skip:         { label: 'Chuyển bài',            default: '' },
+  music_stop:         { label: 'Dừng nhạc',             default: '' },
+  music_loop:         { label: 'Lặp bài',               default: '' },
+  music_shuffle:      { label: 'Trộn hàng đợi',         default: '' },
+  music_queue:        { label: 'Hàng đợi nhạc',         default: '' },
+  music_volume:       { label: 'Âm lượng',              default: '' },
+  music_refresh:      { label: 'Làm mới player',        default: '' },
+  music_disconnect:   { label: 'Rời phòng thoại',      default: '' },
+
   // Status
   status_check:       { label: 'Tích xanh',            default: '✅' },
   status_cross:       { label: 'Dấu X',                default: '❌' },
@@ -235,6 +250,19 @@ export const SLOT_ALIASES = {
   promo_netflix: ['cenar_promo_netflix', 'promo_netflix'],
   promo_decor: ['cenar_promo_decor', 'promo_decor'],
   promo_legend: ['cenar_promo_legend', 'promo_legend'],
+  music_wave: ['cenar_music_wave', 'spotify', 'cenar_spotify'],
+  music_now: ['cenar_music_now', 'youtube', 'cenar_youtube'],
+  music_add: ['cenar_music_add', 'cenar_verified'],
+  music_play: ['cenar_music_playpause', 'cenar_music_play', 'tickgreen'],
+  music_pause: ['cenar_music_playpause', 'cenar_music_pause', 'redload'],
+  music_skip: ['cenar_music_skip', 'arrow2'],
+  music_stop: ['cenar_music_stop', 'tick_red51'],
+  music_loop: ['cenar_music_repeat', 'cenar_music_loop', 'starxoay'],
+  music_shuffle: ['cenar_music_shuffle', 'cenar_activity_search'],
+  music_queue: ['cenar_music_queue', 'cenar_shop'],
+  music_volume: ['cenar_music_volume', 'cenar_spotify'],
+  music_refresh: ['cenar_music_refresh', 'starxoay'],
+  music_disconnect: ['cenar_music_disconnect', 'tick_red51'],
 
   // Status
   status_check: ['check', 'tick', 'success', 'tich_xanh'],

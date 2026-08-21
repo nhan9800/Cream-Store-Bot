@@ -38,6 +38,22 @@ const fallbackEmojis = {
   promo_decor: '<a:cenar_promo_decor:1539948490203992085>',
   promo_legend: '<:cenar_promo_legend:1539948492905250846>',
 
+  // Cenar Music controls · reuse the curated custom pack already licensed and
+  // uploaded to this guild; no Unicode placeholder is rendered.
+  music_wave:       '<:cenar_spotify:1535690966911025262>',
+  music_now:        '<:cenar_youtube:1535691301343858739>',
+  music_add:        '<:cenar_verified:1535618654358736926>',
+  music_play:       '<:cenar_music_playpause:1540322261343670273>',
+  music_pause:      '<:cenar_music_playpause:1540322261343670273>',
+  music_skip:       '<:cenar_music_skip:1540322267399979108>',
+  music_stop:       '<a:tick_red51:1384069065626222632>',
+  music_loop:       '<a:cenar_music_repeat:1540322274542878780>',
+  music_shuffle:    '<:cenar_music_shuffle:1540322270852153425>',
+  music_queue:      '<:cenar_shop:1535691148994023506>',
+  music_volume:     '<:cenar_music_volume:1540322265126936658>',
+  music_refresh:    '<a:starxoay:1481141954346483845>',
+  music_disconnect: '<a:tick_red51:1384069065626222632>',
+
   // Panel Ticket buttons
   panel_order:        '<:cr_muahang:1348622828152426528>',
   panel_support:      '<:cenar_staff:1535618674885402684>',

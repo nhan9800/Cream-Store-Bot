@@ -48,6 +48,13 @@ import {
   updateYoutubeMembership,
   updateYoutubeSource,
 } from './youtubeRenewalService.js';
+import {
+  controlMusic,
+  getMusicState,
+  listMusicVoiceChannels,
+  playYoutube,
+  updateMusicSettings,
+} from './musicPlayerService.js';
 
 function catalogKey(value) {
   return String(value || '')
@@ -1505,6 +1512,101 @@ const fetchWithTimeout = (promise, ms) => {
       return res.json({ ok: true, data: snoozeYoutubeReminder(req.params.id, req.body?.hours || 24) });
     } catch (error) {
       return sendYoutubeRenewalError(res, error);
+    }
+  });
+
+  // ==== 12.7 CENAR MUSIC CONTROL CENTER ====
+  app.get('/api/bot/admin/music', requireAdminRole, async (req, res) => {
+    try {
+      const client = req.app.locals.discordClient;
+      const guild = client?.guilds.cache.get(config.guildId)
+        || await client?.guilds.fetch(config.guildId).catch(() => null);
+      if (!guild) return res.status(503).json({ ok: false, error: 'Bot chưa kết nối tới máy chủ Discord.' });
+      return res.json({
+        ok: true,
+        data: {
+          ...getMusicState(guild.id),
+          voiceChannels: listMusicVoiceChannels(guild),
+        },
+      });
+    } catch (error) {
+      console.error('[ADMIN-MUSIC]', error);
+      return res.status(500).json({ ok: false, error: 'Không thể đọc trạng thái Cenar Music.' });
+    }
+  });
+
+  app.post('/api/bot/admin/music/play', requireAdminRole, async (req, res) => {
+    try {
+      const client = req.app.locals.discordClient;
+      const guild = client?.guilds.cache.get(config.guildId)
+        || await client?.guilds.fetch(config.guildId).catch(() => null);
+      if (!guild) return res.status(503).json({ ok: false, error: 'Bot chưa kết nối tới máy chủ Discord.' });
+      const voiceChannelId = sanitizeString(req.body?.voiceChannelId, 30);
+      const voiceChannel = await guild.channels.fetch(voiceChannelId).catch(() => null);
+      if (!voiceChannel?.isVoiceBased()) {
+        return res.status(400).json({ ok: false, error: 'Phòng thoại đã chọn không hợp lệ.' });
+      }
+      const discordId = sanitizeString(req.header('x-discord-id'), 30);
+      const requestedBy = /^\d{15,22}$/.test(discordId)
+        ? await client.users.fetch(discordId).catch(() => null)
+        : null;
+      const result = await playYoutube({
+        guild,
+        voiceChannel,
+        url: req.body?.url,
+        requestedBy,
+        requestedByLabel: requestedBy?.username || `Web ${req.adminRole}`,
+      });
+      return res.json({ ok: true, data: result });
+    } catch (error) {
+      console.error('[ADMIN-MUSIC-PLAY]', error);
+      const message = String(error?.message || 'Không thể phát link YouTube.');
+      return res.status(/link|youtube|phòng thoại|quyền|hàng đợi/i.test(message) ? 400 : 503).json({ ok: false, error: message });
+    }
+  });
+
+  app.post('/api/bot/admin/music/control', requireAdminRole, async (req, res) => {
+    try {
+      const action = sanitizeString(req.body?.action, 30).toLowerCase();
+      if (!['toggle', 'pause', 'resume', 'skip', 'stop', 'disconnect', 'shuffle', 'loop', 'volume', 'remove'].includes(action)) {
+        return res.status(400).json({ ok: false, error: 'Thao tác điều khiển không hợp lệ.' });
+      }
+      const value = action === 'remove' ? req.body?.index : req.body?.value;
+      const state = await controlMusic(config.guildId, action, value);
+      return res.json({ ok: true, data: state });
+    } catch (error) {
+      console.error('[ADMIN-MUSIC-CONTROL]', error);
+      return res.status(400).json({ ok: false, error: String(error?.message || 'Không thể điều khiển Cenar Music.') });
+    }
+  });
+
+  app.put('/api/bot/admin/music/settings', requireAdminRole, async (req, res) => {
+    try {
+      if (req.adminRole !== 'admin') {
+        return res.status(403).json({ ok: false, error: 'Chỉ Admin được thay đổi cấu hình Music.' });
+      }
+      const client = req.app.locals.discordClient;
+      const guild = client?.guilds.cache.get(config.guildId)
+        || await client?.guilds.fetch(config.guildId).catch(() => null);
+      if (!guild) return res.status(503).json({ ok: false, error: 'Bot chưa kết nối tới máy chủ Discord.' });
+      const defaultVoiceChannelId = req.body?.defaultVoiceChannelId == null
+        ? undefined
+        : sanitizeString(req.body.defaultVoiceChannelId, 30);
+      if (defaultVoiceChannelId) {
+        const channel = await guild.channels.fetch(defaultVoiceChannelId).catch(() => null);
+        if (!channel?.isVoiceBased()) return res.status(400).json({ ok: false, error: 'Phòng thoại mặc định không hợp lệ.' });
+      }
+      const settings = updateMusicSettings(guild.id, {
+        defaultVolume: req.body?.defaultVolume,
+        defaultVoiceChannelId,
+        djRoleId: req.body?.djRoleId,
+        allowMemberControl: req.body?.allowMemberControl,
+        maxQueueSize: req.body?.maxQueueSize,
+      });
+      return res.json({ ok: true, data: settings });
+    } catch (error) {
+      console.error('[ADMIN-MUSIC-SETTINGS]', error);
+      return res.status(400).json({ ok: false, error: String(error?.message || 'Không thể lưu cấu hình Music.') });
     }
   });
 

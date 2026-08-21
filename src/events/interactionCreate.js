@@ -194,6 +194,7 @@ import { handleAnnouncementSelect } from "./announcementHandlers.js";
 import { handleOtpInteraction } from "./otpHandlers.js";
 import { handleCardSwapInteractions } from "./cardHandlers.js";
 import { handleAdminOrderCenterInteraction } from '../services/adminOrderCenterService.js';
+import { handleMusicInteraction } from '../services/musicPlayerService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -354,6 +355,11 @@ export function registerInteractionHandler(client, commands) {
 
       if (interaction.customId && interaction.customId.startsWith('ytrenew:')) {
         const handled = await handleYoutubeRenewalButton(interaction);
+        if (handled) return;
+      }
+
+      if (interaction.customId && interaction.customId.startsWith('music:')) {
+        const handled = await handleMusicInteraction(interaction);
         if (handled) return;
       }
 
@@ -2655,6 +2661,7 @@ export function getClientOptions() {
       GatewayIntentBits.MessageContent,
       GatewayIntentBits.DirectMessages,
       GatewayIntentBits.GuildMembers,
+      GatewayIntentBits.GuildVoiceStates,
     ],
     partials: [Partials.Channel],
   };

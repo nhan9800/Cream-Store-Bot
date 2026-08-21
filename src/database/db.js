@@ -1285,6 +1285,37 @@ export function initDatabase() {
       updated_at TEXT NOT NULL
     );
 
+    CREATE TABLE IF NOT EXISTS music_guild_settings (
+      guild_id TEXT PRIMARY KEY,
+      default_volume INTEGER NOT NULL DEFAULT 80 CHECK(default_volume BETWEEN 0 AND 100),
+      default_voice_channel_id TEXT,
+      dj_role_id TEXT,
+      allow_member_control INTEGER NOT NULL DEFAULT 1,
+      max_queue_size INTEGER NOT NULL DEFAULT 100 CHECK(max_queue_size BETWEEN 1 AND 200),
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
+    CREATE TABLE IF NOT EXISTS music_play_history (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      guild_id TEXT NOT NULL,
+      track_id TEXT,
+      track_url TEXT NOT NULL,
+      title TEXT NOT NULL,
+      author TEXT,
+      thumbnail TEXT,
+      duration_ms INTEGER NOT NULL DEFAULT 0,
+      requested_by TEXT,
+      started_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      finished_at TEXT,
+      status TEXT NOT NULL DEFAULT 'PLAYING',
+      error_message TEXT
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_music_history_guild_started
+      ON music_play_history (guild_id, started_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_music_history_track
+      ON music_play_history (guild_id, track_id, status);
+
     CREATE INDEX IF NOT EXISTS idx_orders_customer_id ON orders(customer_id);
     CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
     CREATE INDEX IF NOT EXISTS idx_orders_expiry_at ON orders(expiry_at);

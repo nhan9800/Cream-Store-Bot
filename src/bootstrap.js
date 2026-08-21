@@ -15,6 +15,7 @@ import { initErrorLogger } from './services/errorLogService.js';
 import { autoSetupDiscountBoard } from './services/autoSetupDiscountBoardService.js';
 import { isInternationalGuild } from './utils/locale.js';
 import { localizeCommandsForInternationalStore } from './utils/internationalCommands.js';
+import { initializeMusicPlayer } from './services/musicPlayerService.js';
 
 export async function buildClient() {
   initDatabase();
@@ -36,6 +37,10 @@ export async function buildClient() {
   const commands = await loadCommands();
   const client = new Client(getClientOptions());
   global.discordClient = client;
+
+  // Music is intentionally isolated: extractor/FFmpeg failure must never stop
+  // commerce, wallet, ticket or warranty services from starting.
+  await initializeMusicPlayer(client).catch(() => null);
 
   initErrorLogger(client);
   registerInteractionHandler(client, commands);
