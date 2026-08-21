@@ -19,16 +19,23 @@ export function updateOrderFieldsRaw(orderCode, payload) {
   const nextAmount = payload.total_amount ?? order.total_amount;
   const nextMonths = payload.duration_months ?? order.duration_months ?? 1;
   const nextDays = payload.duration_days !== undefined ? payload.duration_days : order.duration_days;
+  const durationChanged = payload.duration_months !== undefined || payload.duration_days !== undefined;
+  const isPermanent = Number(nextMonths) === 0 && !(Number(nextDays) > 0);
 
   let nextExpiry = order.expiry_at;
   const baseTime = order.delivered_at ?? order.completed_at ?? null;
 
   if (payload.expiry_at !== undefined) {
     nextExpiry = payload.expiry_at;
-  } else if ((payload.duration_months !== undefined || payload.duration_days !== undefined) && baseTime) {
+  } else if (durationChanged && isPermanent) {
+    nextExpiry = null;
+  } else if (durationChanged && baseTime) {
     const dt = addOrderDuration(baseTime, { duration_months: nextMonths, duration_days: nextDays });
     nextExpiry = dt?.toISOString() ?? nextExpiry;
   }
+
+  const nextExpiryNotice2d = durationChanged ? null : order.expiry_notice_2d_sent_at;
+  const nextExpiryNotice1d = durationChanged ? null : order.expiry_notice_1d_sent_at;
 
   db.prepare(`
     UPDATE orders
@@ -38,6 +45,8 @@ export function updateOrderFieldsRaw(orderCode, payload) {
         duration_months = ?,
         duration_days = ?,
         expiry_at = ?,
+        expiry_notice_2d_sent_at = ?,
+        expiry_notice_1d_sent_at = ?,
         updated_at = ?
     WHERE order_code = ?
   `).run(
@@ -47,6 +56,8 @@ export function updateOrderFieldsRaw(orderCode, payload) {
     nextMonths,
     nextDays,
     nextExpiry,
+    nextExpiryNotice2d,
+    nextExpiryNotice1d,
     nowIso(),
     orderCode,
   );

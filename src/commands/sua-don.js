@@ -10,13 +10,18 @@ import { getGuildConfig } from '../services/guildConfigService.js';
 
 export const data = new SlashCommandBuilder()
   .setName('sua-don')
-  .setDescription('Sửa thông tin đơn hàng, gồm thời hạn theo tháng hoặc ngày.')
+  .setDescription('Sửa thông tin đơn hàng, gồm thời hạn theo tháng, ngày hoặc vĩnh viễn.')
   .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
   .addStringOption((o) => o.setName('ma_don').setDescription('Mã đơn hàng').setRequired(true))
   .addStringOption((o) => o.setName('san_pham').setDescription('Tên sản phẩm mới').setRequired(false))
   .addIntegerOption((o) => o.setName('so_luong').setDescription('Số lượng mới').setRequired(false).setMinValue(1))
   .addIntegerOption((o) => o.setName('so_thang').setDescription('Số tháng mới').setRequired(false).setMinValue(1).setMaxValue(36))
   .addIntegerOption((o) => o.setName('so_ngay').setDescription('Số ngày mới, ví dụ 7').setRequired(false).setMinValue(1).setMaxValue(3650))
+  .addStringOption((o) => o
+    .setName('thoi_han')
+    .setDescription('Chọn Vĩnh viễn để xóa ngày hết hạn hiện tại của đơn')
+    .setRequired(false)
+    .addChoices({ name: 'Vĩnh viễn', value: 'permanent' }))
   .addIntegerOption((o) => o.setName('gia_tien').setDescription('Giá mới').setRequired(false).setMinValue(0));
 
 export async function execute(interaction) {
@@ -36,10 +41,12 @@ export async function execute(interaction) {
     const quantity = interaction.options.getInteger('so_luong');
     const months = interaction.options.getInteger('so_thang');
     const days = interaction.options.getInteger('so_ngay');
+    const isPermanent = interaction.options.getString('thoi_han') === 'permanent';
     const amount = interaction.options.getInteger('gia_tien');
 
-    if (months !== null && days !== null) {
-      await interaction.editReply(`${E('status_warn')} Chỉ chọn **số tháng** hoặc **số ngày**, không nhập cả hai.`);
+    const selectedDurationCount = [months !== null, days !== null, isPermanent].filter(Boolean).length;
+    if (selectedDurationCount > 1) {
+      await interaction.editReply(`${E('status_warn')} Chỉ chọn một loại thời hạn: **số tháng**, **số ngày** hoặc **Vĩnh viễn**.`);
       return;
     }
 
@@ -57,6 +64,11 @@ export async function execute(interaction) {
     if (days !== null) {
       payload.duration_months = 0;
       payload.duration_days = days;
+    }
+    if (isPermanent) {
+      payload.duration_months = 0;
+      payload.duration_days = null;
+      payload.expiry_at = null;
     }
     if (amount !== null) payload.total_amount = amount;
 
@@ -105,7 +117,11 @@ export async function execute(interaction) {
       }),
     });
 
-    const expiryText = after.expiry_at ? `\n🗓️ Hạn mới: <t:${Math.floor(new Date(after.expiry_at).getTime() / 1000)}:F>` : '';
+    const expiryText = after.expiry_at
+      ? `\n🗓️ Hạn mới: <t:${Math.floor(new Date(after.expiry_at).getTime() / 1000)}:F>`
+      : Number(after.duration_months) === 0 && !Number(after.duration_days)
+        ? '\n♾️ Thời hạn mới: **Vĩnh viễn**'
+        : '';
     await interaction.editReply(`${E('status_check')} Đã cập nhật đơn \`${after.order_code}\`.${expiryText}`);
   } catch (error) {
     console.error('[ORDER/EDIT] Lỗi:', error);

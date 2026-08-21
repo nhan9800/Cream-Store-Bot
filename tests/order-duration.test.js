@@ -3,6 +3,7 @@ import { addOrderDuration, formatOrderDuration, normalizeOrderDurationStorage, r
 import { resolveWarrantyTimeline } from '../src/services/warrantyService.js';
 import { data as orderCommand } from '../src/commands/order.js';
 import { data as legacyOrderCommand } from '../src/commands/oder.js';
+import { data as editOrderCommand } from '../src/commands/sua-don.js';
 
 describe('order duration by days', () => {
   test('prefers an explicit day duration over legacy month data', () => {
@@ -44,6 +45,7 @@ describe('order duration by days', () => {
   test.each([
     ['/order', orderCommand],
     ['/oder', legacyOrderCommand],
+    ['/sua-don', editOrderCommand],
   ])('%s exposes month, day and permanent duration options', (_name, command) => {
     const optionNames = command.toJSON().options.map((option) => option.name);
     expect(optionNames).toContain('so_thang');
