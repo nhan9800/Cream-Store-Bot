@@ -19,6 +19,7 @@ import { accentFor } from '../utils/uiKit.js';
 import { publishCtvPricePanel } from './ctvPriceService.js';
 import { publishCtvRecruitmentPanel } from './ctvRecruitmentPanelService.js';
 import { isInternationalGuild } from '../utils/locale.js';
+import { STORE_ONE_CHANNEL_NAMES } from '../config/storeOneChannelAesthetic.js';
 
 const IDS = Object.freeze({
   partnerRole: '1522844528237740066',
@@ -36,18 +37,18 @@ const ROLE_ICON_URLS = Object.freeze({
   ctv: 'https://cdn.discordapp.com/emojis/1535637396782317689.png?size=96',
 });
 
-const fruitNames = Object.freeze({
-  partnerCategory: '🍓 ｜ Cenar Partner',
-  ctvCategory: '🥝 ｜ Cenar CTV',
-  partnerRecruit: '🍇-hợp-tác-đối-tác',
-  partnerDirectory: '🍒-danh-sách-đối-tác',
-  partnerReview: '🍍-duyệt-partner',
-  partnerBroadcast: '🥭-partner-truyền-thông',
-  ctvRecruit: '🍊-tuyển-cộng-tác-viên',
-  ctvReview: '🍋-duyệt-ctv',
-  ctvChat: '🍏-ctv-trò-chuyện',
-  ctvOrderLog: '🍐-ctv-log-đơn-hàng',
-  ctvPrice: '🍎-ctv-bảng-giá',
+const localNames = Object.freeze({
+  partnerCategory: STORE_ONE_CHANNEL_NAMES.partnerCategory,
+  ctvCategory: STORE_ONE_CHANNEL_NAMES.ctvCategory,
+  partnerRecruit: STORE_ONE_CHANNEL_NAMES.partnerRecruit,
+  partnerDirectory: STORE_ONE_CHANNEL_NAMES.partnerDirectory,
+  partnerReview: STORE_ONE_CHANNEL_NAMES.partnerReview,
+  partnerBroadcast: STORE_ONE_CHANNEL_NAMES.partnerBroadcast,
+  ctvRecruit: STORE_ONE_CHANNEL_NAMES.ctvRecruit,
+  ctvReview: STORE_ONE_CHANNEL_NAMES.ctvReview,
+  ctvChat: STORE_ONE_CHANNEL_NAMES.ctvChat,
+  ctvOrderLog: STORE_ONE_CHANNEL_NAMES.ctvOrderLog,
+  ctvPrice: STORE_ONE_CHANNEL_NAMES.ctvPrice,
 });
 
 const internationalNames = Object.freeze({
@@ -446,7 +447,7 @@ export async function autoSetupPartnerAndCtv(client) {
   for (const guild of client.guilds.cache.values()) {
     try {
       await guild.roles.fetch().catch(() => null);
-      const names = isInternationalGuild(guild.id) ? internationalNames : fruitNames;
+      const names = isInternationalGuild(guild.id) ? internationalNames : localNames;
       const settings = db.prepare('SELECT support_role_id, manager_role_id FROM guild_settings WHERE guild_id = ?').get(guild.id) || {};
       const staffRoles = [...new Set([
         settings.support_role_id,

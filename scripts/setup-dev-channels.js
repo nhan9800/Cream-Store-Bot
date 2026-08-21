@@ -2,6 +2,7 @@ import { Client, GatewayIntentBits, PermissionFlagsBits, ChannelType, ActionRowB
 import Database from 'better-sqlite3';
 import dotenv from 'dotenv';
 import path from 'path';
+import { STORE_ONE_CHANNEL_NAMES } from '../src/config/storeOneChannelAesthetic.js';
 dotenv.config();
 
 const client = new Client({
@@ -76,8 +77,8 @@ client.once('ready', async () => {
     const parentCategoryId = '1514606994256957600'; 
 
     const channelsToCreate = [
-      { name: '💻｜dev-bot', topic: 'Dịch vụ thiết kế và lập trình Bot Discord chuyên nghiệp - Cenar Store' },
-      { name: '🌐｜dev-web', topic: 'Dịch vụ thiết kế và phát triển Website chuyên nghiệp, uy tín - Cenar Store' }
+      { name: STORE_ONE_CHANNEL_NAMES.devBot, topic: 'Dịch vụ thiết kế và lập trình Bot Discord chuyên nghiệp - Cenar Store' },
+      { name: STORE_ONE_CHANNEL_NAMES.devWeb, topic: 'Dịch vụ thiết kế và phát triển Website chuyên nghiệp, uy tín - Cenar Store' }
     ];
 
     const createdChannels = {};

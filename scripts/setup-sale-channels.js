@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { initDatabase } from '../src/database/db.js';
 import { upsertGuildConfig } from '../src/services/guildConfigService.js';
 import { refreshSalePanel } from '../src/services/saleService.js';
+import { STORE_ONE_CHANNEL_NAMES } from '../src/config/storeOneChannelAesthetic.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -128,7 +129,7 @@ async function setupServer(envFile) {
     });
   }
 
-  const targetChannelName = '🔥｜khuyến-mãi';
+  const targetChannelName = STORE_ONE_CHANNEL_NAMES.promotion;
 
   // Tìm kênh khuyến mãi trong danh mục "CỬA HÀNG CENAR"
   let saleChannel = channels.find(c => 
@@ -140,7 +141,7 @@ async function setupServer(envFile) {
   // Dọn dẹp kênh khuyến mãi cũ ngoài danh mục để tránh trùng lặp
   const duplicates = channels.filter(c => 
     c.type === ChannelType.GuildText && 
-    (c.name === 'khuyến-mãi' || c.name === 'khuyen-mai' || c.name === targetChannelName) &&
+    (c.name === 'khuyến-mãi' || c.name === 'khuyen-mai' || c.name === '🔥｜khuyến-mãi' || c.name === '🥒｜khuyến-mãi' || c.name === targetChannelName) &&
     c.id !== (saleChannel?.id || null)
   );
 

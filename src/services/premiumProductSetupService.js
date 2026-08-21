@@ -16,6 +16,7 @@ import { ensureRateLimit } from './abuseService.js';
 import { config } from '../config.js';
 import { getCenarHub } from './cenarHub.js';
 import { sendOrRefreshPaymentQr } from './paymentService.js';
+import { STORE_ONE_CHANNEL_NAMES } from '../config/storeOneChannelAesthetic.js';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -23,6 +24,9 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const botRoot = path.resolve(__dirname, '..', '..');
+const PREMIUM_CATEGORY_NAME = STORE_ONE_CHANNEL_NAMES.premiumCategory;
+const CLAUDE_CHANNEL_NAME = STORE_ONE_CHANNEL_NAMES.claudeApi;
+const LOCKET_CHANNEL_NAME = STORE_ONE_CHANNEL_NAMES.locketGold;
 
 // Helper to ensure column exists
 function ensureGuildSettingColumn(columnName) {
@@ -58,7 +62,7 @@ export async function setupPremiumProducts(interaction) {
   
     if (!category) {
       category = await guild.channels.create({
-        name: '👑 ｜ SẢN PHẨM PREMIUM',
+        name: PREMIUM_CATEGORY_NAME,
       type: ChannelType.GuildCategory,
       permissionOverwrites: [
         {
@@ -79,7 +83,7 @@ export async function setupPremiumProducts(interaction) {
   let claudeChannel = settings.claude_channel_id ? guild.channels.cache.get(settings.claude_channel_id) : null;
   if (!claudeChannel) {
     claudeChannel = await guild.channels.create({
-      name: '🤖・claude-api',
+      name: CLAUDE_CHANNEL_NAME,
       type: ChannelType.GuildText,
       parent: category.id,
     });
@@ -89,7 +93,7 @@ export async function setupPremiumProducts(interaction) {
   let locketChannel = settings.locket_channel_id ? guild.channels.cache.get(settings.locket_channel_id) : null;
   if (!locketChannel) {
     locketChannel = await guild.channels.create({
-      name: '💛・locket-gold',
+      name: LOCKET_CHANNEL_NAME,
       type: ChannelType.GuildText,
       parent: category.id,
     });
@@ -790,7 +794,7 @@ export async function autoSetupAndPublishPremiumProducts(guild) {
     
     if (!category) {
       category = await guild.channels.create({
-        name: '👑 ｜ SẢN PHẨM PREMIUM',
+        name: PREMIUM_CATEGORY_NAME,
         type: ChannelType.GuildCategory,
         permissionOverwrites: [
           {
@@ -805,33 +809,33 @@ export async function autoSetupAndPublishPremiumProducts(guild) {
         ]
       });
       db.prepare('UPDATE guild_settings SET premium_category_id = ? WHERE guild_id = ?').run(category.id, guild.id);
-    } else if (category.name !== '👑 ｜ SẢN PHẨM PREMIUM') {
-      await category.setName('👑 ｜ SẢN PHẨM PREMIUM').catch(() => {});
+    } else if (category.name !== PREMIUM_CATEGORY_NAME) {
+      await category.setName(PREMIUM_CATEGORY_NAME).catch(() => {});
     }
 
     // 2. Channels
     let claudeChannel = settings.claude_channel_id ? guild.channels.cache.get(settings.claude_channel_id) : null;
     if (!claudeChannel) {
       claudeChannel = await guild.channels.create({
-        name: '🤖・claude-api',
+        name: CLAUDE_CHANNEL_NAME,
         type: ChannelType.GuildText,
         parent: category.id,
       });
       db.prepare('UPDATE guild_settings SET claude_channel_id = ? WHERE guild_id = ?').run(claudeChannel.id, guild.id);
-    } else if (claudeChannel.name !== '🤖・claude-api') {
-      await claudeChannel.setName('🤖・claude-api').catch(() => {});
+    } else if (claudeChannel.name !== CLAUDE_CHANNEL_NAME) {
+      await claudeChannel.setName(CLAUDE_CHANNEL_NAME).catch(() => {});
     }
 
     let locketChannel = settings.locket_channel_id ? guild.channels.cache.get(settings.locket_channel_id) : null;
     if (!locketChannel) {
       locketChannel = await guild.channels.create({
-        name: '💛・locket-gold',
+        name: LOCKET_CHANNEL_NAME,
         type: ChannelType.GuildText,
         parent: category.id,
       });
       db.prepare('UPDATE guild_settings SET locket_channel_id = ? WHERE guild_id = ?').run(locketChannel.id, guild.id);
-    } else if (locketChannel.name !== '💛・locket-gold') {
-      await locketChannel.setName('💛・locket-gold').catch(() => {});
+    } else if (locketChannel.name !== LOCKET_CHANNEL_NAME) {
+      await locketChannel.setName(LOCKET_CHANNEL_NAME).catch(() => {});
     }
 
     // Kiểm tra nếu kênh đã có tin nhắn rồi thì bỏ qua không tạo lại panel

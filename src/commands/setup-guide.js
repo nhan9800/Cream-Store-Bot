@@ -5,6 +5,7 @@ import {
 } from 'discord.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { getGuildConfig } from '../services/guildConfigService.js';
+import { STORE_ONE_CHANNEL_NAMES } from '../config/storeOneChannelAesthetic.js';
 
 export const data = new SlashCommandBuilder()
   .setName('setup-guide')
@@ -14,7 +15,7 @@ export const data = new SlashCommandBuilder()
 const GUIDE_CHANNELS = [
   {
     key: 'nitro',
-    name: '📘・hướng-dẫn-nitro',
+    name: STORE_ONE_CHANNEL_NAMES.nitroGuide,
     topic: 'Hướng dẫn mua và sử dụng Discord Nitro & Server Boost',
     content: [
       '## Discord Nitro & Server Boost',
@@ -36,7 +37,7 @@ const GUIDE_CHANNELS = [
   },
   {
     key: 'youtube',
-    name: '📺・hướng-dẫn-youtube',
+    name: STORE_ONE_CHANNEL_NAMES.youtubeGuide,
     topic: 'Hướng dẫn mua và sử dụng YouTube Premium',
     content: [
       '## YouTube Premium',
@@ -58,7 +59,7 @@ const GUIDE_CHANNELS = [
   },
   {
     key: 'spotify',
-    name: '🎵・hướng-dẫn-spotify',
+    name: STORE_ONE_CHANNEL_NAMES.spotifyGuide,
     topic: 'Hướng dẫn mua và sử dụng Spotify Premium',
     content: [
       '## Spotify Premium',
@@ -80,7 +81,7 @@ const GUIDE_CHANNELS = [
   },
   {
     key: 'netflix',
-    name: '🎬・hướng-dẫn-netflix',
+    name: STORE_ONE_CHANNEL_NAMES.netflixGuide,
     topic: 'Hướng dẫn mua và sử dụng Netflix Premium',
     content: [
       '## Netflix Premium',
@@ -126,7 +127,7 @@ export async function execute(interaction) {
 
     // Tạo category "Cẩm Nang Hướng Dẫn"
     const category = await guild.channels.create({
-      name: '📚・Cẩm Nang Hướng Dẫn',
+      name: STORE_ONE_CHANNEL_NAMES.guideCategory,
       type: ChannelType.GuildCategory,
       permissionOverwrites: [
         {

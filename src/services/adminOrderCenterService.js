@@ -21,9 +21,10 @@ import { formatCurrency, formatOrderDuration, getOrderStatusLabel, getPaymentSta
 import { isManager } from '../utils/permissions.js';
 import { autoSyncGuildEmojis, formatProductDisplayName } from './emojiService.js';
 import { getGuildConfig } from './guildConfigService.js';
+import { STORE_ONE_CHANNEL_NAMES } from '../config/storeOneChannelAesthetic.js';
 
-const CATEGORY_NAME = '⌁ QUẢN TRỊ ĐƠN HÀNG';
-const CHANNEL_NAME = '📦・trung-tam-don-hang';
+const CATEGORY_NAME = STORE_ONE_CHANNEL_NAMES.adminOrderCategory;
+const CHANNEL_NAME = STORE_ONE_CHANNEL_NAMES.adminOrderCenter;
 const ACTIVE_STATUSES = [
   'PENDING_PAYMENT',
   'PROCESSING',
