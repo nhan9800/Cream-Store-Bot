@@ -35,8 +35,11 @@ const YOUTUBE_HOSTS = new Set([
 ]);
 const VOLUME_STEPS = ['20', '40', '60', '80', '100'];
 const DAVE_HANDSHAKE_TIMEOUT_MS = 8_000;
+const VOLUME_RAMP_DURATION_MS = 360;
+const VOLUME_RAMP_STEP_MS = 20;
 const panelMessages = new Map();
 const refreshTimers = new Map();
+const volumeRamps = new Map();
 
 let musicPlayer = null;
 let initializePromise = null;
@@ -46,6 +49,66 @@ let daveProtocolVersion = null;
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, Number(value) || 0));
+}
+
+export function buildSmoothVolumeRamp(startValue, targetValue, {
+  durationMs = VOLUME_RAMP_DURATION_MS,
+  stepMs = VOLUME_RAMP_STEP_MS,
+} = {}) {
+  const start = clamp(startValue, 0, 100);
+  const target = clamp(targetValue, 0, 100);
+  const steps = Math.max(1, Math.ceil(clamp(durationMs, 0, 10_000) / Math.max(1, clamp(stepMs, 1, 1_000))));
+  return Array.from({ length: steps }, (_, index) => {
+    const progress = (index + 1) / steps;
+    // Ease both ends of the gain transition so adjacent PCM chunks never
+    // receive one large amplitude jump (the click/static heard on adjustment).
+    const eased = (1 - Math.cos(Math.PI * progress)) / 2;
+    return start + ((target - start) * eased);
+  });
+}
+
+export async function setSmoothMusicVolume(queue, targetValue, {
+  durationMs = VOLUME_RAMP_DURATION_MS,
+  stepMs = VOLUME_RAMP_STEP_MS,
+} = {}) {
+  if (!queue?.node || typeof queue.node.setVolume !== 'function') {
+    throw new Error('Player chưa sẵn sàng để chỉnh âm lượng.');
+  }
+  const guildId = String(queue.guild?.id || queue.id || 'unknown');
+  const target = clamp(targetValue, 0, 100);
+  const active = volumeRamps.get(guildId);
+  if (active?.queue === queue) {
+    // Coalesce rapid dashboard/Discord input into the currently running ramp.
+    // Every caller waits for the newest target instead of creating competing
+    // timers that make the gain audibly pump up and down.
+    active.target = target;
+    return active.promise;
+  }
+
+  const rampState = { queue, target, promise: null };
+  rampState.promise = (async () => {
+    for (;;) {
+      const segmentTarget = rampState.target;
+      const start = clamp(queue.node.volume, 0, 100);
+      const ramp = buildSmoothVolumeRamp(start, segmentTarget, { durationMs, stepMs });
+      for (const nextVolume of ramp) {
+        if (rampState.target !== segmentTarget) break;
+        queue.node.setVolume(nextVolume);
+        await new Promise((resolve) => setTimeout(resolve, stepMs));
+      }
+      if (rampState.target !== segmentTarget) continue;
+
+      queue.node.setVolume(segmentTarget);
+      // Leave one event-loop window for a newer UI request before declaring
+      // the ramp stable and removing its coalescing state.
+      await new Promise((resolve) => setTimeout(resolve, stepMs));
+      if (rampState.target === segmentTarget) return segmentTarget;
+    }
+  })().finally(() => {
+    if (volumeRamps.get(guildId) === rampState) volumeRamps.delete(guildId);
+  });
+  volumeRamps.set(guildId, rampState);
+  return rampState.promise;
 }
 
 function plain(value, fallback = '') {
@@ -434,6 +497,13 @@ export async function playYoutube({ guild, voiceChannel, url, requestedBy = null
     },
     nodeOptions: {
       volume: settings.defaultVolume,
+      // The extractor already provides clean 48 kHz PCM and this dashboard
+      // does not expose EQ/effects. Keep only the volume transformer in the
+      // DSP chain to avoid unnecessary passes and CPU jitter on shared hosts.
+      disableEqualizer: true,
+      disableFilterer: true,
+      disableBiquad: true,
+      disableResampler: true,
       maxSize: settings.maxQueueSize,
       maxHistorySize: 50,
       selfDeaf: true,
@@ -513,7 +583,7 @@ export async function controlMusic(guildId, action, value = null) {
       break;
     }
     case 'volume':
-      queue.node.setVolume(clamp(value, 0, 100));
+      await setSmoothMusicVolume(queue, value);
       break;
     case 'remove': {
       const index = Number(value) - 1;
