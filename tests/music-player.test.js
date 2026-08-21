@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import fs from 'node:fs';
 import { normalizeYoutubeUrl } from '../src/services/musicPlayerService.js';
 
 describe('Cenar Music YouTube URL boundary', () => {
@@ -19,5 +20,10 @@ describe('Cenar Music YouTube URL boundary', () => {
     expect(normalized).not.toContain('user');
     expect(normalized).not.toContain('pass');
     expect(normalized).not.toContain('#chapter');
+  });
+
+  it('does not mutate the native Opus bitrate after playback starts', () => {
+    const source = fs.readFileSync(new URL('../src/services/musicPlayerService.js', import.meta.url), 'utf8');
+    expect(source).not.toMatch(/\.setBitrate\s*\(/);
   });
 });

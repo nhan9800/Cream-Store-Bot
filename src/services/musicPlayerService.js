@@ -269,14 +269,10 @@ function schedulePanelRefresh(guildId) {
 function wirePlayerEvents(player) {
   player.events.on(GuildQueueEvent.PlayerStart, (queue, track) => {
     saveTrackStart(queue, track);
-    // The Opus encoder is guaranteed only after PlayerStart. Calling this
-    // immediately after player.play() can race the voice handshake and throw
-    // applyEncoderCTL on a null encoder.
-    try {
-      queue.node.setBitrate('auto');
-    } catch (error) {
-      console.warn(`[MUSIC] Không thể tối ưu bitrate cho ${queue.guild.name}; giữ bitrate mặc định:`, error?.message || error);
-    }
+    // Do not mutate bitrate at runtime. With @discord-player/opus the
+    // PlayerStart event can fire while the native encoder is still null; that
+    // mutation tears down an otherwise valid audio resource. Discord Player's
+    // default Opus settings already match the voice channel bitrate.
     schedulePanelRefresh(queue.guild.id);
   });
   player.events.on(GuildQueueEvent.PlayerFinish, (queue, track) => {
