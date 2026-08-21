@@ -26,4 +26,10 @@ describe('Cenar Music YouTube URL boundary', () => {
     const source = fs.readFileSync(new URL('../src/services/musicPlayerService.js', import.meta.url), 'utf8');
     expect(source).not.toMatch(/\.setBitrate\s*\(/);
   });
+
+  it('keeps the extractor PCM stream out of a second FFmpeg pass', () => {
+    const source = fs.readFileSync(new URL('../src/services/musicPlayerService.js', import.meta.url), 'utf8');
+    expect(source).toMatch(/skipFFmpeg:\s*true/);
+    expect(source).not.toMatch(/skipFFmpeg:\s*false/);
+  });
 });

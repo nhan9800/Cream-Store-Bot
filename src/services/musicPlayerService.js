@@ -279,8 +279,12 @@ function wirePlayerEvents(player) {
     closeTrackHistory(queue, track, 'COMPLETED');
     schedulePanelRefresh(queue.guild.id);
   });
-  player.events.on(GuildQueueEvent.PlayerSkip, (queue, track) => {
+  player.events.on(GuildQueueEvent.PlayerSkip, (queue, track, reason, description) => {
     closeTrackHistory(queue, track, 'SKIPPED');
+    console.warn(
+      `[MUSIC] Track skipped in ${queue.guild.name}: ${track?.title || track?.url || 'unknown'} · ${reason || 'unknown'}`,
+      description || '',
+    );
     schedulePanelRefresh(queue.guild.id);
   });
   player.events.on(GuildQueueEvent.PlayerError, (queue, error, track) => {
@@ -325,7 +329,10 @@ export async function initializeMusicPlayer(client) {
         ffmpegPath,
         connectionTimeout: 20_000,
         probeTimeout: 8_000,
-        skipFFmpeg: false,
+        // YouTubeDlpExtractor already returns raw 48 kHz PCM. Passing that
+        // stream through Discord Player's FFmpeg pipeline a second time can
+        // yield an empty resource, making the bot join and immediately leave.
+        skipFFmpeg: true,
       });
       const cookiesFile = String(process.env.YOUTUBE_COOKIES_FILE || '').trim();
       const proxyUri = String(process.env.YOUTUBE_PROXY_URL || '').trim();
@@ -376,6 +383,10 @@ export async function playYoutube({ guild, voiceChannel, url, requestedBy = null
   const player = await initializeMusicPlayer(guild.client);
   const settings = readSettings(guild.id);
   const activeQueue = player.nodes.get(guild.id);
+  const wasAlreadyPlaying = Boolean(
+    activeQueue?.currentTrack
+    && (activeQueue.node.isPlaying() || activeQueue.node.isPaused() || activeQueue.node.isBuffering()),
+  );
   if (activeQueue && activeQueue.size >= settings.maxQueueSize) {
     throw new Error(`Hàng đợi đã đạt giới hạn ${settings.maxQueueSize} bài.`);
   }
@@ -400,6 +411,19 @@ export async function playYoutube({ guild, voiceChannel, url, requestedBy = null
     requestedById: requestedBy?.id || null,
     requestedByLabel: requestedBy?.username || requestedByLabel,
   });
+  if (!wasAlreadyPlaying) {
+    // player.play() can resolve as soon as Discord enters the Playing state,
+    // even when the upstream stream ends immediately without yielding audio.
+    // Give the first frames a short stabilization window before the dashboard
+    // reports success to the administrator.
+    await new Promise((resolve) => setTimeout(resolve, 1_200));
+    const activeTrack = result.queue.currentTrack;
+    const stable = activeTrack?.id === result.track.id
+      && (result.queue.node.isPlaying() || result.queue.node.isBuffering());
+    if (!stable) {
+      throw new Error('Nguồn âm thanh YouTube kết thúc trước khi phát. Vui lòng thử lại hoặc kiểm tra giới hạn YouTube trên hosting.');
+    }
+  }
   schedulePanelRefresh(guild.id);
   return { track: serializeTrack(result.track), state: getMusicState(guild.id) };
 }
