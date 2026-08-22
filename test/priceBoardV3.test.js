@@ -5,6 +5,7 @@ import { getActiveProducts } from '../src/services/productCatalogService.js';
 import {
   PRICE_BOARD_VERSION,
   buildPriceBoardPayloads,
+  getPriceBoardProducts,
   groupPriceProducts,
 } from '../src/services/autoSetupPriceBoardService.js';
 import { buildPriceAnnouncementContent } from '../src/commands/thong-bao-bang-gia.js';
@@ -49,7 +50,46 @@ describe('Cenar price board V3', () => {
     expect(panels.find((panel) => panel.group.key === 'adobe')?.items.length).toBeGreaterThan(0);
     expect(panels.find((panel) => panel.group.key === 'youtube_continuous')?.items).toHaveLength(4);
     expect(panels.find((panel) => panel.group.key === 'youtube_family_switch')?.items).toHaveLength(4);
+    expect(panels.find((panel) => panel.group.key === 'spotify')?.items).toHaveLength(3);
     expect(panels.find((panel) => panel.group.key === 'netflix')?.items).toHaveLength(2);
+    expect(panels.some((panel) => panel.group.key === 'other')).toBe(false);
+  });
+
+  it('publishes only the official Spotify catalog to Discord and website', () => {
+    const products = [
+      ...getActiveProducts(GUILD_ID),
+      {
+        id: 'legacy-spotify-slot',
+        product_key: '5-slot-spotify',
+        name: '5 Slot Spotify',
+        price: 290000,
+        duration_months: 1,
+        service_type: 'other',
+        emoji: 'brand_spotify',
+      },
+      {
+        id: 'unknown-product',
+        product_key: 'unknown-product',
+        name: 'Sản Phẩm Chưa Phân Loại',
+        price: 10000,
+        duration_months: 1,
+        service_type: 'other',
+        emoji: 'order_product',
+      },
+    ];
+    const publicProducts = getPriceBoardProducts(products);
+    const spotify = publicProducts.filter((product) => String(product.product_key || '').startsWith('spotify-premium-'));
+    const serialized = buildPriceBoardPayloads(GUILD_ID, {}, products).map(serialize).join('\n');
+
+    expect(spotify.map((product) => [product.duration_months, product.price])).toEqual([
+      [3, 100000],
+      [6, 200000],
+      [12, 290000],
+    ]);
+    expect(serialized).toContain('cenar_spotify');
+    expect(serialized).not.toContain('5 Slot Spotify');
+    expect(serialized).not.toContain('Sản Phẩm Khác');
+    expect(publicProducts.map((product) => product.name)).not.toContain('Sản Phẩm Chưa Phân Loại');
   });
 
   it('builds custom-emoji-only Components V2 panels with product selectors', () => {

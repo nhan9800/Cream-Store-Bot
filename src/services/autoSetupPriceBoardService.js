@@ -21,10 +21,15 @@ import { formatInternationalPrice, translateCatalogGroup, translateProductName }
 import { getNitroTrialEligibility, isNitroTrialProduct } from '../constants/nitroTrial.js';
 import { getNetflixPromoDetails, isNetflixPromoProduct } from '../constants/netflixPromotion.js';
 
-export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.9';
+export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.12';
 const PRIMARY_GUILD_ID = '1282637033340403754';
 const PRIMARY_PRICE_CHANNEL_ID = '1514606995842273280';
 const PRIMARY_PROMOTION_CHANNEL_ID = '1515008584549797979';
+const OFFICIAL_SPOTIFY_PRODUCT_KEYS = new Set([
+  'spotify-premium-3-months',
+  'spotify-premium-6-months',
+  'spotify-premium-12-months',
+]);
 
 export const PRICE_GROUPS = [
   {
@@ -88,14 +93,19 @@ export const PRICE_GROUPS = [
     match: (p) => String(p.product_key || '').startsWith('youtube-premium-monthly-family-switch-'),
   },
   {
+    key: 'spotify', titleSlot: 'brand_spotify', title: 'Spotify Premium', accent: 0x1DB954,
+    note: 'Nghe nhạc chất lượng cao, không quảng cáo và tải nhạc để nghe offline theo đúng thời hạn đã chọn.',
+    match: (p) => String(p.product_key || '').startsWith('spotify-premium-') || p.service_type === 'spotify',
+  },
+  {
     key: 'netflix', titleSlot: 'brand_netflix', title: 'Netflix Extra & Premium', accent: 0xE50914,
     note: 'Netflix Extra 75k hỗ trợ gia hạn; Netflix Premium 35k ổn định nhưng hết hạn cần đổi tài khoản mới.',
     match: (p) => p.service_type === 'netflix' || /netflix/i.test(p.name),
   },
   {
-    key: 'streaming', titleSlot: 'brand_spotify', title: 'Spotify Premium & Giải Trí', accent: 0x1DB954,
+    key: 'streaming', titleSlot: 'icon_sparkle', title: 'Dịch Vụ Giải Trí Khác', accent: 0x8B5CF6,
     note: 'Các dịch vụ giải trí còn lại; vui lòng đọc kỹ chu kỳ và chính sách từng sản phẩm.',
-    match: (p) => ['STREAMING', 'youtube', 'spotify'].includes(p.service_type),
+    match: (p) => ['STREAMING', 'youtube'].includes(p.service_type),
   },
   {
     key: 'gearup', titleSlot: 'brand_gearup', title: 'GearUP Booster', accent: 0x00E6FF,
@@ -204,24 +214,29 @@ function hasFullDurationWarranty(product) {
 }
 
 export function groupPriceProducts(products) {
+  // Bảng giá công khai chỉ nhận ba gói Spotify chính thức. Dữ liệu Spotify
+  // thủ công cũ được giữ trong DB phục vụ lịch sử đơn hàng nhưng không xuất bản.
+  const visibleProducts = products.filter((product) => {
+    const key = String(product.product_key || '');
+    const isSpotify = product.service_type === 'spotify' || /spotify/i.test(String(product.name || ''));
+    return !isSpotify || OFFICIAL_SPOTIFY_PRODUCT_KEYS.has(key);
+  });
   const used = new Set();
   const panels = [];
   for (const group of PRICE_GROUPS) {
-    const items = products.filter((product) => !used.has(product.id) && group.match(product));
+    const items = visibleProducts.filter((product) => !used.has(product.id) && group.match(product));
     items.forEach((product) => used.add(product.id));
     if (items.length) panels.push({ group, items });
   }
-  const remaining = products.filter((product) => !used.has(product.id));
-  if (remaining.length) {
-    panels.push({
-      group: {
-        key: 'other', titleSlot: 'order_product', title: 'Sản Phẩm Khác', accent: config.accentColorPrimary,
-        note: 'Các sản phẩm đang mở bán chưa thuộc danh mục chuyên biệt.',
-      },
-      items: remaining,
-    });
-  }
+  // Sản phẩm chưa được phân nhóm không được xuất bản công khai.
   return panels;
+}
+
+export function getPriceBoardProducts(products) {
+  const publishedIds = new Set(
+    groupPriceProducts(products).flatMap((panel) => panel.items.map((product) => String(product.id))),
+  );
+  return products.filter((product) => publishedIds.has(String(product.id)));
 }
 
 export function buildPricePortalPayload(guildId, guildConfig, panels = []) {
@@ -387,7 +402,7 @@ export function buildPriceGroupPayload(guildId, group, products) {
 }
 
 export function buildPriceBoardPayloads(guildId, guildConfig, products = getActiveProducts(guildId)) {
-  const panels = groupPriceProducts(products);
+  const panels = groupPriceProducts(getPriceBoardProducts(products));
   return [
     buildPricePortalPayload(guildId, guildConfig, panels),
     ...panels.map(({ group, items }) => buildPriceGroupPayload(guildId, group, items)),
@@ -447,7 +462,7 @@ export async function publishPriceBoard(guild, { force = false, keepMessageIds =
     return { guildId: guild.id, channelId: channel.id, status: 'current' };
   }
 
-  const products = getActiveProducts(guild.id);
+  const products = getPriceBoardProducts(getActiveProducts(guild.id));
   const payloads = buildPriceBoardPayloads(guild.id, guildConfig, products);
   const sentMessageIds = [];
   try {

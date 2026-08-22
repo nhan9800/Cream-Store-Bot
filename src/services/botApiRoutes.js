@@ -48,6 +48,7 @@ import {
     listCustomerQuestRequests,
     listQuestPlans,
 } from './questService.js';
+import { getPriceBoardProducts, PRICE_BOARD_VERSION } from './autoSetupPriceBoardService.js';
 
 let storeInviteCache = { url: '', expiresAt: 0 };
 const websiteSupportProvisioning = new Map();
@@ -302,7 +303,8 @@ function listPublicProducts() {
         WHERE pc.is_active = 1 AND pc.guild_id = 'WEB'
         ORDER BY pc.is_featured DESC, pc.sort_order ASC, pc.name ASC
     `).all();
-    return isInternationalGuild(config.guildId) ? products.map(internationalizeProduct) : products;
+    const publishedProducts = getPriceBoardProducts(products);
+    return isInternationalGuild(config.guildId) ? publishedProducts.map(internationalizeProduct) : publishedProducts;
 }
 
 function findPublicProduct(query) {
@@ -886,7 +888,18 @@ export function registerBotApiRoutes(app) {
     // ── PRODUCTS — bảng giá sản phẩm bot bán ───────────────
     app.get('/api/bot/products', (req, res) => {
         const result = safeQuery(listPublicProducts);
-        res.json(result);
+        res.set({
+            'Cache-Control': 'no-store, no-cache, must-revalidate, proxy-revalidate',
+            Pragma: 'no-cache',
+            Expires: '0',
+            'X-Cenar-Catalog-Version': PRICE_BOARD_VERSION,
+        });
+        res.json({
+            ...result,
+            catalogVersion: PRICE_BOARD_VERSION,
+            productCount: result.ok && Array.isArray(result.data) ? result.data.length : 0,
+            syncedAt: new Date().toISOString(),
+        });
     });
 
     app.get('/api/bot/product-images/:filename', (req, res) => {

@@ -11,6 +11,7 @@ const GROUP_COPY = Object.freeze({
   claude: ['Claude Pro & Claude API', 'Claude Pro accounts and API usage packages are listed separately.'],
   adobe: ['Adobe Creative Cloud', 'All Apps, trial duration and device limits are shown per package.'],
   creative_tools: ['CapCut Pro & Microsoft 365', 'Video, productivity and cloud storage tools.'],
+  spotify: ['Spotify Premium', 'Ad-free high-quality music and offline playback for the selected duration.'],
   streaming: ['YouTube Premium & Entertainment', 'Renewal cycles and account requirements are shown for every plan.'],
   gearup: ['GearUP Booster', 'Connection optimization packages for 3–12 months.'],
   locket: ['Locket Gold', 'Long-term premium plans for Locket.'],

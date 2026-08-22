@@ -1642,6 +1642,11 @@ export const DEFAULT_PRODUCT_CATALOG = [
     { name: 'Gearup Booster 6 Tháng', description: 'Gói Gearup Booster giảm giật lag chơi game 6 tháng.', price: 380000, duration_months: 6, service_type: 'gearup', emoji: 'brand_gearup', original_price: 0 },
     { name: 'Gearup Booster 12 Tháng (1 Năm)', description: 'Gói Gearup Booster giảm giật lag chơi game 12 tháng (1 năm).', price: 460000, duration_months: 12, service_type: 'gearup', emoji: 'brand_gearup', original_price: 0 },
 
+    // Spotify Premium · bảng giá chính thức
+    { product_key: 'spotify-premium-3-months', name: 'Spotify Premium 3 Tháng', description: 'Spotify Premium không quảng cáo, nghe nhạc chất lượng cao và hỗ trợ tải nhạc để nghe offline trong 3 tháng.', price: 100000, duration_months: 3, service_type: 'spotify', emoji: 'brand_spotify', original_price: 0, is_featured: 1, virtual_purchase_count: 0 },
+    { product_key: 'spotify-premium-6-months', name: 'Spotify Premium 6 Tháng', description: 'Spotify Premium không quảng cáo, nghe nhạc chất lượng cao và hỗ trợ tải nhạc để nghe offline trong 6 tháng.', price: 200000, duration_months: 6, service_type: 'spotify', emoji: 'brand_spotify', original_price: 0, is_featured: 1, virtual_purchase_count: 0 },
+    { product_key: 'spotify-premium-12-months', name: 'Spotify Premium 12 Tháng', description: 'Spotify Premium không quảng cáo, nghe nhạc chất lượng cao và hỗ trợ tải nhạc để nghe offline trong 12 tháng.', price: 290000, duration_months: 12, service_type: 'spotify', emoji: 'brand_spotify', original_price: 0, is_featured: 1, virtual_purchase_count: 0 },
+
     // YouTube Premium · gia hạn liên tục, bảo hành toàn thời gian
     { product_key: 'youtube-premium-continuous-1-month', name: 'YouTube Premium 1 Tháng (Gia Hạn Liên Tục)', description: 'Dòng ổn định, gia hạn YouTube Premium liên tục và bảo hành full trong toàn bộ 1 tháng sử dụng.', warranty_policy: 'Full 1 tháng', price: 55000, duration_months: 1, service_type: 'STREAMING', emoji: 'brand_youtube', original_price: 0 },
     { product_key: 'youtube-premium-continuous-3-months', name: 'YouTube Premium 3 Tháng (Gia Hạn Liên Tục)', aliases: ['YouTube Premium 3 Tháng (Gia Hạn Đều)'], description: 'Dòng ổn định, gia hạn YouTube Premium liên tục và bảo hành full trong toàn bộ 3 tháng sử dụng.', warranty_policy: 'Full 3 tháng', price: 185000, duration_months: 3, service_type: 'STREAMING', emoji: 'brand_youtube', original_price: 0 },
@@ -1755,6 +1760,14 @@ export function seedProductCatalog(dbInstance) {
           AND COALESCE(product_key, '') NOT IN (
             'netflix-extra-1-month-renewable',
             'netflix-premium-1-month-non-renewable'
+          )
+        )
+        OR (
+          LOWER(name) LIKE '%spotify%'
+          AND COALESCE(product_key, '') NOT IN (
+            'spotify-premium-3-months',
+            'spotify-premium-6-months',
+            'spotify-premium-12-months'
           )
         )
       )
