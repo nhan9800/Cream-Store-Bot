@@ -12,6 +12,10 @@ import { createEmojiResolver, withButtonEmoji } from '../utils/emojiHelper.js';
 import { normalizeV2Text } from '../utils/uiKit.js';
 
 const PROMOTION_MARKER_PREFIX = 'CENAR-PROMOTION-BOARD-';
+const LEGACY_PROMOTION_TEXT_MARKERS = Object.freeze([
+  'Khuyến Mãi 21/08 - 02/09',
+  'Sale Nicho Boost Login 2 Tháng Xịn 99k',
+]);
 
 export const PROMOTION_BOARD = Object.freeze({
   guildId: '1282637033340403754',
@@ -148,7 +152,7 @@ export function buildPromotionBoardPayload() {
       `## ${E('icon_key')} TIỆN ÍCH SỐ & PREMIUM`,
       ...productPriceLines(campaign.prices.windows, E('icon_key')),
       ...productPriceLines(campaign.prices.locket, E('brand_locket')),
-      ...productPriceLines(campaign.prices.canva, E('icon_art')),
+      ...productPriceLines(campaign.prices.canva, E('promo_decor')),
       ...productPriceLines(campaign.prices.chatgpt, E('brand_chatgpt')),
     ].join('\n'))));
 
@@ -208,8 +212,19 @@ function messageContainsMarker(message, marker = PROMOTION_MARKER_PREFIX) {
     && message.components.some((component) => containsMarker(component, marker));
 }
 
+function containsLegacyPromotionText(component) {
+  if (typeof component?.content === 'string'
+    && LEGACY_PROMOTION_TEXT_MARKERS.some((marker) => component.content.includes(marker))) {
+    return true;
+  }
+  return Array.isArray(component?.components)
+    && component.components.some(containsLegacyPromotionText);
+}
+
 export function isPromotionBoardMessage(message, botUserId) {
-  return message?.author?.id === botUserId && messageContainsMarker(message);
+  return message?.author?.id === botUserId
+    && (messageContainsMarker(message)
+      || message.components?.some(containsLegacyPromotionText));
 }
 
 export async function publishPromotionBoard(client) {

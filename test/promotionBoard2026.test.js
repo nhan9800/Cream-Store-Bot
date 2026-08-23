@@ -50,6 +50,7 @@ describe('Cenar promotion board 2026', () => {
     expect(json).toContain('cenar_promo_boost');
     expect(json).toContain('cenar_youtube');
     expect(json).toContain('cenar_spotify');
+    expect(json).toContain('cenar_promo_decor');
     expect(json).toContain('cenar_price_chatgpt');
     expect(payload.components).toHaveLength(6);
     expect(payload.allowedMentions.parse).toContain('everyone');
@@ -66,9 +67,14 @@ describe('Cenar promotion board 2026', () => {
       author: { id: 'bot-1' },
       components: [{ type: 17, components: [{ type: 10, content: '-# CENAR-PROMOTION-BOARD-V1' }] }],
     };
+    const staleAnnouncement = {
+      author: { id: 'bot-1' },
+      components: [{ type: 17, components: [{ type: 10, content: '# Khuyến Mãi 21/08 - 02/09' }] }],
+    };
 
     expect(isPromotionBoardMessage(message, 'bot-1')).toBe(true);
     expect(isPromotionBoardMessage(legacy, 'bot-1')).toBe(true);
+    expect(isPromotionBoardMessage(staleAnnouncement, 'bot-1')).toBe(true);
     expect(isPromotionBoardMessage(message, 'bot-2')).toBe(false);
   });
 });
