@@ -49,45 +49,45 @@ export function buildTermsBoardPayload() {
     .setAccentColor(0x7C3AED)
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(normalizeV2Text([
       `# ${E('partner_rules')} ĐIỀU KHOẢN DỊCH VỤ & BẢO HÀNH`,
-      `> ${E('verify_shield')} Quy định này bảo vệ quyền lợi khách hàng, giúp shop xử lý sự cố đúng quy trình và duy trì chất lượng dịch vụ ổn định.`,
-      `> Khi đặt hàng tại **Cenar Store**, khách hàng xác nhận đã đọc và đồng ý với phiên bản điều khoản mới nhất tại kênh này.`,
+      `> ${E('verify_shield')} Quy định giúp shop xử lý sự cố đúng quy trình và bảo vệ quyền lợi khách hàng.`,
+      `> Đặt hàng tại **Cenar Store** đồng nghĩa khách đã đọc và đồng ý với phiên bản mới nhất tại kênh này.`,
     ].join('\n'))));
 
   const general = new ContainerBuilder()
     .setAccentColor(0x2563EB)
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(normalizeV2Text([
       `## ${E('warranty_shield')} 01 · CHÍNH SÁCH BẢO HÀNH CHUNG`,
-      `${E('status_check')} Giữ lại mã đơn, thông tin tài khoản và nội dung bàn giao để đối chiếu khi cần hỗ trợ.`,
-      `${E('status_check')} Gửi feedback sau khi hoàn tất đơn để kích hoạt và lưu nhận quyền lợi bảo hành.`,
-      `${E('status_warn')} Không tự ý thay đổi thông tin, rời nhóm, xoá profile hoặc can thiệp vào sản phẩm khi chưa có hướng dẫn của Admin.`,
-      `${E('status_cross')} Khách tự ý rời server Cenar Store có thể bị từ chối bảo hành đối với các đơn chưa kết thúc thời hạn hỗ trợ.`,
+      `${E('status_check')} Giữ mã đơn, thông tin tài khoản và nội dung bàn giao để đối chiếu khi cần.`,
+      `${E('status_check')} Gửi feedback sau khi hoàn tất đơn để ghi nhận quyền lợi bảo hành.`,
+      `${E('status_warn')} Không tự đổi thông tin, rời nhóm, xoá profile hoặc can thiệp sản phẩm khi chưa được Admin hướng dẫn.`,
+      `${E('status_cross')} Tự ý rời server Cenar Store có thể bị từ chối bảo hành với đơn còn thời hạn.`,
     ].join('\n'))));
 
   const youtube = new ContainerBuilder()
     .setAccentColor(0xFF0000)
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(normalizeV2Text([
       `## ${E('brand_youtube')} 02 · YOUTUBE PREMIUM & GOOGLE FAMILY`,
-      `### ${E('status_warn')} Khi mất Premium hoặc Family phát sinh lỗi`,
-      `${E('status_check')} **Việc đầu tiên cần làm:** giữ nguyên trạng thái tài khoản và liên hệ Admin ngay để được kiểm tra.`,
-      `${E('status_cross')} **Không tự ý rời Google Family.** Tự rời nhóm trước khi Admin xác nhận sẽ làm gián đoạn quy trình bảo hành và có thể kích hoạt giới hạn tham gia nhóm gia đình của Google.`,
+      `### ${E('status_warn')} Khi mất Premium hoặc Family bị lỗi`,
+      `${E('status_check')} **Việc đầu tiên:** giữ nguyên tài khoản và liên hệ Admin ngay.`,
+      `${E('status_cross')} **Không tự ý rời Google Family.** Tự rời nhóm làm gián đoạn bảo hành và có thể kích hoạt giới hạn Family của Google.`,
     ].join('\n'))))
     .addSeparatorComponents(divider())
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(normalizeV2Text([
       `### ${E('icon_price')} Trường hợp khách tự ý rời nhóm`,
-      `> Đơn hàng sẽ **không còn thuộc phạm vi bảo hành miễn phí**. Nếu muốn tiếp tục sử dụng, khách cần thanh toán phí hỗ trợ **${money(policy.youtubeRejoinFee)}** để shop kiểm tra và thực hiện quy trình thêm lại.`,
-      `> Phí trên bao gồm **một lần kiểm tra và hỗ trợ xử lý giới hạn Google Family 12 tháng** nếu Gmail đủ điều kiện. Đây không phải cam kết mọi Gmail đều xử lý thành công.`,
-      `${E('status_info')} Google giới hạn số lần/chỗ tham gia Family và điều kiện này không tồn tại vĩnh viễn. Nếu Gmail cũ không đủ điều kiện xử lý, khách cần đổi sang Gmail khác; phí hỗ trợ thêm lại vẫn là **${money(policy.youtubeRejoinFee)}**.`,
-      `${E('icon_search')} Khi yêu cầu hỗ trợ, vui lòng gửi **Gmail cá nhân**, **tên/Gmail chủ Family** và **mã đơn hàng** để Admin kiểm tra nhanh nhất.`,
+      `> Đơn **không còn được bảo hành miễn phí**. Muốn tiếp tục sử dụng, khách đóng phí hỗ trợ **${money(policy.youtubeRejoinFee)}** để shop kiểm tra và thêm lại.`,
+      `> Phí gồm **một lần kiểm tra/xử lý giới hạn Google Family 12 tháng** nếu Gmail đủ điều kiện; không cam kết mọi Gmail đều xử lý thành công.`,
+      `${E('status_info')} Nếu Gmail cũ không đủ điều kiện do giới hạn/slot Google, khách phải đổi Gmail; phí thêm lại vẫn là **${money(policy.youtubeRejoinFee)}**.`,
+      `${E('icon_search')} Cần cung cấp **Gmail cá nhân**, **Gmail chủ Family** và **mã đơn**.`,
     ].join('\n'))));
 
   const nitro = new ContainerBuilder()
     .setAccentColor(0x5865F2)
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(normalizeV2Text([
       `## ${E('brand_nitro')} 03 · DISCORD NITRO LOGIN & MAIL SHOP CẤP`,
-      `${E('status_check')} **Mail còn hoạt động:** khách phải giữ mail shop cấp và gia hạn đúng chu kỳ **2 tháng/lần** theo lịch shop thông báo.`,
-      `${E('status_warn')} **Mail đã chết nhưng Nitro vẫn còn:** không tự ý can thiệp; liên hệ Admin ngay để shop kiểm tra và đưa phương án xử lý trước khi Nitro bị ảnh hưởng.`,
-      `${E('status_cross')} **Mail đã chết và Nitro đồng thời bị mất:** trường hợp này **không thuộc phạm vi bảo hành**. Shop chỉ hỗ trợ mức giá ưu đãi nếu khách muốn mua lại hoặc tiếp tục sử dụng dịch vụ.`,
-      `> ${E('status_info')} Việc bảo quản mail shop cấp là điều kiện bắt buộc để duy trì quyền lợi bảo hành và các lần gia hạn tiếp theo.`,
+      `${E('status_check')} **Mail còn sống:** phải giữ mail shop cấp và gia hạn đúng chu kỳ **2 tháng/lần**.`,
+      `${E('status_warn')} **Mail chết nhưng Nitro còn:** liên hệ Admin ngay, không tự can thiệp.`,
+      `${E('status_cross')} **Mail chết và Nitro cũng mất:** **không thuộc phạm vi bảo hành**; shop chỉ hỗ trợ giá ưu đãi nếu khách muốn mua lại.`,
+      `> ${E('status_info')} Bảo quản mail shop cấp là điều kiện bắt buộc để duy trì bảo hành và gia hạn.`,
     ].join('\n'))));
 
   const netflix = new ContainerBuilder()
@@ -95,17 +95,17 @@ export function buildTermsBoardPayload() {
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(normalizeV2Text([
       `## ${E('brand_netflix')} 04 · QUY ĐỊNH NETFLIX`,
       `${E('status_cross')} Không đổi mật khẩu tài khoản, không xoá hoặc truy cập profile của người khác.`,
-      `${E('status_check')} Khách được đổi tên và đặt PIN cho profile của mình; sau khi đổi tên cần báo lại shop để cập nhật quản lý.`,
-      `${E('status_check')} Có thể đăng nhập nhiều thiết bị nhưng chỉ xem đồng thời trên **01 thiết bị**, trừ khi gói bàn giao ghi rõ điều kiện khác.`,
+      `${E('status_check')} Được đổi tên/đặt PIN profile của mình nhưng phải báo lại shop.`,
+      `${E('status_check')} Được đăng nhập nhiều thiết bị nhưng chỉ xem đồng thời trên **01 thiết bị**, trừ khi gói ghi khác.`,
     ].join('\n'))));
 
   const footer = new ContainerBuilder()
     .setAccentColor(0xF59E0B)
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(normalizeV2Text([
       `## ${E('cenar_verified')} 05 · TIẾN ĐỘ, HỖ TRỢ & HIỆU LỰC`,
-      `${E('icon_clock')} Thời gian xử lý phụ thuộc nguồn hàng và tình trạng nhà cung cấp; staff có trách nhiệm cập nhật tiến độ minh bạch trong ticket.`,
-      `${E('cenar_support')} Mọi sự cố cần được báo tại <#${policy.supportChannelId}> trước khi khách tự thao tác để shop có đủ dữ liệu bảo hành.`,
-      `${E('status_info')} Điều khoản có thể được cập nhật khi Google, Discord, Netflix hoặc nhà cung cấp gốc thay đổi chính sách. Phiên bản đang hiển thị tại kênh này là phiên bản có hiệu lực.`,
+      `${E('icon_clock')} Tiến độ phụ thuộc nguồn hàng; staff sẽ cập nhật trong ticket.`,
+      `${E('cenar_support')} Báo sự cố tại <#${policy.supportChannelId}> **trước khi tự thao tác**.`,
+      `${E('status_info')} Điều khoản có thể đổi theo nhà cung cấp; phiên bản tại kênh này là phiên bản có hiệu lực.`,
       `-# ${policy.marker}`,
     ].join('\n'))));
 
@@ -205,8 +205,8 @@ export async function publishTermsBoard(client) {
     return { status: 'updated', messageId: current.id, removed: boards.length - 1 };
   }
 
-  await Promise.all(boards.map((message) => message.delete().catch(() => null)));
   const message = await channel.send(payload);
   await message.pin().catch(() => null);
+  await Promise.all(boards.map((legacy) => legacy.delete().catch(() => null)));
   return { status: 'published', messageId: message.id, removed: boards.length };
 }

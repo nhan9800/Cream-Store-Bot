@@ -24,20 +24,32 @@ describe('Cenar terms board 2026', () => {
     expect(json).toContain(TERMS_BOARD.marker);
     expect(json).toContain('YOUTUBE PREMIUM & GOOGLE FAMILY');
     expect(json).toContain('Không tự ý rời Google Family');
-    expect(json).toContain('không còn thuộc phạm vi bảo hành miễn phí');
+    expect(json).toContain('không còn được bảo hành miễn phí');
     expect(json).toContain('65.000đ');
-    expect(json).toContain('một lần kiểm tra và hỗ trợ xử lý giới hạn Google Family 12 tháng');
-    expect(json).toContain('Đây không phải cam kết mọi Gmail đều xử lý thành công');
-    expect(json).toContain('khách cần đổi sang Gmail khác');
-    expect(json).toContain('Mail còn hoạt động');
+    expect(json).toContain('một lần kiểm tra/xử lý giới hạn Google Family 12 tháng');
+    expect(json).toContain('không cam kết mọi Gmail đều xử lý thành công');
+    expect(json).toContain('khách phải đổi Gmail');
+    expect(json).toContain('Mail còn sống');
     expect(json).toContain('gia hạn đúng chu kỳ **2 tháng/lần**');
-    expect(json).toContain('Mail đã chết nhưng Nitro vẫn còn');
-    expect(json).toContain('Mail đã chết và Nitro đồng thời bị mất');
+    expect(json).toContain('Mail chết nhưng Nitro còn');
+    expect(json).toContain('Mail chết và Nitro cũng mất');
     expect(json).toContain('không thuộc phạm vi bảo hành');
-    expect(json).toContain('chỉ hỗ trợ mức giá ưu đãi');
+    expect(json).toContain('chỉ hỗ trợ giá ưu đãi');
     expect(json).toContain('cenar_price_nitro');
     expect(json).toContain('cenar_youtube');
     expect(json).toContain('cenar_warranty_shield');
+
+    const contents = [];
+    const collect = (value) => {
+      if (!value || typeof value !== 'object') return;
+      if (typeof value.content === 'string') contents.push(value.content);
+      Object.values(value).forEach((child) => {
+        if (Array.isArray(child)) child.forEach(collect);
+        else collect(child);
+      });
+    };
+    payload.components.map((component) => component.toJSON()).forEach(collect);
+    expect(contents.reduce((total, content) => total + content.length, 0)).toBeLessThanOrEqual(3_800);
   });
 
   it('recognizes every legacy terms fragment so the publisher can replace all old messages', () => {
