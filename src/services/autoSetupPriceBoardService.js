@@ -21,7 +21,7 @@ import { formatInternationalPrice, translateCatalogGroup, translateProductName }
 import { getNitroTrialEligibility, isNitroTrialProduct } from '../constants/nitroTrial.js';
 import { getNetflixPromoDetails, isNetflixPromoProduct } from '../constants/netflixPromotion.js';
 
-export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.12';
+export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.13';
 const PRIMARY_GUILD_ID = '1282637033340403754';
 const PRIMARY_PRICE_CHANNEL_ID = '1514606995842273280';
 const PRIMARY_PROMOTION_CHANNEL_ID = '1515008584549797979';
@@ -59,7 +59,7 @@ export const PRICE_GROUPS = [
   },
   {
     key: 'chatgpt', titleSlot: 'brand_chatgpt', title: 'ChatGPT Plus & Business', accent: 0x10A37F,
-    note: 'Chỉ mở bán 2 lựa chọn: cấp tài khoản Plus hoặc thêm tài khoản chính chủ vào workspace Business.',
+    note: '4 lựa chọn minh bạch: cấp tài khoản không bảo hành, cấp tài khoản full bảo hành, Business add workspace và Plus thanh toán trực tiếp trên tài khoản chính chủ.',
     match: (p) => p.service_type === 'AI' && /chat\s*gpt/i.test(p.name),
   },
   {
@@ -195,6 +195,7 @@ function setButtonEmoji(button, E, slot) {
 const FULL_WARRANTY_PRODUCT_KEYS = new Set([
   'chatgpt-plus-account-1-month-full-warranty',
   'chatgpt-business-workspace-1-month-full-warranty',
+  'chatgpt-plus-direct-payment-1-month-full-warranty',
   'claude-pro-1-month',
   'gemini-pro-google-one-5tb-12-months-full-warranty',
   'gemini-pro-google-one-5tb-18-months-full-warranty',

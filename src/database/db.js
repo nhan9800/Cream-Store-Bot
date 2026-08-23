@@ -1585,14 +1585,26 @@ export const DEFAULT_PRODUCT_CATALOG = [
     },
     { product_key: 'claude-pro-1-month', name: 'Claude Pro 1 Tháng (Full BH)', aliases: ['Claude Pro Add Team 1 Tháng (Full BH)'], description: 'Claude Pro trong 1 tháng, bảo hành trọn gói tại Cenar Store.', warranty_policy: 'Full 1 tháng', price: 530000, duration_months: 1, service_type: 'AI', emoji: 'brand_claude', original_price: 0, is_featured: 1, virtual_purchase_count: 126 },
     {
+      product_key: 'chatgpt-plus-account-1-month-no-warranty',
+      name: 'ChatGPT Plus 1 Tháng (Cấp Tài Khoản · Không BH)',
+      aliases: ['ChatGPT Plus Cấp Acc 1 Tháng Không Bảo Hành'],
+      description: 'Gói cấp tài khoản có thời hạn danh nghĩa 1 tháng nhưng không bảo hành. Tài khoản có thể mất sau 1–2 tuần hoặc duy trì lâu hơn; đây là lựa chọn thử vận may và không cam kết sống đủ tháng.',
+      warranty_policy: 'Không bảo hành · có thể mất sau 1–2 tuần hoặc lâu hơn; không cam kết đủ tháng',
+      price: 180000,
+      duration_months: 1,
+      service_type: 'AI',
+      emoji: 'brand_chatgpt',
+      original_price: 0,
+      is_featured: 0,
+      virtual_purchase_count: 0,
+    },
+    {
       product_key: 'chatgpt-plus-account-1-month-full-warranty',
       name: 'ChatGPT Plus 1 Tháng (Cấp Tài Khoản · Full BH)',
-      aliases: [
-        'ChatGPT Plus 1 Tháng (Cấp Tài Khoản)',
-        'Chat GPT Plus Cấp Acc FULL bảo Hành 1 tháng',
-      ],
+      aliases: ['ChatGPT Plus 1 Tháng (Cấp Tài Khoản)', 'Chat GPT Plus Cấp Acc FULL bảo Hành 1 tháng'],
       description: 'Cấp tài khoản ChatGPT Plus đã kích hoạt sẵn trong 1 tháng, bảo hành full trong suốt thời gian sử dụng.',
-      price: 250000,
+      warranty_policy: 'Full 1 tháng',
+      price: 350000,
       duration_months: 1,
       service_type: 'AI',
       emoji: 'brand_chatgpt',
@@ -1602,13 +1614,25 @@ export const DEFAULT_PRODUCT_CATALOG = [
     },
     {
       product_key: 'chatgpt-business-workspace-1-month-full-warranty',
-      name: 'ChatGPT Business 1 Tháng (Thêm Vào Workspace · Chính Chủ · Full BH)',
-      aliases: [
-        'ChatGPT Plus 1 Tháng (Chính Chủ - Full BH)',
-        'ChatGPT Add Team Business 1 Tháng (Chính Chủ)',
-      ],
-      description: 'Thêm tài khoản chính chủ của khách vào workspace ChatGPT Business trong 1 tháng, bảo hành full trong suốt thời gian sử dụng.',
-      price: 420000,
+      name: 'ChatGPT Business 1 Tháng (Add Workspace · Chính Chủ · Full BH)',
+      aliases: ['ChatGPT Plus 1 Tháng (Chính Chủ - Full BH)', 'ChatGPT Add Team Business 1 Tháng (Chính Chủ)'],
+      description: 'Thêm tài khoản chính chủ của khách vào workspace ChatGPT Business, hỗ trợ gia hạn đều và bảo hành full trong suốt 1 tháng sử dụng.',
+      warranty_policy: 'Full 1 tháng',
+      price: 450000,
+      duration_months: 1,
+      service_type: 'AI',
+      emoji: 'brand_chatgpt',
+      original_price: 0,
+      is_featured: 1,
+      virtual_purchase_count: 0,
+    },
+    {
+      product_key: 'chatgpt-plus-direct-payment-1-month-full-warranty',
+      name: 'ChatGPT Plus Chính Chủ 1 Tháng (Thanh Toán Trực Tiếp · Full BH)',
+      aliases: ['ChatGPT Plus Chính Chủ Pay Thẳng Trên Acc 1 Tháng'],
+      description: 'Thanh toán ChatGPT Plus trực tiếp trên chính tài khoản của khách, không tham gia workspace hoặc team; bảo hành full trong suốt 1 tháng sử dụng.',
+      warranty_policy: 'Full 1 tháng',
+      price: 530000,
       duration_months: 1,
       service_type: 'AI',
       emoji: 'brand_chatgpt',
@@ -1718,8 +1742,10 @@ export function seedProductCatalog(dbInstance) {
         (
           LOWER(REPLACE(name, ' ', '')) LIKE '%chatgpt%'
           AND COALESCE(product_key, '') NOT IN (
+            'chatgpt-plus-account-1-month-no-warranty',
             'chatgpt-plus-account-1-month-full-warranty',
-            'chatgpt-business-workspace-1-month-full-warranty'
+            'chatgpt-business-workspace-1-month-full-warranty',
+            'chatgpt-plus-direct-payment-1-month-full-warranty'
           )
         )
         OR (
@@ -1797,7 +1823,7 @@ export function seedProductCatalog(dbInstance) {
       }
     }
 
-    // Danh mục mới chỉ mở bán đúng 2 gói ChatGPT và 1 gói Adobe.
+    // Danh mục mới chỉ mở bán đúng 4 gói ChatGPT và 1 gói Adobe.
     // Các hàng lịch sử vẫn được giữ trong database để bảo toàn đơn cũ, nhưng
     // không còn xuất hiện trên bot, website hoặc bảng giá Discord.
     retireReplacedAiCatalogStmt.run();

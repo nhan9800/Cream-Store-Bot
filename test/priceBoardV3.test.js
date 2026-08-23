@@ -264,40 +264,52 @@ describe('Cenar price board V3', () => {
     expect(switchPanel).toContain('Full trong suốt thời gian sử dụng');
   });
 
-  it('keeps only the new ChatGPT and Adobe packages across catalog, board and announcement', () => {
+  it('keeps only the four new ChatGPT and current Adobe packages across catalog, board and announcement', () => {
     const products = getActiveProducts(GUILD_ID);
     const chatgptProducts = products.filter((product) => /chat\s*gpt/i.test(product.name));
     const adobeProducts = products.filter((product) => /adobe/i.test(product.name));
 
-    expect(chatgptProducts).toHaveLength(2);
+    expect(chatgptProducts).toHaveLength(4);
     expect(chatgptProducts.map((product) => product.product_key)).toEqual(expect.arrayContaining([
+      AI_CREATIVE_PRICING_UPDATE.productKeys.chatgptNoWarranty,
       AI_CREATIVE_PRICING_UPDATE.productKeys.chatgptAccount,
       AI_CREATIVE_PRICING_UPDATE.productKeys.chatgptBusiness,
+      AI_CREATIVE_PRICING_UPDATE.productKeys.chatgptDirect,
     ]));
+    expect(chatgptProducts.find((product) => product.product_key === AI_CREATIVE_PRICING_UPDATE.productKeys.chatgptNoWarranty)?.price).toBe(180000);
     expect(chatgptProducts.find((product) => (
       product.product_key === AI_CREATIVE_PRICING_UPDATE.productKeys.chatgptAccount
-    ))?.price).toBe(250000);
+    ))?.price).toBe(350000);
     expect(chatgptProducts.find((product) => (
       product.product_key === AI_CREATIVE_PRICING_UPDATE.productKeys.chatgptBusiness
-    ))?.price).toBe(420000);
+    ))?.price).toBe(450000);
+    expect(chatgptProducts.find((product) => product.product_key === AI_CREATIVE_PRICING_UPDATE.productKeys.chatgptDirect)?.price).toBe(530000);
     expect(adobeProducts).toHaveLength(1);
     expect(adobeProducts[0].product_key).toBe(AI_CREATIVE_PRICING_UPDATE.productKeys.adobe);
     expect(adobeProducts[0].price).toBe(150000);
 
     const payloadJson = buildPriceBoardPayloads(GUILD_ID, {}, products).map(serialize).join('\n');
     expect(payloadJson).toContain('ChatGPT Plus & Business');
-    expect(payloadJson).toContain('250.000');
-    expect(payloadJson).toContain('420.000');
+    expect(payloadJson).toContain('180.000');
+    expect(payloadJson).toContain('350.000');
+    expect(payloadJson).toContain('450.000');
+    expect(payloadJson).toContain('530.000');
+    expect(payloadJson).toContain('Không bảo hành');
+    expect(payloadJson).toContain('1–2 tuần');
     expect(payloadJson).toContain('150.000');
     expect(payloadJson).toContain('Full trong suốt thời gian sử dụng');
     expect(payloadJson).not.toContain('Adobe Creative Cloud Trial');
     expect(payloadJson).not.toContain('Adobe Creative Cloud All Apps (2 Tháng');
 
     const announcement = buildAiCreativePricingAnnouncement(GUILD_ID, products);
-    expect(announcement).toContain('CHATGPT · 2 LỰA CHỌN');
-    expect(announcement).toContain('ChatGPT Business · Tài khoản chính chủ');
-    expect(announcement).toContain('250.000');
-    expect(announcement).toContain('420.000');
+    expect(announcement).toContain('CHATGPT · 4 LỰA CHỌN');
+    expect(announcement).toContain('ChatGPT Business · Add workspace chính chủ');
+    expect(announcement).toContain('Thanh toán Plus trực tiếp');
+    expect(announcement).toContain('180.000');
+    expect(announcement).toContain('350.000');
+    expect(announcement).toContain('450.000');
+    expect(announcement).toContain('530.000');
+    expect(announcement).toContain('thử vận may');
     expect(announcement).toContain('150.000');
     expect(announcement).toContain(AI_CREATIVE_PRICING_UPDATE.marker);
   });
