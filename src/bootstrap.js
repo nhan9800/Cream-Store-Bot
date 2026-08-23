@@ -115,6 +115,10 @@ export async function buildClient() {
       const promotionBoard = await publishPromotionBoard(readyClient);
       console.log(`[PROMOTION-BOARD] status=${promotionBoard.status} message=${promotionBoard.messageId} removed=${promotionBoard.removed}`);
 
+      const { publishTermsBoard } = await import('./campaigns/termsBoard2026.js');
+      const termsBoard = await publishTermsBoard(readyClient);
+      console.log(`[TERMS-BOARD] status=${termsBoard.status} message=${termsBoard.messageId} removed=${termsBoard.removed}`);
+
       const { reconcileRecentCtvOrderLogs } = await import('./services/ctvOrderLogService.js');
       for (const guild of readyClient.guilds.cache.values()) {
         try {
