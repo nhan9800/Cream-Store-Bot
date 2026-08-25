@@ -53,6 +53,37 @@ import {
   activeTicketCloses,
 } from './shared.js';
 
+export function withoutComponentEmojis(value) {
+  if (value === null || value === undefined) return value;
+  if (Array.isArray(value)) return value.map(withoutComponentEmojis);
+  if (typeof value?.toJSON === 'function') return withoutComponentEmojis(value.toJSON());
+  if (typeof value !== 'object') return value;
+  const sanitized = {};
+  for (const [key, child] of Object.entries(value)) {
+    if (key === 'emoji') continue;
+    sanitized[key] = withoutComponentEmojis(child);
+  }
+  return sanitized;
+}
+
+function isInvalidComponentEmojiError(error) {
+  return Number(error?.code) === 50035
+    && JSON.stringify(error?.rawError?.errors || error?.message || '').includes('COMPONENT_INVALID_EMOJI');
+}
+
+export async function sendTicketComponents(channel, payload) {
+  try {
+    return await channel.send(payload);
+  } catch (error) {
+    if (!isInvalidComponentEmojiError(error)) throw error;
+    console.warn(`[TICKET_CREATE] Emoji component không còn hợp lệ tại ${channel.id}; gửi lại panel không emoji.`);
+    return channel.send({
+      ...payload,
+      components: withoutComponentEmojis(payload.components),
+    });
+  }
+}
+
 export async function handleTicketCreate(interaction, ticketType = 'ORDER', gmailAddress = null) {
   const E = createEmojiResolver(interaction.guildId);
   if (!interaction.inGuild()) {
@@ -89,7 +120,7 @@ export async function handleTicketCreate(interaction, ticketType = 'ORDER', gmai
   const normalizedType = String(ticketType || 'ORDER').toUpperCase();
 
   if (normalizedType === 'APPEAL') {
-    await interaction.deferReply({ ephemeral: true }).catch(() => null);
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => null);
   }
 
   // Khóa chống click đúp tạo 2 ticket
@@ -343,7 +374,7 @@ export async function handleTicketCreate(interaction, ticketType = 'ORDER', gmai
         }
       }
 
-      await channel.send({
+      await sendTicketComponents(channel, {
         components: components,
         flags: welcomeV2Flags,
       });

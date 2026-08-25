@@ -1,8 +1,11 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ButtonBuilder, ButtonStyle, MessageFlags } from 'discord.js';
 import { buildAnnouncementMessageV2, isPriceRelatedAnnouncement, publishAnnouncement } from '../src/services/announcementService.js';
 import { buildCardPanelPayload } from '../src/services/cardPanelService.js';
+import { buildCreditOfferV2 } from '../src/utils/embeds.js';
 import { normalizeButtonEmoji, withButtonEmoji } from '../src/utils/emojiHelper.js';
+import { safeReply } from '../src/events/shared.js';
+import { sendTicketComponents } from '../src/events/ticketHandlers.js';
 
 const GUILD_ID = '1070676180103086132';
 const previousDiscordClient = global.discordClient;
@@ -58,6 +61,85 @@ describe('safe custom emoji components', () => {
     const buttons = json[1].components;
     expect(buttons).toHaveLength(4);
     expect(buttons.every((button) => button.emoji === undefined)).toBe(true);
+  });
+
+  it('builds the BNPL ticket controls without stale hard-coded emoji IDs', () => {
+    const unrelatedEmoji = {
+      id: '1999999999999999999',
+      name: 'unrelated',
+      animated: false,
+    };
+    global.discordClient = {
+      guilds: {
+        cache: new Map([[GUILD_ID, { emojis: { cache: new Map([[unrelatedEmoji.id, unrelatedEmoji]]) } }]]),
+      },
+      emojis: { cache: new Map() },
+    };
+
+    const payload = buildCreditOfferV2({ limit: 500_000, available: 350_000 }, 'customer-1', GUILD_ID);
+    const buttons = payload.row.toJSON().components;
+    const text = payload.container.toJSON().components
+      .filter((component) => component.type === 10)
+      .map((component) => component.content)
+      .join('\n');
+
+    expect(buttons).toHaveLength(2);
+    expect(buttons.every((button) => button.emoji === undefined)).toBe(true);
+    expect(text).not.toContain('1481127479702847646');
+    expect(text).not.toContain('1442876095442714748');
+  });
+
+  it('converts deprecated ephemeral replies to Discord message flags', async () => {
+    const interaction = {
+      id: 'interaction-1',
+      createdTimestamp: Date.now(),
+      replied: false,
+      deferred: false,
+      reply: vi.fn().mockResolvedValue(undefined),
+      followUp: vi.fn().mockResolvedValue(undefined),
+    };
+
+    await safeReply(interaction, { content: 'private', ephemeral: true });
+    const response = interaction.reply.mock.calls[0][0];
+    expect(response).not.toHaveProperty('ephemeral');
+    expect(response.flags & MessageFlags.Ephemeral).toBeTruthy();
+    expect(interaction.followUp).not.toHaveBeenCalled();
+  });
+
+  it('retries ticket creation without component emojis when Discord rejects a stale ID', async () => {
+    const invalidEmojiError = Object.assign(new Error('Invalid Form Body'), {
+      code: 50035,
+      rawError: {
+        errors: {
+          components: {
+            3: { components: { 1: { emoji: { id: { _errors: [{ code: 'COMPONENT_INVALID_EMOJI' }] } } } } },
+          },
+        },
+      },
+    });
+    const channel = {
+      id: 'ticket-channel-1',
+      send: vi.fn()
+        .mockRejectedValueOnce(invalidEmojiError)
+        .mockResolvedValueOnce({ id: 'welcome-message' }),
+    };
+    const payload = {
+      flags: MessageFlags.IsComponentsV2,
+      components: [{
+        type: 1,
+        components: [{
+          type: 2,
+          custom_id: 'ticket:credit_rules',
+          label: 'Xem Quy Chế',
+          style: 2,
+          emoji: { id: '1481127479702847646', name: 'verifybadge' },
+        }],
+      }],
+    };
+
+    await expect(sendTicketComponents(channel, payload)).resolves.toEqual({ id: 'welcome-message' });
+    expect(channel.send).toHaveBeenCalledTimes(2);
+    expect(channel.send.mock.calls[1][0].components[0].components[0]).not.toHaveProperty('emoji');
   });
 
   it('builds /thongbao safely and limits mentions to the selected targets', () => {

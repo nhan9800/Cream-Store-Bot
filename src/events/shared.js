@@ -8,6 +8,7 @@
 
 import {
   ActionRowBuilder,
+  MessageFlags,
   ModalBuilder,
   TextInputBuilder,
   TextInputStyle,
@@ -137,6 +138,19 @@ export function announcementCacheSet(key, value) {
 }
 
 export async function safeReply(interaction, payload) {
+  const response = payload && typeof payload === 'object' && Object.hasOwn(payload, 'ephemeral')
+    ? (() => {
+        const normalized = { ...payload };
+        const ephemeral = normalized.ephemeral === true;
+        delete normalized.ephemeral;
+        if (ephemeral) {
+          const existingFlags = typeof normalized.flags === 'number' ? normalized.flags : 0;
+          normalized.flags = existingFlags | MessageFlags.Ephemeral;
+        }
+        return normalized;
+      })()
+    : payload;
+
   // Timeout guard: nếu interaction quá 14 giây thì không reply được nữa
   if (Date.now() - interaction.createdTimestamp > 14000 && !interaction.deferred && !interaction.replied) {
     console.warn(`[INTERACTION] Interaction ${interaction.id} đã hết hạn (>14s), bỏ qua reply.`);
@@ -144,10 +158,10 @@ export async function safeReply(interaction, payload) {
   }
 
   if (interaction.replied || interaction.deferred) {
-    return interaction.followUp(payload).catch(() => null);
+    return interaction.followUp(response).catch(() => null);
   }
 
-  return interaction.reply(payload).catch(() => null);
+  return interaction.reply(response).catch(() => null);
 }
 
 export async function completeOrderByCode(guild, orderCode, actorId) {
