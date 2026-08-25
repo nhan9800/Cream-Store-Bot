@@ -1094,6 +1094,9 @@ export function initDatabase() {
   ensureColumn('oauth_backups', 'scopes', 'TEXT');
   ensureColumn('oauth_backups', 'recovery_consent_at', 'TEXT');
   ensureColumn('oauth_backups', 'member_roles_json', 'TEXT NOT NULL DEFAULT "[]"');
+  // CTV pricing is part of the canonical seed. Ensure this migration runs
+  // before seedProductCatalog so a brand-new database can be seeded in one boot.
+  ensureColumn('product_catalog', 'ctv_price', 'INTEGER DEFAULT NULL');
 
   // Seed product catalog data
   try {
@@ -1487,23 +1490,23 @@ export function getDatabasePath() {
 
 export const DEFAULT_PRODUCT_CATALOG = [
     // Discord Nitro Boost Log
-    { name: 'Discord Nitro Boost 1 Tháng (Login)', description: 'Đăng nhập gia hạn. Vui lòng gửi tài khoản, mật khẩu và 4-5 mã dự phòng khi mua.', price: 90000, duration_months: 1, service_type: 'GAME', emoji: 'brand_nitro', original_price: 0 },
-    { product_key: 'discord-nitro-boost-2-months-login-keep-mail-7-days', name: 'Discord Nitro Boost 2 Tháng (Login · Giữ Mail 7 Ngày)', aliases: ['Discord Nitro Boost 2 Tháng (Login)'], description: 'Gói login Nitro Boost 2 tháng. Khách hàng cần giữ mail tối thiểu 7 ngày, đăng nhập sớm và kiểm tra mail trong 10-30 phút sau khi nhận.', price: 115000, duration_months: 2, service_type: 'GAME', emoji: 'brand_nitro', original_price: 0 },
-    { product_key: 'discord-nitro-boost-2-months-login-mail-guaranteed', name: 'Discord Nitro Boost 2 Tháng (Login · Mail Bao Sống)', description: 'Gói login Nitro Boost 2 tháng kèm mail bao sống. Đăng nhập sớm và kiểm tra mail trong 10-30 phút sau khi nhận; xác minh số điện thoại nếu hệ thống yêu cầu.', price: 140000, duration_months: 2, service_type: 'GAME', emoji: 'brand_nitro', original_price: 0 },
-    { name: 'Discord Nitro Boost 4 Tháng (Login)', description: 'Đăng nhập gia hạn. Vui lòng gửi tài khoản, mật khẩu và 4-5 mã dự phòng khi mua. Gia hạn 2 tháng 1 lần.', price: 280000, duration_months: 4, service_type: 'GAME', emoji: 'brand_nitro', original_price: 0 },
-    { name: 'Discord Nitro Boost 6 Tháng (Login)', description: 'Đăng nhập gia hạn. Vui lòng gửi tài khoản, mật khẩu và 4-5 mã dự phòng khi mua. Gia hạn 2 tháng 1 lần.', price: 380000, duration_months: 6, service_type: 'GAME', emoji: 'brand_nitro', original_price: 0 },
-    { name: 'Discord Nitro Boost 8 Tháng (Login)', description: 'Đăng nhập gia hạn. Vui lòng gửi tài khoản, mật khẩu và 4-5 mã dự phòng khi mua. Gia hạn 2 tháng 1 lần.', price: 480000, duration_months: 8, service_type: 'GAME', emoji: 'brand_nitro', original_price: 0 },
-    { name: 'Discord Nitro Boost 12 Tháng (Login)', description: 'Đăng nhập gia hạn. Vui lòng gửi tài khoản, mật khẩu và 4-5 mã dự phòng khi mua. Gia hạn 2 tháng 1 lần.', price: 680000, duration_months: 12, service_type: 'GAME', emoji: 'brand_nitro', original_price: 0 },
-    { name: 'Discord Nitro Boost 1 Năm (Login)', description: 'Đăng nhập gia hạn. Vui lòng gửi tài khoản, mật khẩu và 4-5 mã dự phòng khi mua.', price: 880000, duration_months: 12, service_type: 'GAME', emoji: 'brand_nitro', original_price: 0 },
-    { name: 'Gia hạn Discord Nitro Boost 2 Tháng', description: 'Dành cho khách hàng cũ đã từng mua Nitro 2 tháng tại shop. (Gia hạn chỉ 95k). Vui lòng gửi tài khoản, mật khẩu và 4-5 mã dự phòng khi mua.', price: 99000, duration_months: 2, service_type: 'GAME', emoji: 'brand_nitro', original_price: 0 },
+    { name: 'Discord Nitro Boost 1 Tháng (Login)', description: 'Đăng nhập gia hạn. Vui lòng gửi tài khoản, mật khẩu và 4-5 mã dự phòng khi mua.', price: 90000, ctv_price: 85000, duration_months: 1, service_type: 'GAME', emoji: 'brand_nitro', original_price: 0 },
+    { product_key: 'discord-nitro-boost-2-months-login-keep-mail-7-days', name: 'Discord Nitro Boost 2 Tháng (Login · Giữ Mail 7 Ngày)', aliases: ['Discord Nitro Boost 2 Tháng (Login)'], description: 'Gói login Nitro Boost 2 tháng. Khách hàng cần giữ mail tối thiểu 7 ngày, đăng nhập sớm và kiểm tra mail trong 10-30 phút sau khi nhận.', price: 115000, ctv_price: 95000, duration_months: 2, service_type: 'GAME', emoji: 'brand_nitro', original_price: 0 },
+    { product_key: 'discord-nitro-boost-2-months-login-mail-guaranteed', name: 'Discord Nitro Boost 2 Tháng (Login · Mail Bao Sống)', description: 'Gói login Nitro Boost 2 tháng kèm mail bao sống. Đăng nhập sớm và kiểm tra mail trong 10-30 phút sau khi nhận; xác minh số điện thoại nếu hệ thống yêu cầu.', price: 140000, ctv_price: 95000, duration_months: 2, service_type: 'GAME', emoji: 'brand_nitro', original_price: 0 },
+    { name: 'Discord Nitro Boost 4 Tháng (Login)', description: 'Đăng nhập gia hạn. Vui lòng gửi tài khoản, mật khẩu và 4-5 mã dự phòng khi mua. Gia hạn 2 tháng 1 lần.', price: 280000, ctv_price: 185000, duration_months: 4, service_type: 'GAME', emoji: 'brand_nitro', original_price: 0 },
+    { name: 'Discord Nitro Boost 6 Tháng (Login)', description: 'Đăng nhập gia hạn. Vui lòng gửi tài khoản, mật khẩu và 4-5 mã dự phòng khi mua. Gia hạn 2 tháng 1 lần.', price: 380000, ctv_price: 365000, duration_months: 6, service_type: 'GAME', emoji: 'brand_nitro', original_price: 0 },
+    { name: 'Discord Nitro Boost 8 Tháng (Login)', description: 'Đăng nhập gia hạn. Vui lòng gửi tài khoản, mật khẩu và 4-5 mã dự phòng khi mua. Gia hạn 2 tháng 1 lần.', price: 480000, ctv_price: 460000, duration_months: 8, service_type: 'GAME', emoji: 'brand_nitro', original_price: 0 },
+    { name: 'Discord Nitro Boost 12 Tháng (Login)', description: 'Đăng nhập gia hạn. Vui lòng gửi tài khoản, mật khẩu và 4-5 mã dự phòng khi mua. Gia hạn 2 tháng 1 lần.', price: 680000, ctv_price: 580000, duration_months: 12, service_type: 'GAME', emoji: 'brand_nitro', original_price: 0 },
+    { name: 'Discord Nitro Boost 1 Năm (Login)', description: 'Đăng nhập gia hạn. Vui lòng gửi tài khoản, mật khẩu và 4-5 mã dự phòng khi mua.', price: 880000, ctv_price: 795000, duration_months: 12, service_type: 'GAME', emoji: 'brand_nitro', original_price: 0 },
+    { name: 'Gia hạn Discord Nitro Boost 2 Tháng', description: 'Dành cho khách hàng cũ đã từng mua Nitro 2 tháng tại shop. (Gia hạn chỉ 95k). Vui lòng gửi tài khoản, mật khẩu và 4-5 mã dự phòng khi mua.', price: 99000, ctv_price: 95000, duration_months: 2, service_type: 'GAME', emoji: 'brand_nitro', original_price: 0 },
     // Discord Nitro Boost Trial
-    { product_key: 'discord-nitro-boost-trial-3-months-first-offer', name: 'Discord Nitro Boost Trial 3 Tháng (Ưu Đãi Lần Đầu)', aliases: ['Discord Nitro Boost 3 Tháng (Trail)'], description: 'Đối tượng áp dụng: tài khoản được tạo trên 1 tháng và chưa từng sử dụng Nitro; hoặc tài khoản đã từng sử dụng Nitro nhưng không dùng lại Nitro trong ít nhất 12 tháng liên tục. Vui lòng gửi tài khoản, mật khẩu và 4-5 mã dự phòng khi mua.', price: 50000, duration_months: 3, service_type: 'GAME', emoji: 'brand_nitro', original_price: 0 },
+    { product_key: 'discord-nitro-boost-trial-3-months-first-offer', name: 'Discord Nitro Boost Trial 3 Tháng (Ưu Đãi Lần Đầu)', aliases: ['Discord Nitro Boost 3 Tháng (Trail)'], description: 'Đối tượng áp dụng: tài khoản được tạo trên 1 tháng và chưa từng sử dụng Nitro; hoặc tài khoản đã từng sử dụng Nitro nhưng không dùng lại Nitro trong ít nhất 12 tháng liên tục. Vui lòng gửi tài khoản, mật khẩu và 4-5 mã dự phòng khi mua.', price: 50000, ctv_price: 45000, duration_months: 3, service_type: 'GAME', emoji: 'brand_nitro', original_price: 0 },
 
     // Bót Server
     { name: 'Discord Server Boost Level 2 (1 Tháng)', description: 'Nâng cấp Server Boost Level 2 trong 1 tháng. Giao hàng nhanh chóng.', price: 75000, duration_months: 1, service_type: 'GAME', emoji: 'brand_boost', original_price: 0 },
-    { name: 'Discord Server Boost Level 3 (1 Tháng)', description: 'Nâng cấp Server Boost Level 3 trong 1 tháng. Giao hàng nhanh chóng.', price: 150000, duration_months: 1, service_type: 'GAME', emoji: 'brand_boost', original_price: 0 },
+    { name: 'Discord Server Boost Level 3 (1 Tháng)', description: 'Nâng cấp Server Boost Level 3 trong 1 tháng. Giao hàng nhanh chóng.', price: 150000, ctv_price: 90000, duration_months: 1, service_type: 'GAME', emoji: 'brand_boost', original_price: 0 },
     { name: 'Discord Server Boost Level 2 (3 Tháng)', description: 'Nâng cấp Server Boost Level 2 trong 3 tháng. Giao hàng nhanh chóng.', price: 185000, duration_months: 3, service_type: 'GAME', emoji: 'brand_boost', original_price: 0 },
-    { name: 'Discord Server Boost Level 3 (3 Tháng)', description: 'Nâng cấp Server Boost Level 3 trong 3 tháng. Giao hàng nhanh chóng.', price: 380000, duration_months: 3, service_type: 'GAME', emoji: 'brand_boost', original_price: 0 },
+    { name: 'Discord Server Boost Level 3 (3 Tháng)', description: 'Nâng cấp Server Boost Level 3 trong 3 tháng. Giao hàng nhanh chóng.', price: 380000, ctv_price: 240000, duration_months: 3, service_type: 'GAME', emoji: 'brand_boost', original_price: 0 },
 
     // Decor Trang Trí - Có Nitro
     { name: 'Decor Discord (Acc Có Nitro) - Gói 25k', description: 'Trang trí hồ sơ cho tài khoản ĐÃ CÓ Nitro. Vui lòng gửi tài khoản, mật khẩu và 4-5 mã dự phòng.', price: 25000, duration_months: 1, service_type: 'decor', emoji: 'icon_sparkle', original_price: 66000 },
@@ -1546,6 +1549,7 @@ export const DEFAULT_PRODUCT_CATALOG = [
       description: 'Gemini Pro kèm 5 TB Google One trong 12 tháng, bảo hành full suốt thời gian sử dụng.',
       warranty_policy: 'Full 12 tháng',
       price: 130000,
+      ctv_price: 80000,
       duration_months: 12,
       service_type: 'AI',
       emoji: 'brand_gemini',
@@ -1559,6 +1563,7 @@ export const DEFAULT_PRODUCT_CATALOG = [
       description: 'Gemini Pro kèm 5 TB Google One trong 18 tháng, bảo hành full suốt thời gian sử dụng.',
       warranty_policy: 'Full 18 tháng',
       price: 180000,
+      ctv_price: 100000,
       duration_months: 18,
       service_type: 'AI',
       emoji: 'brand_gemini',
@@ -1667,9 +1672,9 @@ export const DEFAULT_PRODUCT_CATALOG = [
     { name: 'Gearup Booster 12 Tháng (1 Năm)', description: 'Gói Gearup Booster giảm giật lag chơi game 12 tháng (1 năm).', price: 460000, duration_months: 12, service_type: 'gearup', emoji: 'brand_gearup', original_price: 0 },
 
     // Spotify Premium · bảng giá chính thức
-    { product_key: 'spotify-premium-3-months', name: 'Spotify Premium 3 Tháng', description: 'Spotify Premium không quảng cáo, nghe nhạc chất lượng cao và hỗ trợ tải nhạc để nghe offline trong 3 tháng.', price: 100000, duration_months: 3, service_type: 'spotify', emoji: 'brand_spotify', original_price: 0, is_featured: 1, virtual_purchase_count: 0 },
-    { product_key: 'spotify-premium-6-months', name: 'Spotify Premium 6 Tháng', description: 'Spotify Premium không quảng cáo, nghe nhạc chất lượng cao và hỗ trợ tải nhạc để nghe offline trong 6 tháng.', price: 200000, duration_months: 6, service_type: 'spotify', emoji: 'brand_spotify', original_price: 0, is_featured: 1, virtual_purchase_count: 0 },
-    { product_key: 'spotify-premium-12-months', name: 'Spotify Premium 12 Tháng', description: 'Spotify Premium không quảng cáo, nghe nhạc chất lượng cao và hỗ trợ tải nhạc để nghe offline trong 12 tháng.', price: 290000, duration_months: 12, service_type: 'spotify', emoji: 'brand_spotify', original_price: 0, is_featured: 1, virtual_purchase_count: 0 },
+    { product_key: 'spotify-premium-3-months', name: 'Spotify Premium 3 Tháng', description: 'Spotify Premium không quảng cáo, nghe nhạc chất lượng cao và hỗ trợ tải nhạc để nghe offline trong 3 tháng.', price: 100000, ctv_price: 80000, duration_months: 3, service_type: 'spotify', emoji: 'brand_spotify', original_price: 0, is_featured: 1, virtual_purchase_count: 0 },
+    { product_key: 'spotify-premium-6-months', name: 'Spotify Premium 6 Tháng', description: 'Spotify Premium không quảng cáo, nghe nhạc chất lượng cao và hỗ trợ tải nhạc để nghe offline trong 6 tháng.', price: 200000, ctv_price: 160000, duration_months: 6, service_type: 'spotify', emoji: 'brand_spotify', original_price: 0, is_featured: 1, virtual_purchase_count: 0 },
+    { product_key: 'spotify-premium-12-months', name: 'Spotify Premium 12 Tháng', description: 'Spotify Premium không quảng cáo, nghe nhạc chất lượng cao và hỗ trợ tải nhạc để nghe offline trong 12 tháng.', price: 290000, ctv_price: 260000, duration_months: 12, service_type: 'spotify', emoji: 'brand_spotify', original_price: 0, is_featured: 1, virtual_purchase_count: 0 },
 
     // YouTube Premium · gia hạn liên tục, bảo hành toàn thời gian
     { product_key: 'youtube-premium-continuous-1-month', name: 'YouTube Premium 1 Tháng (Gia Hạn Liên Tục)', description: 'Dòng ổn định, gia hạn YouTube Premium liên tục và bảo hành full trong toàn bộ 1 tháng sử dụng.', warranty_policy: 'Full 1 tháng', price: 55000, duration_months: 1, service_type: 'STREAMING', emoji: 'brand_youtube', original_price: 0 },
@@ -1712,16 +1717,16 @@ export function seedProductCatalog(dbInstance) {
 
   const insertStmt = dbInstance.prepare(`
     INSERT INTO product_catalog (
-      guild_id, name, description, price, duration_months, service_type, emoji, is_active, sort_order, original_price, warranty_policy,
+      guild_id, name, description, price, ctv_price, duration_months, service_type, emoji, is_active, sort_order, original_price, warranty_policy,
       base_price, base_duration_days, additional_day_price, minimum_days, maximum_days, quota_value, quota_unit, activation_method, username_required, login_required,
       product_key, is_featured, virtual_purchase_count
     )
-    VALUES ('WEB', ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES ('WEB', ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const updateStmt = dbInstance.prepare(`
     UPDATE product_catalog
-    SET name = ?, description = ?, price = ?, duration_months = ?, service_type = ?, emoji = ?, original_price = ?, warranty_policy = COALESCE(?, warranty_policy),
+    SET name = ?, description = ?, price = ?, ctv_price = COALESCE(?, ctv_price), duration_months = ?, service_type = ?, emoji = ?, original_price = ?, warranty_policy = COALESCE(?, warranty_policy),
         base_price = ?, base_duration_days = ?, additional_day_price = ?, minimum_days = ?, maximum_days = ?, quota_value = ?, quota_unit = ?, activation_method = ?, username_required = ?, login_required = ?,
         is_featured = CASE WHEN product_key IS NULL THEN ? ELSE is_featured END,
         virtual_purchase_count = CASE WHEN product_key IS NULL AND virtual_purchase_count = 0 THEN ? ELSE virtual_purchase_count END,
@@ -1830,14 +1835,14 @@ export function seedProductCatalog(dbInstance) {
         || names.map((name) => findByNameStmt.get(name, p.duration_months)).find(Boolean);
       if (existing) {
         updateStmt.run(
-          p.name, p.description, p.price, p.duration_months, p.service_type, p.emoji, p.original_price, p.warranty_policy || null,
+          p.name, p.description, p.price, p.ctv_price ?? null, p.duration_months, p.service_type, p.emoji, p.original_price, p.warranty_policy || null,
           p.base_price || null, p.base_duration_days || null, p.additional_day_price || null, p.minimum_days || null, p.maximum_days || null, p.quota_value || null, p.quota_unit || null, p.activation_method || null, p.username_required || 0, p.login_required || 0,
           p.is_featured ? 1 : 0, Math.max(0, Number(p.virtual_purchase_count || 0)), key, existing.id
         );
         deactivateDuplicatesStmt.run(existing.id, key, JSON.stringify(names), p.duration_months);
       } else {
         insertStmt.run(
-          p.name, p.description, p.price, p.duration_months, p.service_type, p.emoji, currentSort++, p.original_price, p.warranty_policy || null,
+          p.name, p.description, p.price, p.ctv_price ?? null, p.duration_months, p.service_type, p.emoji, currentSort++, p.original_price, p.warranty_policy || null,
           p.base_price || null, p.base_duration_days || null, p.additional_day_price || null, p.minimum_days || null, p.maximum_days || null, p.quota_value || null, p.quota_unit || null, p.activation_method || null, p.username_required || 0, p.login_required || 0,
           key, p.is_featured ? 1 : 0, Math.max(0, Number(p.virtual_purchase_count || 0))
         );

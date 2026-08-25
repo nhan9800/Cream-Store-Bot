@@ -1,7 +1,13 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { MessageFlags } from 'discord.js';
 import { db, initDatabase } from '../src/database/db.js';
-import { buildCtvPricePages } from '../src/services/ctvPriceService.js';
+import {
+  buildCtvPricePages,
+  CTV_OFFICIAL_PANEL_MARKER,
+  CTV_OFFICIAL_PRICE_CATALOG,
+  isCtvPricePanelMessage,
+  publishCtvPricePanel,
+} from '../src/services/ctvPriceService.js';
 import {
   buildPartnerBroadcastGuidePayload,
   buildPartnerRecruitmentPayload,
@@ -21,13 +27,6 @@ import {
 const GUILD_ID = 'test_partner_ctv_system';
 const USER_ID = `test_${Date.now()}`;
 const DEFAULT_EMOJI = /[\u{1F000}-\u{1FAFF}\u2600-\u27BF]/u;
-
-function displayText(payload) {
-  return payload.components[0].toJSON().components
-    .filter((component) => component.type === 10)
-    .map((component) => component.content)
-    .join('');
-}
 
 function allDisplayText(payload) {
   return payload.components
@@ -165,14 +164,87 @@ describe('Partner and CTV system', () => {
     db.prepare('DELETE FROM partner_settings WHERE guild_id = ?').run(guildId);
   });
 
-  it('paginates the CTV catalog below the Discord 4000-character limit', () => {
+  it('builds one official CTV price board with the exact approved catalog', () => {
     const pages = buildCtvPricePages('1282637033340403754');
-    expect(pages.length).toBeGreaterThan(1);
+    expect(pages).toHaveLength(1);
     for (const page of pages) {
-      const text = displayText(page);
+      const text = allDisplayText(page);
       expect(page.flags & MessageFlags.IsComponentsV2).toBeTruthy();
       expect(text.length).toBeLessThanOrEqual(4000);
       expect(text).not.toMatch(DEFAULT_EMOJI);
+      expect(text).toContain(CTV_OFFICIAL_PANEL_MARKER);
+      expect(text).toContain('85.000 VND');
+      expect(text).toContain('95.000 VND');
+      expect(text).toContain('580.000 VND');
+      expect(text).toContain('795.000 VND');
+      expect(text).toContain('không sử dụng lại trong ít nhất 12 tháng liên tục');
+      expect(text).toContain('Boost Server 3 Tháng');
+      expect(text).toContain('Gemini Pro + 5 TB Google One 18 Tháng');
+      expect(text).toContain('Spotify Premium Add Family 12 Tháng');
     }
+    expect(CTV_OFFICIAL_PRICE_CATALOG.spotify.map((item) => item.price)).toEqual([80_000, 160_000, 260_000]);
+  });
+
+  it('recognizes only bot-authored official and legacy CTV price panels for cleanup', () => {
+    const botId = 'bot-1';
+    expect(isCtvPricePanelMessage({
+      author: { id: botId },
+      content: '',
+      components: [{ content: CTV_OFFICIAL_PANEL_MARKER }],
+    }, botId)).toBe(true);
+    expect(isCtvPricePanelMessage({
+      author: { id: botId },
+      content: 'CENAR CTV | Bảng giá nội bộ',
+      components: [],
+    }, botId)).toBe(true);
+    expect(isCtvPricePanelMessage({
+      author: { id: 'member-1' },
+      content: 'CENAR CTV | Bảng giá nội bộ',
+      components: [],
+    }, botId)).toBe(false);
+  });
+
+  it('publishes one official board and removes every bot-authored legacy duplicate', async () => {
+    const guildId = '1282637033340403754';
+    const botId = 'bot-cleanup';
+    const legacyMessage = (id) => ({
+      id,
+      author: { id: botId },
+      content: 'CENAR CTV | Bảng giá nội bộ',
+      components: [],
+      delete: vi.fn().mockResolvedValue(undefined),
+    });
+    const legacyOne = legacyMessage('legacy-1');
+    const legacyTwo = legacyMessage('legacy-2');
+    const sent = {
+      id: 'official-new',
+      author: { id: botId },
+      components: [],
+      delete: vi.fn().mockResolvedValue(undefined),
+    };
+    const channel = {
+      isTextBased: () => true,
+      messages: {
+        fetch: vi.fn(async (target) => (
+          typeof target === 'object'
+            ? new Map([[legacyOne.id, legacyOne], [legacyTwo.id, legacyTwo]])
+            : null
+        )),
+      },
+      send: vi.fn().mockResolvedValue(sent),
+    };
+    const guild = {
+      id: guildId,
+      client: { user: { id: botId } },
+      members: { me: { id: botId } },
+      channels: { fetch: vi.fn().mockResolvedValue(channel) },
+    };
+
+    const published = await publishCtvPricePanel(guild);
+    expect(published).toBe(sent);
+    expect(guild.channels.fetch).toHaveBeenCalledWith('1535669791660974141');
+    expect(channel.send).toHaveBeenCalledTimes(1);
+    expect(legacyOne.delete).toHaveBeenCalledTimes(1);
+    expect(legacyTwo.delete).toHaveBeenCalledTimes(1);
   });
 });
