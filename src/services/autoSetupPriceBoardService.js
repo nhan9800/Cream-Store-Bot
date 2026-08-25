@@ -21,7 +21,7 @@ import { formatInternationalPrice, translateCatalogGroup, translateProductName }
 import { getNitroTrialEligibility, isNitroTrialProduct } from '../constants/nitroTrial.js';
 import { getNetflixPromoDetails, isNetflixPromoProduct } from '../constants/netflixPromotion.js';
 
-export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.13';
+export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.14';
 const PRIMARY_GUILD_ID = '1282637033340403754';
 const PRIMARY_PRICE_CHANNEL_ID = '1514606995842273280';
 const PRIMARY_PROMOTION_CHANNEL_ID = '1515008584549797979';
@@ -119,7 +119,7 @@ export const PRICE_GROUPS = [
   },
   {
     key: 'services', titleSlot: 'icon_settings', title: 'Bot, Website & Setup Discord', accent: 0x6366F1,
-    note: 'Dịch vụ tùy chỉnh được khảo sát yêu cầu trước khi báo giá chính thức.',
+    note: 'Giải pháp trọn gói cho store từ 500.000đ–1.000.000đ: setup Discord, bot booking/bảng giá/store, website đồng bộ và tặng hosting bot 3 tháng đầu.',
     match: (p) => ['SERVICE', 'service'].includes(p.service_type),
   },
 ];

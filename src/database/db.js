@@ -1687,11 +1687,11 @@ export const DEFAULT_PRODUCT_CATALOG = [
     { product_key: 'netflix-extra-1-month-renewable', name: 'Netflix Extra 1 Tháng (Ổn Định · Có Gia Hạn)', description: 'Gói Netflix Extra ổn định trong 1 tháng và hỗ trợ gia hạn tiếp trên tài khoản đã cấp.', price: 75000, duration_months: 1, service_type: 'netflix', emoji: 'brand_netflix', original_price: 0, is_featured: 1, virtual_purchase_count: 0 },
     { product_key: 'netflix-premium-1-month-non-renewable', name: 'Netflix Premium 1 Tháng (Ổn Định · Không Gia Hạn)', aliases: ['Netflix Premium 1 Tháng (Không Gia Hạn)'], description: 'Tài khoản Netflix Premium ổn định, chất lượng Full HD/4K, sử dụng 1 tháng và bảo hành 20 ngày. Không hỗ trợ gia hạn trên tài khoản đã cấp; khi hết hạn, khách muốn sử dụng tiếp cần đổi sang tài khoản mới.', warranty_policy: '20 ngày', price: 35000, duration_months: 1, service_type: 'netflix', emoji: 'brand_netflix', original_price: 0, is_featured: 1, virtual_purchase_count: 0 },
  
-    // Dịch vụ Discord Setup & Bot Custom & Website Custom
-    { name: 'Combo Setup Discord + Bot Custom + Boost Server', description: 'Trọn gói setup máy chủ hoàn chỉnh: bot hệ thống tự động siêu đẹp + Boost Server. Phí duy trì bot chỉ 30k/tháng.', price: 500000, duration_months: 1, service_type: 'SERVICE', emoji: 'brand_discord', original_price: 0 },
-    { name: 'Bot Custom Discord — Tuỳ Chỉnh Tính Năng', description: 'Làm bot custom từng tính năng riêng — giá deal trực tiếp với Admin. Giá rất hạt dẻ!', price: 0, duration_months: 1, service_type: 'SERVICE', emoji: 'brand_discord', original_price: 0 },
-    { name: 'Website Custom — Mọi Giao Diện', description: 'Thiết kế website custom mọi giao diện theo yêu cầu — giá deal với Admin. Giá rất hạt dẻ!', price: 0, duration_months: 1, service_type: 'SERVICE', emoji: 'brand_discord', original_price: 0 },
-    { name: 'Phí Duy Trì Bot Discord (1 Tháng)', description: 'Phí duy trì bot Discord custom hàng tháng. Đảm bảo bot chạy ổn định 24/7.', price: 30000, duration_months: 1, service_type: 'SERVICE', emoji: 'brand_discord', original_price: 0 },
+    // Dịch vụ xây dựng Store · một catalog dùng chung cho Bot + Website
+    { product_key: 'discord-store-launch-hosting-3-months', name: 'Setup Discord Store + Bot Custom + Hosting 3 Tháng', description: 'Gói khởi động dành cho store: setup server chuyên nghiệp, bot custom theo nhận diện, hệ thống bảng giá/nhận đơn cơ bản và tặng hosting vận hành 24/7 trong 3 tháng đầu.', price: 500000, duration_months: 3, service_type: 'SERVICE', emoji: 'brand_discord', original_price: 0, is_featured: 1, virtual_purchase_count: 0 },
+    { product_key: 'discord-store-automation-pro', name: 'Bot Booking / Bảng Giá / Store Custom', description: 'Bot vận hành chuyên biệt cho store: booking, bảng giá, catalog giá nguồn, ticket, nhận đơn và luồng quản trị theo yêu cầu. Tặng hosting 3 tháng cho dự án triển khai mới.', price: 750000, duration_months: 3, service_type: 'SERVICE', emoji: 'icon_settings', original_price: 0, is_featured: 1, virtual_purchase_count: 0 },
+    { product_key: 'discord-store-fullstack-website', name: 'Discord Store + Bot Custom + Website Đồng Bộ', description: 'Giải pháp đầy đủ gồm setup Discord, bot custom và website đồng bộ catalog/đơn hàng; giao diện được thiết kế theo thương hiệu của store. Tặng hosting bot 3 tháng đầu.', price: 1000000, duration_months: 3, service_type: 'SERVICE', emoji: 'icon_store', original_price: 0, is_featured: 1, virtual_purchase_count: 0 },
+    { product_key: 'discord-bot-rescue-ui', name: 'Fix Bot Lỗi & Nâng Cấp Giao Diện', description: 'Kiểm tra nguyên nhân bot lỗi, sửa luồng hoạt động và làm mới giao diện thân thiện bằng Components V2 cùng emoji custom. Giá 500.000đ là mức khởi điểm; báo giá cuối dựa trên tình trạng mã nguồn.', price: 500000, duration_months: 1, service_type: 'SERVICE', emoji: 'warranty_shield', original_price: 0, is_featured: 1, virtual_purchase_count: 0 },
     
     // Nâng cấp: Claude API & Locket Gold
     { name: 'Claude API 100M', description: 'Trải nghiệm hệ sinh thái Claude mạnh mẽ, phù hợp cho lập trình, phân tích dữ liệu, viết nội dung, nghiên cứu và xử lý công việc chuyên sâu.', price: 85000, duration_months: 1, service_type: 'AI', emoji: 'brand_claude', original_price: 0, base_price: 85000, base_duration_days: 1, additional_day_price: 5000, minimum_days: 1, maximum_days: 365, quota_value: 100, quota_unit: 'M', activation_method: 'TOKEN', username_required: 0, login_required: 0 },
@@ -1798,6 +1798,27 @@ export function seedProductCatalog(dbInstance) {
         )
       )
   `);
+  const retireReplacedServiceCatalogStmt = dbInstance.prepare(`
+    UPDATE product_catalog
+    SET is_active = 0, updated_at = CURRENT_TIMESTAMP
+    WHERE guild_id = 'WEB'
+      AND is_active = 1
+      AND UPPER(COALESCE(service_type, '')) = 'SERVICE'
+      AND (
+        COALESCE(product_key, '') IN (
+          'combo-setup-discord-bot-custom-boost-server',
+          'bot-custom-discord-tuy-chinh-tinh-nang',
+          'website-custom-moi-giao-dien',
+          'phi-duy-tri-bot-discord-1-thang'
+        )
+        OR LOWER(TRIM(name)) IN (
+          LOWER('Combo Setup Discord + Bot Custom + Boost Server'),
+          LOWER('Bot Custom Discord — Tuỳ Chỉnh Tính Năng'),
+          LOWER('Website Custom — Mọi Giao Diện'),
+          LOWER('Phí Duy Trì Bot Discord (1 Tháng)')
+        )
+      )
+  `);
 
   let currentSort = 100;
   
@@ -1828,6 +1849,7 @@ export function seedProductCatalog(dbInstance) {
     // không còn xuất hiện trên bot, website hoặc bảng giá Discord.
     retireReplacedAiCatalogStmt.run();
     retireReplacedStreamingCatalogStmt.run();
+    retireReplacedServiceCatalogStmt.run();
 
     dbInstance.prepare(`
       UPDATE product_catalog

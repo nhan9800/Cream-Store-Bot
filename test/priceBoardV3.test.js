@@ -92,6 +92,29 @@ describe('Cenar price board V3', () => {
     expect(publicProducts.map((product) => product.name)).not.toContain('Sản Phẩm Chưa Phân Loại');
   });
 
+  it('publishes the four new store-development services from one shared catalog', () => {
+    const products = getActiveProducts(GUILD_ID);
+    const servicePanel = groupPriceProducts(products)
+      .find((panel) => panel.group.key === 'services');
+    const serviceKeys = servicePanel?.items.map((product) => product.product_key) || [];
+    const serialized = buildPriceBoardPayloads(GUILD_ID, {}, products).map(serialize).join('\n');
+
+    expect(serviceKeys).toEqual([
+      'discord-store-launch-hosting-3-months',
+      'discord-store-automation-pro',
+      'discord-store-fullstack-website',
+      'discord-bot-rescue-ui',
+    ]);
+    expect(serialized).toContain('Setup Discord Store + Bot Custom + Hosting 3 Tháng');
+    expect(serialized).toContain('Bot Booking / Bảng Giá / Store Custom');
+    expect(serialized).toContain('Discord Store + Bot Custom + Website Đồng Bộ');
+    expect(serialized).toContain('Fix Bot Lỗi & Nâng Cấp Giao Diện');
+    expect(serialized).toContain('500.000');
+    expect(serialized).toContain('750.000');
+    expect(serialized).toContain('1.000.000');
+    expect(serialized).toContain('hosting bot 3 tháng đầu');
+  });
+
   it('builds custom-emoji-only Components V2 panels with product selectors', () => {
     const products = getActiveProducts(GUILD_ID);
     const payloads = buildPriceBoardPayloads(GUILD_ID, {
