@@ -40,6 +40,18 @@ export const CTV_OFFICIAL_PRICE_CATALOG = Object.freeze({
     { label: 'Gemini Pro + 5 TB Google One 12 Tháng', price: 80_000 },
     { label: 'Gemini Pro + 5 TB Google One 18 Tháng', price: 100_000 },
   ]),
+  youtubeMonthly: Object.freeze([
+    { label: 'YouTube Premium 1 Tháng', price: 25_000 },
+    { label: 'YouTube Premium 3 Tháng', price: 70_000 },
+    { label: 'YouTube Premium 6 Tháng', price: 180_000 },
+    { label: 'YouTube Premium 12 Tháng', price: 230_000 },
+  ]),
+  youtubeStable: Object.freeze([
+    { label: 'YouTube Premium 1 Tháng', price: 50_000 },
+    { label: 'YouTube Premium 3 Tháng', price: 170_000 },
+    { label: 'YouTube Premium 6 Tháng', price: 280_000 },
+    { label: 'YouTube Premium 12 Tháng', price: 485_000 },
+  ]),
   spotify: Object.freeze([
     { label: 'Spotify Premium Add Family 3 Tháng', price: 80_000 },
     { label: 'Spotify Premium Add Family 6 Tháng', price: 160_000 },
@@ -69,8 +81,8 @@ function splitLines(lines, maxLength = 3600) {
   return chunks;
 }
 
-function officialPriceLines(items, emoji, E) {
-  return items.map((item) => `${emoji} **${item.label}**\n> ${E('cenar_wallet')} Giá CTV: **${formatCurrency(item.price)}**`).join('\n');
+function officialPriceLines(items) {
+  return items.map((item) => `- **${item.label}** · **${formatCurrency(item.price)}**`).join('\n');
 }
 
 function buildOfficialCtvPricePanel(guildId) {
@@ -79,17 +91,14 @@ function buildOfficialCtvPricePanel(guildId) {
   header.addTextDisplayComponents(new TextDisplayBuilder().setContent([
     `# ${E('ctv_crystal')} CENAR CTV · BẢNG GIÁ NỘI BỘ`,
     `${E('cenar_verified')} Bảng giá chính thức dành riêng cho CTV đã được duyệt tại **Cenar Store**.`,
+    `${E('cenar_price')} Đây là **một số sản phẩm nổi bật**; shop còn nhiều mặt hàng khác, CTV cần giá cứ hỏi trực tiếp shop.`,
     `-# ${CTV_OFFICIAL_PANEL_MARKER} · Cập nhật ngày 25/08/2026`,
   ].join('\n')));
 
   const nitro = new ContainerBuilder().setAccentColor(accentFor('primary'));
   nitro.addTextDisplayComponents(new TextDisplayBuilder().setContent(`## ${E('brand_nitro')} Nitro Boost Login`));
   nitro.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
-  nitro.addTextDisplayComponents(new TextDisplayBuilder().setContent(officialPriceLines(
-    CTV_OFFICIAL_PRICE_CATALOG.nitro,
-    E('brand_nitro'),
-    E,
-  )));
+  nitro.addTextDisplayComponents(new TextDisplayBuilder().setContent(officialPriceLines(CTV_OFFICIAL_PRICE_CATALOG.nitro)));
   nitro.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
   nitro.addTextDisplayComponents(new TextDisplayBuilder().setContent([
     `${E('status_warn')} **Điều kiện Nitro Trial 3 Tháng:**`,
@@ -100,20 +109,29 @@ function buildOfficialCtvPricePanel(guildId) {
   const services = new ContainerBuilder().setAccentColor(accentFor('success'));
   services.addTextDisplayComponents(new TextDisplayBuilder().setContent([
     `## ${E('brand_boost')} Boost Server`,
-    officialPriceLines(CTV_OFFICIAL_PRICE_CATALOG.boost, E('brand_boost'), E),
+    officialPriceLines(CTV_OFFICIAL_PRICE_CATALOG.boost),
     '',
     `## ${E('brand_gemini')} Gemini Pro + 5 TB Google One`,
-    officialPriceLines(CTV_OFFICIAL_PRICE_CATALOG.gemini, E('brand_gemini'), E),
+    officialPriceLines(CTV_OFFICIAL_PRICE_CATALOG.gemini),
+  ].join('\n')));
+
+  const youtube = new ContainerBuilder().setAccentColor(accentFor('danger'));
+  youtube.addTextDisplayComponents(new TextDisplayBuilder().setContent([
+    `## ${E('brand_youtube')} YouTube Premium · Gia hạn 1 tháng/lần`,
+    officialPriceLines(CTV_OFFICIAL_PRICE_CATALOG.youtubeMonthly),
+    '',
+    `${E('status_warn')} **Yêu cầu sử dụng:** Không tự ý rời Family khi Premium hết. Chỉ out khi có hướng dẫn từ shop, sau đó mới join Family mới để tránh lỗi giới hạn đổi nhóm gia đình Google trong 12 tháng.`,
+  ].join('\n')));
+  youtube.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
+  youtube.addTextDisplayComponents(new TextDisplayBuilder().setContent([
+    `## ${E('brand_youtube')} YouTube Premium · Ổn định`,
+    officialPriceLines(CTV_OFFICIAL_PRICE_CATALOG.youtubeStable),
   ].join('\n')));
 
   const spotify = new ContainerBuilder().setAccentColor(accentFor('warning'));
   spotify.addTextDisplayComponents(new TextDisplayBuilder().setContent(`## ${E('brand_spotify')} Spotify Premium · Add Family`));
   spotify.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
-  spotify.addTextDisplayComponents(new TextDisplayBuilder().setContent(officialPriceLines(
-    CTV_OFFICIAL_PRICE_CATALOG.spotify,
-    E('brand_spotify'),
-    E,
-  )));
+  spotify.addTextDisplayComponents(new TextDisplayBuilder().setContent(officialPriceLines(CTV_OFFICIAL_PRICE_CATALOG.spotify)));
   spotify.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
   spotify.addTextDisplayComponents(new TextDisplayBuilder().setContent([
     `${E('cenar_support')} Giá trên chỉ áp dụng cho tài khoản đã được duyệt role **CTV**.`,
@@ -133,6 +151,7 @@ function buildOfficialCtvPricePanel(guildId) {
       header,
       nitro,
       services,
+      youtube,
       spotify,
       new ActionRowBuilder().addComponents(orderButton),
     ],
