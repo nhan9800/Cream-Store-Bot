@@ -2,6 +2,12 @@ import { getGuildConfig } from './guildConfigService.js';
 import { getOrderByCode, submitFeedback } from './orderService.js';
 import { syncCustomerStats } from './customerService.js';
 import { buildFeedbackV2 } from '../utils/embeds.js';
+import { config } from '../config.js';
+import { scheduleOrderTicketAutoClose } from './ticketService.js';
+
+export function scheduleFeedbackTicketAutoClose(order) {
+  return scheduleOrderTicketAutoClose(order, config.autoCloseCompletedTicketMinutes);
+}
 
 /** Rebuild the Discord card after an admin edits the published feedback. */
 export async function syncPublishedFeedbackMessage({ client, feedback }) {
@@ -91,6 +97,7 @@ export async function publishFeedback({ guild, userId, orderCode, stars, content
     feedbackChannelId: feedbackChannel.id,
     feedbackMessageId: feedbackMessage.id,
   });
+  const ticket = scheduleFeedbackTicketAutoClose(updatedOrder);
 
   syncCustomerStats(updatedOrder.guild_id, updatedOrder.customer_id);
 
@@ -106,5 +113,6 @@ export async function publishFeedback({ guild, userId, orderCode, stars, content
   return {
     order: updatedOrder,
     feedbackChannel,
+    ticket,
   };
 }

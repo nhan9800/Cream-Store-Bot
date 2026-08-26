@@ -18,6 +18,40 @@ function updateTicketAiStatusStmt(){return db.prepare(`UPDATE tickets SET ai_sta
 function getTicketByClientRequestIdStmt(){return db.prepare('SELECT * FROM tickets WHERE client_request_id=? LIMIT 1');}
 function getOpenWebsiteSupportStmt(){return db.prepare(`SELECT * FROM tickets WHERE guild_id=? AND customer_id=? AND ticket_type='SUPPORT' AND support_source='WEBSITE_AI' AND status='OPEN' ORDER BY id DESC LIMIT 1`);}
 function touchTicketStmt(){return db.prepare('UPDATE tickets SET last_activity_at=? WHERE id=?');}
+function getOpenTicketForOrderStmt(){return db.prepare(`
+  SELECT * FROM tickets
+  WHERE guild_id=@guildId AND status='OPEN' AND (
+    (@ticketId IS NOT NULL AND id=@ticketId)
+    OR (@channelId != '' AND channel_id=@channelId)
+    OR (@orderCode != '' AND related_order_code=@orderCode)
+  )
+  ORDER BY CASE
+    WHEN @ticketId IS NOT NULL AND id=@ticketId THEN 0
+    WHEN @channelId != '' AND channel_id=@channelId THEN 1
+    ELSE 2
+  END, id DESC
+  LIMIT 1
+`);}
+function getFeedbackedTicketsMissingAutoCloseStmt(){return db.prepare(`
+  SELECT t.* FROM tickets t
+  WHERE t.guild_id=?
+    AND t.status='OPEN'
+    AND t.auto_close_at IS NULL
+    AND COALESCE(t.keep_open_requested, 0)=0
+    AND EXISTS (
+      SELECT 1 FROM orders o
+      WHERE o.guild_id=t.guild_id
+        AND o.status='COMPLETED'
+        AND o.feedback_submitted_at IS NOT NULL
+        AND (
+          o.ticket_id=t.id
+          OR o.ticket_channel_id=t.channel_id
+          OR (t.related_order_code IS NOT NULL AND t.related_order_code=o.order_code)
+        )
+    )
+  ORDER BY t.id ASC
+  LIMIT ?
+`);}
 
 
 function generateTicketCode(){while(true){const c=`TKT_${randomDigits(6)}`; if(!ticketCodeExistsStmt().get(c)) return c;}}
@@ -92,6 +126,25 @@ export const getTicketById = (ticketId) => getTicketByIdStmt().get(ticketId) ?? 
 export function scheduleTicketAutoClose(ticketId, minutes=5){const at=addMinutes(new Date(), minutes).toISOString(); scheduleAutoCloseStmt().run(at, ticketId); return getTicketById(ticketId);}
 export function keepTicketOpen(ticketId){clearAutoCloseStmt().run(ticketId); return getTicketById(ticketId);}
 export const getDueAutoCloseTickets = (guildId, limit=20) => dueAutoCloseTicketsStmt().all(guildId, nowIso(), limit);
+export function getOpenTicketForOrder(order) {
+  if (!order?.guild_id) return null;
+  return getOpenTicketForOrderStmt().get({
+    guildId: String(order.guild_id),
+    ticketId: Number.isInteger(Number(order.ticket_id)) && Number(order.ticket_id) > 0
+      ? Number(order.ticket_id)
+      : null,
+    channelId: String(order.ticket_channel_id || ''),
+    orderCode: String(order.order_code || ''),
+  }) ?? null;
+}
+export function scheduleOrderTicketAutoClose(order, minutes=5) {
+  const ticket = getOpenTicketForOrder(order);
+  return ticket ? scheduleTicketAutoClose(ticket.id, minutes) : null;
+}
+export function scheduleMissingFeedbackTicketAutoCloses(guildId, limit=100) {
+  const tickets = getFeedbackedTicketsMissingAutoCloseStmt().all(String(guildId), Number(limit));
+  return tickets.map((ticket) => scheduleTicketAutoClose(ticket.id, 0));
+}
 export function updateTicketAiStatus(ticketId, status){updateTicketAiStatusStmt().run(status, ticketId); return getTicketById(ticketId);}
 export function touchTicket(ticketId){touchTicketStmt().run(nowIso(), ticketId); return getTicketById(ticketId);}
 

@@ -2,7 +2,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { runDeepNotifications, runSubscriptionNotifications } from './deepNotificationService.js';
 import { backupDatabase } from './backupService.js';
-import { getDueAutoCloseTickets, closeTicket } from './ticketService.js';
+import {
+  getDueAutoCloseTickets,
+  closeTicket,
+  scheduleMissingFeedbackTicketAutoCloses,
+  scheduleTicketAutoClose,
+} from './ticketService.js';
 import { config } from '../config.js';
 import { exportTicketTranscript } from './transcriptService.js';
 import { deliverTranscript, updateOrderLogMessage } from './notificationService.js';
@@ -116,6 +121,11 @@ export function startScheduler(client) {
     }
 
     try {
+      const repairedTickets = scheduleMissingFeedbackTicketAutoCloses(config.guildId);
+      if (repairedTickets.length > 0) {
+        console.warn(`[SCHEDULER] Đã khôi phục lịch tự đóng cho ${repairedTickets.length} ticket đã feedback.`);
+      }
+
       const dueTickets = getDueAutoCloseTickets(config.guildId, 20);
       for (const ticket of dueTickets) {
         try {
@@ -127,6 +137,25 @@ export function startScheduler(client) {
           
           const guild = channel.guild;
           const transcriptResult = await exportTicketTranscript(channel).catch(() => null);
+
+          let channelClosed = false;
+          try {
+            await channel.delete(`Tự động đóng Ticket ${ticket.ticket_code} sau khi feedback`);
+            channelClosed = true;
+          } catch (deleteError) {
+            if (channel.isThread?.()) {
+              channelClosed = await channel
+                .setArchived(true, `Tự động đóng Ticket ${ticket.ticket_code} sau khi feedback`)
+                .then(() => true)
+                .catch(() => false);
+            }
+            if (!channelClosed) {
+              scheduleTicketAutoClose(ticket.id, 1);
+              console.error(`[SCHEDULER] Discord chưa đóng được ticket ${ticket.ticket_code}; sẽ thử lại sau 1 phút:`, deleteError);
+              continue;
+            }
+          }
+
           closeTicket(ticket.id, client.user.id);
 
           await emitStaffLog(client, {
@@ -153,7 +182,6 @@ export function startScheduler(client) {
             });
           }
 
-          await channel.delete(`Tự động đóng Ticket ${ticket.ticket_code} sau khi feedback`).catch(() => null);
         } catch (e) {
           console.error(`[SCHEDULER] Lỗi auto close ticket ${ticket.id}:`, e);
         }

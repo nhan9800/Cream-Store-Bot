@@ -49,6 +49,7 @@ import {
     listQuestPlans,
 } from './questService.js';
 import { getPriceBoardProducts, PRICE_BOARD_VERSION } from './autoSetupPriceBoardService.js';
+import { scheduleFeedbackTicketAutoClose } from './feedbackService.js';
 
 let storeInviteCache = { url: '', expiresAt: 0 };
 const websiteSupportProvisioning = new Map();
@@ -979,6 +980,7 @@ export function registerBotApiRoutes(app) {
                 ) VALUES (?, ?, ?, ?, NULL, ?, ?, ?, 'WEB', ?, ?, 1, ?, ?)
             `).run(order.guild_id, order.id, order.order_code, order.ticket_id, customerId, stars, content, product.id, product.name, timestamp, timestamp);
             db.prepare('UPDATE orders SET feedback_submitted_at = ?, updated_at = ? WHERE id = ?').run(timestamp, timestamp, order.id);
+            scheduleFeedbackTicketAutoClose({ ...order, feedback_submitted_at: timestamp });
             const review = db.prepare('SELECT * FROM feedbacks WHERE id = ?').get(result.lastInsertRowid);
             return res.status(201).json({ ok: true, data: enrichFeedbackAuthor(review, req) });
         } catch (error) {

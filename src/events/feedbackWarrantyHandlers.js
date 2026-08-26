@@ -17,7 +17,6 @@ import { getOrderByCode } from '../services/orderService.js';
 import { publishFeedback } from '../services/feedbackService.js';
 import { openWarrantyTicket, buildWarrantyCustomerConfirmV2 } from '../services/warrantyService.js';
 import { updateOrderLogMessage } from '../services/notificationService.js';
-import { getTicketByChannelId, getTicketById, scheduleTicketAutoClose } from '../services/ticketService.js';
 import { buildQuickFeedbackAckV2 } from '../utils/embeds.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { safeReply, buildFeedbackModal, FEEDBACK_TEXT_INPUT_ID } from './shared.js';
@@ -205,9 +204,8 @@ export async function handleFeedbackModalSubmit(interaction, orderCode, starsRaw
       content,
     });
 
-    const ticket = getTicketByChannelId(result.order.ticket_channel_id) || getTicketById(result.order.ticket_id);
+    const ticket = result.ticket;
     if (ticket) {
-      const scheduled = scheduleTicketAutoClose(ticket.id, config.autoCloseCompletedTicketMinutes);
       const channel = await interaction.guild.channels.fetch(ticket.channel_id).catch(() => null);
       if (channel?.isTextBased()) {
         const E_ch = createEmojiResolver(interaction.guildId);
@@ -231,7 +229,7 @@ export async function handleFeedbackModalSubmit(interaction, orderCode, starsRaw
           )
         );
         const keepOpenBtn = new ButtonBuilder()
-          .setCustomId(`ticket:keepopen:${scheduled.id}`)
+          .setCustomId(`ticket:keepopen:${ticket.id}`)
           .setStyle(ButtonStyle.Secondary)
           .setLabel('Giữ Ticket Mở');
         const keepOpenBtnEmoji = E_ch.component('icon_lock');
