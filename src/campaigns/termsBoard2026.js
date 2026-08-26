@@ -30,6 +30,7 @@ export const TERMS_BOARD = Object.freeze({
   nitroGuideChannelId: '1524057149783937214',
   marker: 'CENAR-TERMS-BOARD-V1',
   youtubeRejoinFee: 65_000,
+  processingOrderRefundPercent: 50,
   flags: MessageFlags.IsComponentsV2,
 });
 
@@ -57,55 +58,73 @@ export function buildTermsBoardPayload() {
     .setAccentColor(0x2563EB)
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(normalizeV2Text([
       `## ${E('warranty_shield')} 01 · CHÍNH SÁCH BẢO HÀNH CHUNG`,
-      `${E('status_check')} Giữ mã đơn, thông tin tài khoản và nội dung bàn giao để đối chiếu khi cần.`,
-      `${E('status_check')} Gửi feedback sau khi hoàn tất đơn để ghi nhận quyền lợi bảo hành.`,
-      `${E('status_warn')} Không tự đổi thông tin, rời nhóm, xoá profile hoặc can thiệp sản phẩm khi chưa được Admin hướng dẫn.`,
-      `${E('status_cross')} Tự ý rời server Cenar Store có thể bị từ chối bảo hành với đơn còn thời hạn.`,
+      `• Giữ mã đơn, thông tin tài khoản và nội dung bàn giao để đối chiếu khi cần.`,
+      `• Gửi feedback sau khi hoàn tất đơn để ghi nhận quyền lợi bảo hành.`,
+      `• Không tự đổi thông tin, rời nhóm, xoá profile hoặc can thiệp sản phẩm khi chưa được Admin hướng dẫn.`,
+      `• Tự ý rời server Cenar Store có thể bị từ chối bảo hành với đơn còn thời hạn.`,
+    ].join('\n'))));
+
+  const orderAndConduct = new ContainerBuilder()
+    .setAccentColor(0xF97316)
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(normalizeV2Text([
+      `## ${E('payment_refund')} 02 · HOÀN ĐƠN, CHI PHÍ & QUY TẮC ỨNG XỬ`,
+      `### Đơn đã nhập nguồn hoặc đang xử lý`,
+      `• Khách yêu cầu huỷ/refund sau khi shop đã nhập hàng hoặc bắt đầu xử lý được hoàn tối đa **${policy.processingOrderRefundPercent}% giá trị sản phẩm**.`,
+      `> Phần còn lại đối soát chi phí nguồn hàng, vận hành, thanh toán và thuế đã phát sinh.`,
+    ].join('\n'))))
+    .addSeparatorComponents(divider())
+    .addTextDisplayComponents(new TextDisplayBuilder().setContent(normalizeV2Text([
+      `### Tôn trọng trong trao đổi và hỗ trợ`,
+      `• Khách hàng và staff cần lịch sự, cung cấp thông tin đúng sự thật và hợp tác xử lý sự cố.`,
+      `• Với hành vi lăng mạ, đe doạ, quấy rối hoặc tiếp tục xúc phạm sau khi được nhắc nhở, shop có quyền dừng hỗ trợ, huỷ đơn và từ chối phục vụ.`,
+      `> Chi phí đã phát sinh **không được hoàn lại**; phần giá trị còn lại, nếu có, được đối soát theo chính sách hoàn đơn ở trên.`,
     ].join('\n'))));
 
   const youtube = new ContainerBuilder()
     .setAccentColor(0xFF0000)
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(normalizeV2Text([
-      `## ${E('brand_youtube')} 02 · YOUTUBE PREMIUM & GOOGLE FAMILY`,
-      `### ${E('status_warn')} Khi mất Premium hoặc Family bị lỗi`,
-      `${E('status_check')} **Việc đầu tiên:** giữ nguyên tài khoản và liên hệ Admin ngay.`,
-      `${E('status_cross')} **Không tự ý rời Google Family.** Tự rời nhóm làm gián đoạn bảo hành và có thể kích hoạt giới hạn Family của Google.`,
+      `## ${E('brand_youtube')} 03 · YOUTUBE PREMIUM & GOOGLE FAMILY`,
+      `### Khi mất Premium hoặc Family bị lỗi`,
+      `• **Việc đầu tiên:** giữ nguyên tài khoản và liên hệ Admin ngay.`,
+      `• **Không tự ý rời Google Family.** Tự rời nhóm làm gián đoạn bảo hành và có thể kích hoạt giới hạn Family của Google.`,
     ].join('\n'))))
     .addSeparatorComponents(divider())
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(normalizeV2Text([
       `### ${E('icon_price')} Trường hợp khách tự ý rời nhóm`,
       `> Đơn **không còn được bảo hành miễn phí**. Muốn tiếp tục sử dụng, khách đóng phí hỗ trợ **${money(policy.youtubeRejoinFee)}** để shop kiểm tra và thêm lại.`,
       `> Phí gồm **một lần kiểm tra/xử lý giới hạn Google Family 12 tháng** nếu Gmail đủ điều kiện; không cam kết mọi Gmail đều xử lý thành công.`,
-      `${E('status_info')} Nếu Gmail cũ không đủ điều kiện do giới hạn/slot Google, khách phải đổi Gmail; phí thêm lại vẫn là **${money(policy.youtubeRejoinFee)}**.`,
-      `${E('icon_search')} Cần cung cấp **Gmail cá nhân**, **Gmail chủ Family** và **mã đơn**.`,
+      `• Nếu Gmail cũ không đủ điều kiện do giới hạn/slot Google, khách phải đổi Gmail; phí thêm lại vẫn là **${money(policy.youtubeRejoinFee)}**.`,
+      `• Cần cung cấp **Gmail cá nhân**, **Gmail chủ Family** và **mã đơn**.`,
     ].join('\n'))));
 
   const nitro = new ContainerBuilder()
     .setAccentColor(0x5865F2)
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(normalizeV2Text([
-      `## ${E('brand_nitro')} 03 · DISCORD NITRO LOGIN & MAIL SHOP CẤP`,
-      `${E('status_check')} **Mail còn sống:** phải giữ mail shop cấp và gia hạn đúng chu kỳ **2 tháng/lần**.`,
-      `${E('status_warn')} **Mail chết nhưng Nitro còn:** liên hệ Admin ngay, không tự can thiệp.`,
-      `${E('status_cross')} **Mail chết và Nitro cũng mất:** **không thuộc phạm vi bảo hành**; shop chỉ hỗ trợ giá ưu đãi nếu khách muốn mua lại.`,
-      `> ${E('status_info')} Bảo quản mail shop cấp là điều kiện bắt buộc để duy trì bảo hành và gia hạn.`,
+      `## ${E('brand_nitro')} 04 · DISCORD NITRO LOGIN & MAIL SHOP CẤP`,
+      `• **Bảo mật ngay khi nhận mail:** đổi mật khẩu Gmail, bật 2FA, thêm số điện thoại và email khôi phục trước khi sử dụng Nitro.`,
+      `• Nếu không hoàn tất, shop từ chối trách nhiệm với mất mail, chiếm quyền truy cập hoặc mất Nitro do tài khoản chưa được bảo mật.`,
+      `• **Mail còn sống:** giữ mail shop cấp và gia hạn đúng chu kỳ **2 tháng/lần**.`,
+      `• **Mail chết nhưng Nitro còn:** liên hệ Admin ngay, không tự can thiệp.`,
+      `• **Mail chết và Nitro cũng mất:** **không thuộc phạm vi bảo hành**; shop chỉ hỗ trợ giá ưu đãi nếu khách muốn mua lại.`,
+      `> Bảo quản mail shop cấp là điều kiện bắt buộc để duy trì bảo hành và gia hạn.`,
     ].join('\n'))));
 
   const netflix = new ContainerBuilder()
     .setAccentColor(0xE50914)
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(normalizeV2Text([
-      `## ${E('brand_netflix')} 04 · QUY ĐỊNH NETFLIX`,
-      `${E('status_cross')} Không đổi mật khẩu tài khoản, không xoá hoặc truy cập profile của người khác.`,
-      `${E('status_check')} Được đổi tên/đặt PIN profile của mình nhưng phải báo lại shop.`,
-      `${E('status_check')} Được đăng nhập nhiều thiết bị nhưng chỉ xem đồng thời trên **01 thiết bị**, trừ khi gói ghi khác.`,
+      `## ${E('brand_netflix')} 05 · QUY ĐỊNH NETFLIX`,
+      `• Không đổi mật khẩu tài khoản, không xoá hoặc truy cập profile của người khác.`,
+      `• Được đổi tên/đặt PIN profile của mình nhưng phải báo lại shop.`,
+      `• Được đăng nhập nhiều thiết bị nhưng chỉ xem đồng thời trên **01 thiết bị**, trừ khi gói ghi khác.`,
     ].join('\n'))));
 
   const footer = new ContainerBuilder()
     .setAccentColor(0xF59E0B)
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(normalizeV2Text([
-      `## ${E('cenar_verified')} 05 · TIẾN ĐỘ, HỖ TRỢ & HIỆU LỰC`,
-      `${E('icon_clock')} Tiến độ phụ thuộc nguồn hàng; staff sẽ cập nhật trong ticket.`,
-      `${E('cenar_support')} Báo sự cố tại <#${policy.supportChannelId}> **trước khi tự thao tác**.`,
-      `${E('status_info')} Điều khoản có thể đổi theo nhà cung cấp; phiên bản tại kênh này là phiên bản có hiệu lực.`,
+      `## ${E('cenar_verified')} 06 · TIẾN ĐỘ, HỖ TRỢ & HIỆU LỰC`,
+      `• Tiến độ phụ thuộc nguồn hàng; staff sẽ cập nhật trong ticket.`,
+      `• Báo sự cố tại <#${policy.supportChannelId}> **trước khi tự thao tác**.`,
+      `• Điều khoản có thể đổi theo nhà cung cấp; phiên bản tại kênh này là phiên bản có hiệu lực.`,
       `-# ${policy.marker}`,
     ].join('\n'))));
 
@@ -136,6 +155,7 @@ export function buildTermsBoardPayload() {
     components: [
       header,
       general,
+      orderAndConduct,
       youtube,
       nitro,
       netflix,

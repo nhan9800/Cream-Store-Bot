@@ -19,7 +19,7 @@ describe('Cenar terms board 2026', () => {
     const json = serialize(payload);
 
     expect(payload.flags & MessageFlags.IsComponentsV2).toBeTruthy();
-    expect(payload.components).toHaveLength(7);
+    expect(payload.components).toHaveLength(8);
     expect(payload.allowedMentions.parse).toEqual([]);
     expect(json).toContain(TERMS_BOARD.marker);
     expect(json).toContain('YOUTUBE PREMIUM & GOOGLE FAMILY');
@@ -35,6 +35,13 @@ describe('Cenar terms board 2026', () => {
     expect(json).toContain('Mail chết và Nitro cũng mất');
     expect(json).toContain('không thuộc phạm vi bảo hành');
     expect(json).toContain('chỉ hỗ trợ giá ưu đãi');
+    expect(json).toContain('HOÀN ĐƠN, CHI PHÍ & QUY TẮC ỨNG XỬ');
+    expect(json).toContain('hoàn tối đa **50% giá trị sản phẩm**');
+    expect(json).toContain('lăng mạ, đe doạ, quấy rối');
+    expect(json).toContain('Chi phí đã phát sinh **không được hoàn lại**');
+    expect(json).toContain('đổi mật khẩu Gmail, bật 2FA');
+    expect(json).toContain('số điện thoại và email khôi phục');
+    expect(json).toContain('tài khoản chưa được bảo mật');
     expect(json).toContain('cenar_price_nitro');
     expect(json).toContain('cenar_youtube');
     expect(json).toContain('cenar_warranty_shield');
