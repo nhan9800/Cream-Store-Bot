@@ -46,6 +46,7 @@ backups/
 scripts/*
 !scripts/publish-birthday-sale.js
 !scripts/publish-ai-creative-pricing-update.js
+!scripts/publish-youtube-family-policy-update.js
 !scripts/publish-promotion-board.js
 !scripts/setup-sale-channels.js
 !scripts/apply-role-icons.js

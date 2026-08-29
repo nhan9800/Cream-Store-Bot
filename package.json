@@ -14,6 +14,7 @@
     "confirm:webhook": "node scripts/confirm-payos-webhook.js",
     "publish:birthday-sale": "node scripts/publish-birthday-sale.js",
     "publish:ai-creative-pricing": "node scripts/publish-ai-creative-pricing-update.js",
+    "publish:youtube-family-policy": "node scripts/publish-youtube-family-policy-update.js",
     "publish:promotion-board": "node scripts/publish-promotion-board.js",
     "sync:promotion-emojis": "node scripts/sync-promotion-emojis.js",
     "publish:boost-level3-sale": "node scripts/publish-server-boost-level3-sale.js",
