@@ -212,6 +212,10 @@ export async function handleFeedbackModalSubmit(interaction, orderCode, starsRaw
     && isManager(interaction.member, guildConfig),
   );
 
+  // ACK ngay để tránh hết hạn 3 giây của Discord: publishFeedback phải gọi
+  // nhiều API liên tiếp (fetch member, fetch kênh, gửi thẻ feedback, ticket...).
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+
   try {
     const result = await publishFeedback({
       guild: interaction.guild,
@@ -222,8 +226,19 @@ export async function handleFeedbackModalSubmit(interaction, orderCode, starsRaw
       actorId: interaction.user.id,
     });
 
+    // Trả kết quả cho user trước; staff log và ticket card chạy sau để không
+    // kéo dài thời gian chờ.
+    const { container, flags } = buildQuickFeedbackAckV2(result.order, stars, {
+      onBehalf: result.onBehalf,
+      actorId: interaction.user.id,
+    });
+    await interaction.editReply({
+      components: [container],
+      flags: flags | MessageFlags.Ephemeral,
+    });
+
     if (result.onBehalf) {
-      await emitStaffLog(interaction.client, {
+      emitStaffLog(interaction.client, {
         guildId: interaction.guildId,
         actorId: interaction.user.id,
         targetId: order.customer_id,
@@ -273,19 +288,9 @@ export async function handleFeedbackModalSubmit(interaction, orderCode, starsRaw
         }).catch(() => null);
       }
     }
-    {
-      const { container, flags } = buildQuickFeedbackAckV2(result.order, stars, {
-        onBehalf: result.onBehalf,
-        actorId: interaction.user.id,
-      });
-      await interaction.reply({
-        components: [container],
-        flags: flags | MessageFlags.Ephemeral,
-      });
-    }
   } catch (error) {
     const E_err = createEmojiResolver(interaction.guildId);
-    await interaction.reply({ content: `${E_err('status_warn')} ${error.message}`, ephemeral: true }).catch(() => null);
+    await interaction.editReply({ content: `${E_err('status_warn')} ${error.message}` }).catch(() => null);
   }
 }
 

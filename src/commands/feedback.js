@@ -48,6 +48,8 @@ export async function execute(interaction) {
 
   // publishFeedback sẽ chặn nếu người thao tác không phải chủ đơn và
   // cũng không phải admin/manager (quyền kiểm tra tập trung ở service).
+  // ACK sớm vì publishFeedback gọi nhiều API Discord liên tiếp (>3s là hết hạn).
+  await interaction.deferReply({ ephemeral: true });
   try {
     const result = await publishFeedback({
       guild: interaction.guild,
@@ -61,7 +63,7 @@ export async function execute(interaction) {
     order = result.order;
 
     if (result.onBehalf) {
-      await emitStaffLog(interaction.client, {
+      emitStaffLog(interaction.client, {
         guildId: interaction.guildId,
         actorId: interaction.user.id,
         targetId: order.customer_id,
@@ -69,19 +71,17 @@ export async function execute(interaction) {
         detail: `Admin dùng /feedback ghi nhận ${stars}/5 sao thay cho khách`,
         relatedOrderCode: order.order_code,
         relatedTicketCode: result.ticket?.ticket_code || null,
-      });
+      }).catch(() => null);
     }
 
-    await interaction.reply({
+    await interaction.editReply({
       content: result.onBehalf
         ? `${E('status_check')} Đã ghi nhận feedback ${stars}★ thay cho khách <@${order.customer_id}> và đăng vào ${result.feedbackChannel} cho đơn ${order.order_code}.`
         : `${E('status_check')} Cảm ơn bạn đã feedback. Bot đã đăng feedback vào ${result.feedbackChannel} cho đơn ${order.order_code}.`,
-      ephemeral: true,
     });
   } catch (error) {
-    await interaction.reply({
+    await interaction.editReply({
       content: `${E('status_warn')} ${error.message}`,
-      ephemeral: true,
-    });
+    }).catch(() => null);
   }
 }
