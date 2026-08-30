@@ -8,6 +8,7 @@ import {
   findSubscriptions,
   getSubscriptionHistory,
   getSubscriptionProgress,
+  isSubscriptionRenewalDue,
   markDisconnected,
   markRenewed,
   deleteSubscription,
@@ -335,7 +336,20 @@ export async function execute(interaction) {
       if (before.nextAction === 'DISCONNECT') {
         return interaction.editReply(`${E('status_warn')} Gói đã cấp đủ ${before.fulfilledMonths}/${before.totalMonths} tháng. Hãy dùng \`/subscription disconnect\` khi đã ngắt gói.`);
       }
-      const updated = markRenewed(id, { actorId: interaction.user.id, source: 'DISCORD_COMMAND' });
+      if (!isSubscriptionRenewalDue(existing, config.subscriptionAdminReminderDays)) {
+        return interaction.editReply(`${E('status_warn')} Kỳ tiếp theo chưa đến hạn. Hệ thống đã chặn thao tác cộng tháng sớm hoặc bấm lặp.`);
+      }
+      let updated;
+      try {
+        updated = markRenewed(id, {
+          actorId: interaction.user.id,
+          source: 'DISCORD_COMMAND',
+          expectedTimesRenewed: Number(existing.times_renewed || 0),
+        });
+      } catch (error) {
+        if (error?.code !== 'SUBSCRIPTION_RENEWAL_CONFLICT') throw error;
+        return interaction.editReply(`${E('status_info')} Kỳ này vừa được xử lý. Hệ thống đã chặn cộng trùng; hãy tải lại dữ liệu.`);
+      }
       if (!updated) return interaction.editReply(`${E('status_cross')} Lỗi khi gia hạn.`);
 
       const emoji = serviceEmoji(E, updated.service_type);

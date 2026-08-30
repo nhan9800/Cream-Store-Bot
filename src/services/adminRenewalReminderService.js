@@ -15,6 +15,7 @@ import {
   getAdminRenewalCandidates,
   getSubscriptionById,
   getSubscriptionProgress,
+  isSubscriptionRenewalDue,
   markAdminReminderSent,
   markDisconnected,
   markRenewed,
@@ -164,7 +165,7 @@ function buildActionRow(sub, E) {
   );
   const completed = withButtonEmoji(
     new ButtonBuilder()
-      .setCustomId(`sub:admin:${isDisconnect ? 'disconnect' : 'renew'}:${sub.id}`)
+      .setCustomId(`sub:admin:${isDisconnect ? 'disconnect' : 'renew'}:${sub.id}:${Number(sub.times_renewed || 0)}`)
       .setLabel(isDisconnect ? 'Xác Nhận Đã Ngắt Gói' : 'Xác Nhận Đã Gia Hạn')
       .setStyle(isDisconnect ? ButtonStyle.Danger : ButtonStyle.Success),
     E.component(isDisconnect ? 'status_cross' : 'status_check'),
@@ -389,7 +390,7 @@ async function sendDisconnectedCustomerDm(interaction, sub) {
 
 export async function handleAdminRenewalButton(interaction) {
   if (!interaction.isButton() || !interaction.customId.startsWith('sub:admin:')) return false;
-  const [, , action, rawId] = interaction.customId.split(':');
+  const [, , action, rawId, rawRevision] = interaction.customId.split(':');
   if (action === 'done') {
     await interaction.deferUpdate().catch(() => null);
     return true;
@@ -412,6 +413,34 @@ export async function handleAdminRenewalButton(interaction) {
   if (!existing || ![STORE_ONE_GUILD_ID, 'WEB'].includes(existing.guild_id) || existing.status !== 'ACTIVE') {
     await interaction.reply({ content: `${E('status_warn')} Hồ sơ không còn hoạt động hoặc đã được xử lý.`, ephemeral: true });
     return true;
+  }
+
+  const isVersionedAction = action === 'renew' || action === 'disconnect';
+  const expectedRevision = rawRevision === undefined ? null : Number(rawRevision);
+  if (isVersionedAction && rawRevision !== undefined && !Number.isInteger(expectedRevision)) {
+    await interaction.reply({
+      content: `${E('status_cross')} Nút thao tác không hợp lệ. Vui lòng dùng thông báo gia hạn mới nhất.`,
+      flags: MessageFlags.Ephemeral,
+    });
+    return true;
+  }
+  if (isVersionedAction && rawRevision !== undefined && expectedRevision !== Number(existing.times_renewed || 0)) {
+    await interaction.reply({
+      content: `${E('status_info')} Kỳ này đã được xử lý trước đó. Hệ thống không cộng thêm tháng; vui lòng dùng panel mới nhất.`,
+      flags: MessageFlags.Ephemeral,
+    });
+    return true;
+  }
+  if (isVersionedAction && rawRevision === undefined) {
+    const currentMessageId = String(existing.admin_reminder_message_id || '');
+    const clickedMessageId = String(interaction.message?.id || '');
+    if (!currentMessageId || currentMessageId !== clickedMessageId) {
+      await interaction.reply({
+        content: `${E('status_info')} Đây là panel cũ hoặc kỳ này đã được xử lý. Hệ thống không cộng thêm tháng.`,
+        flags: MessageFlags.Ephemeral,
+      });
+      return true;
+    }
   }
 
   if (action === 'claim') {
@@ -464,10 +493,30 @@ export async function handleAdminRenewalButton(interaction) {
       });
       return true;
     }
-    const renewed = markRenewed(id, {
-      actorId: interaction.user.id,
-      source: 'DISCORD_ADMIN_BUTTON',
-    });
+    if (!isSubscriptionRenewalDue(existing, config.subscriptionAdminReminderDays)) {
+      await interaction.reply({
+        content: `${E('status_warn')} Kỳ tiếp theo chưa vào cửa sổ xử lý. Hệ thống đã chặn cộng tháng sớm hoặc bấm lặp.`,
+        flags: MessageFlags.Ephemeral,
+      });
+      return true;
+    }
+    let renewed;
+    try {
+      renewed = markRenewed(id, {
+        actorId: interaction.user.id,
+        source: 'DISCORD_ADMIN_BUTTON',
+        expectedTimesRenewed: rawRevision === undefined
+          ? Number(existing.times_renewed || 0)
+          : expectedRevision,
+      });
+    } catch (error) {
+      if (error?.code !== 'SUBSCRIPTION_RENEWAL_CONFLICT') throw error;
+      await interaction.reply({
+        content: `${E('status_info')} Kỳ này vừa được xử lý bởi một thao tác khác. Hệ thống đã chặn cộng trùng.`,
+        flags: MessageFlags.Ephemeral,
+      });
+      return true;
+    }
     await updateInteraction(interaction, buildActionResultV2(renewed, { action: 'renewed', adminId: interaction.user.id }));
     const dmSent = await sendRenewedCustomerDm(interaction, renewed);
     await emitAutomationLog(interaction.client, {

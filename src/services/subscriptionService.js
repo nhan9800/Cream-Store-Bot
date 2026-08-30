@@ -1,6 +1,14 @@
 import { db, nowIso } from '../database/db.js';
 import { encrypt } from '../utils/crypto.js';
 
+export class SubscriptionRenewalConflictError extends Error {
+  constructor(message = 'Kỳ gia hạn này đã được xử lý. Vui lòng tải lại dữ liệu.') {
+    super(message);
+    this.name = 'SubscriptionRenewalConflictError';
+    this.code = 'SUBSCRIPTION_RENEWAL_CONFLICT';
+  }
+}
+
 // ═══════════════════════════════════════════════
 //  Prepared statement factories
 // ═══════════════════════════════════════════════
@@ -167,7 +175,7 @@ function markRenewedStmt() {
         admin_snoozed_until = NULL,
         admin_last_action_at = ?,
         updated_at = ?
-    WHERE id = ?
+    WHERE id = ? AND times_renewed = ? AND status = 'ACTIVE'
   `);
 }
 
@@ -205,7 +213,7 @@ function markOneTimeRenewedStmt() {
         admin_last_action_at = ?,
         status = 'ACTIVE',
         updated_at = ?
-    WHERE id = ?
+    WHERE id = ? AND times_renewed = ? AND status = 'ACTIVE'
   `);
 }
 
@@ -311,6 +319,17 @@ export function getSubscriptionProgress(sub) {
     nextCycleNumber: nextAction === 'RENEW' ? Math.min(totalMonths, fulfilledMonths + cycleMonths) : null,
     needsReview: sub?.progress_status === 'NEEDS_REVIEW',
   };
+}
+
+export function isSubscriptionRenewalDue(sub, withinDays = 7, now = new Date()) {
+  if (!sub || sub.status !== 'ACTIVE') return false;
+  const progress = getSubscriptionProgress(sub);
+  if (progress.nextAction !== 'RENEW') return false;
+  const dueAt = new Date(progress.nextActionAt || 0);
+  const current = new Date(now);
+  if (!Number.isFinite(dueAt.getTime()) || !Number.isFinite(current.getTime())) return false;
+  const safeDays = Math.min(30, Math.max(0, Number(withinDays) || 0));
+  return dueAt.getTime() <= current.getTime() + safeDays * 24 * 60 * 60 * 1000;
 }
 
 export function recordSubscriptionEvent(subscriptionId, eventType, {
@@ -547,9 +566,22 @@ export function getYoutubeAutoCycleDueGlobal(withinHours = 72, limit = 50) {
 /**
  * Đánh dấu đã gia hạn → tính next_renewal_at mới
  */
-export function markRenewed(id, { actorId = null, source = 'ADMIN', note = null } = {}) {
+export function markRenewed(id, {
+  actorId = null,
+  source = 'ADMIN',
+  note = null,
+  expectedTimesRenewed = null,
+} = {}) {
   const sub = getSubscriptionById(id);
   if (!sub) return null;
+
+  const currentRevision = Number(sub.times_renewed || 0);
+  if (expectedTimesRenewed !== null && expectedTimesRenewed !== undefined) {
+    const expectedRevision = Number(expectedTimesRenewed);
+    if (!Number.isInteger(expectedRevision) || expectedRevision !== currentRevision) {
+      throw new SubscriptionRenewalConflictError();
+    }
+  }
 
   const ts = nowIso();
   if (sub.renewal_mode !== 'auto_cycle' || !Number(sub.renewal_cycle_months)) {
@@ -558,7 +590,8 @@ export function markRenewed(id, { actorId = null, source = 'ADMIN', note = null 
       ? currentExpiry
       : new Date();
     const newExpiry = addSubscriptionMonths(base, Math.max(1, Number(sub.total_duration_months || 1)));
-    markOneTimeRenewedStmt().run(newExpiry, ts, ts, id);
+    const result = markOneTimeRenewedStmt().run(newExpiry, ts, ts, id, currentRevision);
+    if (result.changes !== 1) throw new SubscriptionRenewalConflictError();
     const updated = getSubscriptionById(id);
     recordSubscriptionEvent(id, 'PACKAGE_EXTENDED', { actorId, source, note, scheduledFor: newExpiry });
     return updated;
@@ -575,7 +608,8 @@ export function markRenewed(id, { actorId = null, source = 'ADMIN', note = null 
     ? computeNextRenewal(sub.purchase_date, sub.renewal_cycle_months, newTimesRenewed)
     : null;
 
-  markRenewedStmt().run(newNextRenewal, ts, ts, id);
+  const result = markRenewedStmt().run(newNextRenewal, ts, ts, id, currentRevision);
+  if (result.changes !== 1) throw new SubscriptionRenewalConflictError();
   const updated = getSubscriptionById(id);
   recordSubscriptionEvent(id, 'RENEWED', {
     actorId,

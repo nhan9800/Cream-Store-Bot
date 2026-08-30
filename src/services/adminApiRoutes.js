@@ -1183,15 +1183,40 @@ const fetchWithTimeout = (promise, ms) => {
     try {
       const { id } = req.params;
       const before = subService.getSubscriptionById(Number(id));
+      if (!before) {
+        return res.status(404).json({ ok: false, error: 'Không tìm thấy bản ghi gia hạn.' });
+      }
       if (before && subService.getSubscriptionProgress(before).nextAction === 'DISCONNECT') {
         return res.status(409).json({ ok: false, error: 'Gói đã cấp đủ tháng; hãy xác nhận ngắt gói.' });
       }
-      const renewed = subService.markRenewed(Number(id), { source: 'ADMIN_API' });
-      if (!renewed) {
-        return res.status(404).json({ ok: false, error: 'Không tìm thấy bản ghi hoặc gia hạn thất bại' });
+      const rawExpectedTimesRenewed = req.body?.expectedTimesRenewed;
+      const expectedTimesRenewed = Number(rawExpectedTimesRenewed);
+      if (
+        rawExpectedTimesRenewed === undefined
+        || rawExpectedTimesRenewed === null
+        || rawExpectedTimesRenewed === ''
+        || !Number.isInteger(expectedTimesRenewed)
+      ) {
+        return res.status(428).json({
+          ok: false,
+          error: 'Dữ liệu gia hạn đã cũ. Vui lòng tải lại trang rồi thử lại.',
+        });
       }
+      if (!subService.isSubscriptionRenewalDue(before, config.subscriptionAdminReminderDays)) {
+        return res.status(409).json({
+          ok: false,
+          error: 'Kỳ tiếp theo chưa đến hạn. Hệ thống đã chặn thao tác bấm lặp.',
+        });
+      }
+      const renewed = subService.markRenewed(Number(id), {
+        source: 'ADMIN_API',
+        expectedTimesRenewed,
+      });
       res.json({ ok: true, data: renewed });
     } catch (e) {
+      if (e?.code === 'SUBSCRIPTION_RENEWAL_CONFLICT') {
+        return res.status(409).json({ ok: false, error: e.message });
+      }
       console.error('[ADMIN]', e); res.status(500).json({ ok: false, error: 'Lỗi máy chủ nội bộ.' });
     }
   });

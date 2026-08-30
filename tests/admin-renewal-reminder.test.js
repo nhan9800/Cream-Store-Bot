@@ -78,7 +78,7 @@ describe('Store 1 admin renewal reminder', () => {
     expect(serialized).not.toMatch(NATIVE_EMOJI);
     expect(buttons.map((button) => button.custom_id || button.url)).toEqual([
       'sub:admin:claim:77',
-      'sub:admin:renew:77',
+      'sub:admin:renew:77:0',
       'sub:admin:snooze:77',
       'https://cenarstore.xyz/admin/subscriptions',
     ]);

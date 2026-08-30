@@ -5,6 +5,7 @@ import {
   addSubscriptionMonths,
   getSubscriptionHistory,
   getSubscriptionProgress,
+  isSubscriptionRenewalDue,
   markDisconnected,
   markRenewed,
   migrateSubscriptionMonthlyCycles,
@@ -87,6 +88,26 @@ describe('subscription monthly lifecycle', () => {
       remainingMonths: 0,
       nextAction: 'DISCONNECT',
     });
+  });
+
+  it('applies one renewal revision exactly once and rejects a stale repeated click', () => {
+    const created = createSubscription({ months: 12, suffix: 'idempotent-click' });
+    const renewed = markRenewed(created.id, {
+      source: 'TEST',
+      expectedTimesRenewed: 0,
+    });
+    expect(renewed.times_renewed).toBe(1);
+    expect(() => markRenewed(created.id, {
+      source: 'TEST',
+      expectedTimesRenewed: 0,
+    })).toThrow(/xử lý/i);
+    expect(getSubscriptionHistory(created.id).filter((event) => event.event_type === 'RENEWED')).toHaveLength(1);
+  });
+
+  it('only opens renewal actions inside the configured due window', () => {
+    const created = createSubscription({ months: 12, suffix: 'due-window' });
+    expect(isSubscriptionRenewalDue(created, 7, new Date('2026-02-20T10:30:00.000Z'))).toBe(false);
+    expect(isSubscriptionRenewalDue(created, 7, new Date('2026-02-21T10:30:00.000Z'))).toBe(true);
   });
 
   it('lets Admin safely restore a historical plan to 5/12 months', () => {
