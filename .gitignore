@@ -63,6 +63,8 @@ scripts/*
 !scripts/audit-guild-emojis.js
 !scripts/sync-curated-emojis.js
 !scripts/sync-promotion-emojis.js
+!scripts/sync-youtube-guide-emojis.js
+!scripts/publish-youtube-join-fam-guide.js
 !scripts/smoke-test.js
 !scripts/send-combo-announcement.js
 !scripts/send-service-panel.js

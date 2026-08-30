@@ -182,6 +182,14 @@ export const EMOJI_SLOTS = {
   icon_num8:          { label: 'Số 8',                 default: '8️⃣' },
   icon_num9:          { label: 'Số 9',                 default: '9️⃣' },
   icon_num10:         { label: 'Số 10',                default: '🔟' },
+
+  // Hướng dẫn Join Fam YouTube (2026-08) — đồng bộ từ scripts/sync-youtube-guide-emojis.js
+  guide_youtube:      { label: 'HD Join Fam · Logo YouTube',      default: '' },
+  guide_playstore:    { label: 'HD Join Fam · Logo Google Play',  default: '' },
+  guide_wallet:       { label: 'HD Join Fam · Ví thanh toán',     default: '' },
+  guide_family:       { label: 'HD Join Fam · Gia đình',          default: '' },
+  guide_warning:      { label: 'HD Join Fam · Cảnh báo',          default: '' },
+  guide_card:         { label: 'HD Join Fam · Thẻ thanh toán',    default: '' },
 };
 
 // ═══════════════════════════════════════════════
@@ -304,7 +312,15 @@ export const SLOT_ALIASES = {
   icon_key: ['key', 'chia_khoa', 'verifybadge'],
   icon_link: ['link', 'lien_ket'],
   icon_cart: ['price_cart', 'cart', 'shopping_cart', 'gio_hang'],
-  icon_search: ['activity_search', 'search', 'find', 'tim_kiem']
+  icon_search: ['activity_search', 'search', 'find', 'tim_kiem'],
+
+  // Hướng dẫn Join Fam YouTube — emoji tải từ emoji.gg, tên trong server là cenar_yt_*
+  guide_youtube: ['yt_logo', 'cenar_yt_logo', 'youtube_logo'],
+  guide_playstore: ['yt_play', 'cenar_yt_play', 'playstore'],
+  guide_wallet: ['yt_wallet', 'cenar_yt_wallet'],
+  guide_family: ['yt_family', 'cenar_yt_family', 'family'],
+  guide_warning: ['yt_warning', 'cenar_yt_warning'],
+  guide_card: ['yt_card', 'cenar_yt_card', 'creditcard']
 };
 
 /**
