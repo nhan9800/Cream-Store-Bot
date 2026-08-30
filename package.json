@@ -18,6 +18,7 @@
     "publish:promotion-board": "node scripts/publish-promotion-board.js",
     "sync:promotion-emojis": "node scripts/sync-promotion-emojis.js",
     "publish:boost-level3-sale": "node scripts/publish-server-boost-level3-sale.js",
+    "publish:partner-national-day": "node scripts/publish-partner-national-day-update.js",
     "audit:emojis": "node scripts/audit-guild-emojis.js",
     "audit:emojis:apply": "node scripts/audit-guild-emojis.js --apply",
     "normalize:emojis": "node scripts/normalize-guild-emoji-names.js",
