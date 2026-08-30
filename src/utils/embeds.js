@@ -1339,7 +1339,7 @@ export function buildQuickFeedbackAckEmbed(order, stars) {
   );
 }
 
-export function buildQuickFeedbackAckV2(order, stars) {
+export function buildQuickFeedbackAckV2(order, stars, { onBehalf = false, actorId = null } = {}) {
   const em = order.guild_id ? getEmojiMap(order.guild_id) : {};
   const E = createEmojiResolver(order.guild_id);
   const starEmoji = E('icon_star');
@@ -1348,10 +1348,13 @@ export function buildQuickFeedbackAckV2(order, stars) {
   const container = new ContainerBuilder().setAccentColor(accentFor(accent));
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(joinLines(
-      h2(`${E('payment_success')}  Cảm Ơn Bạn Đã Feedback!`),
+      h2(`${E('payment_success')}  ${onBehalf ? 'Đã Ghi Nhận Feedback Hộ Khách!' : 'Cảm Ơn Bạn Đã Feedback!'}`),
       `> ${E('order_id')} ${fmt.b('Mã đơn:')} ${fmt.code(order.order_code)}`.trim(),
       `> ${E('icon_star')} ${fmt.b('Đánh giá:')} ${fmt.b(`${stars}/5 sao`)}`.trim(),
       `> ${starBar}`,
+      onBehalf && order.customer_id
+        ? `> ${E('ticket_staff')} ${fmt.user(actorId)} đã ghi nhận thay cho khách ${fmt.user(order.customer_id)}`.trim()
+        : null,
     ))
   );
   container.addSeparatorComponents(
@@ -1395,12 +1398,16 @@ export function buildFeedbackV2({ member, order, stars, content }) {
   return { container, flags: MessageFlags.IsComponentsV2 };
 }
 
-export function buildFeedbackModalPrompt(stars) {
+export function buildFeedbackModalPrompt(stars, { onBehalf = false } = {}) {
   const titles = ['', 'Không Hài Lòng', 'Cần Cải Thiện', 'Tạm Ổn', 'Khá Hài Lòng', 'Rất Hài Lòng!'];
   return {
-    title: titles[stars] || `Đánh Giá ${stars} Sao`,
-    label: 'Ý kiến của bạn về đơn hàng',
-    placeholder: 'Chia sẻ trải nghiệm của bạn... Đừng ngại góp ý để shop cải thiện nhé!',
+    title: onBehalf
+      ? `Ghi Đánh Giá Hộ — ${titles[stars] || `${stars} Sao`}`
+      : titles[stars] || `Đánh Giá ${stars} Sao`,
+    label: onBehalf ? 'Ý kiến của khách về đơn hàng (admin ghi hộ)' : 'Ý kiến của bạn về đơn hàng',
+    placeholder: onBehalf
+      ? 'Nhập nội dung feedback mà khách đã chia sẻ với bạn...'
+      : 'Chia sẻ trải nghiệm của bạn... Đừng ngại góp ý để shop cải thiện nhé!',
   };
 }
 

@@ -2,6 +2,7 @@ import { getGuildConfig } from './guildConfigService.js';
 import { getOrderByCode, submitFeedback } from './orderService.js';
 import { syncCustomerStats } from './customerService.js';
 import { buildFeedbackV2 } from '../utils/embeds.js';
+import { isManager } from '../utils/permissions.js';
 import { config } from '../config.js';
 import { scheduleOrderTicketAutoClose } from './ticketService.js';
 
@@ -46,7 +47,7 @@ export async function syncPublishedFeedbackMessage({ client, feedback }) {
   return { synced: true, channelId, messageId };
 }
 
-export async function publishFeedback({ guild, userId, orderCode, stars, content }) {
+export async function publishFeedback({ guild, userId, orderCode, stars, content, actorId = null }) {
   const guildConfig = getGuildConfig(guild.id);
   if (!guildConfig) {
     throw new Error('Server chưa setup hệ thống.');
@@ -57,9 +58,22 @@ export async function publishFeedback({ guild, userId, orderCode, stars, content
     throw new Error('Không tìm thấy đơn hàng.');
   }
 
+  // Người thao tác có thể là chủ đơn (tự feedback) hoặc admin/manager ghi hộ.
+  // Khi là admin ghi hộ: userId vẫn là KHÁCH HÀNG để giữ nguyên attribution
+  // (thẻ công khai, DB, thống kê, gỡ role non_legit); actorId là người bấm.
+  const onBehalf = Boolean(actorId) && actorId !== userId;
+
   if (order.customer_id !== userId) {
     throw new Error('Bạn không phải chủ đơn hàng này.');
   }
+
+  if (onBehalf) {
+    const actorMember = await guild.members.fetch(actorId).catch(() => null);
+    if (!isManager(actorMember, guildConfig)) {
+      throw new Error('Bạn không có quyền đánh giá hộ khách hàng.');
+    }
+  }
+
 
   if (order.guild_id && order.guild_id !== guild.id) {
     throw new Error('Đơn hàng này không thuộc server hiện tại.');
@@ -107,12 +121,17 @@ export async function publishFeedback({ guild, userId, orderCode, stars, content
 
   const ticketChannel = await guild.channels.fetch(updatedOrder.ticket_channel_id).catch(() => null);
   if (ticketChannel?.isTextBased()) {
-    await ticketChannel.send(`<@${userId}> đã gửi feedback cho đơn ${updatedOrder.order_code}. Cảm ơn bạn nhé!`).catch(() => null);
+    const ticketMessage = onBehalf
+      ? `<@${actorId}> (admin) đã ghi nhận feedback cho đơn ${updatedOrder.order_code} thay cho khách <@${userId}>.`
+      : `<@${userId}> đã gửi feedback cho đơn ${updatedOrder.order_code}. Cảm ơn bạn nhé!`;
+    await ticketChannel.send(ticketMessage).catch(() => null);
   }
 
   return {
     order: updatedOrder,
     feedbackChannel,
     ticket,
+    onBehalf,
+    actorId: onBehalf ? actorId : userId,
   };
 }

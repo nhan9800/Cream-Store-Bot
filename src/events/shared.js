@@ -232,8 +232,8 @@ export function buildWarrantyPanelModal() {
   return modal;
 }
 
-export function buildFeedbackModal(orderCode, stars) {
-  const prompt = buildFeedbackModalPrompt(stars);
+export function buildFeedbackModal(orderCode, stars, { onBehalf = false } = {}) {
+  const prompt = buildFeedbackModalPrompt(stars, { onBehalf });
 
   const modal = new ModalBuilder()
     .setCustomId(`feedback:modal:${orderCode}:${stars}`)

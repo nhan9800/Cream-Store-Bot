@@ -14,7 +14,9 @@ import {
 import { config } from '../config.js';
 import { emitStaffLog } from '../services/staffLogService.js';
 import { getOrderByCode } from '../services/orderService.js';
+import { getGuildConfig } from '../services/guildConfigService.js';
 import { publishFeedback } from '../services/feedbackService.js';
+import { isManager } from '../utils/permissions.js';
 import { openWarrantyTicket, buildWarrantyCustomerConfirmV2 } from '../services/warrantyService.js';
 import { updateOrderLogMessage } from '../services/notificationService.js';
 import { buildQuickFeedbackAckV2 } from '../utils/embeds.js';
@@ -31,7 +33,13 @@ export async function handleFeedbackButton(interaction, orderCode, starsRaw) {
     return;
   }
 
-  if (order.customer_id !== interaction.user.id) {
+  // Chủ đơn tự đánh giá; admin/manager được đánh giá hộ khách
+  // (đề phòng trường hợp khách không biết đánh giá ở đâu).
+  const isOwner = order.customer_id === interaction.user.id;
+  const guildConfig = getGuildConfig(interaction.guildId);
+  const onBehalf = !isOwner && isManager(interaction.member, guildConfig);
+
+  if (!isOwner && !onBehalf) {
     await safeReply(interaction, { content: `${E('status_warn')} Bạn không phải chủ đơn hàng này.`, ephemeral: true });
     return;
   }
@@ -51,7 +59,7 @@ export async function handleFeedbackButton(interaction, orderCode, starsRaw) {
     return;
   }
 
-  await interaction.showModal(buildFeedbackModal(orderCode, stars));
+  await interaction.showModal(buildFeedbackModal(orderCode, stars, { onBehalf }));
 }
 
 
@@ -195,14 +203,36 @@ export async function handleFeedbackModalSubmit(interaction, orderCode, starsRaw
   const stars = Number.parseInt(starsRaw, 10);
   const content = interaction.fields.getTextInputValue(FEEDBACK_TEXT_INPUT_ID)?.trim() || 'Không có ý kiến';
 
+  // Xác định admin/manager đang ghi hộ feedback cho khách.
+  const order = getOrderByCode(orderCode);
+  const guildConfig = getGuildConfig(interaction.guildId);
+  const actingOnBehalf = Boolean(
+    order
+    && order.customer_id !== interaction.user.id
+    && isManager(interaction.member, guildConfig),
+  );
+
   try {
     const result = await publishFeedback({
       guild: interaction.guild,
-      userId: interaction.user.id,
+      userId: actingOnBehalf ? order.customer_id : interaction.user.id,
       orderCode,
       stars,
       content,
+      actorId: interaction.user.id,
     });
+
+    if (result.onBehalf) {
+      await emitStaffLog(interaction.client, {
+        guildId: interaction.guildId,
+        actorId: interaction.user.id,
+        targetId: order.customer_id,
+        action: 'FEEDBACK_ON_BEHALF',
+        detail: `Admin ghi nhận feedback ${stars}/5 sao thay cho khách`,
+        relatedOrderCode: order.order_code,
+        relatedTicketCode: result.ticket?.ticket_code || null,
+      }).catch(() => null);
+    }
 
     const ticket = result.ticket;
     if (ticket) {
@@ -218,7 +248,10 @@ export async function handleFeedbackModalSubmit(interaction, orderCode, starsRaw
             `> ${E_ch('order_id')} **Mã đơn:** \`${result.order.order_code}\``.trim(),
             `> ${E_ch('icon_star')} **Đánh giá:** **${stars}/5 sao**`.trim(),
             `> ${starBar}`,
-          ].join('\n'))
+            result.onBehalf
+              ? `> -# ${E_ch('ticket_staff')} Admin <@${interaction.user.id}> ghi nhận đánh giá thay cho khách <@${result.order.customer_id}>`.trim()
+              : null,
+          ].filter(Boolean).join('\n'))
         );
         fbContainer.addSeparatorComponents(
           new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
@@ -241,7 +274,10 @@ export async function handleFeedbackModalSubmit(interaction, orderCode, starsRaw
       }
     }
     {
-      const { container, flags } = buildQuickFeedbackAckV2(result.order, stars);
+      const { container, flags } = buildQuickFeedbackAckV2(result.order, stars, {
+        onBehalf: result.onBehalf,
+        actorId: interaction.user.id,
+      });
       await interaction.reply({
         components: [container],
         flags: flags | MessageFlags.Ephemeral,

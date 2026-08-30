@@ -2,6 +2,7 @@ import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { SlashCommandBuilder } from 'discord.js';
 import { findLatestPendingFeedbackOrder, getOrderByCode } from '../services/orderService.js';
 import { publishFeedback } from '../services/feedbackService.js';
+import { emitStaffLog } from '../services/staffLogService.js';
 
 export const data = new SlashCommandBuilder()
   .setName('feedback')
@@ -45,19 +46,36 @@ export async function execute(interaction) {
     return;
   }
 
+  // publishFeedback sẽ chặn nếu người thao tác không phải chủ đơn và
+  // cũng không phải admin/manager (quyền kiểm tra tập trung ở service).
   try {
     const result = await publishFeedback({
       guild: interaction.guild,
-      userId: interaction.user.id,
+      userId: order.customer_id,
       orderCode: order.order_code,
       stars,
       content,
+      actorId: interaction.user.id,
     });
 
     order = result.order;
 
+    if (result.onBehalf) {
+      await emitStaffLog(interaction.client, {
+        guildId: interaction.guildId,
+        actorId: interaction.user.id,
+        targetId: order.customer_id,
+        action: 'FEEDBACK_ON_BEHALF',
+        detail: `Admin dùng /feedback ghi nhận ${stars}/5 sao thay cho khách`,
+        relatedOrderCode: order.order_code,
+        relatedTicketCode: result.ticket?.ticket_code || null,
+      });
+    }
+
     await interaction.reply({
-      content: `${E('status_check')} Cảm ơn bạn đã feedback. Bot đã đăng feedback vào ${result.feedbackChannel} cho đơn ${order.order_code}.`,
+      content: result.onBehalf
+        ? `${E('status_check')} Đã ghi nhận feedback ${stars}★ thay cho khách <@${order.customer_id}> và đăng vào ${result.feedbackChannel} cho đơn ${order.order_code}.`
+        : `${E('status_check')} Cảm ơn bạn đã feedback. Bot đã đăng feedback vào ${result.feedbackChannel} cho đơn ${order.order_code}.`,
       ephemeral: true,
     });
   } catch (error) {

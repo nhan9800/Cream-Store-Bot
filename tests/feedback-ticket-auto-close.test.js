@@ -21,7 +21,7 @@ function createTicket({ code, channelId, orderCode = null, status = 'OPEN', keep
   `).run(code, channelId, orderCode, keepOpen, status, new Date().toISOString()).lastInsertRowid);
 }
 
-function createCompletedOrder({ code, ticketId, channelId, feedbackSubmitted = true }) {
+function createCompletedOrder({ code, ticketId, channelId, feedbackSubmitted = true, customerId = 'CUSTOMER', guildId = 'FEEDBACK_GUILD' }) {
   const timestamp = new Date().toISOString();
   db.prepare(`
     INSERT INTO orders (
@@ -30,11 +30,11 @@ function createCompletedOrder({ code, ticketId, channelId, feedbackSubmitted = t
       order_log_channel_id, created_by_id, completed_at, feedback_submitted_at,
       created_at, updated_at
     ) VALUES (
-      ?, 'FEEDBACK_GUILD', ?, ?, 'CUSTOMER',
+      ?, ?, ?, ?, ?,
       'Test Product', 1, 100000, 100000, 'PAID', 'COMPLETED',
       'ORDER_LOG', 'STAFF', ?, ?, ?, ?
     )
-  `).run(code, ticketId, channelId, timestamp, feedbackSubmitted ? timestamp : null, timestamp, timestamp);
+  `).run(code, guildId, ticketId, channelId, customerId, timestamp, feedbackSubmitted ? timestamp : null, timestamp, timestamp);
 }
 
 beforeAll(async () => {
@@ -50,8 +50,8 @@ beforeAll(async () => {
   db.prepare(`
     INSERT INTO guild_settings (
       guild_id, ticket_category_id, order_log_channel_id,
-      feedback_channel_id, updated_at
-    ) VALUES ('FEEDBACK_GUILD', 'TICKET_CATEGORY', 'ORDER_LOG', 'FEEDBACK_CHANNEL', ?)
+      feedback_channel_id, manager_role_id, updated_at
+    ) VALUES ('FEEDBACK_GUILD', 'TICKET_CATEGORY', 'ORDER_LOG', 'FEEDBACK_CHANNEL', 'MANAGER_ROLE', ?)
   `).run(new Date().toISOString());
 });
 
@@ -63,6 +63,49 @@ afterAll(() => {
     else process.env[key] = value;
   }
 });
+
+function createGuild({ staffMember, ticketChannelId = 'command-channel' }) {
+  const feedbackChannelSends = [];
+  const ticketChannelSends = [];
+  const feedbackChannel = {
+    id: 'FEEDBACK_CHANNEL',
+    isTextBased: () => true,
+    send: async (payload) => {
+      feedbackChannelSends.push(payload);
+      return { id: 'FEEDBACK_MESSAGE' };
+    },
+  };
+  const ticketChannel = {
+    id: ticketChannelId,
+    isTextBased: () => true,
+    send: async (content) => {
+      ticketChannelSends.push(content);
+      return { id: 'TICKET_MESSAGE' };
+    },
+  };
+  const member = {
+    id: 'CUSTOMER',
+    roles: { cache: { has: () => false }, remove: async () => null },
+  };
+  const guild = {
+    id: 'FEEDBACK_GUILD',
+    channels: {
+      fetch: async (id) => (id === 'FEEDBACK_CHANNEL' ? feedbackChannel : ticketChannel),
+    },
+    members: {
+      fetch: async (id) => (id === 'CUSTOMER' ? member : staffMember),
+    },
+  };
+  return { guild, feedbackChannelSends, ticketChannelSends };
+}
+
+function managerMember(allowed) {
+  return {
+    id: 'ADMIN',
+    permissions: { has: () => allowed },
+    roles: { cache: { has: (roleId) => roleId === 'MANAGER_ROLE' && allowed } },
+  };
+}
 
 describe('feedback ticket auto-close scheduling', () => {
   test('schedules auto-close through the shared feedback service used by /feedback', async () => {
@@ -138,5 +181,67 @@ describe('feedback ticket auto-close scheduling', () => {
     expect(repaired.map((ticket) => ticket.id)).not.toContain(keepOpenId);
     expect(repairedRow.auto_close_at).toBeTruthy();
     expect(keptRow.auto_close_at).toBeNull();
+  });
+
+  test('admin with manager role can publish feedback on behalf of the customer', async () => {
+    const ticketId = createTicket({ code: 'TKT_ONBEHALF', channelId: 'onbehalf-channel', orderCode: 'CN_ONBEHALF_OK' });
+    createCompletedOrder({
+      code: 'CN_ONBEHALF_OK',
+      ticketId,
+      channelId: 'onbehalf-channel',
+      feedbackSubmitted: false,
+    });
+    const { guild, feedbackChannelSends, ticketChannelSends } = createGuild({ staffMember: managerMember(true), ticketChannelId: 'onbehalf-channel' });
+
+    const result = await feedbackService.publishFeedback({
+      guild,
+      userId: 'CUSTOMER',
+      orderCode: 'CN_ONBEHALF_OK',
+      stars: 5,
+      content: 'Khách khen dịch vụ tốt (admin ghi hộ)',
+      actorId: 'ADMIN',
+    });
+
+    // Attribution vẫn thuộc về khách hàng
+    expect(result.onBehalf).toBe(true);
+    expect(result.actorId).toBe('ADMIN');
+    expect(result.order.customer_id).toBe('CUSTOMER');
+    expect(result.order.feedback_submitted_at).toBeTruthy();
+    expect(result.ticket.id).toBe(ticketId);
+    expect(result.ticket.auto_close_at).toBeTruthy();
+
+    const feedbackRow = db.prepare('SELECT * FROM feedbacks WHERE order_code = ?').get('CN_ONBEHALF_OK');
+    expect(feedbackRow.customer_id).toBe('CUSTOMER');
+    expect(feedbackRow.stars).toBe(5);
+
+    // Thông báo trong ticket ghi rõ admin ghi hộ khách
+    expect(ticketChannelSends.some((content) => content.includes('ADMIN') && content.includes('CUSTOMER'))).toBe(true);
+    expect(feedbackChannelSends.length).toBe(1);
+  });
+
+  test('rejects an actor without manager role who is not the order owner', async () => {
+    const ticketId = createTicket({ code: 'TKT_NOTMGR', channelId: 'notmgr-channel', orderCode: 'CN_ONBEHALF_DENY' });
+    createCompletedOrder({
+      code: 'CN_ONBEHALF_DENY',
+      ticketId,
+      channelId: 'notmgr-channel',
+      feedbackSubmitted: false,
+    });
+    const { guild } = createGuild({ staffMember: managerMember(false), ticketChannelId: 'notmgr-channel' });
+
+    await expect(feedbackService.publishFeedback({
+      guild,
+      userId: 'CUSTOMER',
+      orderCode: 'CN_ONBEHALF_DENY',
+      stars: 4,
+      content: 'không được phép',
+      actorId: 'ADMIN',
+    })).rejects.toThrow('Bạn không có quyền đánh giá hộ khách hàng.');
+
+    // Không có feedback nào được ghi
+    const feedbackRow = db.prepare('SELECT * FROM feedbacks WHERE order_code = ?').get('CN_ONBEHALF_DENY');
+    expect(feedbackRow).toBeFalsy();
+    const orderRow = db.prepare('SELECT feedback_submitted_at FROM orders WHERE order_code = ?').get('CN_ONBEHALF_DENY');
+    expect(orderRow.feedback_submitted_at).toBeNull();
   });
 });
