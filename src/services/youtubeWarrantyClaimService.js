@@ -353,15 +353,19 @@ export async function publishYoutubeWarrantyClaim(client, claim, { notify = fals
 
 export async function syncYoutubeWarrantyClaims(client, { guildId = config.guildId } = {}) {
   const rows = db.prepare(`
-    SELECT o.*, t.id AS warranty_ticket_id, t.ticket_code AS warranty_ticket_code,
+    SELECT DISTINCT o.*, t.id AS warranty_ticket_id, t.ticket_code AS warranty_ticket_code,
            t.channel_id AS warranty_ticket_channel_id, t.customer_id AS warranty_customer_id
-    FROM orders o
-    JOIN tickets t ON t.related_order_code = o.order_code
-      AND t.guild_id = o.guild_id
-      AND t.ticket_type = 'WARRANTY'
+    FROM tickets t
+    JOIN orders o ON o.guild_id = t.guild_id
+      AND (
+        (t.related_order_code IS NOT NULL AND t.related_order_code = o.order_code)
+        OR (o.ticket_id IS NOT NULL AND o.ticket_id = t.id)
+        OR (o.ticket_channel_id IS NOT NULL AND o.ticket_channel_id = t.channel_id)
+      )
+    WHERE t.guild_id = ?
       AND t.status = 'OPEN'
-    WHERE o.guild_id = ?
-      AND o.status = 'WARRANTY_OPEN'
+      AND UPPER(COALESCE(t.ticket_type, '')) = 'WARRANTY'
+      AND o.status IN ('WARRANTY_OPEN', 'COMPLETED')
       AND (LOWER(o.product_name) LIKE '%youtube%' OR LOWER(COALESCE(o.service_type, '')) LIKE '%youtube%')
     ORDER BY t.id ASC
   `).all(guildId);
