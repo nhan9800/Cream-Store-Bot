@@ -125,6 +125,48 @@ export function initDatabase() {
       closed_by_id TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS ticket_transcript_archives (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      archive_code TEXT UNIQUE NOT NULL,
+      token_hash TEXT UNIQUE NOT NULL,
+      guild_id TEXT NOT NULL,
+      ticket_id INTEGER,
+      ticket_code TEXT,
+      ticket_type TEXT,
+      channel_id TEXT,
+      channel_name TEXT NOT NULL,
+      customer_id TEXT,
+      closed_by_id TEXT,
+      message_count INTEGER NOT NULL DEFAULT 0,
+      format_version INTEGER NOT NULL DEFAULT 2,
+      compression TEXT NOT NULL DEFAULT 'GZIP',
+      storage_backend TEXT NOT NULL DEFAULT 'LOCAL_GZIP',
+      local_file_name TEXT,
+      original_bytes INTEGER NOT NULL DEFAULT 0,
+      compressed_bytes INTEGER NOT NULL DEFAULT 0,
+      checksum_sha256 TEXT NOT NULL,
+      partial INTEGER NOT NULL DEFAULT 0,
+      fetch_error TEXT,
+      discord_channel_id TEXT,
+      discord_message_id TEXT,
+      discord_attachment_id TEXT,
+      discord_attachment_url TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      expires_at TEXT,
+      last_accessed_at TEXT,
+      access_count INTEGER NOT NULL DEFAULT 0,
+      revoked_at TEXT,
+      status TEXT NOT NULL DEFAULT 'ACTIVE',
+      FOREIGN KEY (ticket_id) REFERENCES tickets(id)
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_transcript_archives_token_hash
+      ON ticket_transcript_archives(token_hash);
+    CREATE INDEX IF NOT EXISTS idx_transcript_archives_ticket
+      ON ticket_transcript_archives(ticket_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_transcript_archives_expiry
+      ON ticket_transcript_archives(status, expires_at);
+
     CREATE TABLE IF NOT EXISTS orders (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       order_code TEXT UNIQUE,

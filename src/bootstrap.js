@@ -8,7 +8,11 @@ import { startPresenceRotation } from './services/presenceService.js';
 import { startOtpAutoCheck } from './services/otpAutoCheckService.js';
 import { backfillRecentDeliverySubscriptions } from './services/deliverySubscriptionService.js';
 import { migrateSubscriptionMonthlyCycles } from './services/subscriptionService.js';
-import { cleanupExpiredTranscripts } from './services/transcriptService.js';
+import {
+  cleanupExpiredTranscripts,
+  cleanupTranscriptArchiveStorage,
+  migrateLegacyTranscriptsToGzip,
+} from './services/transcriptService.js';
 import { reconcileWalletPaidOrders } from './services/orderService.js';
 
 import { initErrorLogger } from './services/errorLogService.js';
@@ -24,8 +28,11 @@ export async function buildClient() {
   for (const repaired of walletReconciliation.repaired) {
     console.log(`[WALLET-RECONCILIATION] restored=${repaired.orderCode} ledger=${repaired.walletTransactionId}`);
   }
+  const transcriptMigration = migrateLegacyTranscriptsToGzip();
+  console.log(`[TRANSCRIPT-MIGRATION] scanned=${transcriptMigration.scanned} migrated=${transcriptMigration.migrated} saved=${transcriptMigration.bytesSaved}`);
   const transcriptCleanup = cleanupExpiredTranscripts();
-  console.log(`[TRANSCRIPT-CLEANUP] scanned=${transcriptCleanup.scanned} removed=${transcriptCleanup.removed}`);
+  const archiveCleanup = cleanupTranscriptArchiveStorage();
+  console.log(`[TRANSCRIPT-CLEANUP] legacyScanned=${transcriptCleanup.scanned} legacyRemoved=${transcriptCleanup.removed} expired=${archiveCleanup.expired} cacheRemoved=${archiveCleanup.cacheRemoved}`);
   const subscriptionMigration = migrateSubscriptionMonthlyCycles();
   console.log(`[SUBSCRIPTION-MIGRATION] scanned=${subscriptionMigration.scanned} normalized=${subscriptionMigration.normalized} needsReview=${subscriptionMigration.needsReview} history=${subscriptionMigration.historyCreated}`);
   const subscriptionBackfill = backfillRecentDeliverySubscriptions({ lookbackDays: 3650 });

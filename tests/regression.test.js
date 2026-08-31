@@ -4,7 +4,14 @@ import path from 'node:path';
 import { describe, expect, test, vi } from 'vitest';
 import { resolveWarrantyTimeline } from '../src/services/warrantyService.js';
 import { getCustomerMembershipProgress } from '../src/services/roleService.js';
-import { cleanupExpiredTranscripts, exportTicketTranscript } from '../src/services/transcriptService.js';
+import { db } from '../src/database/db.js';
+import {
+  cleanupExpiredTranscripts,
+  exportTicketTranscript,
+  hashTranscriptAccessToken,
+  migrateLegacyTranscriptsToGzip,
+  readTranscriptArchive,
+} from '../src/services/transcriptService.js';
 
 describe('YouTube warranty dates', () => {
   test('derives purchase and expiry from order metadata instead of N/A', () => {
@@ -35,23 +42,70 @@ describe('YouTube warranty dates', () => {
 });
 
 describe('compact transcript storage', () => {
-  test('exports one HTML archive without Discord attachment buffers', async () => {
+  test('exports a compressed archive with a hashed 192-bit access token', async () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cenar-transcript-'));
+    let archiveId = null;
     try {
       const result = await exportTicketTranscript({
+        id: '880006',
         name: 'bao-hanh-880006',
-        guild: { name: 'Cenar Store', iconURL: () => null },
+        guild: { id: '100000000000000001', name: 'Cenar Store', iconURL: () => null },
         messages: { fetch: async () => new Map() },
       }, { directory: tempRoot });
+      archiveId = result.archiveId;
 
       expect(result.savedToDisk).toBe(true);
-      expect(result.htmlFileName).toMatch(/^transcript_bao-hanh-880006_[a-f0-9]{24}\.html$/);
+      expect(result.accessToken).toMatch(/^[a-f0-9]{48}$/);
+      expect(result.archiveFileName).toMatch(/^transcript_ta_[a-z0-9_]+\.json\.gz$/);
       expect(result).not.toHaveProperty('htmlBuffer');
       expect(result).not.toHaveProperty('textBuffer');
-      expect(result).not.toHaveProperty('textFileName');
-      expect(fs.existsSync(result.savedHtmlPath)).toBe(true);
+      expect(fs.existsSync(result.savedArchivePath)).toBe(true);
+      expect(fs.readFileSync(result.savedArchivePath).includes(Buffer.from(result.accessToken))).toBe(false);
+
+      const row = db.prepare('SELECT token_hash, original_bytes, compressed_bytes FROM ticket_transcript_archives WHERE id = ?').get(result.archiveId);
+      expect(row.token_hash).toBe(hashTranscriptAccessToken(result.accessToken));
+      expect(row.token_hash).not.toBe(result.accessToken);
+      expect(row.compressed_bytes).toBeLessThan(row.original_bytes);
+
+      const archive = await readTranscriptArchive(result.accessToken, { directory: tempRoot });
+      expect(archive.archive.code).toBe(result.archiveCode);
+      expect(archive.messages).toEqual([]);
+      expect(await readTranscriptArchive('not-a-valid-token', { directory: tempRoot })).toBeNull();
+
+      const mirrorBytes = fs.readFileSync(result.savedArchivePath);
+      db.prepare(`UPDATE ticket_transcript_archives SET discord_channel_id = '10', discord_message_id = '20',
+        discord_attachment_id = '30', discord_attachment_url = 'https://cdn.discordapp.com/archive.json.gz'
+        WHERE id = ?`).run(result.archiveId);
+      fs.rmSync(result.savedArchivePath);
+      let mirrorFetches = 0;
+      const restored = await readTranscriptArchive(result.accessToken, {
+        directory: tempRoot,
+        fetchImpl: async () => {
+          mirrorFetches++;
+          return new Response(mirrorBytes, { status: 200, headers: { 'content-length': String(mirrorBytes.length) } });
+        },
+      });
+      expect(restored.storage.mirrored).toBe(true);
+      expect(mirrorFetches).toBe(1);
+      expect(fs.existsSync(result.savedArchivePath)).toBe(true);
     } finally {
+      if (archiveId) db.prepare('DELETE FROM ticket_transcript_archives WHERE id = ?').run(archiveId);
       fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
+  test('compresses legacy HTML in-place while preserving the original URL name', () => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'cenar-legacy-gzip-'));
+    try {
+      const source = path.join(directory, 'transcript_ticket-123_abcdef.html');
+      fs.writeFileSync(source, '<html><style>same-style</style>'.repeat(500));
+      const result = migrateLegacyTranscriptsToGzip({ directory });
+      expect(result.migrated).toBe(1);
+      expect(fs.existsSync(source)).toBe(false);
+      expect(fs.existsSync(`${source}.gz`)).toBe(true);
+      expect(result.bytesSaved).toBeGreaterThan(0);
+    } finally {
+      fs.rmSync(directory, { recursive: true, force: true });
     }
   });
 

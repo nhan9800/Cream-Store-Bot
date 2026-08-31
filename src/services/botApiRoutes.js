@@ -50,6 +50,7 @@ import {
 } from './questService.js';
 import { getPriceBoardProducts, PRICE_BOARD_VERSION } from './autoSetupPriceBoardService.js';
 import { scheduleFeedbackTicketAutoClose } from './feedbackService.js';
+import { readTranscriptArchive } from './transcriptService.js';
 import {
   getPublicYoutubeWarrantyClaim,
   getYoutubeWarrantySyncState,
@@ -366,6 +367,26 @@ export function registerBotApiRoutes(app) {
 
     // Tất cả route /api/bot/* require API key
     app.use('/api/bot', corsHandler, requireApiKey);
+
+    // ── PRIVATE TRANSCRIPT ARCHIVE ──────────────────────────────
+    // This endpoint is server-to-server. The browser only holds the random
+    // capability token; BOT_API_KEY remains inside the website runtime.
+    app.get('/api/bot/transcripts/:token', async (req, res) => {
+        res.set('Cache-Control', 'private, no-store, max-age=0');
+        res.set('X-Robots-Tag', 'noindex, nofollow, noarchive');
+        try {
+            const archive = await readTranscriptArchive(req.params.token, {
+                client: req.app.locals.discordClient,
+            });
+            if (!archive) {
+                return res.status(404).json({ ok: false, error: 'Transcript không tồn tại, đã hết hạn hoặc đã bị thu hồi.' });
+            }
+            return res.json({ ok: true, data: archive });
+        } catch (error) {
+            console.error('[TRANSCRIPT_API] Không thể đọc archive:', error.message);
+            return res.status(503).json({ ok: false, error: 'Bản lưu đang tạm thời không khả dụng. Vui lòng thử lại sau.' });
+        }
+    });
 
     // ── YOUTUBE WARRANTY CUSTOMER FORM ───────────────────────────
     // Website gọi server-to-server bằng BOT_API_KEY; trình duyệt chỉ nhìn thấy

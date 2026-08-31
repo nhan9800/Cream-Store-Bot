@@ -1,5 +1,5 @@
 import { MessageFlags } from 'discord.js';
-import { config, getTranscriptUrl } from '../config.js';
+import { config, getTranscriptViewerUrl } from '../config.js';
 import { getGuildConfig } from './guildConfigService.js';
 import { applyCustomerRoles } from './roleService.js';
 import {
@@ -18,6 +18,7 @@ import {
   buildOrderCancelledCustomerV2,
 } from '../utils/embeds.js';
 import { formatCurrency, buildOrderLogContent } from '../utils/formatters.js';
+import { recordTranscriptDiscordMirror } from './transcriptService.js';
 import { syncCtvOrderLog } from './ctvOrderLogService.js';
 
 export async function updateOrderLogMessage(guild, order) {
@@ -125,25 +126,50 @@ export async function sendCompletedFlow({ guild, order, actorId, supportId }) {
 export async function deliverTranscript({ guild, ticket, transcriptResult, closedById }) {
   const guildConfig = getGuildConfig(guild.id);
 
-  const transcriptUrl = getTranscriptUrl(`/transcripts/${transcriptResult.htmlFileName}`);
-  if (!transcriptResult.savedToDisk || !transcriptUrl) {
+  const transcriptUrl = getTranscriptViewerUrl(transcriptResult.accessToken);
+  if (!transcriptResult.savedToDisk || !transcriptResult.archiveId || !transcriptUrl) {
     const reason = !transcriptResult.savedToDisk
-      ? 'Không thể lưu transcript lên ổ đĩa.'
-      : 'Thiếu TRANSCRIPT_BASE_URL hoặc PUBLIC_BASE_URL.';
+      ? 'Không thể lưu transcript nén lên ổ đĩa.'
+      : !transcriptResult.archiveId
+        ? 'Không thể đăng ký transcript trong cơ sở dữ liệu.'
+        : 'Thiếu TRANSCRIPT_VIEWER_BASE_URL hoặc STORE_WEBSITE_URL.';
     console.error(`[TRANSCRIPT] Không thể gửi liên kết cho ticket ${ticket.ticket_code}: ${reason}`);
     return { delivered: false, reason };
   }
 
+  let mirrored = false;
   if (guildConfig?.transcript_channel_id) {
     const transcriptChannel = await guild.channels.fetch(guildConfig.transcript_channel_id).catch(() => null);
     if (transcriptChannel?.isTextBased()) {
-      await transcriptChannel.send(buildTranscriptSummaryV2({
+      const summary = buildTranscriptSummaryV2({
         ticket,
         closedById,
         messageCount: transcriptResult.messageCount,
         transcriptUrl,
         guildId: guild.id,
-      })).catch(() => null);
+        compressedBytes: transcriptResult.compressedBytes,
+      });
+      let archiveMessage = await transcriptChannel.send({
+        ...summary,
+        files: [{ attachment: transcriptResult.savedArchivePath, name: transcriptResult.archiveFileName }],
+      }).catch((error) => {
+        console.warn(`[TRANSCRIPT] Không thể đính kèm archive ${transcriptResult.archiveCode}:`, error.message);
+        return null;
+      });
+      // A server upload limit must not prevent the customer from receiving the
+      // viewer link. Keep the local archive and post the summary without a file.
+      if (!archiveMessage) archiveMessage = await transcriptChannel.send(summary).catch(() => null);
+      const attachment = archiveMessage?.attachments?.first?.() || null;
+      if (archiveMessage && attachment) {
+        mirrored = recordTranscriptDiscordMirror({
+          archiveId: transcriptResult.archiveId,
+          closedById,
+          channelId: transcriptChannel.id,
+          messageId: archiveMessage.id,
+          attachmentId: attachment.id,
+          attachmentUrl: attachment.url,
+        });
+      }
     }
   }
 
@@ -159,7 +185,7 @@ export async function deliverTranscript({ guild, ticket, transcriptResult, close
     guildId: guild.id,
   })).catch(() => null);
 
-  return { delivered: true, customerSent: Boolean(customerMessage), transcriptUrl };
+  return { delivered: true, customerSent: Boolean(customerMessage), mirrored, transcriptUrl };
 }
 
 export async function sendOrderCancelledFlow({ guild, order, reason = null }) {

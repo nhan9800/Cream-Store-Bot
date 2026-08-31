@@ -1,7 +1,9 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import zlib from 'node:zlib';
 import { config } from '../config.js';
+import { db } from '../database/db.js';
 
 function escapeHtml(input) {
   return String(input ?? '')
@@ -619,16 +621,219 @@ blockquote { margin: 2px 0; padding: 4px 0 4px 12px; border-left: 4px solid #4e5
 </html>`;
 }
 
+const ARCHIVE_FORMAT_VERSION = 2;
+const DEFAULT_ARCHIVE_DIRECTORY = path.join(process.cwd(), 'data', 'transcript-archive');
+const DEFAULT_LEGACY_DIRECTORY = path.join(process.cwd(), 'data', 'transcripts');
+const ACCESS_TOKEN_PATTERN = /^[a-f0-9]{48}$/;
+const ARCHIVE_FILE_PATTERN = /^transcript_[a-z0-9_-]{4,96}\.json\.gz$/;
+
+function ensureTranscriptArchiveSchema() {
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS ticket_transcript_archives (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      archive_code TEXT UNIQUE NOT NULL,
+      token_hash TEXT UNIQUE NOT NULL,
+      guild_id TEXT NOT NULL,
+      ticket_id INTEGER,
+      ticket_code TEXT,
+      ticket_type TEXT,
+      channel_id TEXT,
+      channel_name TEXT NOT NULL,
+      customer_id TEXT,
+      closed_by_id TEXT,
+      message_count INTEGER NOT NULL DEFAULT 0,
+      format_version INTEGER NOT NULL DEFAULT 2,
+      compression TEXT NOT NULL DEFAULT 'GZIP',
+      storage_backend TEXT NOT NULL DEFAULT 'LOCAL_GZIP',
+      local_file_name TEXT,
+      original_bytes INTEGER NOT NULL DEFAULT 0,
+      compressed_bytes INTEGER NOT NULL DEFAULT 0,
+      checksum_sha256 TEXT NOT NULL,
+      partial INTEGER NOT NULL DEFAULT 0,
+      fetch_error TEXT,
+      discord_channel_id TEXT,
+      discord_message_id TEXT,
+      discord_attachment_id TEXT,
+      discord_attachment_url TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      expires_at TEXT,
+      last_accessed_at TEXT,
+      access_count INTEGER NOT NULL DEFAULT 0,
+      revoked_at TEXT,
+      status TEXT NOT NULL DEFAULT 'ACTIVE'
+    );
+    CREATE INDEX IF NOT EXISTS idx_transcript_archives_token_hash ON ticket_transcript_archives(token_hash);
+    CREATE INDEX IF NOT EXISTS idx_transcript_archives_ticket ON ticket_transcript_archives(ticket_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_transcript_archives_expiry ON ticket_transcript_archives(status, expires_at);
+  `);
+}
+
+export function hashTranscriptAccessToken(value) {
+  return crypto.createHash('sha256').update(String(value || '')).digest('hex');
+}
+
+function archiveCode() {
+  return `TA_${Date.now().toString(36).toUpperCase()}_${crypto.randomBytes(5).toString('hex').toUpperCase()}`;
+}
+
+function collectionValues(value) {
+  if (!value) return [];
+  if (typeof value.values === 'function') return [...value.values()];
+  if (Array.isArray(value)) return value;
+  return [];
+}
+
+function safeJson(value) {
+  try {
+    if (typeof value?.toJSON === 'function') return value.toJSON();
+    if (value?.data && typeof value.data === 'object') return value.data;
+    return JSON.parse(JSON.stringify(value));
+  } catch {
+    return null;
+  }
+}
+
+function avatarUrl(author) {
+  try {
+    return author?.displayAvatarURL?.({ size: 128, extension: 'webp' }) || author?.avatarURL?.({ size: 128 }) || null;
+  } catch {
+    return null;
+  }
+}
+
+function serializeMessage(message) {
+  const attachments = collectionValues(message?.attachments).map((item) => ({
+    id: String(item?.id || ''),
+    name: item?.name || null,
+    description: item?.description || null,
+    contentType: item?.contentType || null,
+    size: Number(item?.size) || 0,
+    url: item?.url || null,
+    proxyUrl: item?.proxyURL || null,
+    width: Number(item?.width) || null,
+    height: Number(item?.height) || null,
+    spoiler: Boolean(item?.spoiler),
+  }));
+  const reactions = collectionValues(message?.reactions?.cache).map((reaction) => ({
+    count: Number(reaction?.count) || 0,
+    me: Boolean(reaction?.me),
+    emoji: {
+      id: reaction?.emoji?.id || null,
+      name: reaction?.emoji?.name || null,
+      animated: Boolean(reaction?.emoji?.animated),
+    },
+  }));
+  const users = collectionValues(message?.mentions?.users).map((user) => ({
+    id: String(user?.id || ''),
+    name: user?.globalName || user?.username || String(user?.id || ''),
+  }));
+  const roles = collectionValues(message?.mentions?.roles).map((role) => ({ id: String(role?.id || ''), name: role?.name || 'role' }));
+  const channels = collectionValues(message?.mentions?.channels).map((mentioned) => ({ id: String(mentioned?.id || ''), name: mentioned?.name || 'channel' }));
+  return {
+    id: String(message?.id || ''),
+    type: Number(message?.type) || 0,
+    createdAt: new Date(message?.createdTimestamp || Date.now()).toISOString(),
+    editedAt: message?.editedTimestamp ? new Date(message.editedTimestamp).toISOString() : null,
+    content: String(message?.content || ''),
+    author: {
+      id: String(message?.author?.id || ''),
+      username: message?.author?.username || 'Unknown',
+      displayName: message?.member?.displayName || message?.author?.globalName || message?.author?.username || 'Unknown',
+      avatarUrl: avatarUrl(message?.author),
+      bot: Boolean(message?.author?.bot),
+    },
+    pinned: Boolean(message?.pinned),
+    system: Boolean(message?.system),
+    webhookId: message?.webhookId || null,
+    replyTo: message?.reference?.messageId || message?.reference?.message_id || null,
+    mentions: { users, roles, channels },
+    attachments,
+    embeds: collectionValues(message?.embeds).map(safeJson).filter(Boolean),
+    components: collectionValues(message?.components).map(safeJson).filter(Boolean),
+    stickers: collectionValues(message?.stickers).map((sticker) => ({
+      id: String(sticker?.id || ''), name: sticker?.name || 'sticker', format: Number(sticker?.format) || null,
+    })),
+    reactions,
+  };
+}
+
+function resolveTicket(channel) {
+  try {
+    return db.prepare('SELECT * FROM tickets WHERE channel_id = ? LIMIT 1').get(String(channel?.id || '')) || null;
+  } catch {
+    return null;
+  }
+}
+
+function atomicWrite(filePath, data) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  const temporary = `${filePath}.${process.pid}.${crypto.randomBytes(4).toString('hex')}.tmp`;
+  let handle;
+  try {
+    handle = fs.openSync(temporary, 'wx', 0o600);
+    fs.writeFileSync(handle, data);
+    fs.fsyncSync(handle);
+    fs.closeSync(handle);
+    handle = null;
+    fs.renameSync(temporary, filePath);
+  } finally {
+    if (handle !== null && handle !== undefined) fs.closeSync(handle);
+    fs.rmSync(temporary, { force: true });
+  }
+}
+
+function parseArchiveBuffer(compressed, expectedChecksum) {
+  const checksum = crypto.createHash('sha256').update(compressed).digest('hex');
+  if (expectedChecksum && checksum !== expectedChecksum) throw new Error('Transcript archive checksum mismatch');
+  const json = zlib.gunzipSync(compressed, { maxOutputLength: 64 * 1024 * 1024 }).toString('utf8');
+  const payload = JSON.parse(json);
+  if (payload?.schemaVersion !== ARCHIVE_FORMAT_VERSION || !Array.isArray(payload?.messages)) {
+    throw new Error('Unsupported transcript archive format');
+  }
+  return payload;
+}
+
+export function migrateLegacyTranscriptsToGzip({ directory = DEFAULT_LEGACY_DIRECTORY } = {}) {
+  if (!fs.existsSync(directory)) return { scanned: 0, migrated: 0, bytesSaved: 0 };
+  let scanned = 0;
+  let migrated = 0;
+  let bytesSaved = 0;
+  let entries;
+  try {
+    entries = fs.readdirSync(directory, { withFileTypes: true });
+  } catch {
+    return { scanned: 0, migrated: 0, bytesSaved: 0 };
+  }
+  for (const entry of entries) {
+    if (!entry.isFile() || !entry.name.toLowerCase().endsWith('.html')) continue;
+    scanned++;
+    const source = path.join(directory, entry.name);
+    const destination = `${source}.gz`;
+    try {
+      if (fs.existsSync(destination)) continue;
+      const stat = fs.statSync(source);
+      const original = fs.readFileSync(source);
+      const compressed = zlib.gzipSync(original, { level: 9 });
+      if (compressed.length >= original.length) continue;
+      atomicWrite(destination, compressed);
+      fs.utimesSync(destination, stat.atime, stat.mtime);
+      fs.rmSync(source, { force: true });
+      migrated++;
+      bytesSaved += original.length - compressed.length;
+    } catch (error) {
+      if (error?.code !== 'ENOENT') console.warn(`[TRANSCRIPT-MIGRATE] Bỏ qua ${entry.name}:`, error.message);
+    }
+  }
+  return { scanned, migrated, bytesSaved };
+}
+
 export function cleanupExpiredTranscripts({
-  directory = path.join(process.cwd(), 'data', 'transcripts'),
-  retentionDays = config.transcriptRetentionDays,
+  directory = DEFAULT_LEGACY_DIRECTORY,
+  retentionDays = config.transcriptArchiveRetentionDays,
   now = Date.now(),
 } = {}) {
   const days = Number(retentionDays);
-  if (!Number.isFinite(days) || days <= 0 || !fs.existsSync(directory)) {
-    return { scanned: 0, removed: 0 };
-  }
-
+  if (!Number.isFinite(days) || days <= 0 || !fs.existsSync(directory)) return { scanned: 0, removed: 0 };
   const cutoff = now - days * 86_400_000;
   let scanned = 0;
   let removed = 0;
@@ -636,16 +841,12 @@ export function cleanupExpiredTranscripts({
   try {
     entries = fs.readdirSync(directory, { withFileTypes: true });
   } catch (error) {
-    // Thư mục có thể vừa bị tác vụ backup/cleanup khác di chuyển hoặc xóa.
-    // Dọn transcript chỉ là bảo trì, tuyệt đối không được chặn bot khởi động.
-    if (error?.code !== 'ENOENT') {
-      console.warn(`[TRANSCRIPT-CLEANUP] Không thể đọc thư mục ${directory}:`, error.message);
-    }
+    if (error?.code !== 'ENOENT') console.warn(`[TRANSCRIPT-CLEANUP] Không thể đọc thư mục ${directory}:`, error.message);
     return { scanned: 0, removed: 0 };
   }
-
   for (const entry of entries) {
-    if (!entry.isFile() || !entry.name.toLowerCase().endsWith('.html')) continue;
+    const lowerName = entry.name.toLowerCase();
+    if (!entry.isFile() || (!lowerName.endsWith('.html') && !lowerName.endsWith('.html.gz'))) continue;
     scanned++;
     const filePath = path.join(directory, entry.name);
     try {
@@ -654,78 +855,216 @@ export function cleanupExpiredTranscripts({
       fs.rmSync(filePath, { force: true });
       removed++;
     } catch (error) {
-      // File có thể biến mất giữa readdirSync và statSync/rmSync khi hai tiến
-      // trình Store cùng dọn thư mục. ENOENT là trạng thái bình thường của race.
-      if (error?.code !== 'ENOENT') {
-        console.warn(`[TRANSCRIPT-CLEANUP] Bỏ qua file ${filePath}:`, error.message);
-      }
+      if (error?.code !== 'ENOENT') console.warn(`[TRANSCRIPT-CLEANUP] Bỏ qua file ${filePath}:`, error.message);
     }
   }
   return { scanned, removed };
 }
 
-export async function exportTicketTranscript(channel, {
-  directory = path.join(process.cwd(), 'data', 'transcripts'),
+export function cleanupTranscriptArchiveStorage({
+  directory = DEFAULT_ARCHIVE_DIRECTORY,
+  now = Date.now(),
+  hotCacheDays = config.transcriptHotCacheDays,
 } = {}) {
+  ensureTranscriptArchiveSchema();
+  const nowIso = new Date(now).toISOString();
+  const hotCutoff = new Date(now - Math.max(1, Number(hotCacheDays) || 90) * 86_400_000).toISOString();
+  const expired = db.prepare(`SELECT id, local_file_name FROM ticket_transcript_archives
+    WHERE status = 'ACTIVE' AND expires_at IS NOT NULL AND expires_at <= ?`).all(nowIso);
+  const cold = db.prepare(`SELECT id, local_file_name FROM ticket_transcript_archives
+    WHERE status = 'ACTIVE' AND local_file_name IS NOT NULL AND created_at <= ?
+      AND discord_channel_id IS NOT NULL AND discord_message_id IS NOT NULL AND discord_attachment_id IS NOT NULL`).all(hotCutoff);
+  let expiredCount = 0;
+  let cacheRemoved = 0;
+  const removeLocal = (row) => {
+    if (!row.local_file_name || path.basename(row.local_file_name) !== row.local_file_name || !ARCHIVE_FILE_PATTERN.test(row.local_file_name)) return;
+    fs.rmSync(path.join(directory, row.local_file_name), { force: true });
+  };
+  for (const row of expired) {
+    try { removeLocal(row); } catch (error) { if (error?.code !== 'ENOENT') continue; }
+    db.prepare("UPDATE ticket_transcript_archives SET status = 'EXPIRED', local_file_name = NULL WHERE id = ?").run(row.id);
+    expiredCount++;
+  }
+  for (const row of cold) {
+    if (expired.some((item) => item.id === row.id)) continue;
+    try { removeLocal(row); } catch (error) { if (error?.code !== 'ENOENT') continue; }
+    db.prepare("UPDATE ticket_transcript_archives SET storage_backend = 'DISCORD_GZIP', local_file_name = NULL WHERE id = ?").run(row.id);
+    cacheRemoved++;
+  }
+  return { expired: expiredCount, cacheRemoved };
+}
+
+export async function exportTicketTranscript(channel, { directory = DEFAULT_ARCHIVE_DIRECTORY } = {}) {
+  ensureTranscriptArchiveSchema();
   let lastId;
   const allMessages = [];
   let fetchCount = 0;
   let fetchError = null;
-
-  // Bọc từng lần fetch: nếu Discord API lỗi giữa chừng, vẫn giữ những tin đã lấy
-  // được (transcript một phần) thay vì để cả hàm ném và caller nuốt lỗi thành null.
-  while (fetchCount < 15) { // Giới hạn tối đa 15 lần fetch (1500 tin nhắn) để tránh lặp vô hạn/treo bot
+  while (fetchCount < 15) {
     try {
       const batch = await channel.messages.fetch({ limit: 100, ...(lastId ? { before: lastId } : {}) });
       if (!batch.size) break;
       allMessages.push(...batch.values());
-      lastId = batch.last().id;
+      lastId = batch.last?.()?.id || [...batch.values()].at(-1)?.id;
       fetchCount++;
       if (batch.size < 100) break;
-    } catch (err) {
-      fetchError = err;
-      console.error(`[TRANSCRIPT] Lỗi khi tải tin nhắn (#${channel?.name ?? '?'}) sau ${allMessages.length} tin:`, err.message);
+    } catch (error) {
+      fetchError = error;
+      console.error(`[TRANSCRIPT] Lỗi khi tải tin nhắn (#${channel?.name ?? '?'}) sau ${allMessages.length} tin:`, error.message);
       break;
     }
   }
+  allMessages.sort((a, b) => Number(a?.createdTimestamp || 0) - Number(b?.createdTimestamp || 0));
 
-  allMessages.sort((a, b) => a.createdTimestamp - b.createdTimestamp);
+  const ticket = resolveTicket(channel);
+  const code = archiveCode();
+  const accessToken = crypto.randomBytes(24).toString('hex');
+  const tokenHash = hashTranscriptAccessToken(accessToken);
+  const createdAt = new Date().toISOString();
+  const retentionDays = Math.max(1, Number(config.transcriptArchiveRetentionDays) || 3650);
+  const expiresAt = new Date(Date.now() + retentionDays * 86_400_000).toISOString();
+  const payload = {
+    schemaVersion: ARCHIVE_FORMAT_VERSION,
+    archive: { code, createdAt, expiresAt, partial: Boolean(fetchError) },
+    ticket: {
+      id: ticket?.id || null,
+      code: ticket?.ticket_code || channel?.name || code,
+      type: ticket?.ticket_type || null,
+      subject: ticket?.ticket_subject || null,
+      customerId: ticket?.customer_id || null,
+      relatedOrderCode: ticket?.related_order_code || null,
+    },
+    server: {
+      id: String(channel?.guild?.id || ticket?.guild_id || config.guildId || ''),
+      name: channel?.guild?.name || config.storeName || 'Cenar Store',
+      iconUrl: channel?.guild?.iconURL?.({ size: 128, extension: 'webp' }) || null,
+    },
+    channel: { id: String(channel?.id || ticket?.channel_id || ''), name: channel?.name || 'ticket' },
+    messages: allMessages.map(serializeMessage),
+  };
+  const jsonBuffer = Buffer.from(JSON.stringify(payload), 'utf8');
+  const compressed = zlib.gzipSync(jsonBuffer, { level: 9 });
+  const checksum = crypto.createHash('sha256').update(compressed).digest('hex');
+  const safeCode = code.toLowerCase().replace(/[^a-z0-9_-]/g, '');
+  const archiveFileName = `transcript_${safeCode}.json.gz`;
+  const savedArchivePath = path.join(directory, archiveFileName);
 
-  const transcriptHtml = renderTranscriptHtml(channel, allMessages);
-
-  const safeChannelName = String(channel.name || 'ticket')
-    .toLowerCase()
-    .replace(/[^a-z0-9-]+/g, '-')
-    .replace(/^-+|-+$/g, '')
-    .slice(0, 48) || 'ticket';
-  const accessToken = crypto.randomBytes(12).toString('hex');
-  const htmlFileName = `transcript_${safeChannelName}_${accessToken}.html`;
-
-  // Chỉ lưu một bản HTML trên đĩa; Discord nhận URL nên không còn giữ thêm
-  // Buffer HTML/TXT trong payload hoặc nhân đôi dữ liệu lưu trữ.
-  let savedToDisk = false;
-  let savedHtmlPath = null;
   try {
-    const transcriptsDir = directory;
-    if (!fs.existsSync(transcriptsDir)) fs.mkdirSync(transcriptsDir, { recursive: true });
-    const cleanup = cleanupExpiredTranscripts({ directory: transcriptsDir });
-    if (cleanup.removed) {
-      console.log(`[TRANSCRIPT] Đã xóa ${cleanup.removed}/${cleanup.scanned} bản lưu quá hạn.`);
-    }
-    savedHtmlPath = path.join(transcriptsDir, htmlFileName);
-    fs.writeFileSync(savedHtmlPath, transcriptHtml, 'utf8');
-    savedToDisk = true;
+    atomicWrite(savedArchivePath, compressed);
+    const result = db.prepare(`INSERT INTO ticket_transcript_archives (
+      archive_code, token_hash, guild_id, ticket_id, ticket_code, ticket_type,
+      channel_id, channel_name, customer_id, message_count, format_version,
+      compression, storage_backend, local_file_name, original_bytes, compressed_bytes,
+      checksum_sha256, partial, fetch_error, created_at, expires_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'GZIP', 'LOCAL_GZIP', ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+      code, tokenHash, payload.server.id || 'UNKNOWN', ticket?.id || null, payload.ticket.code,
+      payload.ticket.type, payload.channel.id || null, payload.channel.name, payload.ticket.customerId,
+      payload.messages.length, ARCHIVE_FORMAT_VERSION, archiveFileName, jsonBuffer.length,
+      compressed.length, checksum, fetchError ? 1 : 0, fetchError?.message || null, createdAt, expiresAt,
+    );
+    return {
+      archiveId: Number(result.lastInsertRowid), archiveCode: code, accessToken, archiveFileName,
+      messageCount: allMessages.length, savedToDisk: true, savedArchivePath,
+      originalBytes: jsonBuffer.length, compressedBytes: compressed.length,
+      partial: fetchError !== null, fetchErrorMessage: fetchError?.message || null,
+    };
   } catch (error) {
-    savedHtmlPath = null;
-    console.error('[TRANSCRIPT] Không thể lưu file html:', error.message);
+    fs.rmSync(savedArchivePath, { force: true });
+    console.error('[TRANSCRIPT] Không thể lưu archive nén:', error.message);
+    return {
+      archiveId: null, archiveCode: code, accessToken: null, archiveFileName,
+      messageCount: allMessages.length, savedToDisk: false, savedArchivePath: null,
+      originalBytes: jsonBuffer.length, compressedBytes: compressed.length,
+      partial: fetchError !== null, fetchErrorMessage: fetchError?.message || null,
+    };
+  }
+}
+
+export function recordTranscriptDiscordMirror({ archiveId, closedById, channelId, messageId, attachmentId, attachmentUrl }) {
+  if (!archiveId) return false;
+  ensureTranscriptArchiveSchema();
+  const result = db.prepare(`UPDATE ticket_transcript_archives SET
+    closed_by_id = COALESCE(?, closed_by_id), discord_channel_id = ?, discord_message_id = ?,
+    discord_attachment_id = ?, discord_attachment_url = ?, storage_backend = 'LOCAL_GZIP+DISCORD'
+    WHERE id = ?`).run(closedById || null, channelId, messageId, attachmentId, attachmentUrl || null, archiveId);
+  return result.changes > 0;
+}
+
+async function downloadDiscordMirror(row, client, fetchImpl, maxBytes) {
+  let url = row.discord_attachment_url || null;
+  if (client && row.discord_channel_id && row.discord_message_id) {
+    const channel = await client.channels.fetch(row.discord_channel_id).catch(() => null);
+    const message = await channel?.messages?.fetch?.(row.discord_message_id).catch(() => null);
+    const attachment = message?.attachments?.get?.(row.discord_attachment_id)
+      || collectionValues(message?.attachments).find((item) => item?.id === row.discord_attachment_id)
+      || collectionValues(message?.attachments).find((item) => String(item?.name || '').endsWith('.json.gz'));
+    if (attachment?.url) url = attachment.url;
+  }
+  if (!url || typeof fetchImpl !== 'function') throw new Error('Transcript archive is temporarily unavailable');
+  const response = await fetchImpl(url, { signal: AbortSignal.timeout(15_000) });
+  if (!response.ok) throw new Error(`Discord mirror returned HTTP ${response.status}`);
+  const declared = Number(response.headers?.get?.('content-length')) || 0;
+  if (declared > maxBytes) throw new Error('Transcript archive exceeds the configured size limit');
+  const buffer = Buffer.from(await response.arrayBuffer());
+  if (buffer.length > maxBytes) throw new Error('Transcript archive exceeds the configured size limit');
+  return buffer;
+}
+
+export async function readTranscriptArchive(accessToken, {
+  directory = DEFAULT_ARCHIVE_DIRECTORY,
+  client = null,
+  fetchImpl = globalThis.fetch,
+} = {}) {
+  const token = String(accessToken || '').trim().toLowerCase();
+  if (!ACCESS_TOKEN_PATTERN.test(token)) return null;
+  ensureTranscriptArchiveSchema();
+  const row = db.prepare('SELECT * FROM ticket_transcript_archives WHERE token_hash = ? LIMIT 1').get(hashTranscriptAccessToken(token));
+  if (!row || row.status !== 'ACTIVE' || row.revoked_at) return null;
+  if (row.expires_at && Date.parse(row.expires_at) <= Date.now()) return null;
+
+  const maxBytes = Math.max(1_048_576, Number(config.transcriptArchiveMaxBytes) || 26_214_400);
+  let compressed = null;
+  if (row.local_file_name && path.basename(row.local_file_name) === row.local_file_name && ARCHIVE_FILE_PATTERN.test(row.local_file_name)) {
+    try {
+      const localPath = path.join(directory, row.local_file_name);
+      const stat = fs.statSync(localPath);
+      if (stat.size > maxBytes) throw new Error('Transcript archive exceeds the configured size limit');
+      compressed = fs.readFileSync(localPath);
+      parseArchiveBuffer(compressed, row.checksum_sha256);
+    } catch (error) {
+      compressed = null;
+      console.warn(`[TRANSCRIPT] Local cache unavailable for ${row.archive_code}:`, error.message);
+    }
   }
 
+  if (!compressed) {
+    compressed = await downloadDiscordMirror(row, client, fetchImpl, maxBytes);
+    parseArchiveBuffer(compressed, row.checksum_sha256);
+    const restoredName = `transcript_${String(row.archive_code).toLowerCase().replace(/[^a-z0-9_-]/g, '')}.json.gz`;
+    atomicWrite(path.join(directory, restoredName), compressed);
+    db.prepare(`UPDATE ticket_transcript_archives SET local_file_name = ?, storage_backend = 'LOCAL_GZIP+DISCORD',
+      discord_attachment_url = COALESCE(discord_attachment_url, ?) WHERE id = ?`).run(restoredName, row.discord_attachment_url || null, row.id);
+  }
+
+  const payload = parseArchiveBuffer(compressed, row.checksum_sha256);
+  db.prepare('UPDATE ticket_transcript_archives SET access_count = access_count + 1, last_accessed_at = ? WHERE id = ?')
+    .run(new Date().toISOString(), row.id);
   return {
-    htmlFileName,
-    messageCount: allMessages.length,
-    savedToDisk,
-    savedHtmlPath,
-    partial: fetchError !== null,
-    fetchErrorMessage: fetchError ? fetchError.message : null,
+    ...payload,
+    archive: {
+      ...payload.archive,
+      code: row.archive_code,
+      createdAt: row.created_at,
+      expiresAt: row.expires_at,
+      messageCount: row.message_count,
+      partial: Boolean(row.partial),
+    },
+    storage: {
+      format: `JSON_V${row.format_version}`,
+      compression: row.compression,
+      originalBytes: row.original_bytes,
+      compressedBytes: row.compressed_bytes,
+      mirrored: Boolean(row.discord_attachment_id),
+    },
   };
 }

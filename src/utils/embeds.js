@@ -1574,13 +1574,13 @@ function transcriptLinkRow(url, guildId) {
   return new ActionRowBuilder().addComponents(button);
 }
 
-export function buildTranscriptSummaryV2({ ticket, closedById, messageCount, transcriptUrl, guildId }) {
+export function buildTranscriptSummaryV2({ ticket, closedById, messageCount, transcriptUrl, guildId, compressedBytes = 0 }) {
   const E = createEmojiResolver(guildId);
   const container = new ContainerBuilder().setAccentColor(accentFor('info'));
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent([
       `## ${E('transcript_web')} Transcript Đã Lưu`,
-      `> ${E('status_check')} Nội dung ticket được lưu thành một trang web gọn nhẹ; không còn gửi file HTML/TXT lặp lại.`,
+      `> ${E('status_check')} Nội dung ticket đã được nén an toàn và có bản sao khôi phục ngay trong kênh này.`,
     ].join('\n')),
   );
   container.addSeparatorComponents(
@@ -1592,6 +1592,7 @@ export function buildTranscriptSummaryV2({ ticket, closedById, messageCount, tra
       `${E('ticket_user')} **Khách hàng** — <@${ticket.customer_id}>`,
       `${E('ticket_staff')} **Đóng bởi** — <@${closedById}>`,
       `${E('icon_doc')} **Tin nhắn lưu trữ** — \`${messageCount}\``,
+      `${E('icon_doc')} **Dung lượng nén** — \`${Math.max(1, Math.ceil(Number(compressedBytes || 0) / 1024))} KB\``,
       `${E('icon_clock')} **Thời điểm** — ${T.rel(new Date())}`,
     ].join('\n')),
   );
@@ -1611,7 +1612,7 @@ export function buildTranscriptCustomerV2({ ticket, messageCount, transcriptUrl,
       '',
       `${E('icon_doc')} **Số tin nhắn** — \`${messageCount}\``,
       `${E('warranty_shield')} **Quyền riêng tư** — Liên kết chỉ được gửi trực tiếp cho bạn và đội ngũ Cenar.`,
-      subtext(`${E('icon_clock')} Bản lưu tự động hết hạn sau ${config.transcriptRetentionDays} ngày để tối ưu dung lượng.`),
+      subtext(`${E('icon_clock')} Bản lưu được duy trì dài hạn; hãy giữ liên kết riêng tư và không chia sẻ công khai.`),
     ].join('\n')),
   );
   return {

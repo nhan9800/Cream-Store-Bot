@@ -152,6 +152,13 @@ export const config = {
   // Domain cho link transcript — fallback về PUBLIC_BASE_URL nếu không set riêng
   transcriptBaseUrl: getEnv('TRANSCRIPT_BASE_URL', '') || getEnv('PUBLIC_BASE_URL', ''),
   transcriptRetentionDays: Number.parseInt(getEnv('TRANSCRIPT_RETENTION_DAYS', '30'), 10),
+  // Transcript v2 is a compressed, capability-link archive. Keep the logical
+  // archive for ten years by default while only retaining a short local cache
+  // when a verified Discord mirror exists.
+  transcriptViewerBaseUrl: getEnv('TRANSCRIPT_VIEWER_BASE_URL', '') || getEnv('STORE_WEBSITE_URL', 'https://cenarstore.xyz'),
+  transcriptArchiveRetentionDays: Number.parseInt(getEnv('TRANSCRIPT_ARCHIVE_RETENTION_DAYS', '3650'), 10),
+  transcriptHotCacheDays: Number.parseInt(getEnv('TRANSCRIPT_HOT_CACHE_DAYS', '90'), 10),
+  transcriptArchiveMaxBytes: Number.parseInt(getEnv('TRANSCRIPT_ARCHIVE_MAX_BYTES', '26214400'), 10),
   httpPort: Number.parseInt(getEnv('INTERNAL_HTTP_PORT', getEnv('HTTP_PORT', '3000')), 10),
   paymentProvider: (getEnv('PAYMENT_PROVIDER', 'PAYOS') ?? 'PAYOS').toUpperCase(),
   payosClientId: getEnv('PAYOS_CLIENT_ID', ''),
@@ -328,6 +335,13 @@ export function getTranscriptUrl(pathValue = '') {
   const base = config.transcriptBaseUrl.replace(/\/$/, '');
   const safePath = pathValue ? (pathValue.startsWith('/') ? pathValue : `/${pathValue}`) : '';
   return `${base}${safePath}`;
+}
+
+export function getTranscriptViewerUrl(accessToken = '') {
+  const token = String(accessToken || '').trim();
+  if (!config.transcriptViewerBaseUrl || !token) return null;
+  const base = config.transcriptViewerBaseUrl.replace(/\/$/, '');
+  return `${base}/transcripts/${encodeURIComponent(token)}`;
 }
 
 export function getWebhookUrl() {
