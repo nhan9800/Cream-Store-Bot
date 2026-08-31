@@ -159,12 +159,12 @@ export function ensureYoutubeWarrantyClaim({ order, ticket, allowLegacyYoutube =
       const result = db.prepare(`
         INSERT INTO youtube_warranty_claims (
           claim_code, access_token_hash, access_token_encrypted, guild_id,
-          order_code, ticket_id, ticket_channel_id, customer_id, status,
+          order_code, ticket_id, ticket_channel_id, customer_id, customer_gmail, status,
           created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'AWAITING_CUSTOMER', ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'AWAITING_CUSTOMER', ?, ?)
       `).run(
         createClaimCode(), hashToken(rawToken), encrypt(rawToken), order.guild_id,
-        order.order_code, Number(ticket.id), ticket.channel_id, order.customer_id,
+        order.order_code, Number(ticket.id), ticket.channel_id, order.customer_id, encrypt(''),
         nowIso(), nowIso(),
       );
       return { claim: getYoutubeWarrantyClaim(result.lastInsertRowid, { includeToken: true }), created: true };
