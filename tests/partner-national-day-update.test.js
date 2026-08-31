@@ -10,6 +10,7 @@ const NATIVE_EMOJI = /[\u{1F000}-\u{1FAFF}\u2600-\u27BF]/u;
 
 describe('partner and National Day announcement', () => {
   test('contains all approved commercial details with custom emoji presentation', () => {
+    expect(PARTNER_NATIONAL_DAY_UPDATE.announcementChannelId).toBe('1514598369597587546');
     const content = buildPartnerNationalDayContent();
     const payload = buildPartnerNationalDayAnnouncement();
     const serialized = JSON.stringify(payload.components.map((component) => component.toJSON()));

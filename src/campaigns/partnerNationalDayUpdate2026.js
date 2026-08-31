@@ -3,7 +3,7 @@ import { createEmojiResolver } from '../utils/emojiHelper.js';
 
 export const PARTNER_NATIONAL_DAY_UPDATE = Object.freeze({
   guildId: '1282637033340403754',
-  announcementChannelId: '1282637033814495249',
+  announcementChannelId: '1514598369597587546',
   marker: 'CENAR PARTNER OPEN CALL · QUỐC KHÁNH 2/9',
 });
 
