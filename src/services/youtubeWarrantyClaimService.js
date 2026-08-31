@@ -354,9 +354,10 @@ export async function publishYoutubeWarrantyClaim(client, claim, { notify = fals
 export async function syncYoutubeWarrantyClaims(client, { guildId = config.guildId } = {}) {
   const rows = db.prepare(`
     SELECT DISTINCT o.*, t.id AS warranty_ticket_id, t.ticket_code AS warranty_ticket_code,
-           t.channel_id AS warranty_ticket_channel_id, t.customer_id AS warranty_customer_id
+           t.channel_id AS warranty_ticket_channel_id, t.customer_id AS warranty_customer_id,
+           t.ticket_type AS warranty_ticket_type, t.ticket_subject AS warranty_ticket_subject
     FROM tickets t
-    JOIN orders o ON o.guild_id = t.guild_id
+    LEFT JOIN orders o ON o.guild_id = t.guild_id
       AND (
         (t.related_order_code IS NOT NULL AND t.related_order_code = o.order_code)
         OR (o.ticket_id IS NOT NULL AND o.ticket_id = t.id)
@@ -364,19 +365,53 @@ export async function syncYoutubeWarrantyClaims(client, { guildId = config.guild
       )
     WHERE t.guild_id = ?
       AND t.status = 'OPEN'
-      AND UPPER(COALESCE(t.ticket_type, '')) = 'WARRANTY'
-      AND o.status IN ('WARRANTY_OPEN', 'COMPLETED')
-      AND (LOWER(o.product_name) LIKE '%youtube%' OR LOWER(COALESCE(o.service_type, '')) LIKE '%youtube%')
     ORDER BY t.id ASC
   `).all(guildId);
-  const result = { scanned: rows.length, created: 0, published: 0, current: 0, missingChannels: 0, failed: 0 };
-  for (const order of rows) {
+  const result = { scanned: 0, created: 0, published: 0, current: 0, missingChannels: 0, skipped: 0, failed: 0 };
+  for (const row of rows) {
+    let order = row.order_code ? row : null;
     const ticket = {
-      id: order.warranty_ticket_id,
-      ticket_code: order.warranty_ticket_code,
-      channel_id: order.warranty_ticket_channel_id,
-      customer_id: order.warranty_customer_id,
+      id: row.warranty_ticket_id,
+      ticket_code: row.warranty_ticket_code,
+      channel_id: row.warranty_ticket_channel_id,
+      customer_id: row.warranty_customer_id,
     };
+
+    let channel = null;
+    const ticketType = String(row.warranty_ticket_type || '').toUpperCase();
+    const subject = String(row.warranty_ticket_subject || '').toLowerCase();
+    if (ticketType !== 'WARRANTY' || !order) {
+      channel = await resolveClaimChannel(client, { guildId, ticketChannelId: ticket.channel_id });
+      const channelName = String(channel?.name || '').toLowerCase();
+      const warrantyName = /^(bao-hanh|baohanh)[-_]\d{6,}$/.test(channelName);
+      if (ticketType !== 'WARRANTY' && !warrantyName && !subject.includes('youtube') && !subject.includes('bảo hành')) {
+        result.skipped += 1;
+        continue;
+      }
+
+      // Very old tickets sometimes lost related_order_code/ticket_id. Recover
+      // the conventional CN_XXXXXX order code from the channel name.
+      if (!order) {
+        const suffix = channelName.match(/^(?:bao-hanh|baohanh)[-_](\d{6,})$/)?.[1];
+        if (suffix) {
+          order = db.prepare(`
+            SELECT * FROM orders
+            WHERE guild_id = ? AND order_code IN (?, ?)
+            LIMIT 1
+          `).get(guildId, `CN_${suffix}`, `BST_${suffix}`) || null;
+        }
+      }
+    }
+    if (!order || !['WARRANTY_OPEN', 'COMPLETED'].includes(String(order.status || '').toUpperCase())) {
+      result.skipped += 1;
+      continue;
+    }
+    const identity = `${order.product_name || ''} ${order.service_type || ''}`.toLowerCase();
+    if (!identity.includes('youtube')) {
+      result.skipped += 1;
+      continue;
+    }
+    result.scanned += 1;
     try {
       const ensured = ensureYoutubeWarrantyClaim({ order, ticket });
       if (ensured.created) result.created += 1;
