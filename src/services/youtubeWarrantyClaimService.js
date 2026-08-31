@@ -365,6 +365,17 @@ async function channelHasYoutubeSignal(channel) {
   return /youtube|ytb|yt\s*(?:premium|\d+\s*m)|family|google/.test(textContent);
 }
 
+async function resolveLegacyCustomerId(channel, botUserId) {
+  const permissionCustomer = [...(channel?.permissionOverwrites?.cache?.values?.() || [])]
+    .find((overwrite) => overwrite.type === 1 && String(overwrite.id) !== String(botUserId));
+  if (permissionCustomer?.id) return String(permissionCustomer.id);
+
+  const messages = await channel?.messages?.fetch?.({ limit: 40 }).catch(() => null);
+  return [...(messages?.values?.() || [])]
+    .reverse()
+    .find((message) => !message.author?.bot)?.author?.id || null;
+}
+
 export async function publishYoutubeWarrantyClaim(client, claim, { notify = false } = {}) {
   const hydrated = getYoutubeWarrantyClaim(claim.id, { includeEmail: true, includeToken: true });
   const channel = await resolveClaimChannel(client, hydrated);
@@ -426,15 +437,31 @@ export async function syncYoutubeWarrantyClaims(client, { guildId = config.guild
       const channelName = String(channel?.name || '').toLowerCase();
       const suffix = channelName.match(/^(?:bao-hanh|baohanh)[-_](\d{6,})$/)?.[1];
       if (!suffix || knownChannels.has(String(channel.id))) continue;
-      const order = db.prepare(`
+      let order = db.prepare(`
         SELECT * FROM orders
         WHERE guild_id = ? AND order_code IN (?, ?)
         LIMIT 1
       `).get(guildId, `CN_${suffix}`, `BST_${suffix}`) || null;
+      const youtubeSignal = (order && `${order.product_name || ''} ${order.service_type || ''}`.toLowerCase().includes('youtube'))
+        || await channelHasYoutubeSignal(channel);
+      if (!order && youtubeSignal) {
+        const customerId = await resolveLegacyCustomerId(channel, client?.user?.id);
+        if (customerId) {
+          order = {
+            guild_id: guildId,
+            order_code: `CN_${suffix}`,
+            ticket_id: null,
+            ticket_channel_id: channel.id,
+            customer_id: customerId,
+            product_name: 'YouTube Premium',
+            service_type: 'YouTube Family',
+            status: 'WARRANTY_OPEN',
+          };
+        }
+      }
       if (!order) continue;
       const identity = `${order.product_name || ''} ${order.service_type || ''}`.toLowerCase();
       const status = String(order.status || '').toUpperCase();
-      const youtubeSignal = identity.includes('youtube') || await channelHasYoutubeSignal(channel);
       if (!['WARRANTY_OPEN', 'WARRANTY', 'COMPLETED'].includes(status) || !youtubeSignal) continue;
       const ticket = ensureLegacyWarrantyTicket({ guildId, channel, order });
       if (!ticket) continue;
@@ -482,6 +509,21 @@ export async function syncYoutubeWarrantyClaims(client, { guildId = config.guild
             WHERE guild_id = ? AND order_code IN (?, ?)
             LIMIT 1
           `).get(guildId, `CN_${suffix}`, `BST_${suffix}`) || null;
+          if (!order && await channelHasYoutubeSignal(channel)) {
+            const customerId = await resolveLegacyCustomerId(channel, client?.user?.id);
+            if (customerId) {
+              order = {
+                guild_id: guildId,
+                order_code: `CN_${suffix}`,
+                ticket_id: null,
+                ticket_channel_id: channel.id,
+                customer_id: customerId,
+                product_name: 'YouTube Premium',
+                service_type: 'YouTube Family',
+                status: 'WARRANTY_OPEN',
+              };
+            }
+          }
         }
       }
     }

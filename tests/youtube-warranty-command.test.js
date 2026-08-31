@@ -42,6 +42,8 @@ describe('YouTube warranty admin command', () => {
     expect(source).toContain('guild.channels.fetch()');
     expect(source).toContain('ensureLegacyWarrantyTicket');
     expect(source).toContain('channelHasYoutubeSignal');
+    expect(source).toContain('resolveLegacyCustomerId');
+    expect(source).toContain("product_name: 'YouTube Premium'");
     expect(source).toContain("'WARRANTY', 'COMPLETED'");
   });
 });
