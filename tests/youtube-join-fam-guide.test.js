@@ -40,10 +40,24 @@ describe('YouTube join-fam guide announcement', () => {
     );
 
     expect(content).toContain('42 Nguyễn Thiện Thuật');
+    expect(content).toContain('Dòng địa chỉ 2  : Để trống');
     expect(content).toContain('Mã bưu điện     : 10000');
     expect(content).toContain('Việt Nam (VN)');
     expect(content).toContain('BỊ HỦY GÓI PREMIUM');
     expect(content).toContain(YOUTUBE_JOIN_FAM_GUIDE.marker);
+  });
+
+  it('recognizes the old HDAN panel so publishing replaces it instead of duplicating it', async () => {
+    const { isYoutubeJoinFamGuideAnnouncement } = await import(
+      '../src/campaigns/youtubeJoinFamGuide2026.js'
+    );
+    const legacy = {
+      author: { id: 'bot-1' },
+      toJSON: () => ({ content: '‼ HDAN JOIN FAM YT' }),
+    };
+
+    expect(isYoutubeJoinFamGuideAnnouncement(legacy, 'bot-1')).toBe(true);
+    expect(isYoutubeJoinFamGuideAnnouncement(legacy, 'other-bot')).toBe(false);
   });
 
   it('builds a Components V2 payload and toggles the media gallery with the screenshot', () => {

@@ -42,6 +42,7 @@ export function buildYoutubeJoinFamGuideContent(guildId, E = createEmojiResolver
     '',
     '```',
     'Dòng địa chỉ 1  : 42 Nguyễn Thiện Thuật',
+    'Dòng địa chỉ 2  : Để trống',
     'Thành phố       : Hà Nội',
     'Tỉnh / Khu vực  : Hà Nội',
     'Mã bưu điện     : 10000',
@@ -142,7 +143,12 @@ export function buildYoutubeJoinFamGuideMessage({
 export function isYoutubeJoinFamGuideAnnouncement(message, botId) {
   if (message?.author?.id !== botId) return false;
   try {
-    return JSON.stringify(message.toJSON?.() || message).includes(YOUTUBE_JOIN_FAM_GUIDE.marker);
+    const serialized = JSON.stringify(message.toJSON?.() || message);
+    return [
+      YOUTUBE_JOIN_FAM_GUIDE.marker,
+      'HDAN JOIN FAM YT',
+      'HƯỚNG DẪN JOIN FAM YOUTUBE',
+    ].some((fingerprint) => serialized.includes(fingerprint));
   } catch {
     return false;
   }
