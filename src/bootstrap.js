@@ -155,10 +155,6 @@ export async function buildClient() {
       const warrantyActions = await refreshOpenWarrantyActionPanels(readyClient);
       console.log(`[WARRANTY-ACTIONS] scanned=${warrantyActions.scanned} published=${warrantyActions.published} current=${warrantyActions.current} missing=${warrantyActions.missingChannels}`);
 
-      const { syncYoutubeWarrantyClaims } = await import('./services/youtubeWarrantyClaimService.js');
-      const youtubeWarranty = await syncYoutubeWarrantyClaims(readyClient, { guildId: config.guildId });
-      console.log(`[YOUTUBE-WARRANTY] scanned=${youtubeWarranty.scanned} created=${youtubeWarranty.created} published=${youtubeWarranty.published} current=${youtubeWarranty.current} missing=${youtubeWarranty.missingChannels} failed=${youtubeWarranty.failed}`);
-
       const { refreshAdminOrderCenter, refreshExistingAdminAgingReminderCards } = await import('./services/adminOrderCenterService.js');
       const storeOneGuild = readyClient.guilds.cache.get(config.storeOneGuildId);
       if (storeOneGuild) {
@@ -169,6 +165,17 @@ export async function buildClient() {
       }
     } catch (error) {
       console.error('[AUTO-SETUP] Không thể đồng bộ emoji/panel:', error);
+    }
+
+    // Warranty reconciliation is intentionally isolated from optional
+    // marketing/admin panels. A failure in any other auto-setup must not stop
+    // existing YouTube warranty tickets from receiving their Gmail form.
+    try {
+      const { syncYoutubeWarrantyClaims } = await import('./services/youtubeWarrantyClaimService.js');
+      const youtubeWarranty = await syncYoutubeWarrantyClaims(readyClient, { guildId: config.guildId });
+      console.log(`[YOUTUBE-WARRANTY] scanned=${youtubeWarranty.scanned} created=${youtubeWarranty.created} published=${youtubeWarranty.published} current=${youtubeWarranty.current} missing=${youtubeWarranty.missingChannels} skipped=${youtubeWarranty.skipped} failed=${youtubeWarranty.failed}`);
+    } catch (error) {
+      console.error('[YOUTUBE-WARRANTY] Không thể đồng bộ form bảo hành:', error);
     }
 
     // Tự động setup kênh Bảng Giá
