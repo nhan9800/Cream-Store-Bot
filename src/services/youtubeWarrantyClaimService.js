@@ -320,6 +320,38 @@ async function resolveClaimChannel(client, claim) {
     || await guild.channels.fetch(claim.ticketChannelId).catch(() => null);
 }
 
+function ensureLegacyWarrantyTicket({ guildId, channel, order }) {
+  if (!channel?.id || !order?.customer_id) return null;
+  const existing = db.prepare('SELECT * FROM tickets WHERE channel_id = ? LIMIT 1').get(channel.id);
+  if (existing) return existing;
+
+  const createdAt = nowIso();
+  const ticketCode = `LEGACY_${String(order.order_code || channel.id).replace(/[^A-Za-z0-9_-]/g, '_')}`.slice(0, 80);
+  try {
+    const result = db.prepare(`
+      INSERT INTO tickets (
+        ticket_code, guild_id, channel_id, customer_id, opened_by_id, ticket_type,
+        related_order_code, ticket_subject, support_source, last_activity_at, status, created_at
+      ) VALUES (?, ?, ?, ?, ?, 'WARRANTY', ?, 'YouTube warranty legacy ticket', 'DISCORD_ORDER', ?, 'OPEN', ?)
+    `).run(
+      ticketCode,
+      guildId,
+      channel.id,
+      String(order.customer_id),
+      String(order.customer_id),
+      order.order_code,
+      createdAt,
+      createdAt,
+    );
+    return db.prepare('SELECT * FROM tickets WHERE id = ?').get(Number(result.lastInsertRowid));
+  } catch (error) {
+    if (/UNIQUE constraint failed/i.test(String(error?.message || ''))) {
+      return db.prepare('SELECT * FROM tickets WHERE channel_id = ? LIMIT 1').get(channel.id) || null;
+    }
+    throw error;
+  }
+}
+
 export async function publishYoutubeWarrantyClaim(client, claim, { notify = false } = {}) {
   const hydrated = getYoutubeWarrantyClaim(claim.id, { includeEmail: true, includeToken: true });
   const channel = await resolveClaimChannel(client, hydrated);
@@ -367,8 +399,44 @@ export async function syncYoutubeWarrantyClaims(client, { guildId = config.guild
       AND t.status = 'OPEN'
     ORDER BY t.id ASC
   `).all(guildId);
+  const candidates = [...rows];
+  const knownChannels = new Set(rows.map((row) => String(row.warranty_ticket_channel_id || '')).filter(Boolean));
+
+  // Some very old warranty channels were created before ticket rows were
+  // persisted. Scan Discord channel names so those customers receive the
+  // same Gmail form and guide as newer tickets.
+  const guild = client?.guilds?.cache?.get(guildId)
+    || await client?.guilds?.fetch(guildId).catch(() => null);
+  if (guild) {
+    const channels = await guild.channels.fetch().catch(() => guild.channels.cache);
+    for (const channel of channels.values()) {
+      const channelName = String(channel?.name || '').toLowerCase();
+      const suffix = channelName.match(/^(?:bao-hanh|baohanh)[-_](\d{6,})$/)?.[1];
+      if (!suffix || knownChannels.has(String(channel.id))) continue;
+      const order = db.prepare(`
+        SELECT * FROM orders
+        WHERE guild_id = ? AND order_code IN (?, ?)
+        LIMIT 1
+      `).get(guildId, `CN_${suffix}`, `BST_${suffix}`) || null;
+      if (!order) continue;
+      const identity = `${order.product_name || ''} ${order.service_type || ''}`.toLowerCase();
+      if (!['WARRANTY_OPEN', 'COMPLETED'].includes(String(order.status || '').toUpperCase()) || !identity.includes('youtube')) continue;
+      const ticket = ensureLegacyWarrantyTicket({ guildId, channel, order });
+      if (!ticket) continue;
+      candidates.push({
+        ...order,
+        warranty_ticket_id: ticket.id,
+        warranty_ticket_code: ticket.ticket_code,
+        warranty_ticket_channel_id: channel.id,
+        warranty_customer_id: ticket.customer_id,
+        warranty_ticket_type: 'WARRANTY',
+        warranty_ticket_subject: ticket.ticket_subject,
+      });
+      knownChannels.add(String(channel.id));
+    }
+  }
   const result = { scanned: 0, created: 0, published: 0, current: 0, missingChannels: 0, skipped: 0, failed: 0 };
-  for (const row of rows) {
+  for (const row of candidates) {
     let order = row.order_code ? row : null;
     const ticket = {
       id: row.warranty_ticket_id,
