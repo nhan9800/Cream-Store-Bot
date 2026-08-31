@@ -629,6 +629,34 @@ export function initDatabase() {
     CREATE INDEX IF NOT EXISTS idx_youtube_renewal_events_membership
       ON youtube_renewal_events (membership_id, created_at DESC);
 
+    CREATE TABLE IF NOT EXISTS youtube_warranty_claims (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      claim_code TEXT UNIQUE NOT NULL,
+      access_token_hash TEXT UNIQUE NOT NULL,
+      access_token_encrypted TEXT NOT NULL,
+      guild_id TEXT NOT NULL,
+      order_code TEXT NOT NULL,
+      ticket_id INTEGER NOT NULL UNIQUE,
+      ticket_channel_id TEXT NOT NULL,
+      customer_id TEXT NOT NULL,
+      customer_gmail TEXT,
+      status TEXT NOT NULL DEFAULT 'AWAITING_CUSTOMER',
+      notification_message_id TEXT,
+      submitted_at TEXT,
+      completed_at TEXT,
+      completed_by_id TEXT,
+      completion_note TEXT,
+      created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      revision INTEGER NOT NULL DEFAULT 0,
+      FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE
+    );
+
+    CREATE INDEX IF NOT EXISTS idx_youtube_warranty_claims_status
+      ON youtube_warranty_claims (guild_id, status, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_youtube_warranty_claims_order
+      ON youtube_warranty_claims (order_code, created_at DESC);
+
     CREATE TABLE IF NOT EXISTS quest_service_plans (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       code TEXT UNIQUE NOT NULL,

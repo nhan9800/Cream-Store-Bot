@@ -63,6 +63,14 @@ import {
   updateQuestProgress,
   updateQuestRequestStatus,
 } from './questService.js';
+import {
+  completeYoutubeWarrantyClaim,
+  getYoutubeWarrantyClaim,
+  getYoutubeWarrantyClaimStats,
+  listYoutubeWarrantyClaims,
+  resendYoutubeWarrantyClaim,
+  syncYoutubeWarrantyClaims,
+} from './youtubeWarrantyClaimService.js';
 
 function catalogKey(value) {
   return String(value || '')
@@ -103,6 +111,71 @@ export function registerAdminRoutes(app) {
     req.adminRole = user.role; // 'admin' or 'staff'
     next();
   }
+
+  // ==== YOUTUBE WARRANTY INBOX ====
+  app.get('/api/bot/admin/youtube-warranties', requireAdminRole, (req, res) => {
+    try {
+      const guildId = config.guildId || 'WEB';
+      const claims = listYoutubeWarrantyClaims(guildId, {
+        status: req.query.status || 'ALL',
+        search: req.query.search || '',
+        limit: req.query.limit || 250,
+      });
+      return res.json({
+        ok: true,
+        data: { claims, stats: getYoutubeWarrantyClaimStats(guildId) },
+      });
+    } catch (error) {
+      console.error('[ADMIN-YOUTUBE-WARRANTY] List failed:', error);
+      return res.status(500).json({ ok: false, error: 'Không thể tải danh sách bảo hành YouTube.' });
+    }
+  });
+
+  app.post('/api/bot/admin/youtube-warranties/sync', requireAdminRole, async (req, res) => {
+    try {
+      const result = await syncYoutubeWarrantyClaims(req.app.locals.discordClient, { guildId: config.guildId });
+      return res.json({ ok: true, data: result, message: `Đã quét ${result.scanned} hồ sơ YouTube.` });
+    } catch (error) {
+      console.error('[ADMIN-YOUTUBE-WARRANTY] Sync failed:', error);
+      return res.status(500).json({ ok: false, error: 'Không thể đồng bộ ticket bảo hành YouTube.' });
+    }
+  });
+
+  app.post('/api/bot/admin/youtube-warranties/:id/resend', requireAdminRole, async (req, res) => {
+    try {
+      const claim = getYoutubeWarrantyClaim(req.params.id, { includeEmail: true });
+      if (!claim || claim.guildId !== config.guildId) {
+        return res.status(404).json({ ok: false, error: 'Không tìm thấy hồ sơ bảo hành.' });
+      }
+      const result = await resendYoutubeWarrantyClaim(req.app.locals.discordClient, claim.id);
+      return res.json({ ok: true, data: result.claim, message: 'Đã nhắc khách hàng trong ticket.' });
+    } catch (error) {
+      const status = error?.code === 'NOT_FOUND' ? 404 : 400;
+      return res.status(status).json({ ok: false, error: error?.message || 'Không thể gửi lại thông báo.' });
+    }
+  });
+
+  app.post('/api/bot/admin/youtube-warranties/:id/complete', requireAdminRole, async (req, res) => {
+    try {
+      const claim = getYoutubeWarrantyClaim(req.params.id, { includeEmail: true });
+      if (!claim || claim.guildId !== config.guildId) {
+        return res.status(404).json({ ok: false, error: 'Không tìm thấy hồ sơ bảo hành.' });
+      }
+      const actorId = req.header('x-discord-id') || req.header('x-user-id') || 'WEB_ADMIN';
+      const result = await completeYoutubeWarrantyClaim(req.app.locals.discordClient, claim.id, {
+        actorId,
+        note: req.body?.note || '',
+      });
+      return res.json({
+        ok: true,
+        data: result.claim,
+        message: result.alreadyCompleted ? 'Hồ sơ đã được hoàn tất trước đó.' : 'Đã bảo hành và thông báo cho khách hàng.',
+      });
+    } catch (error) {
+      const status = error?.code === 'NOT_FOUND' ? 404 : error?.code === 'GMAIL_REQUIRED' ? 409 : 400;
+      return res.status(status).json({ ok: false, error: error?.message || 'Không thể hoàn tất bảo hành.' });
+    }
+  });
 
   function spotifyFamilyBelongsToStore(family) {
     return family && [String(config.guildId || ''), 'WEB'].includes(String(family.guildId));

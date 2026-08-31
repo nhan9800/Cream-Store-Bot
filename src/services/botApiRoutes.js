@@ -50,6 +50,11 @@ import {
 } from './questService.js';
 import { getPriceBoardProducts, PRICE_BOARD_VERSION } from './autoSetupPriceBoardService.js';
 import { scheduleFeedbackTicketAutoClose } from './feedbackService.js';
+import {
+    getPublicYoutubeWarrantyClaim,
+    refreshYoutubeWarrantyClaimNotification,
+    submitYoutubeWarrantyGmail,
+} from './youtubeWarrantyClaimService.js';
 
 let storeInviteCache = { url: '', expiresAt: 0 };
 const websiteSupportProvisioning = new Map();
@@ -359,6 +364,32 @@ export function registerBotApiRoutes(app) {
 
     // Tất cả route /api/bot/* require API key
     app.use('/api/bot', corsHandler, requireApiKey);
+
+    // ── YOUTUBE WARRANTY CUSTOMER FORM ───────────────────────────
+    // Website gọi server-to-server bằng BOT_API_KEY; trình duyệt chỉ nhìn thấy
+    // access token ngẫu nhiên trong URL, không bao giờ nhận API key của bot.
+    app.get('/api/bot/youtube-warranty/:token', (req, res) => {
+        const claim = getPublicYoutubeWarrantyClaim(req.params.token);
+        res.set('Cache-Control', 'no-store');
+        if (!claim) return res.status(404).json({ ok: false, error: 'Liên kết bảo hành không tồn tại hoặc đã hết hiệu lực.' });
+        return res.json({ ok: true, data: claim });
+    });
+
+    app.post('/api/bot/youtube-warranty/:token', async (req, res) => {
+        try {
+            const claim = submitYoutubeWarrantyGmail(req.params.token, req.body?.gmail);
+            await refreshYoutubeWarrantyClaimNotification(req.app.locals.discordClient, claim.id).catch((error) => {
+                console.error(`[YOUTUBE-WARRANTY] Không thể cập nhật panel sau khi khách gửi Gmail (${claim.claimCode}):`, error);
+            });
+            const publicClaim = getPublicYoutubeWarrantyClaim(req.params.token);
+            return res.json({ ok: true, data: publicClaim, message: 'Shop đã nhận Gmail bảo hành của bạn.' });
+        } catch (error) {
+            const status = error?.code === 'NOT_FOUND' ? 404
+                : error?.code === 'ALREADY_COMPLETED' || error?.code === 'CANCELLED' ? 409
+                    : 400;
+            return res.status(status).json({ ok: false, error: error?.message || 'Không thể lưu Gmail bảo hành.' });
+        }
+    });
 
     // ── PUBLIC SETTINGS ──────────────────────────────────────────
     app.get('/api/bot/settings', async (req, res) => {

@@ -15,6 +15,10 @@ import { formatProductDisplayName } from './emojiService.js';
 import { isInternationalGuild } from '../utils/locale.js';
 import { formatInternationalPrice, translateProductName } from '../utils/internationalCatalog.js';
 import { db } from '../database/db.js';
+import {
+  ensureYoutubeWarrantyClaim,
+  publishYoutubeWarrantyClaim,
+} from './youtubeWarrantyClaimService.js';
 
 /**
  * Dữ liệu form bảo hành từ modal
@@ -440,6 +444,14 @@ export async function openWarrantyTicket({ guild, customerId, actorId, orderCode
   const existing = getOpenWarrantyTicket(guild.id, customerId, orderCode);
   if (existing) {
     const channel = await guild.channels.fetch(existing.channel_id).catch(() => null);
+    try {
+      const { claim } = ensureYoutubeWarrantyClaim({ order, ticket: existing });
+      await publishYoutubeWarrantyClaim(guild.client, claim);
+    } catch (error) {
+      if (error?.code !== 'NOT_YOUTUBE') {
+        console.error(`[YOUTUBE-WARRANTY] Không thể khôi phục form cho ${orderCode}:`, error);
+      }
+    }
     return { ticket: existing, channel, order, reused: true };
   }
 
@@ -525,6 +537,15 @@ export async function openWarrantyTicket({ guild, customerId, actorId, orderCode
       await logChannel.send(
         buildWarrantyLogV2({ order: updatedOrder ?? order, ticket, channel, formData: resolvedFormData, actorId, guildId: guild.id })
       ).catch(() => null);
+    }
+  }
+
+  try {
+    const { claim } = ensureYoutubeWarrantyClaim({ order: updatedOrder ?? order, ticket });
+    await publishYoutubeWarrantyClaim(guild.client, claim);
+  } catch (error) {
+    if (error?.code !== 'NOT_YOUTUBE') {
+      console.error(`[YOUTUBE-WARRANTY] Không thể tạo form cho ${orderCode}:`, error);
     }
   }
 

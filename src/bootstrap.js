@@ -148,6 +148,10 @@ export async function buildClient() {
       const warrantyActions = await refreshOpenWarrantyActionPanels(readyClient);
       console.log(`[WARRANTY-ACTIONS] scanned=${warrantyActions.scanned} published=${warrantyActions.published} current=${warrantyActions.current} missing=${warrantyActions.missingChannels}`);
 
+      const { syncYoutubeWarrantyClaims } = await import('./services/youtubeWarrantyClaimService.js');
+      const youtubeWarranty = await syncYoutubeWarrantyClaims(readyClient, { guildId: config.guildId });
+      console.log(`[YOUTUBE-WARRANTY] scanned=${youtubeWarranty.scanned} created=${youtubeWarranty.created} published=${youtubeWarranty.published} current=${youtubeWarranty.current} missing=${youtubeWarranty.missingChannels} failed=${youtubeWarranty.failed}`);
+
       const { refreshAdminOrderCenter, refreshExistingAdminAgingReminderCards } = await import('./services/adminOrderCenterService.js');
       const storeOneGuild = readyClient.guilds.cache.get(config.storeOneGuildId);
       if (storeOneGuild) {
