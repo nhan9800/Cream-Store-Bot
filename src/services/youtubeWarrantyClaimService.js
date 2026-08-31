@@ -18,6 +18,7 @@ import { completeWarranty } from './orderService.js';
 
 export const YOUTUBE_GUIDE_CHANNEL_ID = '1524057155022491679';
 export const YOUTUBE_GUIDE_URL = `https://discord.com/channels/1282637033340403754/${YOUTUBE_GUIDE_CHANNEL_ID}`;
+export const YOUTUBE_BRAND_EMOJI = '<:cenar_yt_logo:1543842435707310151>';
 
 const CLAIM_STATUSES = new Set(['AWAITING_CUSTOMER', 'SUBMITTED', 'COMPLETED', 'CANCELLED']);
 const GMAIL_PATTERN = /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@(gmail\.com|googlemail\.com)$/i;
@@ -269,6 +270,7 @@ export function getYoutubeWarrantyClaimStats(guildId) {
 
 export function buildYoutubeWarrantyRequestPanel(claim) {
   const E = createEmojiResolver(claim.guildId);
+  const youtubeEmoji = YOUTUBE_BRAND_EMOJI;
   const container = new ContainerBuilder().setAccentColor(accentFor('danger'));
   const statusLine = claim.status === 'SUBMITTED'
     ? `${E('status_check')} **Đã nhận Gmail** — ${claim.customerGmailMasked || 'Đã ẩn bảo mật'}`
@@ -283,7 +285,7 @@ export function buildYoutubeWarrantyRequestPanel(claim) {
   container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
   container.addTextDisplayComponents(new TextDisplayBuilder().setContent([
     `${E('order_id')} **Mã đơn** — \`${claim.orderCode}\``,
-    `${E('order_product')} **Sản phẩm** — ${claim.productName}`,
+    `${youtubeEmoji} **Sản phẩm** — ${claim.productName}`,
     statusLine,
     '',
     `${E('status_warn')} Chỉ chủ ticket sử dụng liên kết riêng này. Không gửi link cho người khác.`,
@@ -407,7 +409,7 @@ export async function publishYoutubeWarrantyClaim(client, claim, { notify = fals
   let message = null;
   if (hydrated.notificationMessageId) {
     message = await channel.messages.fetch(hydrated.notificationMessageId).catch(() => null);
-    if (message) await message.edit(payload).catch(() => null);
+    if (message) message = await message.edit(payload).catch(() => null);
   }
   if (!message) {
     await channel.send({
