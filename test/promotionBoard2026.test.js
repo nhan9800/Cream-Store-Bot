@@ -48,7 +48,7 @@ describe('Cenar promotion board 2026', () => {
     expect(json).toContain('cenar_promo_discount');
     expect(json).toContain('cenar_promo_nitro');
     expect(json).toContain('cenar_promo_boost');
-    expect(json).toContain('cenar_youtube');
+    expect(json).toContain('cenar_yt_logo');
     expect(json).toContain('cenar_spotify');
     expect(json).toContain('cenar_promo_decor');
     expect(json).toContain('cenar_price_chatgpt');

@@ -43,7 +43,7 @@ describe('Cenar terms board 2026', () => {
     expect(json).toContain('số điện thoại và email khôi phục');
     expect(json).toContain('tài khoản chưa được bảo mật');
     expect(json).toContain('cenar_price_nitro');
-    expect(json).toContain('cenar_youtube');
+    expect(json).toContain('cenar_yt_logo');
     expect(json).toContain('cenar_warranty_shield');
 
     const contents = [];
