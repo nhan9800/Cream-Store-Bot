@@ -115,6 +115,9 @@ if (process.env.IS_CHILD_BOT === 'true') {
     store2Port: STORE2_PORT,
   } = resolveLauncherPorts(process.env);
 
+  let launcherStopping = false;
+  let childExitHandled = false;
+
   console.log(`[LAUNCHER] Starting Store 1 (ENV_FILE=.env) on local port ${STORE1_PORT}...`);
   const child1 = fork(__filename, [], {
     env: {
@@ -127,9 +130,7 @@ if (process.env.IS_CHILD_BOT === 'true') {
   child1.on('error', (err) => {
     console.error('[LAUNCHER] Store 1 fork error:', err);
   });
-  child1.on('exit', (code, signal) => {
-    console.log(`[LAUNCHER] Store 1 exited with code ${code} and signal ${signal}`);
-  });
+  child1.on('exit', (code, signal) => handleChildExit('Store 1', code, signal));
 
   console.log(`[LAUNCHER] Starting Store 2 (ENV_FILE=.env.store2) on local port ${STORE2_PORT}...`);
   const child2 = fork(__filename, [], {
@@ -143,11 +144,16 @@ if (process.env.IS_CHILD_BOT === 'true') {
   child2.on('error', (err) => {
     console.error('[LAUNCHER] Store 2 fork error:', err);
   });
-  child2.on('exit', (code, signal) => {
-    console.log(`[LAUNCHER] Store 2 exited with code ${code} and signal ${signal}`);
-  });
+  child2.on('exit', (code, signal) => handleChildExit('Store 2', code, signal));
 
-  let launcherStopping = false;
+  function handleChildExit(label, code, signal) {
+    console.log(`[LAUNCHER] ${label} exited with code ${code} and signal ${signal}`);
+    if (launcherStopping || childExitHandled) return;
+    childExitHandled = true;
+    console.error(`[LAUNCHER] ${label} stopped unexpectedly; exiting so the supervisor can restart both stores.`);
+    void shutdownLauncher('CHILD_EXIT', 1);
+  }
+
 
   function waitForChildExit(child, timeoutMs) {
     if (!child || child.exitCode != null || child.signalCode != null) return Promise.resolve(true);
@@ -166,7 +172,7 @@ if (process.env.IS_CHILD_BOT === 'true') {
     await waitForChildExit(child, 2_000);
   }
 
-  async function shutdownLauncher(signal) {
+  async function shutdownLauncher(signal, exitCode = 0) {
     if (launcherStopping) return;
     launcherStopping = true;
     console.log(`[LAUNCHER] ${signal} received. Stopping child processes...`);
@@ -175,7 +181,7 @@ if (process.env.IS_CHILD_BOT === 'true') {
       terminateChild(child2, 'Store 2'),
     ]);
     releaseLauncherLock();
-    process.exit(0);
+    process.exit(exitCode);
   }
 
   // Handle process shutdown and wait until both internal HTTP ports are free

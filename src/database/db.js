@@ -652,11 +652,6 @@ export function initDatabase() {
       FOREIGN KEY (ticket_id) REFERENCES tickets(id) ON DELETE CASCADE
     );
 
-    CREATE INDEX IF NOT EXISTS idx_youtube_warranty_claims_status
-      ON youtube_warranty_claims (guild_id, status, updated_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_youtube_warranty_claims_order
-      ON youtube_warranty_claims (order_code, created_at DESC);
-
     CREATE TABLE IF NOT EXISTS quest_service_plans (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       code TEXT UNIQUE NOT NULL,
@@ -713,13 +708,6 @@ export function initDatabase() {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       FOREIGN KEY (request_id) REFERENCES quest_service_requests(id) ON DELETE CASCADE
     );
-
-    CREATE INDEX IF NOT EXISTS idx_quest_service_requests_customer
-      ON quest_service_requests (discord_id, created_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_quest_service_requests_queue
-      ON quest_service_requests (status, updated_at DESC);
-    CREATE INDEX IF NOT EXISTS idx_quest_service_events_request
-      ON quest_service_events (request_id, created_at ASC);
 
     CREATE TABLE IF NOT EXISTS web_users (
       id TEXT PRIMARY KEY,
@@ -808,6 +796,24 @@ export function initDatabase() {
       sold_at TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_account_stock_service ON account_stock (service_type, status);
+  `);
+
+  // Legacy releases may have created these tables without the timestamp
+  // columns. Add the columns before creating indexes that reference them.
+  ensureColumn('youtube_warranty_claims', 'updated_at', 'TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP');
+  ensureColumn('youtube_warranty_claims', 'revision', 'INTEGER NOT NULL DEFAULT 0');
+  ensureColumn('quest_service_requests', 'updated_at', 'TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP');
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_youtube_warranty_claims_status
+      ON youtube_warranty_claims (guild_id, status, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_youtube_warranty_claims_order
+      ON youtube_warranty_claims (order_code, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_quest_service_requests_customer
+      ON quest_service_requests (discord_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_quest_service_requests_queue
+      ON quest_service_requests (status, updated_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_quest_service_events_request
+      ON quest_service_events (request_id, created_at ASC);
   `);
 
   // Một số database Store 1 cũ đã có bảng Spotify Family thử nghiệm với ít

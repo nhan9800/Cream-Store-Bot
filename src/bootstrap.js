@@ -13,7 +13,7 @@ import { reconcileWalletPaidOrders } from './services/orderService.js';
 
 import { initErrorLogger } from './services/errorLogService.js';
 import { autoSetupDiscountBoard } from './services/autoSetupDiscountBoardService.js';
-import { isInternationalGuild } from './utils/locale.js';
+import { isInternationalGuild, STORE_ONE_GUILD_ID } from './utils/locale.js';
 import { localizeCommandsForInternationalStore } from './utils/internationalCommands.js';
 import { initializeMusicPlayer } from './services/musicPlayerService.js';
 
@@ -111,13 +111,20 @@ export async function buildClient() {
       const { autoSetupPartnerAndCtv } = await import('./services/autoSetupService.js');
       await autoSetupPartnerAndCtv(readyClient);
 
-      const { publishPromotionBoard } = await import('./campaigns/promotionBoard2026.js');
-      const promotionBoard = await publishPromotionBoard(readyClient);
-      console.log(`[PROMOTION-BOARD] status=${promotionBoard.status} message=${promotionBoard.messageId} removed=${promotionBoard.removed}`);
+      // Promotion and terms channels are Store 1 campaigns. Store 2 has its
+      // own international price board and does not belong to these guild IDs.
+      if (String(config.guildId) === STORE_ONE_GUILD_ID) {
+        const { publishPromotionBoard } = await import('./campaigns/promotionBoard2026.js');
+        const promotionBoard = await publishPromotionBoard(readyClient);
+        console.log(`[PROMOTION-BOARD] status=${promotionBoard.status} message=${promotionBoard.messageId} removed=${promotionBoard.removed}`);
 
-      const { publishTermsBoard } = await import('./campaigns/termsBoard2026.js');
-      const termsBoard = await publishTermsBoard(readyClient);
-      console.log(`[TERMS-BOARD] status=${termsBoard.status} message=${termsBoard.messageId} removed=${termsBoard.removed}`);
+        const { publishTermsBoard } = await import('./campaigns/termsBoard2026.js');
+        const termsBoard = await publishTermsBoard(readyClient);
+        console.log(`[TERMS-BOARD] status=${termsBoard.status} message=${termsBoard.messageId} removed=${termsBoard.removed}`);
+      } else {
+        console.log(`[PROMOTION-BOARD] status=skipped guild=${config.guildId} reason=store2-international`);
+        console.log(`[TERMS-BOARD] status=skipped guild=${config.guildId} reason=store2-international`);
+      }
 
       const { publishCustomServicesLaunch } = await import('./campaigns/customServicesLaunch2026.js');
       const customServices = await publishCustomServicesLaunch(readyClient);
