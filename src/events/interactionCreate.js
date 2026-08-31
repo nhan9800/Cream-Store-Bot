@@ -358,6 +358,12 @@ export function registerInteractionHandler(client, commands) {
         if (handled) return;
       }
 
+      if (interaction.customId && interaction.customId.startsWith('ytw:')) {
+        const { handleYoutubeWarrantyInteraction } = await import('../commands/ytbaohanh.js');
+        const handled = await handleYoutubeWarrantyInteraction(interaction);
+        if (handled) return;
+      }
+
       if (interaction.customId && interaction.customId.startsWith('music:')) {
         const handled = await handleMusicInteraction(interaction);
         if (handled) return;

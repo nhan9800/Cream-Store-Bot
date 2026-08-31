@@ -377,7 +377,9 @@ export function registerBotApiRoutes(app) {
 
     app.post('/api/bot/youtube-warranty/:token', async (req, res) => {
         try {
-            const claim = submitYoutubeWarrantyGmail(req.params.token, req.body?.gmail);
+            const claim = submitYoutubeWarrantyGmail(req.params.token, req.body?.gmail, {
+                guidanceAccepted: req.body?.guidanceAccepted === true,
+            });
             await refreshYoutubeWarrantyClaimNotification(req.app.locals.discordClient, claim.id).catch((error) => {
                 console.error(`[YOUTUBE-WARRANTY] Không thể cập nhật panel sau khi khách gửi Gmail (${claim.claimCode}):`, error);
             });
@@ -386,6 +388,7 @@ export function registerBotApiRoutes(app) {
         } catch (error) {
             const status = error?.code === 'NOT_FOUND' ? 404
                 : error?.code === 'ALREADY_COMPLETED' || error?.code === 'CANCELLED' ? 409
+                    : error?.code === 'GUIDANCE_REQUIRED' ? 400
                     : 400;
             return res.status(status).json({ ok: false, error: error?.message || 'Không thể lưu Gmail bảo hành.' });
         }

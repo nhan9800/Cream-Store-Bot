@@ -816,6 +816,7 @@ export function initDatabase() {
     ['completed_at', 'TEXT'],
     ['completed_by_id', 'TEXT'],
     ['completion_note', 'TEXT'],
+    ['guidance_acknowledged_at', 'TEXT'],
     ['created_at', 'TEXT'],
     ['updated_at', 'TEXT'],
     ['revision', 'INTEGER NOT NULL DEFAULT 0'],

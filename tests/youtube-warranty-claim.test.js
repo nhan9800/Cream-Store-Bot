@@ -68,10 +68,13 @@ describe('YouTube warranty claim service', () => {
     expect(row.access_token_hash).not.toBe(rawToken);
     expect(row.access_token_encrypted).not.toContain(rawToken);
 
-    const submitted = service.submitYoutubeWarrantyGmail(rawToken, 'Customer.Name@gmail.com');
+    expect(() => service.submitYoutubeWarrantyGmail(rawToken, 'Customer.Name@gmail.com'))
+      .toThrow(/hướng dẫn YouTube/i);
+    const submitted = service.submitYoutubeWarrantyGmail(rawToken, 'Customer.Name@gmail.com', { guidanceAccepted: true });
     expect(submitted).toMatchObject({ status: 'SUBMITTED', customerGmail: 'customer.name@gmail.com' });
     const stored = db.prepare('SELECT customer_gmail FROM youtube_warranty_claims WHERE id = ?').get(created.claim.id);
     expect(stored.customer_gmail).not.toContain('customer.name@gmail.com');
+    expect(db.prepare('SELECT guidance_acknowledged_at FROM youtube_warranty_claims WHERE id = ?').get(created.claim.id).guidance_acknowledged_at).toBeTruthy();
 
     const publicClaim = service.getPublicYoutubeWarrantyClaim(rawToken);
     expect(publicClaim.customerGmailMasked).toMatch(/@gmail\.com$/);
@@ -105,4 +108,3 @@ describe('YouTube warranty claim service', () => {
     expect(order).toMatchObject({ status: 'COMPLETED', warranty_count: 1 });
   });
 });
-

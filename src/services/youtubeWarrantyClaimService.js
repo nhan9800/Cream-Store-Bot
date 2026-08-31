@@ -98,6 +98,7 @@ function hydrateClaim(row, { includeToken = false, includeEmail = true } = {}) {
     completedAt: row.completed_at || null,
     completedById: row.completed_by_id || null,
     completionNote: row.completion_note || null,
+    guidanceAcceptedAt: row.guidance_acknowledged_at || null,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
     revision: Number(row.revision || 0),
@@ -176,7 +177,7 @@ export function ensureYoutubeWarrantyClaim({ order, ticket }) {
   throw new YoutubeWarrantyClaimError('Không thể tạo mã bảo hành an toàn.', 'TOKEN_CREATE_FAILED');
 }
 
-export function submitYoutubeWarrantyGmail(token, gmail) {
+export function submitYoutubeWarrantyGmail(token, gmail, { guidanceAccepted = false } = {}) {
   const claim = getYoutubeWarrantyClaimByToken(token);
   if (!claim) throw new YoutubeWarrantyClaimError('Liên kết bảo hành không tồn tại hoặc đã hết hiệu lực.', 'NOT_FOUND');
   if (claim.status === 'COMPLETED') {
@@ -185,14 +186,22 @@ export function submitYoutubeWarrantyGmail(token, gmail) {
   if (claim.status === 'CANCELLED') {
     throw new YoutubeWarrantyClaimError('Hồ sơ bảo hành đã bị hủy.', 'CANCELLED');
   }
+  if (guidanceAccepted !== true) {
+    throw new YoutubeWarrantyClaimError(
+      'Bạn phải xác nhận đã hiểu và sẽ làm đúng hướng dẫn YouTube trước khi vào Family.',
+      'GUIDANCE_REQUIRED',
+    );
+  }
 
   const normalizedGmail = normalizeGmail(gmail);
   const updatedAt = nowIso();
   const result = db.prepare(`
     UPDATE youtube_warranty_claims
-    SET customer_gmail = ?, status = 'SUBMITTED', submitted_at = ?, updated_at = ?, revision = revision + 1
+    SET customer_gmail = ?, status = 'SUBMITTED', submitted_at = ?,
+        guidance_acknowledged_at = COALESCE(guidance_acknowledged_at, ?),
+        updated_at = ?, revision = revision + 1
     WHERE id = ? AND status IN ('AWAITING_CUSTOMER', 'SUBMITTED')
-  `).run(encrypt(normalizedGmail), updatedAt, updatedAt, claim.id);
+  `).run(encrypt(normalizedGmail), updatedAt, updatedAt, updatedAt, claim.id);
   if (!result.changes) throw new YoutubeWarrantyClaimError('Hồ sơ vừa được xử lý, vui lòng tải lại trang.', 'STALE_STATUS');
   return getYoutubeWarrantyClaim(claim.id, { includeEmail: true });
 }
@@ -263,7 +272,7 @@ export function buildYoutubeWarrantyRequestPanel(claim) {
     `1. Mở form và nhập đúng Gmail cần nhận bảo hành.`,
     `2. Chờ shop xử lý; bạn sẽ nhận thông báo ngay tại ticket và qua DM.`,
     `3. **Trước khi nhận lời mời Family, bắt buộc làm đúng hướng dẫn YouTube.**`,
-    `-# Không tự ý rời Family hoặc nhận lời mời khi chưa hoàn tất hướng dẫn.`
+    `-# Nếu vào Family trước khi làm hướng dẫn hoặc làm sai quy trình, shop có quyền ngừng bảo hành và không chịu trách nhiệm cho lỗi phát sinh.`
   ].join('\n')));
 
   const buttons = new ActionRowBuilder().addComponents(
@@ -295,7 +304,7 @@ export function buildYoutubeWarrantyCompletedPanel(claim, actorId) {
   container.addTextDisplayComponents(new TextDisplayBuilder().setContent([
     `### ${E('status_warn')} LÀM HƯỚNG DẪN TRƯỚC KHI VÀO FAMILY`,
     `**Không bấm nhận lời mời ngay.** Hãy mở kênh hướng dẫn YouTube, làm đủ từng bước rồi mới chấp nhận lời mời Family.`,
-    `-# Nếu tự ý vào/rời Family sai quy trình, tài khoản có thể bị giới hạn Family 12 tháng và ảnh hưởng quyền bảo hành.`,
+    `-# Nếu tự ý vào/rời Family sai quy trình, shop sẽ ngừng bảo hành và không chịu trách nhiệm cho lỗi phát sinh; tài khoản có thể bị giới hạn Family 12 tháng.`,
   ].join('\n')));
   const buttons = new ActionRowBuilder().addComponents(
     new ButtonBuilder().setLabel('Mở hướng dẫn YouTube ngay').setStyle(ButtonStyle.Link).setURL(YOUTUBE_GUIDE_URL),
@@ -427,4 +436,3 @@ export async function completeYoutubeWarrantyClaim(client, claimId, { actorId, n
   if (user) await user.send(payload).catch(() => null);
   return { completed: true, claim, alreadyCompleted: false };
 }
-
