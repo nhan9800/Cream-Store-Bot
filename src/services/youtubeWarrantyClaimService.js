@@ -145,9 +145,9 @@ export function getPublicYoutubeWarrantyClaim(token) {
   };
 }
 
-export function ensureYoutubeWarrantyClaim({ order, ticket }) {
+export function ensureYoutubeWarrantyClaim({ order, ticket, allowLegacyYoutube = false }) {
   if (!order || !ticket) throw new YoutubeWarrantyClaimError('Thiếu dữ liệu đơn hoặc ticket bảo hành.');
-  if (!isYoutubeOrder(order)) throw new YoutubeWarrantyClaimError('Đơn hàng này không phải YouTube.', 'NOT_YOUTUBE');
+  if (!isYoutubeOrder(order) && !allowLegacyYoutube) throw new YoutubeWarrantyClaimError('Đơn hàng này không phải YouTube.', 'NOT_YOUTUBE');
 
   const existing = getYoutubeWarrantyClaimByTicket(ticket.id, { includeToken: true });
   if (existing) return { claim: existing, created: false };
@@ -352,6 +352,19 @@ function ensureLegacyWarrantyTicket({ guildId, channel, order }) {
   }
 }
 
+async function channelHasYoutubeSignal(channel) {
+  if (!channel?.isTextBased?.()) return false;
+  const messages = await channel.messages.fetch({ limit: 40 }).catch(() => null);
+  if (!messages) return false;
+  const textContent = [...messages.values()]
+    .map((message) => String(message.content || ''))
+    .join('\n')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+  return /youtube|ytb|yt\s*(?:premium|\d+\s*m)|family|google/.test(textContent);
+}
+
 export async function publishYoutubeWarrantyClaim(client, claim, { notify = false } = {}) {
   const hydrated = getYoutubeWarrantyClaim(claim.id, { includeEmail: true, includeToken: true });
   const channel = await resolveClaimChannel(client, hydrated);
@@ -420,7 +433,9 @@ export async function syncYoutubeWarrantyClaims(client, { guildId = config.guild
       `).get(guildId, `CN_${suffix}`, `BST_${suffix}`) || null;
       if (!order) continue;
       const identity = `${order.product_name || ''} ${order.service_type || ''}`.toLowerCase();
-      if (!['WARRANTY_OPEN', 'COMPLETED'].includes(String(order.status || '').toUpperCase()) || !identity.includes('youtube')) continue;
+      const status = String(order.status || '').toUpperCase();
+      const youtubeSignal = identity.includes('youtube') || await channelHasYoutubeSignal(channel);
+      if (!['WARRANTY_OPEN', 'WARRANTY', 'COMPLETED'].includes(status) || !youtubeSignal) continue;
       const ticket = ensureLegacyWarrantyTicket({ guildId, channel, order });
       if (!ticket) continue;
       candidates.push({
@@ -470,18 +485,21 @@ export async function syncYoutubeWarrantyClaims(client, { guildId = config.guild
         }
       }
     }
-    if (!order || !['WARRANTY_OPEN', 'COMPLETED'].includes(String(order.status || '').toUpperCase())) {
+    if (!order || !['WARRANTY_OPEN', 'WARRANTY', 'COMPLETED'].includes(String(order.status || '').toUpperCase())) {
       result.skipped += 1;
       continue;
     }
     const identity = `${order.product_name || ''} ${order.service_type || ''}`.toLowerCase();
     if (!identity.includes('youtube')) {
-      result.skipped += 1;
-      continue;
+      channel = channel || await resolveClaimChannel(client, { guildId, ticketChannelId: ticket.channel_id });
+      if (!(await channelHasYoutubeSignal(channel))) {
+        result.skipped += 1;
+        continue;
+      }
     }
     result.scanned += 1;
     try {
-      const ensured = ensureYoutubeWarrantyClaim({ order, ticket });
+      const ensured = ensureYoutubeWarrantyClaim({ order, ticket, allowLegacyYoutube: true });
       if (ensured.created) result.created += 1;
       const published = await publishYoutubeWarrantyClaim(client, ensured.claim);
       if (published.missingChannel) result.missingChannels += 1;

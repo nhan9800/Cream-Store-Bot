@@ -34,12 +34,14 @@ describe('YouTube warranty admin command', () => {
 
   it('matches legacy warranty tickets through ticket id/channel and completed orders', () => {
     const source = fs.readFileSync(new URL('../src/services/youtubeWarrantyClaimService.js', import.meta.url), 'utf8');
-    expect(source).toContain("['WARRANTY_OPEN', 'COMPLETED']");
+    expect(source).toContain("['WARRANTY_OPEN', 'WARRANTY', 'COMPLETED']");
     expect(source).toContain('o.ticket_id = t.id');
     expect(source).toContain('o.ticket_channel_id = t.channel_id');
     expect(source).toContain("/^(bao-hanh|baohanh)[-_]\\d{6,}$/");
     expect(source).toContain('`CN_${suffix}`');
     expect(source).toContain('guild.channels.fetch()');
     expect(source).toContain('ensureLegacyWarrantyTicket');
+    expect(source).toContain('channelHasYoutubeSignal');
+    expect(source).toContain("'WARRANTY', 'COMPLETED'");
   });
 });
