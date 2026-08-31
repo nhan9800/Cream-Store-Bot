@@ -49,6 +49,7 @@ describe('YouTube warranty admin command', () => {
     expect(fs.readFileSync(new URL('../src/services/schedulerService.js', import.meta.url), 'utf8'))
       .toContain('syncYoutubeWarrantyClaimsAcrossGuilds');
     expect(source).toContain('youtubeWarrantySyncState');
+    expect(source).toContain('result.errors.push');
     expect(source).toContain("'WARRANTY', 'COMPLETED'");
   });
 });

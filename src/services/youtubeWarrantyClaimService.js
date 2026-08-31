@@ -478,7 +478,7 @@ export async function syncYoutubeWarrantyClaims(client, { guildId = config.guild
       knownChannels.add(String(channel.id));
     }
   }
-  const result = { scanned: 0, created: 0, published: 0, current: 0, missingChannels: 0, skipped: 0, failed: 0 };
+  const result = { scanned: 0, created: 0, published: 0, current: 0, missingChannels: 0, skipped: 0, failed: 0, errors: [] };
   for (const row of candidates) {
     let order = row.order_code ? row : null;
     const ticket = {
@@ -550,6 +550,7 @@ export async function syncYoutubeWarrantyClaims(client, { guildId = config.guild
       else result.current += 1;
     } catch (error) {
       result.failed += 1;
+      result.errors.push({ orderCode: order.order_code || null, error: String(error?.message || error).slice(0, 240) });
       console.error(`[YOUTUBE-WARRANTY] Sync failed for ${order.order_code}:`, error);
     }
   }
@@ -561,14 +562,18 @@ export async function syncYoutubeWarrantyClaimsAcrossGuilds(client, { guildIds =
     ...guildIds.map((id) => String(id || '')).filter(Boolean),
     ...(client?.guilds?.cache?.keys?.() || []),
   ])];
-  const total = { scanned: 0, created: 0, published: 0, current: 0, missingChannels: 0, skipped: 0, failed: 0 };
+  const total = { scanned: 0, created: 0, published: 0, current: 0, missingChannels: 0, skipped: 0, failed: 0, errors: [] };
   youtubeWarrantySyncState = { status: 'running', updatedAt: new Date().toISOString(), result: null };
   for (const guildId of ids) {
     try {
       const result = await syncYoutubeWarrantyClaims(client, { guildId });
-      for (const key of Object.keys(total)) total[key] += Number(result[key] || 0);
+      for (const key of Object.keys(total)) {
+        if (key === 'errors') total.errors.push(...(result.errors || []));
+        else total[key] += Number(result[key] || 0);
+      }
     } catch (error) {
       total.failed += 1;
+      total.errors.push({ orderCode: null, error: String(error?.message || error).slice(0, 240) });
       console.error(`[YOUTUBE-WARRANTY] Guild ${guildId} sync failed:`, error);
     }
   }
