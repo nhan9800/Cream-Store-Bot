@@ -32,8 +32,13 @@ describe('Cenar promotion board 2026', () => {
     expect(json).toContain('Mua thẳng 1 lần');
     expect(json).toContain('1 Tháng:** `99.000đ`');
     expect(json).toContain('3 Tháng:** `250.000đ`');
-    expect(json).toContain('1 Năm:** `200.000đ`');
-    expect(json).toContain('mỗi tháng khách quay lại shop để gia hạn một lần');
+    expect(json).toContain('1 Tháng:** `60.000đ`');
+    expect(json).toContain('3 Tháng:** `195.000đ`');
+    expect(json).toContain('6 Tháng:** `320.000đ`');
+    expect(json).toContain('12 Tháng:** `580.000đ`');
+    expect(json).toContain('Shop chỉ mở bán dòng **ổn định cao**');
+    expect(json).toContain('Dòng 12 tháng gia hạn/đổi Family mỗi tháng đã dừng bán');
+    expect(json).not.toContain('1 Năm:** `200.000đ`');
     expect(json).toContain('6 Tháng:** `180.000đ`');
     expect(json).toContain('12 Tháng:** `280.000đ`');
     expect(json).toContain('Cấp tài khoản** — `55.000đ`');

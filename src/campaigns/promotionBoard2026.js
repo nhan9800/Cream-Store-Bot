@@ -25,7 +25,7 @@ export const PROMOTION_BOARD = Object.freeze({
     '1282638730812854345', // Cenar Member
     '1282637103045279820', // Cenar Patron
   ]),
-  marker: 'CENAR-PROMOTION-BOARD-V2',
+  marker: 'CENAR-PROMOTION-BOARD-V3',
   flags: MessageFlags.IsComponentsV2,
   prices: Object.freeze({
     nitroLogin: Object.freeze([
@@ -41,7 +41,10 @@ export const PROMOTION_BOARD = Object.freeze({
       Object.freeze({ duration: '3 Tháng', price: 250_000 }),
     ]),
     youtube: Object.freeze([
-      Object.freeze({ duration: '1 Năm', price: 200_000, note: 'Mỗi tháng quay lại shop gia hạn 1 lần' }),
+      Object.freeze({ duration: '1 Tháng', price: 60_000, note: 'Ổn định cao · Full bảo hành' }),
+      Object.freeze({ duration: '3 Tháng', price: 195_000, note: 'Ổn định cao · Full bảo hành' }),
+      Object.freeze({ duration: '6 Tháng', price: 320_000, note: 'Ổn định cao · Full bảo hành' }),
+      Object.freeze({ duration: '12 Tháng', price: 580_000, note: 'Ổn định cao · Full bảo hành' }),
     ]),
     spotify: Object.freeze([
       Object.freeze({ duration: '6 Tháng', price: 180_000 }),
@@ -130,7 +133,8 @@ export function buildPromotionBoardPayload() {
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(normalizeV2Text([
       `## ${E('brand_youtube')} YOUTUBE PREMIUM`,
       ...priceLines(campaign.prices.youtube, E('icon_price')),
-      `> ${E('icon_calendar')} Gói 1 năm vận hành theo chu kỳ: **mỗi tháng khách quay lại shop để gia hạn một lần**.`,
+      `> ${E('cenar_verified')} Shop chỉ mở bán dòng **ổn định cao**, không vận hành bằng cơ chế đổi Family mỗi tháng và bảo hành full theo thời hạn gói.`,
+      `> ${E('status_warn')} Dòng 12 tháng gia hạn/đổi Family mỗi tháng đã dừng bán từ ngày 01/09/2026.`,
     ].join('\n'))))
     .addSeparatorComponents(divider())
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(normalizeV2Text([

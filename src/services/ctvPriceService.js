@@ -19,7 +19,7 @@ import { formatInternationalPrice, translateProductName } from '../utils/interna
 
 const CUSTOM_EMOJI_RE = /^<a?:[a-zA-Z0-9_]+:\d+>$/;
 export const CTV_OFFICIAL_PRICE_CHANNEL_ID = '1535669791660974141';
-export const CTV_OFFICIAL_PANEL_MARKER = 'CENAR-CTV-PRICE-BOARD-V2';
+export const CTV_OFFICIAL_PANEL_MARKER = 'CENAR-CTV-PRICE-BOARD-V3';
 
 export const CTV_OFFICIAL_PRICE_CATALOG = Object.freeze({
   nitro: Object.freeze([
@@ -40,17 +40,11 @@ export const CTV_OFFICIAL_PRICE_CATALOG = Object.freeze({
     { label: 'Gemini Pro + 5 TB Google One 12 Tháng', price: 80_000 },
     { label: 'Gemini Pro + 5 TB Google One 18 Tháng', price: 100_000 },
   ]),
-  youtubeMonthly: Object.freeze([
-    { label: 'YouTube Premium 1 Tháng', price: 25_000 },
-    { label: 'YouTube Premium 3 Tháng', price: 70_000 },
-    { label: 'YouTube Premium 6 Tháng', price: 180_000 },
-    { label: 'YouTube Premium 12 Tháng', price: 230_000 },
-  ]),
   youtubeStable: Object.freeze([
-    { label: 'YouTube Premium 1 Tháng', price: 50_000 },
-    { label: 'YouTube Premium 3 Tháng', price: 170_000 },
-    { label: 'YouTube Premium 6 Tháng', price: 280_000 },
-    { label: 'YouTube Premium 12 Tháng', price: 485_000 },
+    { label: 'YouTube Premium 1 Tháng · Ổn định cao', price: 55_000 },
+    { label: 'YouTube Premium 3 Tháng · Ổn định cao', price: 180_000 },
+    { label: 'YouTube Premium 6 Tháng · Ổn định cao', price: 300_000 },
+    { label: 'YouTube Premium 12 Tháng · Ổn định cao', price: 520_000 },
   ]),
   spotify: Object.freeze([
     { label: 'Spotify Premium Add Family 3 Tháng', price: 80_000 },
@@ -92,7 +86,7 @@ function buildOfficialCtvPricePanel(guildId) {
     `# ${E('ctv_crystal')} CENAR CTV · BẢNG GIÁ NỘI BỘ`,
     `${E('cenar_verified')} Bảng giá chính thức dành riêng cho CTV đã được duyệt tại **Cenar Store**.`,
     `${E('cenar_price')} Đây là **một số sản phẩm nổi bật**; shop còn nhiều mặt hàng khác, CTV cần giá cứ hỏi trực tiếp shop.`,
-    `-# ${CTV_OFFICIAL_PANEL_MARKER} · Cập nhật ngày 25/08/2026`,
+    `-# ${CTV_OFFICIAL_PANEL_MARKER} · Cập nhật ngày 01/09/2026`,
   ].join('\n')));
 
   const nitro = new ContainerBuilder().setAccentColor(accentFor('primary'));
@@ -117,15 +111,11 @@ function buildOfficialCtvPricePanel(guildId) {
 
   const youtube = new ContainerBuilder().setAccentColor(accentFor('danger'));
   youtube.addTextDisplayComponents(new TextDisplayBuilder().setContent([
-    `## ${E('brand_youtube')} YouTube Premium · Gia hạn 1 tháng/lần`,
-    officialPriceLines(CTV_OFFICIAL_PRICE_CATALOG.youtubeMonthly),
-    '',
-    `${E('status_warn')} **Yêu cầu sử dụng:** Không tự ý rời Family khi Premium hết. Chỉ out khi có hướng dẫn từ shop, sau đó mới join Family mới để tránh lỗi giới hạn đổi nhóm gia đình Google trong 12 tháng.`,
-  ].join('\n')));
-  youtube.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
-  youtube.addTextDisplayComponents(new TextDisplayBuilder().setContent([
-    `## ${E('brand_youtube')} YouTube Premium · Ổn định`,
+    `## ${E('brand_youtube')} YouTube Premium · Ổn định cao`,
     officialPriceLines(CTV_OFFICIAL_PRICE_CATALOG.youtubeStable),
+    '',
+    `${E('cenar_verified')} Đây là dòng YouTube duy nhất đang mở bán; không vận hành bằng cơ chế đổi Family mỗi tháng, hạn chế tối đa tình trạng mất Premium và được bảo hành full theo thời hạn gói.`,
+    `${E('status_warn')} Dòng gia hạn/đổi Family mỗi tháng đã dừng bán từ ngày 01/09/2026. Đơn cũ vẫn được lưu để shop đối soát và hỗ trợ theo chính sách chuyển đổi.`,
   ].join('\n')));
 
   const spotify = new ContainerBuilder().setAccentColor(accentFor('warning'));

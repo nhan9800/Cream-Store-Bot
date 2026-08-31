@@ -190,6 +190,9 @@ export const EMOJI_SLOTS = {
   guide_family:       { label: 'HD Join Fam · Gia đình',          default: '' },
   guide_warning:      { label: 'HD Join Fam · Cảnh báo',          default: '' },
   guide_card:         { label: 'HD Join Fam · Thẻ thanh toán',    default: '' },
+  guide_upgrade:      { label: 'YouTube · Nâng cấp',              default: '' },
+  guide_refund:       { label: 'YouTube · Hoàn tiền',             default: '' },
+  guide_exchange:     { label: 'YouTube · Đổi sản phẩm',          default: '' },
 };
 
 // ═══════════════════════════════════════════════
@@ -271,6 +274,11 @@ export const SLOT_ALIASES = {
   music_volume: ['cenar_music_volume', 'cenar_spotify'],
   music_refresh: ['cenar_music_refresh', 'starxoay'],
   music_disconnect: ['cenar_music_disconnect', 'tick_red51'],
+
+  // YouTube transition policy
+  guide_upgrade: ['yt_upgrade', 'cenar_yt_upgrade', 'upgrade'],
+  guide_refund: ['yt_refund', 'cenar_yt_refund', 'moneytransfer', 'refund'],
+  guide_exchange: ['yt_exchange', 'cenar_yt_exchange', 'exchange'],
 
   // Status
   status_check: ['check', 'tick', 'success', 'tich_xanh'],

@@ -48,8 +48,8 @@ describe('Cenar price board V3', () => {
     expect(panels.find((panel) => panel.group.key === 'chatgpt')?.items.length).toBeGreaterThan(0);
     expect(panels.find((panel) => panel.group.key === 'gemini')?.items.length).toBeGreaterThan(0);
     expect(panels.find((panel) => panel.group.key === 'adobe')?.items.length).toBeGreaterThan(0);
-    expect(panels.find((panel) => panel.group.key === 'youtube_continuous')?.items).toHaveLength(4);
-    expect(panels.find((panel) => panel.group.key === 'youtube_family_switch')?.items).toHaveLength(4);
+    expect(panels.find((panel) => panel.group.key === 'youtube_stable')?.items).toHaveLength(4);
+    expect(panels.some((panel) => panel.group.key === 'youtube_family_switch')).toBe(false);
     expect(panels.find((panel) => panel.group.key === 'spotify')?.items).toHaveLength(3);
     expect(panels.find((panel) => panel.group.key === 'netflix')?.items).toHaveLength(2);
     expect(panels.some((panel) => panel.group.key === 'other')).toBe(false);
@@ -254,37 +254,31 @@ describe('Cenar price board V3', () => {
     expect(announcement).toContain('đổi sang tài khoản mới');
   });
 
-  it('publishes both complete YouTube lines with full-duration warranty', () => {
+  it('publishes only the stable YouTube line and retires monthly Family switching', () => {
     const products = getActiveProducts(GUILD_ID);
     const youtube = products.filter((product) => /youtube premium/i.test(product.name));
-    expect(youtube).toHaveLength(8);
+    expect(youtube).toHaveLength(4);
     expect(youtube.map((product) => [product.product_key, product.price])).toEqual(expect.arrayContaining([
-      ['youtube-premium-continuous-1-month', 55000],
-      ['youtube-premium-continuous-3-months', 185000],
-      ['youtube-premium-continuous-6-months', 300000],
-      ['youtube-premium-continuous-12-months', 550000],
-      ['youtube-premium-monthly-family-switch-1-month', 25000],
-      ['youtube-premium-monthly-family-switch-3-months', 90000],
-      ['youtube-premium-monthly-family-switch-6-months', 150000],
-      ['youtube-premium-monthly-family-switch-12-months', 250000],
+      ['youtube-premium-continuous-1-month', 60000],
+      ['youtube-premium-continuous-3-months', 195000],
+      ['youtube-premium-continuous-6-months', 320000],
+      ['youtube-premium-continuous-12-months', 580000],
     ]));
+    expect(youtube.some((product) => product.product_key.includes('monthly-family-switch'))).toBe(false);
+    expect(DEFAULT_PRODUCT_CATALOG.some((product) => (
+      String(product.product_key || '').includes('monthly-family-switch')
+    ))).toBe(false);
     expect(youtube.every((product) => String(product.warranty_policy).startsWith('Full '))).toBe(true);
 
     const panels = buildPriceBoardPayloads(GUILD_ID, {}, products).map(serialize);
-    const continuousPanel = panels.find((json) => json.includes('YouTube Premium · Gia Hạn Liên Tục'));
-    const switchPanel = panels.find((json) => json.includes('YouTube Premium · Đổi Family Mỗi Tháng'));
-    for (const price of ['55.000', '185.000', '300.000', '550.000']) {
-      expect(continuousPanel).toContain(price);
+    const stablePanel = panels.find((json) => json.includes('YouTube Premium · Ổn Định Cao'));
+    for (const price of ['60.000', '195.000', '320.000', '580.000']) {
+      expect(stablePanel).toContain(price);
     }
-    for (const price of ['25.000', '90.000', '150.000', '250.000']) {
-      expect(switchPanel).toContain(price);
-    }
-    expect(continuousPanel).toContain('Full trong suốt thời gian sử dụng');
-    expect(switchPanel).toContain('Không bị vướng lỗi giới hạn 12 tháng');
-    expect(switchPanel).toContain('rời/đổi nhóm gia đình Google');
-    expect(switchPanel).toContain('đổi Gmail để Cenar thêm lại');
-    expect(switchPanel).toContain('1–2%');
-    expect(switchPanel).toContain('Full trong suốt thời gian sử dụng');
+    expect(stablePanel).toContain('không dùng cơ chế đổi Family mỗi tháng');
+    expect(stablePanel).toContain('hạn chế tối đa tình trạng mất Premium');
+    expect(stablePanel).toContain('Full trong suốt thời gian sử dụng');
+    expect(panels.join('\n')).not.toContain('YouTube Premium · Đổi Family Mỗi Tháng');
   });
 
   it('keeps only the four new ChatGPT and current Adobe packages across catalog, board and announcement', () => {

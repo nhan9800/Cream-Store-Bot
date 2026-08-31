@@ -37,6 +37,21 @@ export const YOUTUBE_GUIDE_EMOJIS = Object.freeze([
     url: 'https://cdn3.emoji.gg/emojis/91003-creditcard.png',
     source: 'https://emoji.gg/emoji/91003-creditcard',
   }),
+  Object.freeze({
+    name: 'cenar_yt_upgrade',
+    url: 'https://cdn3.emoji.gg/emojis/919403-upgrade.png',
+    source: 'https://emoji.gg/emoji/919403-upgrade',
+  }),
+  Object.freeze({
+    name: 'cenar_yt_refund',
+    url: 'https://cdn3.emoji.gg/emojis/687306-moneytransfer.png',
+    source: 'https://emoji.gg/emoji/687306-moneytransfer',
+  }),
+  Object.freeze({
+    name: 'cenar_yt_exchange',
+    url: 'https://cdn3.emoji.gg/emojis/598010-exchange.gif',
+    source: 'https://emoji.gg/emoji/598010-exchange',
+  }),
 ]);
 
 function asDiscordEmoji(emoji) {
@@ -72,7 +87,7 @@ export async function syncYoutubeGuideEmojis(guild) {
       emoji = await guild.emojis.create({
         attachment,
         name: asset.name,
-        reason: `Cenar YouTube join-fam guide · Basic License · ${asset.source}`,
+        reason: `Cenar YouTube support UI · Basic License · ${asset.source}`,
       });
       status = 'created';
     }

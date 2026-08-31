@@ -15,6 +15,7 @@
     "publish:birthday-sale": "node scripts/publish-birthday-sale.js",
     "publish:ai-creative-pricing": "node scripts/publish-ai-creative-pricing-update.js",
     "publish:youtube-family-policy": "node scripts/publish-youtube-family-policy-update.js",
+    "publish:youtube-stability-transition": "node scripts/publish-youtube-stability-transition.js",
     "publish:youtube-join-fam-guide": "node scripts/publish-youtube-join-fam-guide.js",
     "publish:promotion-board": "node scripts/publish-promotion-board.js",
     "sync:promotion-emojis": "node scripts/sync-promotion-emojis.js",

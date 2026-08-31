@@ -21,7 +21,7 @@ import { formatInternationalPrice, translateCatalogGroup, translateProductName }
 import { getNitroTrialEligibility, isNitroTrialProduct } from '../constants/nitroTrial.js';
 import { getNetflixPromoDetails, isNetflixPromoProduct } from '../constants/netflixPromotion.js';
 
-export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.14';
+export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.15';
 const PRIMARY_GUILD_ID = '1282637033340403754';
 const PRIMARY_PRICE_CHANNEL_ID = '1514606995842273280';
 const PRIMARY_PROMOTION_CHANNEL_ID = '1515008584549797979';
@@ -83,14 +83,9 @@ export const PRICE_GROUPS = [
     match: (p) => p.service_type === 'AI' && /(capcut|office)/i.test(p.name),
   },
   {
-    key: 'youtube_continuous', titleSlot: 'brand_youtube', title: 'YouTube Premium · Gia Hạn Liên Tục', accent: 0xFF0033,
-    note: 'Dòng ổn định, gia hạn liên tục và bảo hành full toàn bộ thời gian sử dụng.',
+    key: 'youtube_stable', titleSlot: 'brand_youtube', title: 'YouTube Premium · Ổn Định Cao', accent: 0xFF0033,
+    note: 'Dòng duy nhất đang mở bán: không dùng cơ chế đổi Family mỗi tháng, hạn chế tối đa tình trạng mất Premium và bảo hành full toàn bộ thời gian sử dụng.',
     match: (p) => String(p.product_key || '').startsWith('youtube-premium-continuous-'),
-  },
-  {
-    key: 'youtube_family_switch', titleSlot: 'brand_youtube', title: 'YouTube Premium · Đổi Family Mỗi Tháng', accent: 0xDC2626,
-    note: 'Dòng tiết kiệm, đổi Family mỗi tháng. **Không bị vướng lỗi giới hạn 12 tháng** khi rời/đổi nhóm gia đình Google theo quy trình của shop. Trường hợp hiếm nếu hệ thống vẫn hạn chế (shop ghi nhận khoảng 1–2%), khách đổi Gmail để Cenar thêm lại; bảo hành full toàn thời gian.',
-    match: (p) => String(p.product_key || '').startsWith('youtube-premium-monthly-family-switch-'),
   },
   {
     key: 'spotify', titleSlot: 'brand_spotify', title: 'Spotify Premium', accent: 0x1DB954,
@@ -204,10 +199,6 @@ const FULL_WARRANTY_PRODUCT_KEYS = new Set([
   'youtube-premium-continuous-3-months',
   'youtube-premium-continuous-6-months',
   'youtube-premium-continuous-12-months',
-  'youtube-premium-monthly-family-switch-1-month',
-  'youtube-premium-monthly-family-switch-3-months',
-  'youtube-premium-monthly-family-switch-6-months',
-  'youtube-premium-monthly-family-switch-12-months',
 ]);
 
 function hasFullDurationWarranty(product) {
