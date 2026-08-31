@@ -21,7 +21,7 @@ import { processPendingInviteRewards } from './inviteTrackerService.js';
 import { processAdminOrderAgingReminders } from './adminOrderCenterService.js';
 import { runSpotifyFamilyReminders } from './spotifyFamilyReminderService.js';
 import { runYoutubeRenewalReminders } from './youtubeRenewalReminderService.js';
-import { syncYoutubeWarrantyClaims } from './youtubeWarrantyClaimService.js';
+import { syncYoutubeWarrantyClaimsAcrossGuilds } from './youtubeWarrantyClaimService.js';
 
 let schedulerHandle = null;
 let backupHandle = null;
@@ -106,8 +106,8 @@ export function startScheduler(client) {
     const warrantySyncNow = Date.now();
     if (warrantySyncNow - lastYoutubeWarrantySync >= 5 * 60 * 1000) {
       try {
-        const result = await syncYoutubeWarrantyClaims(client, { guildId: config.guildId });
-        console.log(`[SCHEDULER-YOUTUBE-WARRANTY] scanned=${result.scanned} created=${result.created} published=${result.published} current=${result.current} missing=${result.missingChannels} failed=${result.failed}`);
+        const result = await syncYoutubeWarrantyClaimsAcrossGuilds(client, { guildIds: [config.guildId] });
+        console.log(`[SCHEDULER-YOUTUBE-WARRANTY] scanned=${result.scanned} created=${result.created} published=${result.published} current=${result.current} missing=${result.missingChannels} skipped=${result.skipped} failed=${result.failed}`);
         lastYoutubeWarrantySync = warrantySyncNow;
       } catch (error) {
         console.error('[SCHEDULER] Lỗi đồng bộ form bảo hành YouTube:', error);

@@ -46,6 +46,8 @@ describe('YouTube warranty admin command', () => {
     expect(source).toContain("product_name: 'YouTube Premium'");
     expect(fs.readFileSync(new URL('../src/bootstrap.js', import.meta.url), 'utf8'))
       .toContain('[YOUTUBE-WARRANTY] Không thể đồng bộ form bảo hành:');
+    expect(fs.readFileSync(new URL('../src/services/schedulerService.js', import.meta.url), 'utf8'))
+      .toContain('syncYoutubeWarrantyClaimsAcrossGuilds');
     expect(source).toContain("'WARRANTY', 'COMPLETED'");
   });
 });

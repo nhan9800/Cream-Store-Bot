@@ -171,8 +171,8 @@ export async function buildClient() {
     // marketing/admin panels. A failure in any other auto-setup must not stop
     // existing YouTube warranty tickets from receiving their Gmail form.
     try {
-      const { syncYoutubeWarrantyClaims } = await import('./services/youtubeWarrantyClaimService.js');
-      const youtubeWarranty = await syncYoutubeWarrantyClaims(readyClient, { guildId: config.guildId });
+      const { syncYoutubeWarrantyClaimsAcrossGuilds } = await import('./services/youtubeWarrantyClaimService.js');
+      const youtubeWarranty = await syncYoutubeWarrantyClaimsAcrossGuilds(readyClient, { guildIds: [config.guildId] });
       console.log(`[YOUTUBE-WARRANTY] scanned=${youtubeWarranty.scanned} created=${youtubeWarranty.created} published=${youtubeWarranty.published} current=${youtubeWarranty.current} missing=${youtubeWarranty.missingChannels} skipped=${youtubeWarranty.skipped} failed=${youtubeWarranty.failed}`);
     } catch (error) {
       console.error('[YOUTUBE-WARRANTY] Không thể đồng bộ form bảo hành:', error);

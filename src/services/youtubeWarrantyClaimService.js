@@ -555,6 +555,24 @@ export async function syncYoutubeWarrantyClaims(client, { guildId = config.guild
   return result;
 }
 
+export async function syncYoutubeWarrantyClaimsAcrossGuilds(client, { guildIds = [] } = {}) {
+  const ids = [...new Set([
+    ...guildIds.map((id) => String(id || '')).filter(Boolean),
+    ...(client?.guilds?.cache?.keys?.() || []),
+  ])];
+  const total = { scanned: 0, created: 0, published: 0, current: 0, missingChannels: 0, skipped: 0, failed: 0 };
+  for (const guildId of ids) {
+    try {
+      const result = await syncYoutubeWarrantyClaims(client, { guildId });
+      for (const key of Object.keys(total)) total[key] += Number(result[key] || 0);
+    } catch (error) {
+      total.failed += 1;
+      console.error(`[YOUTUBE-WARRANTY] Guild ${guildId} sync failed:`, error);
+    }
+  }
+  return total;
+}
+
 export async function refreshYoutubeWarrantyClaimNotification(client, claimId) {
   const claim = getYoutubeWarrantyClaim(claimId, { includeEmail: true, includeToken: true });
   if (!claim) return null;
