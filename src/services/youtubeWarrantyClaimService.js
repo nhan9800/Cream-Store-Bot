@@ -146,6 +146,16 @@ export function getPublicYoutubeWarrantyClaim(token) {
   };
 }
 
+function legacyClaimPlaceholder(column, { order, now }) {
+  const name = String(column.name || '').toLowerCase();
+  if (name.includes('gmail') || name.includes('email') || name.includes('password') || name.includes('token')) return encrypt('');
+  if (name === 'customer_id' || name === 'user_id' || name === 'discord_id') return String(order.customer_id || '');
+  if (name.includes('status')) return 'AWAITING_CUSTOMER';
+  if (name.includes('created') || name.includes('updated') || name.endsWith('_at')) return now;
+  if (/int|real|numeric/i.test(String(column.type || ''))) return 0;
+  return '';
+}
+
 export function ensureYoutubeWarrantyClaim({ order, ticket, allowLegacyYoutube = false }) {
   if (!order || !ticket) throw new YoutubeWarrantyClaimError('Thiếu dữ liệu đơn hoặc ticket bảo hành.');
   if (!isYoutubeOrder(order) && !allowLegacyYoutube) throw new YoutubeWarrantyClaimError('Đơn hàng này không phải YouTube.', 'NOT_YOUTUBE');
@@ -156,17 +166,28 @@ export function ensureYoutubeWarrantyClaim({ order, ticket, allowLegacyYoutube =
   for (let attempt = 0; attempt < 5; attempt += 1) {
     const rawToken = createAccessToken();
     try {
-      const result = db.prepare(`
-        INSERT INTO youtube_warranty_claims (
-          claim_code, access_token_hash, access_token_encrypted, guild_id,
-          order_code, ticket_id, ticket_channel_id, customer_id, customer_gmail, status,
-          created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'AWAITING_CUSTOMER', ?, ?)
-      `).run(
-        createClaimCode(), hashToken(rawToken), encrypt(rawToken), order.guild_id,
-        order.order_code, Number(ticket.id), ticket.channel_id, order.customer_id, encrypt(''),
-        nowIso(), nowIso(),
-      );
+      const now = nowIso();
+      const valuesByColumn = {
+        claim_code: createClaimCode(),
+        access_token_hash: hashToken(rawToken),
+        access_token_encrypted: encrypt(rawToken),
+        guild_id: order.guild_id,
+        order_code: order.order_code,
+        ticket_id: Number(ticket.id),
+        ticket_channel_id: ticket.channel_id,
+        customer_id: order.customer_id,
+        customer_gmail: encrypt(''),
+        status: 'AWAITING_CUSTOMER',
+        created_at: now,
+        updated_at: now,
+      };
+      const columns = db.prepare('PRAGMA table_info(youtube_warranty_claims)').all()
+        .filter((column) => Object.prototype.hasOwnProperty.call(valuesByColumn, column.name) || (column.notnull && column.dflt_value === null));
+      const names = columns.map((column) => `"${String(column.name).replace(/"/g, '""')}"`);
+      const values = columns.map((column) => Object.prototype.hasOwnProperty.call(valuesByColumn, column.name)
+        ? valuesByColumn[column.name]
+        : legacyClaimPlaceholder(column, { order, now }));
+      const result = db.prepare(`INSERT INTO youtube_warranty_claims (${names.join(', ')}) VALUES (${values.map(() => '?').join(', ')})`).run(...values);
       return { claim: getYoutubeWarrantyClaim(result.lastInsertRowid, { includeToken: true }), created: true };
     } catch (error) {
       if (/youtube_warranty_claims\.ticket_id/i.test(String(error?.message || ''))) {
