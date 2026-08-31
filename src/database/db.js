@@ -800,9 +800,17 @@ export function initDatabase() {
 
   // Legacy releases may have created these tables without the timestamp
   // columns. Add the columns before creating indexes that reference them.
-  ensureColumn('youtube_warranty_claims', 'updated_at', 'TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP');
+  ensureColumn('youtube_warranty_claims', 'updated_at', 'TEXT');
   ensureColumn('youtube_warranty_claims', 'revision', 'INTEGER NOT NULL DEFAULT 0');
-  ensureColumn('quest_service_requests', 'updated_at', 'TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP');
+  ensureColumn('quest_service_requests', 'updated_at', 'TEXT');
+  db.exec(`
+    UPDATE youtube_warranty_claims
+    SET updated_at = COALESCE(NULLIF(updated_at, ''), created_at, CURRENT_TIMESTAMP)
+    WHERE updated_at IS NULL OR TRIM(updated_at) = '';
+    UPDATE quest_service_requests
+    SET updated_at = COALESCE(NULLIF(updated_at, ''), created_at, CURRENT_TIMESTAMP)
+    WHERE updated_at IS NULL OR TRIM(updated_at) = '';
+  `);
   db.exec(`
     CREATE INDEX IF NOT EXISTS idx_youtube_warranty_claims_status
       ON youtube_warranty_claims (guild_id, status, updated_at DESC);
