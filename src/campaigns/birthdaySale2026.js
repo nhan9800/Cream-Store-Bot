@@ -25,7 +25,7 @@ const EMOJI = Object.freeze({
   nitro: '<:discord_nitro:1384901794475282523>',
   boost: '<:boost:1327543332171284532>',
   spotify: '<:spotify:1459181297288220704>',
-  youtube: '<:youtube:1373734824342327297>',
+  youtube: '<:cenar_yt_logo:1543842435707310151>',
   chatgpt: '<:chatgopete:1481154927677014098>',
   gemini: '<:gemini:1481157054210248864>',
   office: '<:office365:1459180639390535836>',

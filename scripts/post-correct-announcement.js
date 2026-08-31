@@ -50,7 +50,7 @@ Quý khách vui lòng đọc kỹ các quy định dưới đây để đảm b�
 * **Quy trình gia hạn:**
   * <a:chamxanh:1481124932447371374> Cần thực hiện gia hạn ngay sau khi gói cũ vừa hết hạn. Quá hạn trên 1 tháng sẽ không thể gia hạn tiếp mà phải mua gói mới.
 
-### <:youtube:1373734824342327297> 2. DỊCH VỤ YOUTUBE PREMIUM
+### <:cenar_yt_logo:1543842435707310151> 2. DỊCH VỤ YOUTUBE PREMIUM
 * **Mua mới:** Quý khách chỉ cần gửi địa chỉ Gmail, kiểm tra thư mời và bấm đồng ý tham gia Family.
 * **Bảo hành:** Cung cấp đầy đủ **Gmail chủ Family** và **Gmail cá nhân của bạn** để xử lý nhanh nhất.
 * **Bảo mật:** Nhóm gia đình đảm bảo **riêng tư 100%**, tuyệt đối không chia sẻ thông tin cá nhân.

@@ -54,4 +54,13 @@ describe('YouTube warranty admin command', () => {
     expect(source).toContain('result.errors.push');
     expect(source).toContain("'WARRANTY', 'COMPLETED'");
   });
+
+  it('prefers and auto-syncs the refreshed YouTube logo emoji', () => {
+    const emojiService = fs.readFileSync(new URL('../src/services/emojiService.js', import.meta.url), 'utf8');
+    const emojiHelper = fs.readFileSync(new URL('../src/utils/emojiHelper.js', import.meta.url), 'utf8');
+    const bootstrap = fs.readFileSync(new URL('../src/bootstrap.js', import.meta.url), 'utf8');
+    expect(emojiService).toContain("brand_youtube: ['cenar_yt_logo', 'yt_logo'");
+    expect(emojiHelper).toContain('<:cenar_yt_logo:1543842435707310151>');
+    expect(bootstrap).toContain('syncYoutubeGuideEmojis');
+  });
 });

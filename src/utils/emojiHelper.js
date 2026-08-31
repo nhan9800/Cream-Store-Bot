@@ -41,7 +41,7 @@ const fallbackEmojis = {
   // Cenar Music controls · reuse the curated custom pack already licensed and
   // uploaded to this guild; no Unicode placeholder is rendered.
   music_wave:       '<:cenar_spotify:1535690966911025262>',
-  music_now:        '<:cenar_youtube:1535691301343858739>',
+  music_now:        '<:cenar_yt_logo:1543842435707310151>',
   music_add:        '<:cenar_verified:1535618654358736926>',
   music_play:       '<:cenar_music_playpause:1540322261343670273>',
   music_pause:      '<:cenar_music_playpause:1540322261343670273>',
@@ -111,7 +111,7 @@ const fallbackEmojis = {
   // Brands
   brand_netflix:      '<:cenar_price_netflix:1535910620828803113>',
   brand_spotify:      '<:cenar_spotify:1535690966911025262>',
-  brand_youtube:      '<:cenar_youtube:1535691301343858739>',
+  brand_youtube:      '<:cenar_yt_logo:1543842435707310151>',
   brand_chatgpt:      '<:cenar_price_chatgpt:1535910616748007464>',
   brand_nitro:        '<:cenar_price_nitro:1535910618782240768>',
   brand_boost:        '<:boost:1327543332171284532>',

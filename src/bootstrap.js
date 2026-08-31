@@ -104,6 +104,15 @@ export async function buildClient() {
       const { autoSyncGuildEmojis } = await import('./services/emojiService.js');
       for (const guild of readyClient.guilds.cache.values()) {
         await guild.emojis.fetch().catch(() => null);
+        try {
+          const { syncYoutubeGuideEmojis } = await import('../scripts/sync-youtube-guide-emojis.js');
+          const syncedYoutube = await syncYoutubeGuideEmojis(guild);
+          const createdYoutube = syncedYoutube.filter((item) => item.status === 'created').length;
+          if (createdYoutube) console.log(`[EMOJI-YOUTUBE] Created ${createdYoutube} refreshed YouTube emoji(s) in ${guild.name}`);
+          await guild.emojis.fetch().catch(() => null);
+        } catch (error) {
+          console.warn(`[EMOJI-YOUTUBE] Sync skipped for ${guild.name}: ${error.message}`);
+        }
         const result = autoSyncGuildEmojis(guild);
         console.log(`[EMOJI-SYNC] Synced ${result.syncedCount} emojis for guild: ${guild.name}`);
       }

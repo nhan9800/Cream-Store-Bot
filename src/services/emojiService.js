@@ -282,7 +282,9 @@ export const SLOT_ALIASES = {
   // Brand
   brand_netflix: ['price_netflix', 'netflix', 'brand_netflix', 'netflix62'],
   brand_spotify: ['spotify', 'brand_spotify', 'spotify2', 'spotify_app_logo10'],
-  brand_youtube: ['youtube', 'brand_youtube'],
+  // Prefer the refreshed YouTube logo pack; keep old names as fallbacks for
+  // guilds that have not completed the automatic emoji sync yet.
+  brand_youtube: ['cenar_yt_logo', 'yt_logo', 'youtube', 'brand_youtube'],
   brand_chatgpt: ['price_chatgpt', 'chatgpt', 'brand_chatgpt', 'cr_chatgpt'],
   brand_nitro: ['price_nitro', 'nitro', 'brand_nitro', 'discord_nitro', '9836flyingnitroboost'],
   brand_boost: ['boost', 'brand_boost', 'booster', 'discord_boost', '3825boosterorange', '9836flyingnitroboost'],
