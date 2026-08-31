@@ -21,12 +21,14 @@ import { processPendingInviteRewards } from './inviteTrackerService.js';
 import { processAdminOrderAgingReminders } from './adminOrderCenterService.js';
 import { runSpotifyFamilyReminders } from './spotifyFamilyReminderService.js';
 import { runYoutubeRenewalReminders } from './youtubeRenewalReminderService.js';
+import { syncYoutubeWarrantyClaims } from './youtubeWarrantyClaimService.js';
 
 let schedulerHandle = null;
 let backupHandle = null;
 let bootstrapped = false;
 let lastVinhDanhRun = 0;
 let lastDiscountBoardRun = 0;
+let lastYoutubeWarrantySync = 0;
 
 function autoBackupDatabase() {
   backupDatabase().catch(e => console.error('[BACKUP] Lỗi hệ thống sao lưu tự động:', e));
@@ -97,6 +99,19 @@ export function startScheduler(client) {
       await runYoutubeRenewalReminders(client);
     } catch (error) {
       console.error('[SCHEDULER] Lỗi nhắc thanh toán nguồn YouTube:', error);
+    }
+
+    // Reconcile open YouTube warranty tickets periodically so existing tickets
+    // receive their Gmail form even when they were opened after bot startup.
+    const warrantySyncNow = Date.now();
+    if (warrantySyncNow - lastYoutubeWarrantySync >= 5 * 60 * 1000) {
+      try {
+        const result = await syncYoutubeWarrantyClaims(client, { guildId: config.guildId });
+        console.log(`[SCHEDULER-YOUTUBE-WARRANTY] scanned=${result.scanned} created=${result.created} published=${result.published} current=${result.current} missing=${result.missingChannels} failed=${result.failed}`);
+        lastYoutubeWarrantySync = warrantySyncNow;
+      } catch (error) {
+        console.error('[SCHEDULER] Lỗi đồng bộ form bảo hành YouTube:', error);
+      }
     }
 
     // Tự động cập nhật vinh danh định kỳ mỗi 1 tiếng

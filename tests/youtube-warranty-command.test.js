@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { data, buildYoutubeWarrantyAdminPayload } from '../src/commands/ytbaohanh.js';
+import fs from 'node:fs';
 
 describe('YouTube warranty admin command', () => {
   it('publishes a staff-only inbox command', () => {
@@ -22,5 +23,12 @@ describe('YouTube warranty admin command', () => {
     expect(serialized).toContain('ytw:complete:11');
     expect(serialized).toContain('ytw:resend:12');
     expect(payload.ephemeral).toBe(true);
+  });
+
+  it('reconciles open warranty tickets from the scheduler', () => {
+    const source = fs.readFileSync(new URL('../src/services/schedulerService.js', import.meta.url), 'utf8');
+    expect(source).toContain('syncYoutubeWarrantyClaims');
+    expect(source).toContain('5 * 60 * 1000');
+    expect(source).toContain('SCHEDULER-YOUTUBE-WARRANTY');
   });
 });
