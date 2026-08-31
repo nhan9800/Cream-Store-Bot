@@ -36,6 +36,15 @@ function text(value, maxLength = 500) {
   return String(value ?? '').trim().slice(0, maxLength);
 }
 
+function cleanYoutubeProductName(value) {
+  const cleaned = String(value || '')
+    .replace(/<a?:[a-zA-Z0-9_]+:\d+>|:[a-zA-Z0-9_]+:/g, '')
+    .replace(/^\s*youtube\s*:\s*/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return cleaned || 'YouTube Premium';
+}
+
 function hashToken(token) {
   return crypto.createHash('sha256').update(String(token), 'utf8').digest('hex');
 }
@@ -90,7 +99,7 @@ function hydrateClaim(row, { includeToken = false, includeEmail = true } = {}) {
     ticketCode: row.ticket_code || null,
     ticketChannelId: row.ticket_channel_id,
     customerId: row.customer_id,
-    productName: row.product_name || 'YouTube Premium',
+    productName: cleanYoutubeProductName(row.product_name),
     status: CLAIM_STATUSES.has(row.status) ? row.status : 'AWAITING_CUSTOMER',
     customerGmail,
     customerGmailMasked: customerGmail ? maskEmail(customerGmail) : null,

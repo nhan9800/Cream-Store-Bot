@@ -65,6 +65,8 @@ describe('YouTube warranty admin command', () => {
       .toContain('YOUTUBE_BRAND_EMOJI');
     expect(fs.readFileSync(new URL('../src/services/youtubeWarrantyClaimService.js', import.meta.url), 'utf8'))
       .toContain('message = await message.edit(payload).catch(() => null)');
+    expect(fs.readFileSync(new URL('../src/services/youtubeWarrantyClaimService.js', import.meta.url), 'utf8'))
+      .toContain('cleanYoutubeProductName');
     expect(bootstrap).toContain('syncYoutubeGuideEmojis');
   });
 });
