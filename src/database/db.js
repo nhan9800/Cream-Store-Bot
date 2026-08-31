@@ -800,8 +800,28 @@ export function initDatabase() {
 
   // Legacy releases may have created these tables without the timestamp
   // columns. Add the columns before creating indexes that reference them.
-  ensureColumn('youtube_warranty_claims', 'updated_at', 'TEXT');
-  ensureColumn('youtube_warranty_claims', 'revision', 'INTEGER NOT NULL DEFAULT 0');
+  for (const [columnName, definitionSql] of [
+    ['claim_code', 'TEXT'],
+    ['access_token_hash', 'TEXT'],
+    ['access_token_encrypted', 'TEXT'],
+    ['guild_id', 'TEXT'],
+    ['order_code', 'TEXT'],
+    ['ticket_id', 'INTEGER'],
+    ['ticket_channel_id', 'TEXT'],
+    ['customer_id', 'TEXT'],
+    ['customer_gmail', 'TEXT'],
+    ['status', "TEXT DEFAULT 'AWAITING_CUSTOMER'"],
+    ['notification_message_id', 'TEXT'],
+    ['submitted_at', 'TEXT'],
+    ['completed_at', 'TEXT'],
+    ['completed_by_id', 'TEXT'],
+    ['completion_note', 'TEXT'],
+    ['created_at', 'TEXT'],
+    ['updated_at', 'TEXT'],
+    ['revision', 'INTEGER NOT NULL DEFAULT 0'],
+  ]) {
+    ensureColumn('youtube_warranty_claims', columnName, definitionSql);
+  }
   ensureColumn('quest_service_requests', 'updated_at', 'TEXT');
   db.exec(`
     UPDATE youtube_warranty_claims

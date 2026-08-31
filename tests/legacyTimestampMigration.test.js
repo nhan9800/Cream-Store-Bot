@@ -45,10 +45,13 @@ describe('legacy timestamp schema migration', () => {
         initDatabase();
         const tableColumns = (table) => db.prepare('PRAGMA table_info(' + table + ')').all().map((row) => row.name);
         const indexes = db.prepare("SELECT name FROM sqlite_master WHERE type = 'index' AND name IN ('idx_youtube_warranty_claims_status', 'idx_quest_service_requests_queue') ORDER BY name").all().map((row) => row.name);
+        const { getYoutubeWarrantyClaimByTicket } = await import(${JSON.stringify(pathToFileURL(path.join(projectRoot, 'src', 'services', 'youtubeWarrantyClaimService.js')).href)});
+        const emptyClaimLookup = getYoutubeWarrantyClaimByTicket(1);
         console.log('__LEGACY_TIMESTAMP__' + JSON.stringify({
           warranty: tableColumns('youtube_warranty_claims'),
           quest: tableColumns('quest_service_requests'),
           indexes,
+          emptyClaimLookup,
         }));
         db.close();
       `;
@@ -62,7 +65,11 @@ describe('legacy timestamp schema migration', () => {
 
       expect(result.warranty).toContain('updated_at');
       expect(result.warranty).toContain('revision');
+      expect(result.warranty).toContain('ticket_id');
+      expect(result.warranty).toContain('ticket_channel_id');
+      expect(result.warranty).toContain('customer_id');
       expect(result.quest).toContain('updated_at');
+      expect(result.emptyClaimLookup).toBeNull();
       expect(result.indexes).toEqual([
         'idx_quest_service_requests_queue',
         'idx_youtube_warranty_claims_status',
