@@ -51,8 +51,9 @@ import {
 import { getPriceBoardProducts, PRICE_BOARD_VERSION } from './autoSetupPriceBoardService.js';
 import { scheduleFeedbackTicketAutoClose } from './feedbackService.js';
 import {
-    getPublicYoutubeWarrantyClaim,
-    refreshYoutubeWarrantyClaimNotification,
+  getPublicYoutubeWarrantyClaim,
+  getYoutubeWarrantySyncState,
+  refreshYoutubeWarrantyClaimNotification,
     submitYoutubeWarrantyGmail,
 } from './youtubeWarrantyClaimService.js';
 
@@ -357,6 +358,7 @@ export function registerBotApiRoutes(app) {
             service: 'cenar-store-bot',
             commitSha: runtimeCommitSha,
             discordReady,
+            youtubeWarrantySync: getYoutubeWarrantySyncState(),
             uptime: Math.floor(process.uptime()),
             timestamp: Date.now(),
         });

@@ -21,6 +21,7 @@ export const YOUTUBE_GUIDE_URL = `https://discord.com/channels/12826370333404037
 
 const CLAIM_STATUSES = new Set(['AWAITING_CUSTOMER', 'SUBMITTED', 'COMPLETED', 'CANCELLED']);
 const GMAIL_PATTERN = /^[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@(gmail\.com|googlemail\.com)$/i;
+let youtubeWarrantySyncState = { status: 'never', updatedAt: null, result: null };
 
 export class YoutubeWarrantyClaimError extends Error {
   constructor(message, code = 'INVALID_REQUEST') {
@@ -561,6 +562,7 @@ export async function syncYoutubeWarrantyClaimsAcrossGuilds(client, { guildIds =
     ...(client?.guilds?.cache?.keys?.() || []),
   ])];
   const total = { scanned: 0, created: 0, published: 0, current: 0, missingChannels: 0, skipped: 0, failed: 0 };
+  youtubeWarrantySyncState = { status: 'running', updatedAt: new Date().toISOString(), result: null };
   for (const guildId of ids) {
     try {
       const result = await syncYoutubeWarrantyClaims(client, { guildId });
@@ -570,7 +572,12 @@ export async function syncYoutubeWarrantyClaimsAcrossGuilds(client, { guildIds =
       console.error(`[YOUTUBE-WARRANTY] Guild ${guildId} sync failed:`, error);
     }
   }
+  youtubeWarrantySyncState = { status: 'success', updatedAt: new Date().toISOString(), result: { ...total, guilds: ids.length } };
   return total;
+}
+
+export function getYoutubeWarrantySyncState() {
+  return youtubeWarrantySyncState;
 }
 
 export async function refreshYoutubeWarrantyClaimNotification(client, claimId) {
