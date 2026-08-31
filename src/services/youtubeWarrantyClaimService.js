@@ -66,9 +66,9 @@ function maskEmail(email) {
 }
 
 function normalizeGmail(value) {
-  const email = text(value, 254).toLowerCase();
+  const email = text(value, 254).toLowerCase().replace(/\s+/g, '');
   if (!GMAIL_PATTERN.test(email)) {
-    throw new YoutubeWarrantyClaimError('Vui lòng nhập đúng địa chỉ Gmail dùng để nhận lời mời YouTube Family.', 'INVALID_GMAIL');
+    throw new YoutubeWarrantyClaimError('Gmail phải có dạng tenban@gmail.com hoặc tenban@googlemail.com.', 'INVALID_GMAIL');
   }
   return email;
 }
