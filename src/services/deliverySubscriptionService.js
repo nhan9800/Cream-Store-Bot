@@ -7,6 +7,18 @@ function positiveMonths(value, fallback = 1) {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
 }
 
+/**
+ * Thời điểm bắt đầu quyền lợi phải bám theo lúc khách thực sự nhận dịch vụ.
+ * created_at chỉ là phương án cuối cho dữ liệu cũ chưa có mốc giao/hoàn tất.
+ */
+export function resolveDeliveryServiceStartAt(order, fallback = new Date().toISOString()) {
+  return order?.delivered_at
+    || order?.completed_at
+    || order?.paid_at
+    || order?.created_at
+    || fallback;
+}
+
 export function detectDeliverySubscriptionService(order) {
   const serviceType = String(order?.service_type || '').toLowerCase();
   const productName = String(order?.product_name || '').toLowerCase();
@@ -61,7 +73,7 @@ export function buildDeliverySubscriptionInput({
     customerId: order.customer_id || null,
     customerDiscordName: customerDiscordName || null,
     relatedOrderCode: order.order_code,
-    purchaseDate: order.delivered_at || order.completed_at || new Date().toISOString(),
+    purchaseDate: resolveDeliveryServiceStartAt(order),
     totalDurationMonths,
     renewalCycleMonths,
     spotifyFamilyName: serviceType === 'spotify_family' ? (profile || null) : null,

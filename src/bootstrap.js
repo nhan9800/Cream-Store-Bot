@@ -7,7 +7,7 @@ import { startWebhookServer } from './services/webhookServer.js';
 import { startPresenceRotation } from './services/presenceService.js';
 import { startOtpAutoCheck } from './services/otpAutoCheckService.js';
 import { backfillRecentDeliverySubscriptions } from './services/deliverySubscriptionService.js';
-import { migrateSubscriptionMonthlyCycles } from './services/subscriptionService.js';
+import { migrateSubscriptionMonthlyCycles, repairNetflixDeliveryStartDates } from './services/subscriptionService.js';
 import {
   cleanupExpiredTranscripts,
   cleanupTranscriptArchiveStorage,
@@ -35,6 +35,11 @@ export async function buildClient() {
   console.log(`[TRANSCRIPT-CLEANUP] legacyScanned=${transcriptCleanup.scanned} legacyRemoved=${transcriptCleanup.removed} expired=${archiveCleanup.expired} cacheRemoved=${archiveCleanup.cacheRemoved}`);
   const subscriptionMigration = migrateSubscriptionMonthlyCycles();
   console.log(`[SUBSCRIPTION-MIGRATION] scanned=${subscriptionMigration.scanned} normalized=${subscriptionMigration.normalized} needsReview=${subscriptionMigration.needsReview} history=${subscriptionMigration.historyCreated}`);
+  const netflixDateRepair = repairNetflixDeliveryStartDates();
+  console.log(`[NETFLIX-DATE-REPAIR] scanned=${netflixDateRepair.scanned} repaired=${netflixDateRepair.repaired.length}`);
+  for (const repaired of netflixDateRepair.repaired) {
+    console.log(`[NETFLIX-DATE-REPAIR] order=${repaired.orderCode} oldExpiry=${repaired.previousExpiryAt} newExpiry=${repaired.expiryAt}`);
+  }
   const subscriptionBackfill = backfillRecentDeliverySubscriptions({ lookbackDays: 3650 });
   console.log(`[SUBSCRIPTION-SYNC] scanned=${subscriptionBackfill.scanned} created=${subscriptionBackfill.created} skipped=${subscriptionBackfill.skipped} failed=${subscriptionBackfill.failed.length}`);
   for (const failure of subscriptionBackfill.failed) {

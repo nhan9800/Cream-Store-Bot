@@ -1,6 +1,7 @@
 import { EmbedBuilder } from 'discord.js';
 import { addSubscription, getSubscriptionById as getSubById, getSubscriptionProgress, markCustomerResponse as markSubResponse } from '../services/subscriptionService.js';
 import { buildOwnerCustomerWantsRenewalV2, getReminderChannel } from '../services/deepNotificationService.js';
+import { resolveDeliveryServiceStartAt } from '../services/deliverySubscriptionService.js';
 import { getOrderByCode } from '../services/orderService.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { safeReply, parseDateInput } from './shared.js';
@@ -61,7 +62,8 @@ export async function handleSubscriptionAddModal(interaction) {
         if (order) {
           relatedOrderCode = order.order_code;
           customerId = order.customer_id;
-          purchaseDate = order.created_at; // Override purchase date từ đơn hàng
+          // Quyền lợi bắt đầu khi giao hàng, không phải khi ticket/đơn được tạo.
+          purchaseDate = resolveDeliveryServiceStartAt(order);
           
           if (type !== 'spotify') {
             duration = order.duration_months || duration;

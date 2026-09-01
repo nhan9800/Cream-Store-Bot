@@ -471,7 +471,9 @@ export function upsertSubscriptionFromDelivery(data) {
   const existing = getSubscriptionByOrderCode(data.relatedOrderCode);
   if (!existing) return addSubscription({ ...data, source: data.source || 'DELIVERY' });
 
-  const purchaseDate = existing.purchase_date || data.purchaseDate;
+  // Dữ liệu giao hàng là nguồn chuẩn. Thứ tự cũ giữ purchase_date sai được tạo
+  // từ order.created_at và khiến hạn Netflix đến sớm hơn ngày khách nhận hàng.
+  const purchaseDate = data.purchaseDate || existing.purchase_date;
   const totalDurationMonths = Math.max(1, Number(data.totalDurationMonths || 1));
   const renewalMode = data.renewalMode === 'full_paid'
     ? 'full_paid'
@@ -895,6 +897,107 @@ export function migrateSubscriptionMonthlyCycles({ guildId = null } = {}) {
   });
   migrate.immediate();
   return { scanned: rows.length, normalized, needsReview, historyCreated };
+}
+
+function dateTimesMatch(left, right, toleranceMs = 1000) {
+  const leftMs = new Date(left || 0).getTime();
+  const rightMs = new Date(right || 0).getTime();
+  return Number.isFinite(leftMs)
+    && Number.isFinite(rightMs)
+    && Math.abs(leftMs - rightMs) <= toleranceMs;
+}
+
+/**
+ * Sửa đúng lỗi lịch sử của modal Netflix: purchase_date từng được gán bằng
+ * orders.created_at dù khách chỉ bắt đầu dùng khi orders.delivered_at.
+ *
+ * Migration cố ý rất hẹp: chỉ đụng subscription Netflix liên kết đơn hàng,
+ * chưa từng gia hạn/chưa có phản hồi và purchase_date khớp chính xác ngày tạo
+ * đơn. Vì vậy các lần gia hạn hợp lệ hoặc mốc được Admin chỉnh tay được giữ lại.
+ */
+export function repairNetflixDeliveryStartDates({ now = new Date() } = {}) {
+  const current = new Date(now);
+  if (!Number.isFinite(current.getTime())) throw new Error('Mốc kiểm tra Netflix không hợp lệ.');
+
+  const rows = db.prepare(`
+    SELECT
+      subscription_accounts.*,
+      orders.created_at AS order_created_at,
+      orders.paid_at AS order_paid_at,
+      orders.completed_at AS order_completed_at,
+      orders.delivered_at AS order_delivered_at
+    FROM subscription_accounts
+    INNER JOIN orders
+      ON orders.order_code = subscription_accounts.related_order_code
+    WHERE LOWER(subscription_accounts.service_type) = 'netflix'
+      AND subscription_accounts.related_order_code IS NOT NULL
+      AND orders.delivered_at IS NOT NULL
+      AND COALESCE(subscription_accounts.times_renewed, 0) = 0
+      AND subscription_accounts.customer_response IS NULL
+    ORDER BY subscription_accounts.id ASC
+  `).all();
+
+  const update = db.prepare(`
+    UPDATE subscription_accounts
+    SET purchase_date = ?,
+        next_renewal_at = ?,
+        expiry_at = ?,
+        status = ?,
+        renewal_remind_sent_at = NULL,
+        admin_reminder_stage = NULL,
+        admin_reminder_sent_at = NULL,
+        admin_reminder_message_id = NULL,
+        admin_reminder_channel_id = NULL,
+        admin_claimed_by_id = NULL,
+        admin_claimed_at = NULL,
+        admin_snoozed_until = NULL,
+        admin_last_action_at = NULL,
+        updated_at = ?
+    WHERE id = ?
+  `);
+  const repaired = [];
+
+  const repair = db.transaction(() => {
+    for (const sub of rows) {
+      const canonicalStart = sub.order_delivered_at
+        || sub.order_completed_at
+        || sub.order_paid_at
+        || sub.order_created_at;
+      if (!dateTimesMatch(sub.purchase_date, sub.order_created_at)) continue;
+      if (dateTimesMatch(sub.purchase_date, canonicalStart)) continue;
+
+      const totalMonths = Math.max(1, Number.parseInt(String(sub.total_duration_months || 1), 10) || 1);
+      const expiryAt = computeExpiry(canonicalStart, totalMonths);
+      let nextRenewalAt = null;
+      if (sub.renewal_mode === 'auto_cycle') {
+        const cycleMonths = Math.max(1, Number.parseInt(String(sub.renewal_cycle_months || 1), 10) || 1);
+        nextRenewalAt = computeNextRenewal(canonicalStart, cycleMonths, Number(sub.times_renewed || 0));
+        if (new Date(nextRenewalAt) >= new Date(expiryAt)) nextRenewalAt = null;
+      }
+
+      const status = ['ACTIVE', 'EXPIRED'].includes(sub.status)
+        ? (new Date(expiryAt) <= current ? 'EXPIRED' : 'ACTIVE')
+        : sub.status;
+      const updatedAt = nowIso();
+      update.run(canonicalStart, nextRenewalAt, expiryAt, status, updatedAt, sub.id);
+      recordSubscriptionEvent(sub.id, 'START_DATE_REPAIRED', {
+        source: 'NETFLIX_DELIVERY_DATE_REPAIR',
+        scheduledFor: nextRenewalAt || expiryAt,
+        note: `Sửa ngày bắt đầu từ ngày tạo đơn (${sub.purchase_date}) sang ngày giao hàng (${canonicalStart}); hạn cũ ${sub.expiry_at}, hạn mới ${expiryAt}.`,
+      });
+      repaired.push({
+        subscriptionId: sub.id,
+        orderCode: sub.related_order_code,
+        previousStartAt: sub.purchase_date,
+        startAt: canonicalStart,
+        previousExpiryAt: sub.expiry_at,
+        expiryAt,
+      });
+    }
+  });
+  repair.immediate();
+
+  return { scanned: rows.length, repaired };
 }
 
 /**
