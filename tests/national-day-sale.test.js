@@ -48,18 +48,27 @@ describe('National Day 2/9 sale campaign', () => {
     expect(content).toContain('mua thẳng 01 năm');
   });
 
-  it('builds three mobile-readable Components V2 messages without any ping', () => {
+  it('pings everyone once in the promotion opener and never repeats the ping', () => {
     const messages = buildNationalDaySaleMessages({ E: emojiResolver, customEmojis });
     expect(messages).toHaveLength(3);
 
     messages.forEach((payload, index) => {
       expect(payload.flags & MessageFlags.IsComponentsV2).toBeTruthy();
-      expect(payload.allowedMentions).toEqual({ parse: [], roles: [], users: [], repliedUser: false });
+      expect(payload.allowedMentions).toEqual({
+        parse: index === 0 ? ['everyone'] : [],
+        roles: [],
+        users: [],
+        repliedUser: false,
+      });
       const json = JSON.stringify(payload);
       expect(json).toContain(`${NATIONAL_DAY_SALE.marker}-PART-${index + 1}`);
-      expect(json).not.toContain('@everyone');
+      if (index === 0) expect(json).toContain('@everyone');
+      else expect(json).not.toContain('@everyone');
       expect(json).not.toMatch(NATIVE_EMOJI);
     });
+
+    expect(NATIONAL_DAY_SALE.promotionChannelId).toBe('1515008584549797979');
+    expect(NATIONAL_DAY_SALE.legacyAnnouncementChannelId).toBe('1514598369597587546');
 
     const last = messages.at(-1).components[0].toJSON();
     const actionRow = last.components.at(-1);

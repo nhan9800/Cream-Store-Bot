@@ -32,16 +32,17 @@ try {
   global.discordClient = client;
   const { updatedSlots } = autoSyncGuildEmojis(guild);
 
-  const channel = await guild.channels.fetch(NATIONAL_DAY_SALE.announcementChannelId);
+  const channel = await guild.channels.fetch(NATIONAL_DAY_SALE.promotionChannelId);
   if (!channel?.isTextBased() || channel.isThread?.()) {
-    throw new Error('Kênh thông báo không hợp lệ hoặc không thể gửi tin nhắn.');
+    throw new Error('Kênh khuyến mãi không hợp lệ hoặc không thể gửi tin nhắn.');
   }
   const member = guild.members.me || await guild.members.fetchMe();
   if (!channel.permissionsFor(member)?.has([
     PermissionFlagsBits.ViewChannel,
     PermissionFlagsBits.SendMessages,
+    PermissionFlagsBits.MentionEveryone,
   ])) {
-    throw new Error('Bot thiếu quyền xem hoặc gửi tin nhắn tại kênh thông báo.');
+    throw new Error('Bot thiếu quyền xem, gửi tin nhắn hoặc tag everyone tại kênh khuyến mãi.');
   }
 
   const payloads = buildNationalDaySaleMessages({
@@ -70,12 +71,28 @@ try {
     });
   }
 
+  // Chỉ dọn đúng các phần của chiến dịch này do chính bot đăng ở kênh cũ,
+  // và chỉ sau khi cả ba phần đã xuất hiện thành công tại kênh khuyến mãi.
+  const legacyChannel = await guild.channels.fetch(NATIONAL_DAY_SALE.legacyAnnouncementChannelId);
+  const deletedLegacyMessages = [];
+  if (legacyChannel?.isTextBased() && !legacyChannel.isThread?.()) {
+    const legacyRecent = await legacyChannel.messages.fetch({ limit: 100 });
+    const legacyCampaignMessages = legacyRecent.filter((message) => (
+      nationalDaySalePart(message, client.user.id) !== null
+    ));
+    for (const message of legacyCampaignMessages.values()) {
+      await message.delete();
+      deletedLegacyMessages.push(message.id);
+    }
+  }
+
   console.log(JSON.stringify({
     guild: guild.name,
     channelId: channel.id,
     emojis: campaignEmojis,
     updatedEmojiSlots: updatedSlots,
     messages: results,
+    deletedLegacyMessages,
   }, null, 2));
 } finally {
   client.destroy();

@@ -18,7 +18,8 @@ const emojiAssetRoot = path.resolve(__dirname, '../../assets/emojis');
 
 export const NATIONAL_DAY_SALE = Object.freeze({
   guildId: '1282637033340403754',
-  announcementChannelId: '1514598369597587546',
+  promotionChannelId: '1515008584549797979',
+  legacyAnnouncementChannelId: '1514598369597587546',
   supportChannelId: '1514607020098191393',
   priceChannelId: '1514606995842273280',
   storeUrl: 'https://cenarstore.xyz/products',
@@ -182,6 +183,7 @@ export function buildNationalDaySaleMessages({
   guildId = NATIONAL_DAY_SALE.guildId,
   E = createEmojiResolver(guildId),
   customEmojis = {},
+  tagEveryone = true,
 } = {}) {
   const sections = buildNationalDaySaleSections({ guildId, E, customEmojis });
   const supportUrl = `https://discord.com/channels/${guildId}/${NATIONAL_DAY_SALE.supportChannelId}`;
@@ -214,7 +216,17 @@ export function buildNationalDaySaleMessages({
   return [
     {
       ...common,
-      components: [panel(0xda251d, [sections.hero, sections.nitro, sections.boostNetflix])],
+      components: [panel(0xda251d, [
+        `${tagEveryone ? '@everyone\n' : ''}${sections.hero}`,
+        sections.nitro,
+        sections.boostNetflix,
+      ])],
+      allowedMentions: {
+        parse: tagEveryone ? ['everyone'] : [],
+        roles: [],
+        users: [],
+        repliedUser: false,
+      },
     },
     {
       ...common,
