@@ -19,6 +19,7 @@
     "publish:national-day-sale": "node scripts/publish-national-day-sale.js",
     "publish:transcript-archive-launch": "node scripts/publish-transcript-archive-launch.js",
     "publish:youtube-join-fam-guide": "node scripts/publish-youtube-join-fam-guide.js",
+    "publish:nitro-gmail-phone-guide": "node scripts/publish-nitro-gmail-phone-guide.js",
     "publish:promotion-board": "node scripts/publish-promotion-board.js",
     "sync:promotion-emojis": "node scripts/sync-promotion-emojis.js",
     "publish:boost-level3-sale": "node scripts/publish-server-boost-level3-sale.js",
