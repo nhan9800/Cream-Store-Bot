@@ -960,6 +960,24 @@ export function markAdminReminderSent(id, {
   return result.changes === 1 ? getSubscriptionById(id) : null;
 }
 
+export function resetOrphanedAdminReminderDispatch(id, expectedMessageId = null) {
+  const ts = nowIso();
+  const result = db.prepare(`
+    UPDATE subscription_accounts
+    SET admin_reminder_stage = NULL,
+        admin_reminder_sent_at = NULL,
+        admin_reminder_for_at = NULL,
+        admin_reminder_message_id = NULL,
+        admin_reminder_channel_id = NULL,
+        admin_last_action_at = ?,
+        updated_at = ?
+    WHERE id = ?
+      AND status = 'ACTIVE'
+      AND COALESCE(admin_reminder_message_id, '') = ?
+  `).run(ts, ts, id, String(expectedMessageId || ''));
+  return result.changes === 1 ? getSubscriptionById(id) : null;
+}
+
 export function claimAdminRenewal(id, adminId) {
   const sub = getSubscriptionById(id);
   if (!sub || sub.status !== 'ACTIVE') return null;

@@ -20,6 +20,7 @@ import {
   markDisconnected,
   markRenewed,
   reserveAdminReminderDispatch,
+  resetOrphanedAdminReminderDispatch,
   snoozeAdminRenewal,
 } from './subscriptionService.js';
 import { createEmojiResolver, withButtonEmoji } from '../utils/emojiHelper.js';
@@ -444,6 +445,75 @@ export async function cleanupAdminRenewalMessagesForRepair(client, {
     if (page.size < 100) break;
   }
   return { scanned, deleted, channelId: channel.id };
+}
+
+/**
+ * Dọn panel gia hạn cũ/trùng sau restart. Chỉ xét message do chính bot gửi và
+ * có custom-id subscription; giữ nguyên message-id đang được database quản lý.
+ */
+export async function cleanupStaleAdminRenewalPanels(client, { maxMessages = 500 } = {}) {
+  if (String(config.guildId) !== STORE_ONE_GUILD_ID) {
+    return { skipped: true, scanned: 0, deleted: [], reset: [] };
+  }
+  const guild = client.guilds.cache.get(STORE_ONE_GUILD_ID)
+    || await client.guilds.fetch(STORE_ONE_GUILD_ID).catch(() => null);
+  if (!guild) return { skipped: false, scanned: 0, deleted: [], reset: [], reason: 'guild_unavailable' };
+  const settings = getGuildConfig(STORE_ONE_GUILD_ID);
+  const channel = await resolveReminderChannel(client, guild, settings);
+  if (!channel?.isTextBased()) {
+    return { skipped: false, scanned: 0, deleted: [], reset: [], reason: 'channel_unavailable' };
+  }
+
+  const safeLimit = Math.min(1_000, Math.max(1, Number(maxMessages) || 500));
+  const deleted = [];
+  const reset = [];
+  const touched = new Set();
+  const currentSeen = new Set();
+  let scanned = 0;
+  let before;
+  while (scanned < safeLimit) {
+    const page = await channel.messages.fetch({
+      limit: Math.min(100, safeLimit - scanned),
+      ...(before ? { before } : {}),
+    }).catch(() => null);
+    if (!page?.size) break;
+    for (const message of page.values()) {
+      scanned += 1;
+      if (message.author?.id !== client.user?.id) continue;
+      const serialized = JSON.stringify(message.toJSON?.() || message);
+      const match = serialized.match(/sub:admin:(?:claim|renew|disconnect|snooze):(\d+)/);
+      if (!match) continue;
+      const id = Number(match[1]);
+      if (!Number.isInteger(id)) continue;
+      touched.add(id);
+      const sub = getSubscriptionById(id);
+      const isCurrent = sub
+        && sub.status === 'ACTIVE'
+        && sub.progress_status !== 'NEEDS_REVIEW'
+        && String(sub.admin_reminder_message_id || '') === String(message.id);
+      if (isCurrent) {
+        currentSeen.add(id);
+        continue;
+      }
+      if (await message.delete().then(() => true).catch(() => false)) deleted.push(message.id);
+    }
+    before = page.last()?.id;
+    if (page.size < 100) break;
+  }
+
+  for (const id of touched) {
+    if (currentSeen.has(id)) continue;
+    const sub = getSubscriptionById(id);
+    if (!sub || sub.status !== 'ACTIVE') continue;
+    const currentMessageId = String(sub.admin_reminder_message_id || '');
+    if (currentMessageId) {
+      const currentMessage = await channel.messages.fetch(currentMessageId).catch(() => null);
+      if (currentMessage?.author?.id === client.user?.id) continue;
+    }
+    if (resetOrphanedAdminReminderDispatch(id, currentMessageId)) reset.push(id);
+  }
+
+  return { skipped: false, scanned, deleted, reset, channelId: channel.id };
 }
 
 async function updateInteraction(interaction, payload) {

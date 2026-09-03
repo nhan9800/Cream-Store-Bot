@@ -13,7 +13,10 @@ import {
   migrateSubscriptionMonthlyCycles,
   repairNetflixDeliveryStartDates,
 } from './services/subscriptionService.js';
-import { cleanupAdminRenewalMessagesForRepair } from './services/adminRenewalReminderService.js';
+import {
+  cleanupAdminRenewalMessagesForRepair,
+  cleanupStaleAdminRenewalPanels,
+} from './services/adminRenewalReminderService.js';
 import {
   cleanupExpiredTranscripts,
   cleanupTranscriptArchiveStorage,
@@ -87,6 +90,9 @@ export async function buildClient() {
         markSubscriptionProgressRepairCleanupComplete(ownerConfirmedRepairMigrationId, cleanup.deleted);
       }
     }
+    const stalePanelCleanup = await cleanupStaleAdminRenewalPanels(readyClient)
+      .catch((error) => ({ scanned: 0, deleted: [], reset: [], error: error.message }));
+    console.log(`[SUBSCRIPTION-PANEL-SWEEP] scanned=${stalePanelCleanup.scanned || 0} deleted=${stalePanelCleanup.deleted?.length || 0} reset=${stalePanelCleanup.reset?.length || 0}${stalePanelCleanup.error ? ` error=${stalePanelCleanup.error}` : ''}`);
     try {
       await startWebhookServer(readyClient);
     } catch (error) {

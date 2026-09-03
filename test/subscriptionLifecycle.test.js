@@ -12,6 +12,7 @@ import {
   markRenewed,
   migrateSubscriptionMonthlyCycles,
   reserveAdminReminderDispatch,
+  resetOrphanedAdminReminderDispatch,
   setSubscriptionFulfilledMonths,
 } from '../src/services/subscriptionService.js';
 
@@ -190,6 +191,36 @@ describe('subscription monthly lifecycle', () => {
       reservedAt,
       reminderForAt: created.next_renewal_at,
     })).toBeNull();
+  });
+
+  it('only resets an orphaned panel when its stored message id still matches', () => {
+    const created = createSubscription({ months: 12, suffix: 'orphaned-panel' });
+    const reservedAt = '2026-02-27T10:30:00.000Z';
+    reserveAdminReminderDispatch(created.id, {
+      stage: 'URGENT_1D',
+      channelId: 'CHANNEL_1',
+      expectedStage: null,
+      expectedSentAt: null,
+      expectedTimesRenewed: 0,
+      expectedActionAt: created.next_renewal_at,
+      sentAt: reservedAt,
+    });
+    markAdminReminderSent(created.id, {
+      stage: 'URGENT_1D',
+      messageId: 'CURRENT_MESSAGE',
+      channelId: 'CHANNEL_1',
+      reservedAt,
+      reminderForAt: created.next_renewal_at,
+    });
+
+    expect(resetOrphanedAdminReminderDispatch(created.id, 'STALE_MESSAGE')).toBeNull();
+    const reset = resetOrphanedAdminReminderDispatch(created.id, 'CURRENT_MESSAGE');
+    expect(reset).toMatchObject({
+      admin_reminder_stage: null,
+      admin_reminder_sent_at: null,
+      admin_reminder_for_at: null,
+      admin_reminder_message_id: null,
+    });
   });
 
   it('pauses automatic reminders when the next calculated cycle would alert immediately again', () => {
