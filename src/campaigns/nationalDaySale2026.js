@@ -135,8 +135,9 @@ export function buildNationalDaySaleSections({
     ].join('\n'),
     geminiOffice: [
       `## ${E('brand_gemini')} GEMINI PRO + GOOGLE ONE 5 TB`,
-      `${sale} \`12 tháng\` — **119.000đ**`,
-      `${sale} \`18 tháng\` — **150.000đ**`,
+      `${sale} \`12 tháng\` — **250.000đ** · **Full bảo hành**`,
+      `${sale} \`18 tháng\` — **280.000đ** · **Full bảo hành**`,
+      `-# ${E('status_info')} Giá mới áp dụng từ 03/09/2026 do phương thức triển khai cũ không còn khả dụng sau thay đổi từ Google.`,
       '',
       `## ${E('brand_office')} OFFICE 365 + ONEDRIVE 1 TB`,
       `${sale} \`12 tháng\` — **180.000đ**`,

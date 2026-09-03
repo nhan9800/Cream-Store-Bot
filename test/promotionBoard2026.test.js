@@ -45,7 +45,8 @@ describe('Cenar promotion board 2026', () => {
     expect(json).toContain('Cấp tài khoản** — `350.000đ`');
     expect(json).toContain('Office 365 Plus + 1 TB OneDrive · Cấp tài khoản** — `100.000đ`');
     expect(json).toContain('Tài khoản chính chủ** — `180.000đ`');
-    expect(json).toContain('Gemini Pro + 5 TB Google One** — `150.000đ`');
+    expect(json).toContain('Gemini Pro + 5 TB Google One · Full bảo hành** — `250.000đ`');
+    expect(json).toContain('Gemini Pro + 5 TB Google One · Full bảo hành** — `280.000đ`');
     expect(json).toContain('Windows 10/11 Pro chính hãng** — `150.000đ`');
     expect(json).toContain('Locket Gold** — `100.000đ`');
     expect(json).toContain('Canva Pro** — `130.000đ`');

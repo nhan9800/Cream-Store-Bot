@@ -14,7 +14,6 @@ export const AI_CREATIVE_PRICING_UPDATE = Object.freeze({
     claudePro: 'claude-pro-1-month',
     gemini12Months: 'gemini-pro-google-one-5tb-12-months-full-warranty',
     gemini18Months: 'gemini-pro-google-one-5tb-18-months-full-warranty',
-    geminiValue: 'gemini-pro-google-one-5tb-12-months-4-month-warranty',
     adobe: 'adobe-creative-cloud-1-month',
   }),
 });
@@ -29,7 +28,6 @@ export function getAiCreativePricingProducts(products) {
     claudePro: byKey.get(AI_CREATIVE_PRICING_UPDATE.productKeys.claudePro),
     gemini12Months: byKey.get(AI_CREATIVE_PRICING_UPDATE.productKeys.gemini12Months),
     gemini18Months: byKey.get(AI_CREATIVE_PRICING_UPDATE.productKeys.gemini18Months),
-    geminiValue: byKey.get(AI_CREATIVE_PRICING_UPDATE.productKeys.geminiValue),
     adobe: byKey.get(AI_CREATIVE_PRICING_UPDATE.productKeys.adobe),
   };
 }
@@ -71,7 +69,7 @@ export function buildAiCreativePricingAnnouncement(guildId, products) {
     `> ${E('payment_money')} **Giá:** ${formatCurrency(selected.claudePro.price)} / 1 tháng`,
     `> ${E('warranty_shield')} **Bảo hành:** Full trong suốt thời gian sử dụng`,
     '',
-    `### ${E('brand_gemini')} GEMINI PRO + 5 TB GOOGLE ONE · 3 LỰA CHỌN`,
+    `### ${E('brand_gemini')} GEMINI PRO + 5 TB GOOGLE ONE · 2 LỰA CHỌN MỚI`,
     `**01 · Gói 12 tháng · Full bảo hành**`,
     `> ${E('payment_money')} **Giá:** ${formatCurrency(selected.gemini12Months.price)}`,
     `> ${E('warranty_shield')} **Bảo hành:** Full 12 tháng`,
@@ -80,10 +78,7 @@ export function buildAiCreativePricingAnnouncement(guildId, products) {
     `> ${E('payment_money')} **Giá:** ${formatCurrency(selected.gemini18Months.price)}`,
     `> ${E('warranty_shield')} **Bảo hành:** Full 18 tháng`,
     '',
-    `**03 · Gói tiết kiệm 12 tháng · Bảo hành giới hạn**`,
-    `> ${E('payment_money')} **Giá:** ${formatCurrency(selected.geminiValue.price)}`,
-    `> ${E('warranty_shield')} **Bảo hành:** 4 tháng đầu`,
-    `> ${E('status_info')} **Thời gian sử dụng:** Gói có thể duy trì lâu hơn 12 tháng tùy trạng thái hệ thống, nhưng thời gian vượt phạm vi bảo hành không được cam kết.`,
+    `> ${E('status_info')} Phương thức giá cũ đã ngừng áp dụng sau thay đổi từ Google; shop chỉ nhận đơn theo hai nguồn mới full bảo hành ở trên.`,
     '',
     `### ${E('brand_adobe')} ADOBE CREATIVE CLOUD ALL APPS`,
     `> ${E('payment_money')} **Giá:** ${formatCurrency(selected.adobe.price)} / 1 tháng`,

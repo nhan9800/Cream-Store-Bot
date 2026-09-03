@@ -189,6 +189,7 @@ describe('Partner and CTV system', () => {
       expect(text).toContain('Spotify Premium Add Family 12 Tháng');
     }
     expect(CTV_OFFICIAL_PRICE_CATALOG.spotify.map((item) => item.price)).toEqual([80_000, 160_000, 260_000]);
+    expect(CTV_OFFICIAL_PRICE_CATALOG.gemini.map((item) => item.price)).toEqual([250_000, 280_000]);
     expect(CTV_OFFICIAL_PRICE_CATALOG).not.toHaveProperty('youtubeMonthly');
     expect(CTV_OFFICIAL_PRICE_CATALOG.youtubeStable.map((item) => item.price)).toEqual([55_000, 180_000, 300_000, 520_000]);
   });

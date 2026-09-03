@@ -25,7 +25,7 @@ describe('National Day 2/9 sale campaign', () => {
     const content = Object.values(sections).join('\n');
     const prices = [
       '85.000đ', '99.000đ', '115.000đ', '210.000đ', '310.000đ', '450.000đ', '550.000đ', '800.000đ', '55.000đ',
-      '90.000đ', '230.000đ', '30.000đ', '50.000đ', '119.000đ', '150.000đ', '180.000đ', '130.000đ', '390.000đ',
+      '90.000đ', '230.000đ', '30.000đ', '50.000đ', '250.000đ', '280.000đ', '180.000đ', '130.000đ', '390.000đ',
       '295.000đ', '280.000đ', '65.000đ', '185.000đ', '530.000đ',
     ];
     prices.forEach((price) => expect(content).toContain(price));
@@ -46,6 +46,8 @@ describe('National Day 2/9 sale campaign', () => {
     expect(content).toContain('xử lý 4–5 ngày');
     expect(content).toContain('gia hạn tự động');
     expect(content).toContain('mua thẳng 01 năm');
+    expect(content).toContain('Giá mới áp dụng từ 03/09/2026');
+    expect(content).toContain('Full bảo hành');
   });
 
   it('pings everyone once in the promotion opener and never repeats the ping', () => {

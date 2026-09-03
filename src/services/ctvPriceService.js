@@ -37,8 +37,8 @@ export const CTV_OFFICIAL_PRICE_CATALOG = Object.freeze({
     { label: 'Boost Server 3 Tháng', price: 240_000 },
   ]),
   gemini: Object.freeze([
-    { label: 'Gemini Pro + 5 TB Google One 12 Tháng', price: 80_000 },
-    { label: 'Gemini Pro + 5 TB Google One 18 Tháng', price: 100_000 },
+    { label: 'Gemini Pro + 5 TB Google One 12 Tháng · Full bảo hành', price: 250_000 },
+    { label: 'Gemini Pro + 5 TB Google One 18 Tháng · Full bảo hành', price: 280_000 },
   ]),
   youtubeStable: Object.freeze([
     { label: 'YouTube Premium 1 Tháng · Ổn định cao', price: 55_000 },
@@ -86,7 +86,7 @@ function buildOfficialCtvPricePanel(guildId) {
     `# ${E('ctv_crystal')} CENAR CTV · BẢNG GIÁ NỘI BỘ`,
     `${E('cenar_verified')} Bảng giá chính thức dành riêng cho CTV đã được duyệt tại **Cenar Store**.`,
     `${E('cenar_price')} Đây là **một số sản phẩm nổi bật**; shop còn nhiều mặt hàng khác, CTV cần giá cứ hỏi trực tiếp shop.`,
-    `-# ${CTV_OFFICIAL_PANEL_MARKER} · Cập nhật ngày 01/09/2026`,
+    `-# ${CTV_OFFICIAL_PANEL_MARKER} · Cập nhật ngày 03/09/2026`,
   ].join('\n')));
 
   const nitro = new ContainerBuilder().setAccentColor(accentFor('primary'));

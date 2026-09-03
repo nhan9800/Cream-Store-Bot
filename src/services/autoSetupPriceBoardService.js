@@ -21,7 +21,7 @@ import { formatInternationalPrice, translateCatalogGroup, translateProductName }
 import { getNitroTrialEligibility, isNitroTrialProduct } from '../constants/nitroTrial.js';
 import { getNetflixPromoDetails, isNetflixPromoProduct } from '../constants/netflixPromotion.js';
 
-export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.15';
+export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.16';
 const PRIMARY_GUILD_ID = '1282637033340403754';
 const PRIMARY_PRICE_CHANNEL_ID = '1514606995842273280';
 const PRIMARY_PROMOTION_CHANNEL_ID = '1515008584549797979';
@@ -64,7 +64,7 @@ export const PRICE_GROUPS = [
   },
   {
     key: 'gemini', titleSlot: 'brand_gemini', title: 'Gemini & Google One', accent: 0x4285F4,
-    note: 'Gói Gemini Advanced/Pro kèm dung lượng Google One theo mô tả.',
+    note: 'Chỉ mở bán nguồn triển khai mới, gồm gói 12 và 18 tháng với bảo hành full toàn thời gian.',
     match: (p) => p.service_type === 'AI' && /gemini/i.test(p.name),
   },
   {

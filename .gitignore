@@ -67,6 +67,7 @@ scripts/*
 !scripts/sync-youtube-guide-emojis.js
 !scripts/publish-youtube-join-fam-guide.js
 !scripts/publish-nitro-gmail-phone-guide.js
+!scripts/publish-gemini-pricing-update.js
 !scripts/smoke-test.js
 !scripts/send-combo-announcement.js
 !scripts/send-service-panel.js

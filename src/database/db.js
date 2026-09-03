@@ -1651,10 +1651,10 @@ export const DEFAULT_PRODUCT_CATALOG = [
         'Gemini Pro + 5TB Google Driver (12 Tháng)',
         'Gemini Pro + 5TB Google Drive (12 Tháng)',
       ],
-      description: 'Gemini Pro kèm 5 TB Google One trong 12 tháng, bảo hành full suốt thời gian sử dụng.',
+      description: 'Gemini Pro kèm 5 TB Google One trong 12 tháng theo nguồn triển khai mới, bảo hành full suốt thời gian sử dụng.',
       warranty_policy: 'Full 12 tháng',
-      price: 130000,
-      ctv_price: 80000,
+      price: 250000,
+      ctv_price: 250000,
       duration_months: 12,
       service_type: 'AI',
       emoji: 'brand_gemini',
@@ -1665,28 +1665,11 @@ export const DEFAULT_PRODUCT_CATALOG = [
     {
       product_key: 'gemini-pro-google-one-5tb-18-months-full-warranty',
       name: 'Gemini Pro + 5 TB Google One 18 Tháng (Full BH)',
-      description: 'Gemini Pro kèm 5 TB Google One trong 18 tháng, bảo hành full suốt thời gian sử dụng.',
+      description: 'Gemini Pro kèm 5 TB Google One trong 18 tháng theo nguồn triển khai mới, bảo hành full suốt thời gian sử dụng.',
       warranty_policy: 'Full 18 tháng',
-      price: 180000,
-      ctv_price: 100000,
+      price: 280000,
+      ctv_price: 280000,
       duration_months: 18,
-      service_type: 'AI',
-      emoji: 'brand_gemini',
-      original_price: 0,
-      is_featured: 1,
-      virtual_purchase_count: 0,
-    },
-    {
-      product_key: 'gemini-pro-google-one-5tb-12-months-4-month-warranty',
-      name: 'Gemini Pro + 5 TB Google One 12 Tháng (BH 4 Tháng)',
-      aliases: [
-        'Gemini Advanced & 5 TB Google One (1 Năm - Không BH)',
-        'Gemini Pro + 5TB Google One 12 Tháng Không Bảo Hành',
-      ],
-      description: 'Gói tiết kiệm có thời hạn danh nghĩa 12 tháng và được Cenar bảo hành 4 tháng đầu. Tài khoản có thể duy trì lâu hơn tùy trạng thái hệ thống, nhưng thời gian vượt phạm vi bảo hành không được cam kết.',
-      warranty_policy: 'Bảo hành 4 tháng đầu',
-      price: 69000,
-      duration_months: 12,
       service_type: 'AI',
       emoji: 'brand_gemini',
       original_price: 0,
@@ -1860,8 +1843,7 @@ export function seedProductCatalog(dbInstance) {
           LOWER(REPLACE(name, ' ', '')) LIKE '%gemini%'
           AND COALESCE(product_key, '') NOT IN (
             'gemini-pro-google-one-5tb-12-months-full-warranty',
-            'gemini-pro-google-one-5tb-18-months-full-warranty',
-            'gemini-pro-google-one-5tb-12-months-4-month-warranty'
+            'gemini-pro-google-one-5tb-18-months-full-warranty'
           )
         )
       )

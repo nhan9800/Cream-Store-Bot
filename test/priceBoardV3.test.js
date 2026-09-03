@@ -331,7 +331,7 @@ describe('Cenar price board V3', () => {
     expect(announcement).toContain(AI_CREATIVE_PRICING_UPDATE.marker);
   });
 
-  it('synchronizes Claude Pro and the three canonical Gemini packages', () => {
+  it('synchronizes Claude Pro and the two new full-warranty Gemini packages', () => {
     const products = getActiveProducts(GUILD_ID);
     const claudePro = products.find((product) => (
       product.product_key === AI_CREATIVE_PRICING_UPDATE.productKeys.claudePro
@@ -340,32 +340,28 @@ describe('Cenar price board V3', () => {
 
     expect(claudePro?.price).toBe(530000);
     expect(claudePro?.original_price).toBe(0);
-    expect(geminiProducts).toHaveLength(3);
+    expect(geminiProducts).toHaveLength(2);
     expect(geminiProducts.map((product) => [product.product_key, product.price])).toEqual(expect.arrayContaining([
-      [AI_CREATIVE_PRICING_UPDATE.productKeys.gemini12Months, 130000],
-      [AI_CREATIVE_PRICING_UPDATE.productKeys.gemini18Months, 180000],
-      [AI_CREATIVE_PRICING_UPDATE.productKeys.geminiValue, 69000],
+      [AI_CREATIVE_PRICING_UPDATE.productKeys.gemini12Months, 250000],
+      [AI_CREATIVE_PRICING_UPDATE.productKeys.gemini18Months, 280000],
     ]));
-    expect(geminiProducts.find((product) => (
-      product.product_key === AI_CREATIVE_PRICING_UPDATE.productKeys.geminiValue
-    ))?.warranty_policy).toBe('Bảo hành 4 tháng đầu');
+    expect(geminiProducts.every((product) => /Full/.test(product.warranty_policy))).toBe(true);
 
     const payloadJson = buildPriceBoardPayloads(GUILD_ID, {}, products).map(serialize).join('\n');
     expect(payloadJson).toContain('530.000');
-    expect(payloadJson).toContain('130.000');
-    expect(payloadJson).toContain('180.000');
-    expect(payloadJson).toContain('69.000');
-    expect(payloadJson).toContain('Bảo hành 4 tháng đầu');
+    expect(payloadJson).toContain('250.000');
+    expect(payloadJson).toContain('280.000');
+    expect(payloadJson).not.toContain('69.000');
+    expect(payloadJson).not.toContain('Bảo hành 4 tháng đầu');
 
     const announcement = buildAiCreativePricingAnnouncement(GUILD_ID, products);
     expect(announcement).toContain('CLAUDE PRO');
-    expect(announcement).toContain('GEMINI PRO + 5 TB GOOGLE ONE · 3 LỰA CHỌN');
+    expect(announcement).toContain('GEMINI PRO + 5 TB GOOGLE ONE · 2 LỰA CHỌN MỚI');
     expect(announcement).toContain('530.000');
-    expect(announcement).toContain('130.000');
-    expect(announcement).toContain('180.000');
-    expect(announcement).toContain('69.000');
-    expect(announcement).toContain('4 tháng đầu');
-    expect(announcement).toContain('không được cam kết');
+    expect(announcement).toContain('250.000');
+    expect(announcement).toContain('280.000');
+    expect(announcement).not.toContain('69.000');
+    expect(announcement).toMatch(/phương thức giá cũ đã ngừng áp dụng/i);
   });
 
   it('renders every product as its own consistently spaced Markdown block', () => {

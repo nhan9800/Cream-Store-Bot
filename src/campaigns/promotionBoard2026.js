@@ -59,7 +59,8 @@ export const PROMOTION_BOARD = Object.freeze({
       Object.freeze({ duration: '1 Năm', price: 180_000, note: 'Office 365 + 1 TB OneDrive · Tài khoản chính chủ' }),
     ]),
     gemini: Object.freeze([
-      Object.freeze({ duration: '18 Tháng', price: 150_000, note: 'Gemini Pro + 5 TB Google One' }),
+      Object.freeze({ duration: '12 Tháng', price: 250_000, note: 'Gemini Pro + 5 TB Google One · Full bảo hành' }),
+      Object.freeze({ duration: '18 Tháng', price: 280_000, note: 'Gemini Pro + 5 TB Google One · Full bảo hành' }),
     ]),
     windows: Object.freeze([
       Object.freeze({ duration: 'Vĩnh viễn', price: 150_000, note: 'Key kích hoạt Windows 10/11 Pro chính hãng' }),
@@ -107,9 +108,9 @@ export function buildPromotionBoardPayload() {
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(normalizeV2Text([
       mentions,
       `# ${E('promo_discount')} SALE CUỐI HÈ · CENAR STORE`,
-      `### GIÁ TỐT ĐỂ CHỐT DEAL — SỐ LƯỢNG CÓ HẠN`,
-      `> ${E('icon_sparkle')} Loạt dịch vụ Premium được điều chỉnh về mức giá ưu đãi để bạn học tập, giải trí và nâng cấp Discord tiết kiệm hơn.`,
-      `> ${E('status_check')} Chọn đúng gói, mở ticket và chờ staff xác nhận nguồn hàng trước khi thanh toán.`,
+      `### GIÁ TỐT · SỐ LƯỢNG CÓ HẠN`,
+      `> ${E('icon_sparkle')} Giá ưu đãi cho các dịch vụ Premium nổi bật.`,
+      `> ${E('status_check')} Mở ticket để staff xác nhận nguồn hàng trước khi thanh toán.`,
     ].join('\n'))));
 
   const discordDeals = new ContainerBuilder()
