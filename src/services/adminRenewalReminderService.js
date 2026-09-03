@@ -29,14 +29,6 @@ import { isManager } from '../utils/permissions.js';
 import { emitAutomationLog } from './automationLogService.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
-const STAGE_ORDER = {
-  UPCOMING_7D: 1,
-  UPCOMING_3D: 2,
-  URGENT_1D: 3,
-  DUE_NOW: 4,
-  OVERDUE: 5,
-};
-
 const SERVICE_META = {
   nitro: { label: 'Discord Nitro', emoji: 'brand_nitro' },
   spotify_family: { label: 'Spotify Family', emoji: 'brand_spotify' },
@@ -122,10 +114,24 @@ export function resolveAdminReminderStage(sub, now = new Date()) {
 
 export function shouldSendAdminReminder(sub, stage, now = new Date()) {
   if (!stage) return false;
+  const dueAt = getSubscriptionAdminDueAt(sub);
+  const dueMs = new Date(dueAt || 0).getTime();
+  const completedMs = new Date(sub?.admin_last_completed_for_at || 0).getTime();
+  if (Number.isFinite(dueMs) && Number.isFinite(completedMs) && dueMs === completedMs) return false;
+
+  const reminderForMs = new Date(sub?.admin_reminder_for_at || 0).getTime();
+  if (
+    sub?.admin_reminder_sent_at
+    && Number.isFinite(dueMs)
+    && Number.isFinite(reminderForMs)
+    && dueMs === reminderForMs
+  ) return false;
+
   const previous = String(sub?.admin_reminder_stage || '');
-  if (!previous) return true;
-  if ((STAGE_ORDER[stage] || 0) > (STAGE_ORDER[previous] || 0)) return true;
-  return false;
+  // Dữ liệu cũ chưa có admin_reminder_for_at vẫn được xem là đã gửi cho kỳ
+  // hiện tại. Một kỳ chỉ có một panel; không nâng cấp 7d -> 3d -> 1d bằng
+  // những tin nhắn mới nữa.
+  return !previous;
 }
 
 function adminTargets(guild, settings) {
@@ -164,7 +170,7 @@ function buildActionRow(sub, E) {
   );
   const completed = withButtonEmoji(
     new ButtonBuilder()
-      .setCustomId(`sub:admin:${isDisconnect ? 'disconnect' : 'renew'}:${sub.id}:${Number(sub.times_renewed || 0)}`)
+      .setCustomId(`sub:admin:${isDisconnect ? 'disconnect' : 'renew'}:${sub.id}:${Number(sub.times_renewed || 0)}:${unix(progress.nextActionAt) || 0}`)
       .setLabel(isDisconnect ? 'Xác Nhận Đã Ngắt Gói' : 'Xác Nhận Đã Gia Hạn')
       .setStyle(isDisconnect ? ButtonStyle.Danger : ButtonStyle.Success),
     E.component(isDisconnect ? 'status_cross' : 'status_check'),
@@ -252,12 +258,13 @@ function buildActionResultV2(sub, { action, adminId, snoozedUntil = null }) {
   const E = createEmojiResolver(presentationGuildId(sub.guild_id));
   const progress = getSubscriptionProgress(sub);
   const isComplete = action === 'renewed' || action === 'disconnected';
+  const needsReview = action === 'renewed' && sub.progress_status === 'NEEDS_REVIEW';
   const title = action === 'disconnected'
     ? 'ĐÃ XÁC NHẬN NGẮT GÓI'
     : action === 'renewed'
-      ? 'ĐÃ XÁC NHẬN GIA HẠN'
+      ? needsReview ? 'ĐÃ GHI NHẬN · CẦN ĐỐI SOÁT' : 'ĐÃ XÁC NHẬN GIA HẠN'
       : action === 'snoozed' ? 'ĐÃ TẠM HOÃN NHẮC VIỆC' : 'ADMIN ĐÃ NHẬN XỬ LÝ';
-  const tone = action === 'disconnected' ? 'danger' : isComplete ? 'success' : action === 'snoozed' ? 'warning' : 'info';
+  const tone = action === 'disconnected' ? 'danger' : needsReview ? 'warning' : isComplete ? 'success' : action === 'snoozed' ? 'warning' : 'info';
   const container = new ContainerBuilder().setAccentColor(accentFor(tone));
   container.addTextDisplayComponents(new TextDisplayBuilder().setContent([
     `# ${E(isComplete ? 'status_check' : action === 'snoozed' ? 'cenar_cooldown' : 'ticket_claim')} ${title}`,
@@ -266,7 +273,9 @@ function buildActionResultV2(sub, { action, adminId, snoozedUntil = null }) {
     isComplete
       ? action === 'disconnected'
         ? `${E('status_cross')} **Trạng thái:** Đã ngắt gói · hồ sơ hoàn tất`
-        : `${E('icon_history')} **Tiến độ:** Đã cấp ${progress.fulfilledMonths}/${progress.totalMonths} tháng · ${progress.nextAction === 'DISCONNECT' ? 'chờ ngắt gói vào ngày hết hạn' : `kỳ tiếp theo <t:${unix(progress.nextActionAt)}:F>`}`
+        : needsReview
+          ? `${E('status_warn')} **Đã khóa nhắc tự động:** lịch kỳ tiếp theo vẫn quá gần hoặc đã quá hạn. Vui lòng đối soát số tháng đã cấp trên website; bot sẽ không gửi lại panel sai.`
+          : `${E('icon_history')} **Tiến độ:** Đã cấp ${progress.fulfilledMonths}/${progress.totalMonths} tháng · ${progress.nextAction === 'DISCONNECT' ? 'chờ ngắt gói vào ngày hết hạn' : `kỳ tiếp theo <t:${unix(progress.nextActionAt)}:F>`}`
       : action === 'snoozed'
         ? `${E('icon_clock')} Bot sẽ nhắc lại <t:${unix(snoozedUntil)}:R>.`
         : `${E('order_processing')} Hồ sơ đã được khóa người phụ trách; các admin khác vẫn có thể xác nhận hoàn tất.`,
@@ -329,17 +338,20 @@ export async function runStoreOneAdminRenewalReminders(client) {
       channelId: channel.id,
       expectedStage: sub.admin_reminder_stage,
       expectedSentAt: sub.admin_reminder_sent_at,
+      expectedTimesRenewed: Number(sub.times_renewed || 0),
+      expectedActionAt: getSubscriptionAdminDueAt(sub),
     });
     if (!reservation) continue;
     try {
+      const reservedSub = reservation.subscription;
       let message = null;
       if (
-        sub.admin_reminder_message_id
-        && String(sub.admin_reminder_channel_id || channel.id) === String(channel.id)
+        reservedSub.admin_reminder_message_id
+        && String(reservedSub.admin_reminder_channel_id || channel.id) === String(channel.id)
       ) {
-        message = await channel.messages.fetch(sub.admin_reminder_message_id).catch(() => null);
+        message = await channel.messages.fetch(reservedSub.admin_reminder_message_id).catch(() => null);
         if (message?.author?.id === client.user?.id) {
-          await message.edit(buildAdminRenewalReminderV2(sub, {
+          await message.edit(buildAdminRenewalReminderV2(reservedSub, {
             stage,
             ...targets,
             ping: false,
@@ -349,14 +361,22 @@ export async function runStoreOneAdminRenewalReminders(client) {
         }
       }
       if (!message) {
-        message = await channel.send(buildAdminRenewalReminderV2(sub, { stage, ...targets }));
+        message = await channel.send(buildAdminRenewalReminderV2(reservedSub, { stage, ...targets }));
       }
-      markAdminReminderSent(sub.id, {
+      const finalized = markAdminReminderSent(reservedSub.id, {
         stage,
         messageId: message.id,
         channelId: channel.id,
         reservedAt: reservation.sentAt,
+        reminderForAt: getSubscriptionAdminDueAt(reservedSub),
       });
+      // Admin có thể bấm hoàn tất đúng lúc scheduler đang gửi. Khi CAS cuối
+      // không còn hợp lệ, xóa ngay panel vừa gửi/ghi đè để nó không sống lại
+      // sau thao tác thành công.
+      if (!finalized) {
+        if (message.author?.id === client.user?.id) await message.delete().catch(() => null);
+        continue;
+      }
       sent += 1;
     } catch (error) {
       errors += 1;
@@ -378,10 +398,12 @@ export async function cleanupAdminRenewalMessagesForRepair(client, {
   orderCode,
   channelId = null,
   maxMessages = 500,
+  keepMessageIds = [],
+  matchOrderReference = true,
 } = {}) {
   const id = Number(subscriptionId);
   const reference = String(orderCode || '').trim();
-  if (!Number.isInteger(id) || !reference) return { scanned: 0, deleted: [] };
+  if (!Number.isInteger(id)) return { scanned: 0, deleted: [] };
 
   const guild = client.guilds.cache.get(STORE_ONE_GUILD_ID)
     || await client.guilds.fetch(STORE_ONE_GUILD_ID).catch(() => null);
@@ -395,6 +417,7 @@ export async function cleanupAdminRenewalMessagesForRepair(client, {
   if (!channel?.isTextBased()) return { scanned: 0, deleted: [], reason: 'channel_unavailable' };
 
   const safeLimit = Math.min(1_000, Math.max(1, Number(maxMessages) || 500));
+  const keep = new Set((keepMessageIds || []).filter(Boolean).map(String));
   const deleted = [];
   let scanned = 0;
   let before;
@@ -406,11 +429,13 @@ export async function cleanupAdminRenewalMessagesForRepair(client, {
     if (!page?.size) break;
     for (const message of page.values()) {
       scanned += 1;
+      if (keep.has(String(message.id))) continue;
       if (message.author?.id !== client.user?.id) continue;
       const serialized = JSON.stringify(message.toJSON?.() || message);
-      const belongsToRepair = serialized.includes(reference)
+      const belongsToRepair = (matchOrderReference && reference && serialized.includes(reference))
         || serialized.includes(`sub:admin:claim:${id}`)
         || serialized.includes(`sub:admin:renew:${id}:`)
+        || serialized.includes(`sub:admin:disconnect:${id}:`)
         || serialized.includes(`sub:admin:snooze:${id}`);
       if (!belongsToRepair) continue;
       if (await message.delete().then(() => true).catch(() => false)) deleted.push(message.id);
@@ -423,6 +448,10 @@ export async function cleanupAdminRenewalMessagesForRepair(client, {
 
 async function updateInteraction(interaction, payload) {
   const { flags: _flags, ...updatePayload } = payload;
+  if (interaction.deferred || interaction.replied) {
+    await interaction.editReply(updatePayload);
+    return;
+  }
   await interaction.update(updatePayload);
 }
 
@@ -471,7 +500,7 @@ async function sendDisconnectedCustomerDm(interaction, sub) {
 
 export async function handleAdminRenewalButton(interaction) {
   if (!interaction.isButton() || !interaction.customId.startsWith('sub:admin:')) return false;
-  const [, , action, rawId, rawRevision] = interaction.customId.split(':');
+  const [, , action, rawId, rawRevision, rawDueUnix] = interaction.customId.split(':');
   if (action === 'done') {
     await interaction.deferUpdate().catch(() => null);
     return true;
@@ -512,12 +541,21 @@ export async function handleAdminRenewalButton(interaction) {
     });
     return true;
   }
-  if (isVersionedAction && rawRevision === undefined) {
-    const currentMessageId = String(existing.admin_reminder_message_id || '');
-    const clickedMessageId = String(interaction.message?.id || '');
-    if (!currentMessageId || currentMessageId !== clickedMessageId) {
+  const currentMessageId = String(existing.admin_reminder_message_id || '');
+  const clickedMessageId = String(interaction.message?.id || '');
+  if (isVersionedAction && currentMessageId && currentMessageId !== clickedMessageId) {
+    await interaction.reply({
+      content: `${E('status_info')} Đây là panel cũ hoặc kỳ này đã được xử lý. Hệ thống không cộng thêm tháng.`,
+      flags: MessageFlags.Ephemeral,
+    });
+    return true;
+  }
+  if (isVersionedAction && rawDueUnix !== undefined) {
+    const expectedDueUnix = Number(rawDueUnix);
+    const currentDueUnix = unix(getSubscriptionAdminDueAt(existing));
+    if (!Number.isInteger(expectedDueUnix) || expectedDueUnix <= 0 || expectedDueUnix !== currentDueUnix) {
       await interaction.reply({
-        content: `${E('status_info')} Đây là panel cũ hoặc kỳ này đã được xử lý. Hệ thống không cộng thêm tháng.`,
+        content: `${E('status_info')} Ngày gia hạn trên panel này đã cũ. Hệ thống đã chặn xử lý lặp; vui lòng dùng panel mới nhất.`,
         flags: MessageFlags.Ephemeral,
       });
       return true;
@@ -581,6 +619,7 @@ export async function handleAdminRenewalButton(interaction) {
       });
       return true;
     }
+    await interaction.deferUpdate();
     let renewed;
     try {
       renewed = markRenewed(id, {
@@ -589,23 +628,41 @@ export async function handleAdminRenewalButton(interaction) {
         expectedTimesRenewed: rawRevision === undefined
           ? Number(existing.times_renewed || 0)
           : expectedRevision,
+        expectedActionAt: getSubscriptionAdminDueAt(existing),
+        reminderWindowDays: config.subscriptionAdminReminderDays,
       });
     } catch (error) {
       if (error?.code !== 'SUBSCRIPTION_RENEWAL_CONFLICT') throw error;
-      await interaction.reply({
+      await interaction.followUp({
         content: `${E('status_info')} Kỳ này vừa được xử lý bởi một thao tác khác. Hệ thống đã chặn cộng trùng.`,
         flags: MessageFlags.Ephemeral,
       });
       return true;
     }
-    await updateInteraction(interaction, buildActionResultV2(renewed, { action: 'renewed', adminId: interaction.user.id }));
+    const panelUpdated = await updateInteraction(
+      interaction,
+      buildActionResultV2(renewed, { action: 'renewed', adminId: interaction.user.id }),
+    ).then(() => true).catch(() => false);
+    if (!panelUpdated) {
+      await interaction.followUp({
+        content: `${E('status_check')} Đã lưu gia hạn thành công. Panel cũ không cập nhật được nên hệ thống sẽ dọn nó để tránh thao tác lặp.`,
+        flags: MessageFlags.Ephemeral,
+      }).catch(() => null);
+    }
+    await cleanupAdminRenewalMessagesForRepair(interaction.client, {
+      subscriptionId: id,
+      orderCode: renewed.related_order_code,
+      channelId: existing.admin_reminder_channel_id || interaction.channelId,
+      keepMessageIds: panelUpdated && clickedMessageId ? [clickedMessageId] : [],
+      matchOrderReference: false,
+    }).catch((error) => console.error(`[SUB-ADMIN-REMINDER] Không dọn được panel trùng của subscription ${id}:`, error.message));
     const dmSent = await sendRenewedCustomerDm(interaction, renewed);
     await emitAutomationLog(interaction.client, {
       guildId: interaction.guildId,
       customerId: renewed.customer_id,
       action: 'SUBSCRIPTION_RENEWED',
       title: 'GIA HẠN DỊCH VỤ HOÀN TẤT',
-      summary: `Subscription #${id} đã được xác nhận gia hạn; DM khách hàng: ${dmSent ? 'đã gửi' : 'không gửi được'}.`,
+      summary: `Subscription #${id} đã được xác nhận gia hạn${renewed.progress_status === 'NEEDS_REVIEW' ? ' và khóa nhắc để đối soát lịch' : ''}; DM khách hàng: ${dmSent ? 'đã gửi' : 'không gửi được'}.`,
       reference: renewed.related_order_code || String(id),
       status: 'success',
     });
@@ -620,11 +677,42 @@ export async function handleAdminRenewalButton(interaction) {
       });
       return true;
     }
-    const disconnected = markDisconnected(id, {
-      actorId: interaction.user.id,
-      source: 'DISCORD_ADMIN_BUTTON',
-    });
-    await updateInteraction(interaction, buildActionResultV2(disconnected, { action: 'disconnected', adminId: interaction.user.id }));
+    await interaction.deferUpdate();
+    let disconnected;
+    try {
+      disconnected = markDisconnected(id, {
+        actorId: interaction.user.id,
+        source: 'DISCORD_ADMIN_BUTTON',
+        expectedTimesRenewed: rawRevision === undefined
+          ? Number(existing.times_renewed || 0)
+          : expectedRevision,
+        expectedActionAt: existing.expiry_at,
+      });
+    } catch (error) {
+      if (error?.code !== 'SUBSCRIPTION_RENEWAL_CONFLICT') throw error;
+      await interaction.followUp({
+        content: `${E('status_info')} Hồ sơ này vừa được xử lý bởi thao tác khác. Hệ thống đã chặn xử lý lặp.`,
+        flags: MessageFlags.Ephemeral,
+      });
+      return true;
+    }
+    const panelUpdated = await updateInteraction(
+      interaction,
+      buildActionResultV2(disconnected, { action: 'disconnected', adminId: interaction.user.id }),
+    ).then(() => true).catch(() => false);
+    if (!panelUpdated) {
+      await interaction.followUp({
+        content: `${E('status_check')} Đã lưu trạng thái ngắt gói. Panel cũ không cập nhật được nên hệ thống sẽ dọn nó để tránh thao tác lặp.`,
+        flags: MessageFlags.Ephemeral,
+      }).catch(() => null);
+    }
+    await cleanupAdminRenewalMessagesForRepair(interaction.client, {
+      subscriptionId: id,
+      orderCode: disconnected.related_order_code,
+      channelId: existing.admin_reminder_channel_id || interaction.channelId,
+      keepMessageIds: panelUpdated && clickedMessageId ? [clickedMessageId] : [],
+      matchOrderReference: false,
+    }).catch((error) => console.error(`[SUB-ADMIN-REMINDER] Không dọn được panel trùng của subscription ${id}:`, error.message));
     const dmSent = await sendDisconnectedCustomerDm(interaction, disconnected);
     await emitAutomationLog(interaction.client, {
       guildId: interaction.guildId,

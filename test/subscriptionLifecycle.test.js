@@ -100,6 +100,8 @@ describe('subscription monthly lifecycle', () => {
       expectedTimesRenewed: 0,
     });
     expect(renewed.times_renewed).toBe(1);
+    expect(renewed.admin_last_completed_for_at).toBe(created.next_renewal_at);
+    expect(renewed.admin_reminder_for_at).toBeNull();
     expect(() => markRenewed(created.id, {
       source: 'TEST',
       expectedTimesRenewed: 0,
@@ -115,6 +117,8 @@ describe('subscription monthly lifecycle', () => {
       channelId: 'CHANNEL_1',
       expectedStage: null,
       expectedSentAt: null,
+      expectedTimesRenewed: 0,
+      expectedActionAt: created.next_renewal_at,
       sentAt,
     });
     const duplicate = reserveAdminReminderDispatch(created.id, {
@@ -122,6 +126,8 @@ describe('subscription monthly lifecycle', () => {
       channelId: 'CHANNEL_1',
       expectedStage: null,
       expectedSentAt: null,
+      expectedTimesRenewed: 0,
+      expectedActionAt: created.next_renewal_at,
       sentAt: '2026-01-25T10:30:01.000Z',
     });
 
@@ -132,7 +138,73 @@ describe('subscription monthly lifecycle', () => {
       messageId: 'MESSAGE_1',
       channelId: 'CHANNEL_1',
       reservedAt: sentAt,
+      reminderForAt: created.next_renewal_at,
     })?.admin_reminder_message_id).toBe('MESSAGE_1');
+  });
+
+  it('rejects a stale scheduler reservation after the lifecycle already advanced', () => {
+    const created = createSubscription({ months: 12, suffix: 'stale-scheduler' });
+    markRenewed(created.id, {
+      source: 'TEST',
+      expectedTimesRenewed: 0,
+      expectedActionAt: created.next_renewal_at,
+      now: new Date('2026-02-28T10:30:00.000Z'),
+    });
+
+    expect(reserveAdminReminderDispatch(created.id, {
+      stage: 'DUE_NOW',
+      channelId: 'CHANNEL_1',
+      expectedStage: null,
+      expectedSentAt: null,
+      expectedTimesRenewed: 0,
+      expectedActionAt: created.next_renewal_at,
+      sentAt: '2026-02-28T10:30:01.000Z',
+    })).toBeNull();
+  });
+
+  it('invalidates an in-flight reminder when Admin completes the cycle', () => {
+    const created = createSubscription({ months: 12, suffix: 'inflight-reminder' });
+    const reservedAt = '2026-02-27T10:30:00.000Z';
+    const reservation = reserveAdminReminderDispatch(created.id, {
+      stage: 'URGENT_1D',
+      channelId: 'CHANNEL_1',
+      expectedStage: null,
+      expectedSentAt: null,
+      expectedTimesRenewed: 0,
+      expectedActionAt: created.next_renewal_at,
+      sentAt: reservedAt,
+    });
+    expect(reservation).not.toBeNull();
+
+    markRenewed(created.id, {
+      source: 'TEST',
+      expectedTimesRenewed: 0,
+      expectedActionAt: created.next_renewal_at,
+      now: new Date('2026-02-28T10:30:00.000Z'),
+    });
+
+    expect(markAdminReminderSent(created.id, {
+      stage: 'URGENT_1D',
+      messageId: 'STALE_MESSAGE',
+      channelId: 'CHANNEL_1',
+      reservedAt,
+      reminderForAt: created.next_renewal_at,
+    })).toBeNull();
+  });
+
+  it('pauses automatic reminders when the next calculated cycle would alert immediately again', () => {
+    const created = createSubscription({ months: 12, suffix: 'overdue-backlog' });
+    const renewed = markRenewed(created.id, {
+      source: 'TEST',
+      expectedTimesRenewed: 0,
+      expectedActionAt: created.next_renewal_at,
+      reminderWindowDays: 7,
+      now: new Date('2026-05-01T10:30:00.000Z'),
+    });
+
+    expect(renewed.progress_status).toBe('NEEDS_REVIEW');
+    expect(renewed.progress_review_note).toMatch(/tránh spam/i);
+    expect(isSubscriptionRenewalDue(renewed, 7, new Date('2026-05-01T10:31:00.000Z'))).toBe(false);
   });
 
   it('only opens renewal actions inside the configured due window', () => {

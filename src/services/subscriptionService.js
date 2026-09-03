@@ -147,18 +147,25 @@ function markRenewedStmt() {
     UPDATE subscription_accounts
     SET times_renewed = times_renewed + 1,
         next_renewal_at = ?,
+        progress_status = ?,
+        progress_review_note = ?,
         renewal_remind_sent_at = NULL,
         customer_response = NULL,
         admin_reminder_stage = NULL,
         admin_reminder_sent_at = NULL,
+        admin_reminder_for_at = NULL,
         admin_reminder_message_id = NULL,
         admin_reminder_channel_id = NULL,
+        admin_last_completed_for_at = ?,
         admin_claimed_by_id = NULL,
         admin_claimed_at = NULL,
         admin_snoozed_until = NULL,
         admin_last_action_at = ?,
         updated_at = ?
-    WHERE id = ? AND times_renewed = ? AND status = 'ACTIVE'
+    WHERE id = ?
+      AND times_renewed = ?
+      AND status = 'ACTIVE'
+      AND COALESCE(next_renewal_at, '') = ?
   `);
 }
 
@@ -168,14 +175,19 @@ function markExpiredStmt() {
     SET status = 'EXPIRED',
         admin_reminder_stage = NULL,
         admin_reminder_sent_at = NULL,
+        admin_reminder_for_at = NULL,
         admin_reminder_message_id = NULL,
         admin_reminder_channel_id = NULL,
+        admin_last_completed_for_at = ?,
         admin_claimed_by_id = NULL,
         admin_claimed_at = NULL,
         admin_snoozed_until = NULL,
         admin_last_action_at = ?,
         updated_at = ?
     WHERE id = ?
+      AND status = 'ACTIVE'
+      AND times_renewed = ?
+      AND COALESCE(expiry_at, '') = ?
   `);
 }
 
@@ -188,15 +200,20 @@ function markOneTimeRenewedStmt() {
         customer_response = NULL,
         admin_reminder_stage = NULL,
         admin_reminder_sent_at = NULL,
+        admin_reminder_for_at = NULL,
         admin_reminder_message_id = NULL,
         admin_reminder_channel_id = NULL,
+        admin_last_completed_for_at = ?,
         admin_claimed_by_id = NULL,
         admin_claimed_at = NULL,
         admin_snoozed_until = NULL,
         admin_last_action_at = ?,
         status = 'ACTIVE',
         updated_at = ?
-    WHERE id = ? AND times_renewed = ? AND status = 'ACTIVE'
+    WHERE id = ?
+      AND status = 'ACTIVE'
+      AND times_renewed = ?
+      AND COALESCE(expiry_at, '') = ?
   `);
 }
 
@@ -306,6 +323,7 @@ export function getSubscriptionProgress(sub) {
 
 export function isSubscriptionRenewalDue(sub, withinDays = 7, now = new Date()) {
   if (!sub || sub.status !== 'ACTIVE') return false;
+  if (String(sub.progress_status || 'VERIFIED') !== 'VERIFIED') return false;
   const progress = getSubscriptionProgress(sub);
   if (progress.nextAction !== 'RENEW') return false;
   const dueAt = new Date(progress.nextActionAt || 0);
@@ -533,6 +551,9 @@ export function markRenewed(id, {
   source = 'ADMIN',
   note = null,
   expectedTimesRenewed = null,
+  expectedActionAt = null,
+  reminderWindowDays = 7,
+  now = new Date(),
 } = {}) {
   const sub = getSubscriptionById(id);
   if (!sub) return null;
@@ -545,14 +566,32 @@ export function markRenewed(id, {
     }
   }
 
-  const ts = nowIso();
+  const currentProgress = getSubscriptionProgress(sub);
+  const currentActionAt = currentProgress.nextActionAt;
+  if (expectedActionAt !== null && expectedActionAt !== undefined) {
+    if (!dateTimesMatch(expectedActionAt, currentActionAt)) {
+      throw new SubscriptionRenewalConflictError('Ngày của kỳ gia hạn đã thay đổi. Vui lòng dùng panel mới nhất.');
+    }
+  }
+
+  const actionDate = new Date(now);
+  if (!Number.isFinite(actionDate.getTime())) throw new Error('Thời điểm gia hạn không hợp lệ.');
+  const ts = actionDate.toISOString();
   if (sub.renewal_mode !== 'auto_cycle' || !Number(sub.renewal_cycle_months)) {
     const currentExpiry = new Date(sub.expiry_at);
-    const base = Number.isFinite(currentExpiry.getTime()) && currentExpiry > new Date()
+    const base = Number.isFinite(currentExpiry.getTime()) && currentExpiry > actionDate
       ? currentExpiry
-      : new Date();
+      : actionDate;
     const newExpiry = addSubscriptionMonths(base, Math.max(1, Number(sub.total_duration_months || 1)));
-    const result = markOneTimeRenewedStmt().run(newExpiry, ts, ts, id, currentRevision);
+    const result = markOneTimeRenewedStmt().run(
+      newExpiry,
+      currentActionAt,
+      ts,
+      ts,
+      id,
+      currentRevision,
+      String(sub.expiry_at || ''),
+    );
     if (result.changes !== 1) throw new SubscriptionRenewalConflictError();
     const updated = getSubscriptionById(id);
     recordSubscriptionEvent(id, 'PACKAGE_EXTENDED', { actorId, source, note, scheduledFor: newExpiry });
@@ -570,13 +609,35 @@ export function markRenewed(id, {
     ? computeNextRenewal(sub.purchase_date, sub.renewal_cycle_months, newTimesRenewed)
     : null;
 
-  const result = markRenewedStmt().run(newNextRenewal, ts, ts, id, currentRevision);
+  // Nếu dữ liệu lịch sử bị chậm nhiều kỳ, cộng đúng một tháng có thể khiến kỳ
+  // mới vẫn nằm ngay trong cửa sổ nhắc. Không được bắn tiếp một panel ngay sau
+  // khi Admin vừa xác nhận; khóa nhắc tự động để Admin đối soát tiến độ một lần.
+  const safeReminderDays = Math.min(30, Math.max(0, Number(reminderWindowDays) || 0));
+  const reviewCutoff = actionDate.getTime() + safeReminderDays * 24 * 60 * 60 * 1000;
+  const newNextMs = newNextRenewal ? new Date(newNextRenewal).getTime() : Number.POSITIVE_INFINITY;
+  const needsReview = Number.isFinite(newNextMs) && newNextMs <= reviewCutoff;
+  const progressStatus = needsReview ? 'NEEDS_REVIEW' : 'VERIFIED';
+  const reviewNote = needsReview
+    ? 'Lịch kỳ tiếp theo vẫn nằm trong cửa sổ nhắc ngay sau khi xác nhận. Hệ thống đã tạm khóa thông báo để tránh spam; Admin cần đối soát số tháng đã cấp.'
+    : null;
+
+  const result = markRenewedStmt().run(
+    newNextRenewal,
+    progressStatus,
+    reviewNote,
+    currentActionAt,
+    ts,
+    ts,
+    id,
+    currentRevision,
+    String(sub.next_renewal_at || ''),
+  );
   if (result.changes !== 1) throw new SubscriptionRenewalConflictError();
   const updated = getSubscriptionById(id);
   recordSubscriptionEvent(id, 'RENEWED', {
     actorId,
     source,
-    note,
+    note: note || reviewNote,
     fulfilledMonths: fulfilledAfter,
     totalMonths: before.totalMonths,
     scheduledFor: newNextRenewal || updated.expiry_at,
@@ -584,11 +645,25 @@ export function markRenewed(id, {
   return updated;
 }
 
-export function markDisconnected(id, { actorId = null, source = 'ADMIN', note = null } = {}) {
+export function markDisconnected(id, {
+  actorId = null,
+  source = 'ADMIN',
+  note = null,
+  expectedTimesRenewed = null,
+  expectedActionAt = null,
+} = {}) {
   const sub = getSubscriptionById(id);
   if (!sub) return null;
+  const currentRevision = Number(sub.times_renewed || 0);
+  if (expectedTimesRenewed !== null && Number(expectedTimesRenewed) !== currentRevision) {
+    throw new SubscriptionRenewalConflictError();
+  }
+  if (expectedActionAt !== null && !dateTimesMatch(expectedActionAt, sub.expiry_at)) {
+    throw new SubscriptionRenewalConflictError('Ngày kết thúc gói đã thay đổi. Vui lòng dùng panel mới nhất.');
+  }
   const ts = nowIso();
-  markExpiredStmt().run(ts, ts, id);
+  const result = markExpiredStmt().run(sub.expiry_at, ts, ts, id, currentRevision, String(sub.expiry_at || ''));
+  if (result.changes !== 1) throw new SubscriptionRenewalConflictError();
   const updated = getSubscriptionById(id);
   recordSubscriptionEvent(id, 'DISCONNECTED', { actorId, source, note, scheduledFor: ts });
   return updated;
@@ -618,8 +693,9 @@ export function setSubscriptionFulfilledMonths(id, fulfilledMonths, {
     SET renewal_mode = ?, renewal_cycle_months = ?, times_renewed = ?,
         next_renewal_at = ?, progress_status = 'VERIFIED', progress_review_note = NULL,
         renewal_remind_sent_at = NULL, admin_reminder_stage = NULL,
-        admin_reminder_sent_at = NULL, admin_reminder_message_id = NULL,
-        admin_reminder_channel_id = NULL, admin_claimed_by_id = NULL,
+        admin_reminder_sent_at = NULL, admin_reminder_for_at = NULL,
+        admin_reminder_message_id = NULL, admin_reminder_channel_id = NULL,
+        admin_last_completed_for_at = NULL, admin_claimed_by_id = NULL,
         admin_claimed_at = NULL, admin_snoozed_until = NULL,
         admin_last_action_at = ?, updated_at = ?
     WHERE id = ?
@@ -784,6 +860,13 @@ export function getAdminRenewalCandidates(guildId, withinDays = 7, limit = 100) 
           AND datetime(expiry_at) <= datetime('now', ?))
       )
       AND (admin_snoozed_until IS NULL OR datetime(admin_snoozed_until) <= datetime('now'))
+      AND (
+        admin_last_completed_for_at IS NULL
+        OR datetime(admin_last_completed_for_at) <> datetime(CASE
+          WHEN renewal_mode = 'auto_cycle' AND next_renewal_at IS NOT NULL THEN next_renewal_at
+          ELSE expiry_at
+        END)
+      )
     ORDER BY datetime(CASE
       WHEN renewal_mode = 'auto_cycle' AND next_renewal_at IS NOT NULL THEN next_renewal_at
       ELSE expiry_at
@@ -801,27 +884,41 @@ export function reserveAdminReminderDispatch(id, {
   channelId = null,
   expectedStage = null,
   expectedSentAt = null,
+  expectedTimesRenewed = null,
+  expectedActionAt = null,
   sentAt = nowIso(),
 } = {}) {
+  const expectedRevision = Number(expectedTimesRenewed);
+  if (!Number.isInteger(expectedRevision) || !expectedActionAt) return null;
   const result = db.prepare(`
     UPDATE subscription_accounts
     SET admin_reminder_stage = ?,
         admin_reminder_sent_at = ?,
+        admin_reminder_for_at = ?,
         admin_reminder_channel_id = ?,
         admin_last_action_at = ?,
         updated_at = ?
     WHERE id = ?
       AND status = 'ACTIVE'
+      AND COALESCE(progress_status, 'VERIFIED') = 'VERIFIED'
+      AND times_renewed = ?
+      AND COALESCE(CASE
+        WHEN renewal_mode = 'auto_cycle' AND next_renewal_at IS NOT NULL THEN next_renewal_at
+        ELSE expiry_at
+      END, '') = ?
       AND COALESCE(admin_reminder_stage, '') = ?
       AND COALESCE(admin_reminder_sent_at, '') = ?
       AND (admin_snoozed_until IS NULL OR datetime(admin_snoozed_until) <= datetime(?))
   `).run(
     stage,
     sentAt,
+    expectedActionAt,
     channelId,
     sentAt,
     sentAt,
     id,
+    expectedRevision,
+    String(expectedActionAt),
     String(expectedStage || ''),
     String(expectedSentAt || ''),
     sentAt,
@@ -835,6 +932,7 @@ export function markAdminReminderSent(id, {
   messageId = null,
   channelId = null,
   reservedAt = null,
+  reminderForAt = null,
 } = {}) {
   const ts = nowIso();
   const result = reservedAt
@@ -846,17 +944,19 @@ export function markAdminReminderSent(id, {
         WHERE id = ?
           AND admin_reminder_stage = ?
           AND admin_reminder_sent_at = ?
-      `).run(messageId, channelId, ts, id, stage, reservedAt)
+          AND COALESCE(admin_reminder_for_at, '') = ?
+      `).run(messageId, channelId, ts, id, stage, reservedAt, String(reminderForAt || ''))
     : db.prepare(`
         UPDATE subscription_accounts
         SET admin_reminder_stage = ?,
             admin_reminder_sent_at = ?,
+            admin_reminder_for_at = ?,
             admin_reminder_message_id = ?,
             admin_reminder_channel_id = ?,
             admin_last_action_at = ?,
             updated_at = ?
         WHERE id = ?
-      `).run(stage, ts, messageId, channelId, ts, ts, id);
+      `).run(stage, ts, reminderForAt, messageId, channelId, ts, ts, id);
   return result.changes === 1 ? getSubscriptionById(id) : null;
 }
 
@@ -883,6 +983,7 @@ export function snoozeAdminRenewal(id, hours = 24) {
     SET admin_snoozed_until = ?,
         admin_reminder_stage = NULL,
         admin_reminder_sent_at = NULL,
+        admin_reminder_for_at = NULL,
         admin_reminder_message_id = NULL,
         admin_reminder_channel_id = NULL,
         admin_last_action_at = ?,
@@ -914,8 +1015,17 @@ export function markCustomerResponse(id, response) {
  * Đánh dấu hết hạn
  */
 export function markExpired(id) {
+  const sub = getSubscriptionById(id);
+  if (!sub) return null;
   const ts = nowIso();
-  markExpiredStmt().run(ts, ts, id);
+  markExpiredStmt().run(
+    sub.expiry_at,
+    ts,
+    ts,
+    id,
+    Number(sub.times_renewed || 0),
+    String(sub.expiry_at || ''),
+  );
   return getSubscriptionById(id);
 }
 
@@ -994,7 +1104,9 @@ export function migrateSubscriptionMonthlyCycles({ guildId = null } = {}) {
         db.prepare(`
           UPDATE subscription_accounts
           SET renewal_cycle_months = 1, times_renewed = ?, next_renewal_at = ?,
-              progress_status = 'VERIFIED', progress_review_note = NULL, updated_at = ?
+              progress_status = 'VERIFIED', progress_review_note = NULL,
+              admin_reminder_for_at = NULL, admin_last_completed_for_at = NULL,
+              updated_at = ?
           WHERE id = ?
         `).run(fulfilled - 1, nextRenewal, nowIso(), sub.id);
         normalized += 1;
@@ -1070,8 +1182,10 @@ export function repairNetflixDeliveryStartDates({ now = new Date() } = {}) {
         renewal_remind_sent_at = NULL,
         admin_reminder_stage = NULL,
         admin_reminder_sent_at = NULL,
+        admin_reminder_for_at = NULL,
         admin_reminder_message_id = NULL,
         admin_reminder_channel_id = NULL,
+        admin_last_completed_for_at = NULL,
         admin_claimed_by_id = NULL,
         admin_claimed_at = NULL,
         admin_snoozed_until = NULL,

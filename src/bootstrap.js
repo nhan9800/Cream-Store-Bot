@@ -87,7 +87,6 @@ export async function buildClient() {
         markSubscriptionProgressRepairCleanupComplete(ownerConfirmedRepairMigrationId, cleanup.deleted);
       }
     }
-    startScheduler(readyClient);
     try {
       await startWebhookServer(readyClient);
     } catch (error) {
@@ -100,6 +99,10 @@ export async function buildClient() {
       setTimeout(() => process.exit(1), 50).unref();
       return;
     }
+    // Chỉ một tiến trình giữ được cổng HTTP production mới được chạy
+    // scheduler. Điều này loại bỏ cửa sổ vài giây mà một bot trùng phiên có
+    // thể gửi reminder trước khi bị cơ chế khóa launcher dừng lại.
+    startScheduler(readyClient);
     startOtpAutoCheck(readyClient);
 
     // Store 2 is the international storefront. The migration is idempotent,

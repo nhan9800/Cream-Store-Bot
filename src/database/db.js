@@ -518,8 +518,10 @@ export function initDatabase() {
       customer_response TEXT,
       admin_reminder_stage TEXT,
       admin_reminder_sent_at TEXT,
+      admin_reminder_for_at TEXT,
       admin_reminder_message_id TEXT,
       admin_reminder_channel_id TEXT,
+      admin_last_completed_for_at TEXT,
       admin_claimed_by_id TEXT,
       admin_claimed_at TEXT,
       admin_snoozed_until TEXT,
@@ -1085,8 +1087,10 @@ export function initDatabase() {
   // Subscription admin workflow — staged Store 1 alerts, claim and snooze state.
   ensureColumn('subscription_accounts', 'admin_reminder_stage', 'TEXT');
   ensureColumn('subscription_accounts', 'admin_reminder_sent_at', 'TEXT');
+  ensureColumn('subscription_accounts', 'admin_reminder_for_at', 'TEXT');
   ensureColumn('subscription_accounts', 'admin_reminder_message_id', 'TEXT');
   ensureColumn('subscription_accounts', 'admin_reminder_channel_id', 'TEXT');
+  ensureColumn('subscription_accounts', 'admin_last_completed_for_at', 'TEXT');
   ensureColumn('subscription_accounts', 'admin_claimed_by_id', 'TEXT');
   ensureColumn('subscription_accounts', 'admin_claimed_at', 'TEXT');
   ensureColumn('subscription_accounts', 'admin_snoozed_until', 'TEXT');

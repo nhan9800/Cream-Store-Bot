@@ -46,13 +46,23 @@ describe('Store 1 admin renewal reminder', () => {
     expect(resolveAdminReminderStage(subscription({ next_renewal_at: '2026-08-11T05:59:00.000Z' }), NOW)).toBe('OVERDUE');
   });
 
-  test('prevents duplicate pings and only permits a higher-priority stage', () => {
+  test('sends at most one panel for each renewal cycle', () => {
     expect(shouldSendAdminReminder(subscription(), 'UPCOMING_7D', NOW)).toBe(true);
     expect(shouldSendAdminReminder(subscription({
       admin_reminder_stage: 'UPCOMING_7D',
       admin_reminder_sent_at: '2026-08-12T05:00:00.000Z',
     }), 'UPCOMING_7D', NOW)).toBe(false);
-    expect(shouldSendAdminReminder(subscription({ admin_reminder_stage: 'UPCOMING_7D' }), 'UPCOMING_3D', NOW)).toBe(true);
+    expect(shouldSendAdminReminder(subscription({ admin_reminder_stage: 'UPCOMING_7D' }), 'UPCOMING_3D', NOW)).toBe(false);
+    expect(shouldSendAdminReminder(subscription({
+      admin_reminder_stage: null,
+      admin_reminder_sent_at: '2026-08-12T05:00:00.000Z',
+      admin_reminder_for_at: '2026-08-15T06:00:00.000Z',
+    }), 'UPCOMING_3D', NOW)).toBe(false);
+    expect(shouldSendAdminReminder(subscription({
+      admin_reminder_stage: null,
+      admin_reminder_sent_at: null,
+      admin_last_completed_for_at: '2026-08-15T06:00:00.000Z',
+    }), 'UPCOMING_3D', NOW)).toBe(false);
     expect(shouldSendAdminReminder(subscription({
       admin_reminder_stage: 'OVERDUE',
       admin_reminder_sent_at: '2026-08-11T05:59:00.000Z',
@@ -78,7 +88,7 @@ describe('Store 1 admin renewal reminder', () => {
     expect(serialized).not.toMatch(NATIVE_EMOJI);
     expect(buttons.map((button) => button.custom_id || button.url)).toEqual([
       'sub:admin:claim:77',
-      'sub:admin:renew:77:0',
+      'sub:admin:renew:77:0:1786773600',
       'sub:admin:snooze:77',
       'https://cenarstore.xyz/admin/subscriptions',
     ]);

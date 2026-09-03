@@ -109,8 +109,10 @@ describe('/giaohang subscription synchronization', () => {
           renewal_remind_sent_at = '2026-08-29T12:00:00.000Z',
           admin_reminder_stage = 'UPCOMING_3D',
           admin_reminder_sent_at = '2026-08-29T12:00:00.000Z',
+          admin_reminder_for_at = '2026-09-01T12:00:00.000Z',
           admin_reminder_message_id = '123456789012345678',
-          admin_reminder_channel_id = '234567890123456789'
+          admin_reminder_channel_id = '234567890123456789',
+          admin_last_completed_for_at = '2026-08-01T12:00:00.000Z'
       WHERE id = ?
     `).run(first.id);
     const second = syncDeliverySubscription({
@@ -135,8 +137,10 @@ describe('/giaohang subscription synchronization', () => {
       renewal_remind_sent_at: '2026-08-29T12:00:00.000Z',
       admin_reminder_stage: 'UPCOMING_3D',
       admin_reminder_sent_at: '2026-08-29T12:00:00.000Z',
+      admin_reminder_for_at: '2026-09-01T12:00:00.000Z',
       admin_reminder_message_id: '123456789012345678',
       admin_reminder_channel_id: '234567890123456789',
+      admin_last_completed_for_at: '2026-08-01T12:00:00.000Z',
     });
   });
 
