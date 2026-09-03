@@ -40,35 +40,18 @@ function getByOrderCodeStmt() {
   `);
 }
 
-function updateFromDeliveryStmt() {
+function updateMetadataFromDeliveryStmt() {
   return db.prepare(`
     UPDATE subscription_accounts
     SET guild_id = ?,
         service_type = ?,
-        renewal_mode = ?,
         gmail_email = ?,
         gmail_password = ?,
         customer_id = ?,
         customer_discord_name = ?,
-        purchase_date = ?,
-        total_duration_months = ?,
-        renewal_cycle_months = ?,
-        next_renewal_at = ?,
-        expiry_at = ?,
         spotify_family_name = ?,
         spotify_slots_used = ?,
-        status = ?,
-        renewal_remind_sent_at = NULL,
-        customer_response = NULL,
-        admin_reminder_stage = NULL,
-        admin_reminder_sent_at = NULL,
-        admin_reminder_message_id = NULL,
-        admin_reminder_channel_id = NULL,
-        admin_claimed_by_id = NULL,
-        admin_claimed_at = NULL,
-        admin_snoozed_until = NULL,
-        admin_last_action_at = NULL,
-        note = ?,
+        note = COALESCE(?, note),
         updated_at = ?
     WHERE id = ?
   `);
@@ -471,51 +454,28 @@ export function upsertSubscriptionFromDelivery(data) {
   const existing = getSubscriptionByOrderCode(data.relatedOrderCode);
   if (!existing) return addSubscription({ ...data, source: data.source || 'DELIVERY' });
 
-  // Dữ liệu giao hàng là nguồn chuẩn. Thứ tự cũ giữ purchase_date sai được tạo
-  // từ order.created_at và khiến hạn Netflix đến sớm hơn ngày khách nhận hàng.
-  const purchaseDate = data.purchaseDate || existing.purchase_date;
-  const totalDurationMonths = Math.max(1, Number(data.totalDurationMonths || 1));
-  const renewalMode = data.renewalMode === 'full_paid'
-    ? 'full_paid'
-    : totalDurationMonths > 1 ? 'auto_cycle' : 'one_time';
-  const renewalCycleMonths = renewalMode === 'auto_cycle' ? 1 : 0;
-  const expiryAt = computeExpiry(purchaseDate, totalDurationMonths);
-  let nextRenewalAt = null;
-  if (renewalMode === 'auto_cycle') {
-    nextRenewalAt = computeNextRenewal(purchaseDate, renewalCycleMonths, existing.times_renewed || 0);
-    if (new Date(nextRenewalAt) >= new Date(expiryAt)) nextRenewalAt = null;
-  }
-  const status = new Date(expiryAt) <= new Date() ? 'EXPIRED' : 'ACTIVE';
+  // /giaohang có thể được gửi lại để sửa Gmail, mật khẩu hoặc profile. Khi hồ
+  // sơ đã tồn tại, tuyệt đối không dựng lại vòng đời từ đơn gốc: thao tác đó
+  // từng đưa next_renewal_at về mốc cũ và xóa cờ chống nhắc trùng, khiến bot
+  // báo sai kỳ rồi spam lại sau mỗi lần giao hàng lại.
   const ts = nowIso();
 
-  updateFromDeliveryStmt().run(
+  updateMetadataFromDeliveryStmt().run(
     data.guildId,
     data.serviceType,
-    renewalMode,
     data.gmailEmail,
     encrypt(data.gmailPassword),
     data.customerId ?? null,
     data.customerDiscordName ?? null,
-    purchaseDate,
-    totalDurationMonths,
-    renewalCycleMonths,
-    nextRenewalAt,
-    expiryAt,
     data.spotifyFamilyName ?? null,
     Number(data.spotifySlotsUsed || 0),
-    status,
     data.note ?? null,
     ts,
     existing.id,
   );
-  db.prepare(`
-    UPDATE subscription_accounts
-    SET progress_status = ?, progress_review_note = ?
-    WHERE id = ?
-  `).run(data.progressStatus || 'VERIFIED', data.progressReviewNote || null, existing.id);
   recordSubscriptionEvent(existing.id, 'DELIVERY_UPDATED', {
     source: data.source || 'DELIVERY',
-    note: 'Đồng bộ lại thông tin từ đơn giao hàng.',
+    note: 'Cập nhật thông tin đăng nhập từ lần giao lại; giữ nguyên tiến độ và lịch gia hạn hiện có.',
   });
   return getSubscriptionById(existing.id);
 }
@@ -676,6 +636,117 @@ export function setSubscriptionFulfilledMonths(id, fulfilledMonths, {
   return updated;
 }
 
+/**
+ * Áp dụng một lần bản sửa tiến độ đã được chủ shop xác nhận. Marker trong
+ * system_settings ngăn một deploy/restart sau này ghi đè các lần gia hạn hợp
+ * lệ mới hơn.
+ */
+export function applySubscriptionProgressRepairOnce({
+  migrationId,
+  orderCode,
+  fulfilledMonths,
+  note = null,
+} = {}) {
+  const safeMigrationId = String(migrationId || '').trim();
+  const safeOrderCode = String(orderCode || '').trim();
+  if (!safeMigrationId || !safeOrderCode) {
+    throw new Error('Bản sửa tiến độ cần migrationId và orderCode.');
+  }
+
+  const markerKey = `subscription_progress_repair:${safeMigrationId}`;
+  const existingMarker = db.prepare('SELECT value FROM system_settings WHERE key = ?').get(markerKey);
+  if (existingMarker) {
+    let saved = {};
+    try {
+      saved = JSON.parse(existingMarker.value || '{}');
+    } catch {}
+    return {
+      ...saved,
+      skipped: true,
+      reason: 'already_applied',
+      orderCode: safeOrderCode,
+    };
+  }
+
+  const existing = getSubscriptionByOrderCode(safeOrderCode);
+  if (!existing) {
+    return { skipped: true, reason: 'subscription_not_found', orderCode: safeOrderCode };
+  }
+
+  const requestedMonths = Number.parseInt(String(fulfilledMonths), 10);
+  const totalMonths = Math.max(1, Number(existing.total_duration_months || 1));
+  if (!Number.isInteger(requestedMonths) || requestedMonths < 1 || requestedMonths > totalMonths) {
+    throw new Error(`Tiến độ cần khôi phục phải nằm trong khoảng 1-${totalMonths}.`);
+  }
+
+  const previousProgress = getSubscriptionProgress(existing);
+  const expectedNextRenewalAt = requestedMonths < totalMonths
+    ? addSubscriptionMonths(existing.purchase_date, requestedMonths)
+    : null;
+  const alreadyCorrect = previousProgress.fulfilledMonths === requestedMonths
+    && (
+      (expectedNextRenewalAt === null && existing.next_renewal_at === null)
+      || dateTimesMatch(existing.next_renewal_at, expectedNextRenewalAt)
+    );
+  const staleReminder = {
+    channelId: existing.admin_reminder_channel_id || null,
+    messageId: existing.admin_reminder_message_id || null,
+  };
+
+  const updated = alreadyCorrect
+    ? existing
+    : setSubscriptionFulfilledMonths(existing.id, requestedMonths, {
+        source: 'OWNER_CONFIRMED_REPAIR',
+        note: note || `Khôi phục tiến độ đã được xác nhận về ${requestedMonths}/${totalMonths} tháng.`,
+      });
+
+  const appliedAt = nowIso();
+  db.prepare(`
+    INSERT INTO system_settings (key, value, updated_at)
+    VALUES (?, ?, ?)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+  `).run(markerKey, JSON.stringify({
+    orderCode: safeOrderCode,
+    subscriptionId: existing.id,
+    fulfilledMonths: requestedMonths,
+    staleReminder,
+    cleanupPending: true,
+    appliedAt,
+  }), appliedAt);
+
+  return {
+    skipped: false,
+    changed: !alreadyCorrect,
+    orderCode: safeOrderCode,
+    subscriptionId: existing.id,
+    previousFulfilledMonths: previousProgress.fulfilledMonths,
+    fulfilledMonths: requestedMonths,
+    nextRenewalAt: updated.next_renewal_at,
+    staleReminder,
+    cleanupPending: true,
+  };
+}
+
+export function markSubscriptionProgressRepairCleanupComplete(migrationId, deletedMessageIds = []) {
+  const safeMigrationId = String(migrationId || '').trim();
+  if (!safeMigrationId) return false;
+  const markerKey = `subscription_progress_repair:${safeMigrationId}`;
+  const marker = db.prepare('SELECT value FROM system_settings WHERE key = ?').get(markerKey);
+  if (!marker) return false;
+  let saved = {};
+  try {
+    saved = JSON.parse(marker.value || '{}');
+  } catch {}
+  const updatedAt = nowIso();
+  db.prepare('UPDATE system_settings SET value = ?, updated_at = ? WHERE key = ?').run(JSON.stringify({
+    ...saved,
+    cleanupPending: false,
+    cleanedAt: updatedAt,
+    deletedReminderMessageIds: [...new Set((deletedMessageIds || []).map(String))],
+  }), updatedAt, markerKey);
+  return true;
+}
+
 export function findSubscriptions(guildId, query, limit = 20) {
   const keyword = String(query || '').trim();
   if (!keyword) return [];
@@ -721,19 +792,72 @@ export function getAdminRenewalCandidates(guildId, withinDays = 7, limit = 100) 
   `).all(guildId, `+${safeDays} days`, `+${safeDays} days`, `+${safeDays} days`, safeLimit);
 }
 
-export function markAdminReminderSent(id, { stage, messageId = null, channelId = null } = {}) {
-  const ts = nowIso();
-  db.prepare(`
+/**
+ * Giữ chỗ một lượt gửi reminder bằng optimistic concurrency. Hai scheduler
+ * hoặc hai lần quét chạy đồng thời chỉ có một tiến trình được quyền gửi.
+ */
+export function reserveAdminReminderDispatch(id, {
+  stage,
+  channelId = null,
+  expectedStage = null,
+  expectedSentAt = null,
+  sentAt = nowIso(),
+} = {}) {
+  const result = db.prepare(`
     UPDATE subscription_accounts
     SET admin_reminder_stage = ?,
         admin_reminder_sent_at = ?,
-        admin_reminder_message_id = ?,
         admin_reminder_channel_id = ?,
         admin_last_action_at = ?,
         updated_at = ?
     WHERE id = ?
-  `).run(stage, ts, messageId, channelId, ts, ts, id);
-  return getSubscriptionById(id);
+      AND status = 'ACTIVE'
+      AND COALESCE(admin_reminder_stage, '') = ?
+      AND COALESCE(admin_reminder_sent_at, '') = ?
+      AND (admin_snoozed_until IS NULL OR datetime(admin_snoozed_until) <= datetime(?))
+  `).run(
+    stage,
+    sentAt,
+    channelId,
+    sentAt,
+    sentAt,
+    id,
+    String(expectedStage || ''),
+    String(expectedSentAt || ''),
+    sentAt,
+  );
+  if (result.changes !== 1) return null;
+  return { subscription: getSubscriptionById(id), sentAt };
+}
+
+export function markAdminReminderSent(id, {
+  stage,
+  messageId = null,
+  channelId = null,
+  reservedAt = null,
+} = {}) {
+  const ts = nowIso();
+  const result = reservedAt
+    ? db.prepare(`
+        UPDATE subscription_accounts
+        SET admin_reminder_message_id = ?,
+            admin_reminder_channel_id = ?,
+            updated_at = ?
+        WHERE id = ?
+          AND admin_reminder_stage = ?
+          AND admin_reminder_sent_at = ?
+      `).run(messageId, channelId, ts, id, stage, reservedAt)
+    : db.prepare(`
+        UPDATE subscription_accounts
+        SET admin_reminder_stage = ?,
+            admin_reminder_sent_at = ?,
+            admin_reminder_message_id = ?,
+            admin_reminder_channel_id = ?,
+            admin_last_action_at = ?,
+            updated_at = ?
+        WHERE id = ?
+      `).run(stage, ts, messageId, channelId, ts, ts, id);
+  return result.changes === 1 ? getSubscriptionById(id) : null;
 }
 
 export function claimAdminRenewal(id, adminId) {

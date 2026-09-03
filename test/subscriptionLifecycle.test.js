@@ -3,12 +3,15 @@ import { db, initDatabase } from '../src/database/db.js';
 import {
   addSubscription,
   addSubscriptionMonths,
+  applySubscriptionProgressRepairOnce,
   getSubscriptionHistory,
   getSubscriptionProgress,
   isSubscriptionRenewalDue,
+  markAdminReminderSent,
   markDisconnected,
   markRenewed,
   migrateSubscriptionMonthlyCycles,
+  reserveAdminReminderDispatch,
   setSubscriptionFulfilledMonths,
 } from '../src/services/subscriptionService.js';
 
@@ -104,6 +107,34 @@ describe('subscription monthly lifecycle', () => {
     expect(getSubscriptionHistory(created.id).filter((event) => event.event_type === 'RENEWED')).toHaveLength(1);
   });
 
+  it('reserves an admin reminder exactly once across concurrent scheduler scans', () => {
+    const created = createSubscription({ months: 12, suffix: 'reminder-reservation' });
+    const sentAt = '2026-01-25T10:30:00.000Z';
+    const first = reserveAdminReminderDispatch(created.id, {
+      stage: 'UPCOMING_7D',
+      channelId: 'CHANNEL_1',
+      expectedStage: null,
+      expectedSentAt: null,
+      sentAt,
+    });
+    const duplicate = reserveAdminReminderDispatch(created.id, {
+      stage: 'UPCOMING_7D',
+      channelId: 'CHANNEL_1',
+      expectedStage: null,
+      expectedSentAt: null,
+      sentAt: '2026-01-25T10:30:01.000Z',
+    });
+
+    expect(first?.subscription.admin_reminder_stage).toBe('UPCOMING_7D');
+    expect(duplicate).toBeNull();
+    expect(markAdminReminderSent(created.id, {
+      stage: 'UPCOMING_7D',
+      messageId: 'MESSAGE_1',
+      channelId: 'CHANNEL_1',
+      reservedAt: sentAt,
+    })?.admin_reminder_message_id).toBe('MESSAGE_1');
+  });
+
   it('only opens renewal actions inside the configured due window', () => {
     const created = createSubscription({ months: 12, suffix: 'due-window' });
     expect(isSubscriptionRenewalDue(created, 7, new Date('2026-02-20T10:30:00.000Z'))).toBe(false);
@@ -117,6 +148,47 @@ describe('subscription monthly lifecycle', () => {
     expect(updated.next_renewal_at).toBe('2026-06-30T10:30:00.000Z');
     expect(getSubscriptionProgress(updated)).toMatchObject({ fulfilledMonths: 5, remainingMonths: 7, nextCycleNumber: 6 });
     expect(getSubscriptionHistory(updated.id)[0]).toMatchObject({ event_type: 'PROGRESS_ADJUSTED', fulfilled_months: 5 });
+  });
+
+  it('applies an owner-confirmed progress repair once and restores the next cycle', () => {
+    const sub = createSubscription({ months: 12, suffix: 'owner-repair' });
+    db.prepare(`
+      UPDATE subscription_accounts
+      SET times_renewed = 3,
+          next_renewal_at = '2026-02-28T10:30:00.000Z',
+          admin_reminder_stage = 'OVERDUE',
+          admin_reminder_sent_at = '2026-09-03T08:00:00.000Z',
+          admin_reminder_message_id = 'BAD_MESSAGE',
+          admin_reminder_channel_id = 'REMINDER_CHANNEL'
+      WHERE id = ?
+    `).run(sub.id);
+
+    const migrationId = `restore-${GUILD_ID}`;
+    const repaired = applySubscriptionProgressRepairOnce({
+      migrationId,
+      orderCode: sub.related_order_code,
+      fulfilledMonths: 3,
+      note: 'Owner confirmed 3/12.',
+    });
+    const repeated = applySubscriptionProgressRepairOnce({
+      migrationId,
+      orderCode: sub.related_order_code,
+      fulfilledMonths: 3,
+    });
+
+    expect(repaired).toMatchObject({
+      changed: true,
+      previousFulfilledMonths: 4,
+      fulfilledMonths: 3,
+      nextRenewalAt: '2026-04-30T10:30:00.000Z',
+      staleReminder: {
+        channelId: 'REMINDER_CHANNEL',
+        messageId: 'BAD_MESSAGE',
+      },
+    });
+    expect(getSubscriptionProgress(db.prepare('SELECT * FROM subscription_accounts WHERE id = ?').get(sub.id)))
+      .toMatchObject({ fulfilledMonths: 3, nextCycleNumber: 4 });
+    expect(repeated).toMatchObject({ skipped: true, reason: 'already_applied' });
   });
 
   it('migrates an old two-month cycle without losing fulfilled months', () => {

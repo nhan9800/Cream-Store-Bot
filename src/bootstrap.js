@@ -7,7 +7,13 @@ import { startWebhookServer } from './services/webhookServer.js';
 import { startPresenceRotation } from './services/presenceService.js';
 import { startOtpAutoCheck } from './services/otpAutoCheckService.js';
 import { backfillRecentDeliverySubscriptions } from './services/deliverySubscriptionService.js';
-import { migrateSubscriptionMonthlyCycles, repairNetflixDeliveryStartDates } from './services/subscriptionService.js';
+import {
+  applySubscriptionProgressRepairOnce,
+  markSubscriptionProgressRepairCleanupComplete,
+  migrateSubscriptionMonthlyCycles,
+  repairNetflixDeliveryStartDates,
+} from './services/subscriptionService.js';
+import { cleanupAdminRenewalMessagesForRepair } from './services/adminRenewalReminderService.js';
 import {
   cleanupExpiredTranscripts,
   cleanupTranscriptArchiveStorage,
@@ -45,6 +51,14 @@ export async function buildClient() {
   for (const failure of subscriptionBackfill.failed) {
     console.error(`[SUBSCRIPTION-SYNC] ${failure.orderCode}: ${failure.error}`);
   }
+  const ownerConfirmedRepairMigrationId = '2026-09-03-cr615637-restore-3-of-12';
+  const ownerConfirmedRenewalRepair = applySubscriptionProgressRepairOnce({
+    migrationId: ownerConfirmedRepairMigrationId,
+    orderCode: 'CR_615637',
+    fulfilledMonths: 3,
+    note: 'Chủ shop xác nhận khách đang ở kỳ 3/12 và chưa tới kỳ 4; khôi phục sau sự cố panel nhắc lặp.',
+  });
+  console.log(`[SUBSCRIPTION-PROGRESS-REPAIR] order=${ownerConfirmedRenewalRepair.orderCode} skipped=${Boolean(ownerConfirmedRenewalRepair.skipped)} changed=${Boolean(ownerConfirmedRenewalRepair.changed)} next=${ownerConfirmedRenewalRepair.nextRenewalAt || 'unchanged'}`);
 
   const commands = await loadCommands();
   const client = new Client(getClientOptions());
@@ -62,6 +76,17 @@ export async function buildClient() {
     console.log(`[READY] Loaded ${commands.size} slash commands`);
 
     startPresenceRotation(readyClient);
+    if (ownerConfirmedRenewalRepair.cleanupPending && ownerConfirmedRenewalRepair.subscriptionId) {
+      const cleanup = await cleanupAdminRenewalMessagesForRepair(readyClient, {
+        subscriptionId: ownerConfirmedRenewalRepair.subscriptionId,
+        orderCode: ownerConfirmedRenewalRepair.orderCode,
+        channelId: ownerConfirmedRenewalRepair.staleReminder?.channelId,
+      }).catch((error) => ({ scanned: 0, deleted: [], error: error.message }));
+      console.log(`[SUBSCRIPTION-REMINDER-CLEANUP] order=${ownerConfirmedRenewalRepair.orderCode} scanned=${cleanup.scanned || 0} deleted=${cleanup.deleted?.length || 0}${cleanup.error ? ` error=${cleanup.error}` : ''}`);
+      if (!cleanup.error && !cleanup.reason) {
+        markSubscriptionProgressRepairCleanupComplete(ownerConfirmedRepairMigrationId, cleanup.deleted);
+      }
+    }
     startScheduler(readyClient);
     try {
       await startWebhookServer(readyClient);

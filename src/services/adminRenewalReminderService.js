@@ -19,6 +19,7 @@ import {
   markAdminReminderSent,
   markDisconnected,
   markRenewed,
+  reserveAdminReminderDispatch,
   snoozeAdminRenewal,
 } from './subscriptionService.js';
 import { createEmojiResolver, withButtonEmoji } from '../utils/emojiHelper.js';
@@ -77,7 +78,7 @@ const STAGE_META = {
     badge: 'QUÁ HẠN',
     accent: 'danger',
     emoji: 'status_cross',
-    summary: 'Gói đã quá hạn và có nguy cơ gián đoạn. Hệ thống sẽ nhắc lại tối đa một lần mỗi 24 giờ cho tới khi được xử lý.',
+    summary: 'Gói đã quá hạn và có nguy cơ gián đoạn. Hệ thống chỉ giữ một thông báo xử lý cho kỳ hiện tại để tránh spam.',
   },
 };
 
@@ -124,9 +125,7 @@ export function shouldSendAdminReminder(sub, stage, now = new Date()) {
   const previous = String(sub?.admin_reminder_stage || '');
   if (!previous) return true;
   if ((STAGE_ORDER[stage] || 0) > (STAGE_ORDER[previous] || 0)) return true;
-  if (stage !== 'OVERDUE' || previous !== 'OVERDUE') return false;
-  const lastSent = new Date(sub.admin_reminder_sent_at || 0);
-  return !Number.isFinite(lastSent.getTime()) || new Date(now).getTime() - lastSent.getTime() >= DAY_MS;
+  return false;
 }
 
 function adminTargets(guild, settings) {
@@ -325,9 +324,39 @@ export async function runStoreOneAdminRenewalReminders(client) {
   for (const sub of candidates) {
     const stage = resolveAdminReminderStage(sub);
     if (!shouldSendAdminReminder(sub, stage)) continue;
+    const reservation = reserveAdminReminderDispatch(sub.id, {
+      stage,
+      channelId: channel.id,
+      expectedStage: sub.admin_reminder_stage,
+      expectedSentAt: sub.admin_reminder_sent_at,
+    });
+    if (!reservation) continue;
     try {
-      const message = await channel.send(buildAdminRenewalReminderV2(sub, { stage, ...targets }));
-      markAdminReminderSent(sub.id, { stage, messageId: message.id, channelId: channel.id });
+      let message = null;
+      if (
+        sub.admin_reminder_message_id
+        && String(sub.admin_reminder_channel_id || channel.id) === String(channel.id)
+      ) {
+        message = await channel.messages.fetch(sub.admin_reminder_message_id).catch(() => null);
+        if (message?.author?.id === client.user?.id) {
+          await message.edit(buildAdminRenewalReminderV2(sub, {
+            stage,
+            ...targets,
+            ping: false,
+          }));
+        } else {
+          message = null;
+        }
+      }
+      if (!message) {
+        message = await channel.send(buildAdminRenewalReminderV2(sub, { stage, ...targets }));
+      }
+      markAdminReminderSent(sub.id, {
+        stage,
+        messageId: message.id,
+        channelId: channel.id,
+        reservedAt: reservation.sentAt,
+      });
       sent += 1;
     } catch (error) {
       errors += 1;
@@ -338,6 +367,58 @@ export async function runStoreOneAdminRenewalReminders(client) {
     console.log(`[SUB-ADMIN-REMINDER] scanned=${candidates.length} sent=${sent} errors=${errors}`);
   }
   return { skipped: false, scanned: candidates.length, sent, errors };
+}
+
+/**
+ * Xóa đúng các panel bot đã gửi sai cho một hồ sơ vừa được khôi phục. Không
+ * đụng tới tin nhắn người dùng hoặc reminder của hồ sơ khác.
+ */
+export async function cleanupAdminRenewalMessagesForRepair(client, {
+  subscriptionId,
+  orderCode,
+  channelId = null,
+  maxMessages = 500,
+} = {}) {
+  const id = Number(subscriptionId);
+  const reference = String(orderCode || '').trim();
+  if (!Number.isInteger(id) || !reference) return { scanned: 0, deleted: [] };
+
+  const guild = client.guilds.cache.get(STORE_ONE_GUILD_ID)
+    || await client.guilds.fetch(STORE_ONE_GUILD_ID).catch(() => null);
+  if (!guild) return { scanned: 0, deleted: [], reason: 'guild_unavailable' };
+  const settings = getGuildConfig(STORE_ONE_GUILD_ID);
+  const targetChannelId = channelId || settings?.reminder_channel_id || settings?.staff_log_channel_id;
+  const channel = targetChannelId
+    ? guild.channels.cache.get(targetChannelId)
+      || await guild.channels.fetch(targetChannelId).catch(() => null)
+    : null;
+  if (!channel?.isTextBased()) return { scanned: 0, deleted: [], reason: 'channel_unavailable' };
+
+  const safeLimit = Math.min(1_000, Math.max(1, Number(maxMessages) || 500));
+  const deleted = [];
+  let scanned = 0;
+  let before;
+  while (scanned < safeLimit) {
+    const page = await channel.messages.fetch({
+      limit: Math.min(100, safeLimit - scanned),
+      ...(before ? { before } : {}),
+    }).catch(() => null);
+    if (!page?.size) break;
+    for (const message of page.values()) {
+      scanned += 1;
+      if (message.author?.id !== client.user?.id) continue;
+      const serialized = JSON.stringify(message.toJSON?.() || message);
+      const belongsToRepair = serialized.includes(reference)
+        || serialized.includes(`sub:admin:claim:${id}`)
+        || serialized.includes(`sub:admin:renew:${id}:`)
+        || serialized.includes(`sub:admin:snooze:${id}`);
+      if (!belongsToRepair) continue;
+      if (await message.delete().then(() => true).catch(() => false)) deleted.push(message.id);
+    }
+    before = page.last()?.id;
+    if (page.size < 100) break;
+  }
+  return { scanned, deleted, channelId: channel.id };
 }
 
 async function updateInteraction(interaction, payload) {

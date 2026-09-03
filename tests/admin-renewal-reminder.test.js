@@ -46,7 +46,7 @@ describe('Store 1 admin renewal reminder', () => {
     expect(resolveAdminReminderStage(subscription({ next_renewal_at: '2026-08-11T05:59:00.000Z' }), NOW)).toBe('OVERDUE');
   });
 
-  test('prevents duplicate pings but permits escalation and one overdue repeat per day', () => {
+  test('prevents duplicate pings and only permits a higher-priority stage', () => {
     expect(shouldSendAdminReminder(subscription(), 'UPCOMING_7D', NOW)).toBe(true);
     expect(shouldSendAdminReminder(subscription({
       admin_reminder_stage: 'UPCOMING_7D',
@@ -56,7 +56,7 @@ describe('Store 1 admin renewal reminder', () => {
     expect(shouldSendAdminReminder(subscription({
       admin_reminder_stage: 'OVERDUE',
       admin_reminder_sent_at: '2026-08-11T05:59:00.000Z',
-    }), 'OVERDUE', NOW)).toBe(true);
+    }), 'OVERDUE', NOW)).toBe(false);
   });
 
   test('builds a secure Components V2 admin panel with only custom emoji', () => {

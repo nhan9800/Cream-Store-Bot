@@ -100,6 +100,19 @@ describe('/giaohang subscription synchronization', () => {
       profile: 'Cenar 01',
       customerDiscordName: 'customer',
     });
+    db.prepare(`
+      UPDATE subscription_accounts
+      SET purchase_date = '2026-07-01T12:00:00.000Z',
+          next_renewal_at = '2026-09-01T12:00:00.000Z',
+          expiry_at = '2026-10-01T12:00:00.000Z',
+          times_renewed = 1,
+          renewal_remind_sent_at = '2026-08-29T12:00:00.000Z',
+          admin_reminder_stage = 'UPCOMING_3D',
+          admin_reminder_sent_at = '2026-08-29T12:00:00.000Z',
+          admin_reminder_message_id = '123456789012345678',
+          admin_reminder_channel_id = '234567890123456789'
+      WHERE id = ?
+    `).run(first.id);
     const second = syncDeliverySubscription({
       order: netflixOrder,
       gmailEmail: 'updated@example.com',
@@ -114,6 +127,17 @@ describe('/giaohang subscription synchronization', () => {
     expect(rows[0].gmail_email).toBe('updated@example.com');
     expect(decrypt(rows[0].gmail_password)).toBe('updated-password');
     expect(rows[0].note).toBe('Profile: Cenar 02');
+    expect(rows[0]).toMatchObject({
+      purchase_date: '2026-07-01T12:00:00.000Z',
+      next_renewal_at: '2026-09-01T12:00:00.000Z',
+      expiry_at: '2026-10-01T12:00:00.000Z',
+      times_renewed: 1,
+      renewal_remind_sent_at: '2026-08-29T12:00:00.000Z',
+      admin_reminder_stage: 'UPCOMING_3D',
+      admin_reminder_sent_at: '2026-08-29T12:00:00.000Z',
+      admin_reminder_message_id: '123456789012345678',
+      admin_reminder_channel_id: '234567890123456789',
+    });
   });
 
   it('requires both credentials for a tracked subscription', () => {

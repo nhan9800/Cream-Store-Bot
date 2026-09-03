@@ -110,10 +110,18 @@ describe('Netflix delivery date integrity', () => {
     });
     expect(subscriptions.getSubscriptionHistory(wrong.id).some((event) => event.event_type === 'START_DATE_REPAIRED')).toBe(true);
 
-    db.prepare('UPDATE subscription_accounts SET purchase_date = ?, expiry_at = ? WHERE id = ?')
-      .run(CREATED_AT, '2026-09-01T02:00:00.000Z', wrong.id);
+    db.prepare(`
+      UPDATE subscription_accounts
+      SET renewal_remind_sent_at = '2026-09-01T00:00:00.000Z',
+          admin_reminder_stage = 'UPCOMING_3D',
+          admin_reminder_sent_at = '2026-09-01T00:00:00.000Z'
+      WHERE id = ?
+    `).run(wrong.id);
     const resynced = subscriptions.upsertSubscriptionFromDelivery(input);
     expect(resynced.purchase_date).toBe(DELIVERED_AT);
     expect(resynced.expiry_at).toBe(CORRECT_EXPIRY);
+    expect(resynced.renewal_remind_sent_at).toBe('2026-09-01T00:00:00.000Z');
+    expect(resynced.admin_reminder_stage).toBe('UPCOMING_3D');
+    expect(resynced.admin_reminder_sent_at).toBe('2026-09-01T00:00:00.000Z');
   });
 });
