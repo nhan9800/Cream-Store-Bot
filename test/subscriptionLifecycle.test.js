@@ -396,11 +396,13 @@ describe('subscription monthly lifecycle', () => {
     const sub = createSubscription({ months: 12, serviceType: 'nitro', suffix: 'owner-nitro-cycle-3' });
     db.prepare(`
       UPDATE subscription_accounts
-      SET renewal_cycle_months = 1, times_renewed = 2,
-          next_renewal_at = '2026-04-30T10:30:00.000Z'
+      SET renewal_cycle_months = 1, times_renewed = 5,
+          next_renewal_at = '2026-07-31T10:30:00.000Z'
       WHERE id = ?
     `).run(sub.id);
     migrateSubscriptionMonthlyCycles({ guildId: GUILD_ID });
+    expect(db.prepare('SELECT progress_status FROM subscription_accounts WHERE id = ?').get(sub.id).progress_status)
+      .toBe('NEEDS_REVIEW');
 
     const repaired = applySubscriptionProgressRepairOnce({
       migrationId: `nitro-cycle-3-${GUILD_ID}`,
@@ -412,7 +414,9 @@ describe('subscription monthly lifecycle', () => {
       fulfilledMonths: 6,
       nextRenewalAt: '2026-07-31T10:30:00.000Z',
     });
-    expect(getSubscriptionProgress(db.prepare('SELECT * FROM subscription_accounts WHERE id = ?').get(sub.id)))
+    const verified = db.prepare('SELECT * FROM subscription_accounts WHERE id = ?').get(sub.id);
+    expect(verified.progress_status).toBe('VERIFIED');
+    expect(getSubscriptionProgress(verified))
       .toMatchObject({ fulfilledMonths: 6, completedCycles: 3, totalCycles: 6, nextCycleNumber: 4 });
   });
 });

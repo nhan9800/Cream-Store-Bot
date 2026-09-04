@@ -784,6 +784,12 @@ export function applySubscriptionProgressRepairOnce({
     ? addSubscriptionMonths(existing.purchase_date, requestedMonths)
     : null;
   const alreadyCorrect = previousProgress.fulfilledMonths === requestedMonths
+    && existing.progress_status === 'VERIFIED'
+    && Number(existing.renewal_cycle_months || 0) === getDefaultRenewalCycleMonths(
+      existing.service_type,
+      totalMonths,
+      existing.renewal_mode,
+    )
     && (
       (expectedNextRenewalAt === null && existing.next_renewal_at === null)
       || dateTimesMatch(existing.next_renewal_at, expectedNextRenewalAt)
