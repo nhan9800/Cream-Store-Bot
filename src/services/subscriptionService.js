@@ -298,6 +298,12 @@ function computeExpiry(purchaseDate, totalMonths) {
   return addSubscriptionMonths(purchaseDate, totalMonths);
 }
 
+export function getDefaultRenewalCycleMonths(serviceType, totalDurationMonths, renewalMode = 'auto_cycle') {
+  if (renewalMode !== 'auto_cycle') return 0;
+  const total = Math.max(1, Number.parseInt(String(totalDurationMonths || 1), 10) || 1);
+  return String(serviceType || '').toLowerCase() === 'nitro' ? Math.min(2, total) : 1;
+}
+
 export function getSubscriptionProgress(sub) {
   const totalMonths = Math.max(1, Number.parseInt(String(sub?.total_duration_months || 1), 10) || 1);
   const isAutoCycle = sub?.renewal_mode === 'auto_cycle';
@@ -309,14 +315,23 @@ export function getSubscriptionProgress(sub) {
     : totalMonths;
   const remainingMonths = Math.max(0, totalMonths - fulfilledMonths);
   const nextAction = remainingMonths > 0 ? 'RENEW' : 'DISCONNECT';
+  const totalCycles = isAutoCycle ? Math.ceil(totalMonths / cycleMonths) : 1;
+  const completedCycles = isAutoCycle
+    ? Math.min(totalCycles, Math.max(0, Number(sub?.times_renewed || 0)) + 1)
+    : 1;
+  const nextCycleNumber = nextAction === 'RENEW' ? Math.min(totalCycles, completedCycles + 1) : null;
   return {
     totalMonths,
     cycleMonths,
     fulfilledMonths,
     remainingMonths,
+    totalCycles,
+    completedCycles,
     nextAction,
     nextActionAt: nextAction === 'RENEW' ? sub?.next_renewal_at : sub?.expiry_at,
-    nextCycleNumber: nextAction === 'RENEW' ? Math.min(totalMonths, fulfilledMonths + cycleMonths) : null,
+    nextCycleNumber,
+    nextCycleStartMonth: nextAction === 'RENEW' ? fulfilledMonths + 1 : null,
+    nextCycleEndMonth: nextAction === 'RENEW' ? Math.min(totalMonths, fulfilledMonths + cycleMonths) : null,
     needsReview: sub?.progress_status === 'NEEDS_REVIEW',
   };
 }
@@ -406,7 +421,11 @@ export function addSubscription({
   const safeRenewalMode = renewalMode === 'full_paid'
     ? 'full_paid'
     : safeTotalDurationMonths > 1 ? 'auto_cycle' : 'one_time';
-  const safeRenewalCycleMonths = safeRenewalMode === 'auto_cycle' ? 1 : 0;
+  const safeRenewalCycleMonths = getDefaultRenewalCycleMonths(
+    serviceType,
+    safeTotalDurationMonths,
+    safeRenewalMode,
+  );
   const expiryAt = computeExpiry(purchaseDate, safeTotalDurationMonths);
   let nextRenewalAt = null;
 
@@ -683,7 +702,12 @@ export function setSubscriptionFulfilledMonths(id, fulfilledMonths, {
   }
   const autoCycle = total > 1 && sub.renewal_mode !== 'full_paid';
   const renewalMode = autoCycle ? 'auto_cycle' : sub.renewal_mode;
-  const timesRenewed = autoCycle ? fulfilled - 1 : 0;
+  const renewalCycleMonths = getDefaultRenewalCycleMonths(sub.service_type, total, renewalMode);
+  if (autoCycle && fulfilled < total && fulfilled % renewalCycleMonths !== 0) {
+    throw new Error(`Tiến độ ${fulfilled}/${total} tháng không khớp chu kỳ ${renewalCycleMonths} tháng/lần của ${sub.service_type}.`);
+  }
+  const completedCycles = autoCycle ? Math.ceil(fulfilled / renewalCycleMonths) : 1;
+  const timesRenewed = autoCycle ? Math.max(0, completedCycles - 1) : 0;
   const nextRenewalAt = autoCycle && fulfilled < total
     ? addSubscriptionMonths(sub.purchase_date, fulfilled)
     : null;
@@ -699,7 +723,7 @@ export function setSubscriptionFulfilledMonths(id, fulfilledMonths, {
         admin_claimed_at = NULL, admin_snoozed_until = NULL,
         admin_last_action_at = ?, updated_at = ?
     WHERE id = ?
-  `).run(renewalMode, autoCycle ? 1 : 0, timesRenewed, nextRenewalAt, ts, ts, id);
+  `).run(renewalMode, renewalCycleMonths, timesRenewed, nextRenewalAt, ts, ts, id);
   const updated = getSubscriptionById(id);
   recordSubscriptionEvent(id, 'PROGRESS_ADJUSTED', {
     actorId,
@@ -1101,9 +1125,10 @@ export function isRetailNitro(sub) {
 }
 
 /**
- * Chuẩn hóa dữ liệu cũ sang chu kỳ cấp dịch vụ mỗi tháng.
- * Gói từng dùng chu kỳ 2+ tháng được quy đổi mà không làm mất tiến độ;
- * gói mua lẻ nhiều tháng được đưa vào hàng chờ Admin xác minh vì không thể đoán an toàn.
+ * Chuẩn hóa chu kỳ theo từng dịch vụ. Nitro cấp 2 tháng/kỳ; Spotify,
+ * YouTube và Netflix dùng chu kỳ 1 tháng. Khi đổi cấu trúc, giữ nguyên số
+ * tháng đã cấp nếu có thể xác định chắc chắn, còn dữ liệu lệch kỳ sẽ bị khóa
+ * để Admin đối soát thay vì tiếp tục gửi reminder sai.
  */
 export function migrateSubscriptionMonthlyCycles({ guildId = null } = {}) {
   const rows = guildId
@@ -1114,20 +1139,71 @@ export function migrateSubscriptionMonthlyCycles({ guildId = null } = {}) {
   let historyCreated = 0;
   const migrate = db.transaction(() => {
     for (const sub of rows) {
-      if (sub.renewal_mode === 'auto_cycle' && Number(sub.renewal_cycle_months || 0) !== 1) {
+      if (sub.renewal_mode === 'auto_cycle') {
         const total = Math.max(1, Number(sub.total_duration_months || 1));
         const oldCycle = Math.max(1, Number(sub.renewal_cycle_months || 1));
-        const fulfilled = Math.min(total, oldCycle * (Math.max(0, Number(sub.times_renewed || 0)) + 1));
-        const nextRenewal = fulfilled < total ? addSubscriptionMonths(sub.purchase_date, fulfilled) : null;
-        db.prepare(`
-          UPDATE subscription_accounts
-          SET renewal_cycle_months = 1, times_renewed = ?, next_renewal_at = ?,
-              progress_status = 'VERIFIED', progress_review_note = NULL,
-              admin_reminder_for_at = NULL, admin_last_completed_for_at = NULL,
-              updated_at = ?
-          WHERE id = ?
-        `).run(fulfilled - 1, nextRenewal, nowIso(), sub.id);
-        normalized += 1;
+        const targetCycle = getDefaultRenewalCycleMonths(sub.service_type, total, sub.renewal_mode);
+        if (oldCycle !== targetCycle) {
+          const fulfilled = Math.min(total, oldCycle * (Math.max(0, Number(sub.times_renewed || 0)) + 1));
+          const isFreshNitroRecord = String(sub.service_type || '').toLowerCase() === 'nitro'
+            && oldCycle === 1
+            && targetCycle === 2
+            && Number(sub.times_renewed || 0) === 0;
+          // Các bản ghi Nitro chu kỳ tháng đã từng được bấm gia hạn không còn
+          // đáng tin vì lỗi panel cũ có thể đã tăng revision nhiều lần. Chỉ
+          // hồ sơ chưa gia hạn lần nào mới có thể tự nâng an toàn; phần còn lại
+          // phải dừng reminder để Admin đối soát.
+          const isUntrustedMonthlyNitro = String(sub.service_type || '').toLowerCase() === 'nitro'
+            && oldCycle === 1
+            && targetCycle === 2
+            && Number(sub.times_renewed || 0) > 0;
+          const aligned = (fulfilled >= total || fulfilled % targetCycle === 0 || isFreshNitroRecord)
+            && !isUntrustedMonthlyNitro;
+          const completedCycles = Math.max(1, Math.ceil(fulfilled / targetCycle));
+          const normalizedFulfilled = Math.min(total, completedCycles * targetCycle);
+          const nextRenewal = normalizedFulfilled < total
+            ? addSubscriptionMonths(sub.purchase_date, normalizedFulfilled)
+            : null;
+          const ts = nowIso();
+          db.prepare(`
+            UPDATE subscription_accounts
+            SET renewal_cycle_months = ?, times_renewed = ?, next_renewal_at = ?,
+                progress_status = ?, progress_review_note = ?,
+                renewal_remind_sent_at = NULL, admin_reminder_stage = NULL,
+                admin_reminder_sent_at = NULL, admin_reminder_for_at = NULL,
+                admin_reminder_message_id = NULL, admin_reminder_channel_id = NULL,
+                admin_last_completed_for_at = NULL, admin_claimed_by_id = NULL,
+                admin_claimed_at = NULL, admin_snoozed_until = NULL,
+                admin_last_action_at = ?, updated_at = ?
+            WHERE id = ?
+          `).run(
+            targetCycle,
+            completedCycles - 1,
+            nextRenewal,
+            aligned ? 'VERIFIED' : 'NEEDS_REVIEW',
+            aligned
+              ? null
+              : isUntrustedMonthlyNitro
+                ? `Nitro cũ đã ghi nhận ${sub.times_renewed} lần bấm gia hạn khi hệ thống dùng sai chu kỳ 1 tháng; cần Admin đối soát trước khi nhắc tiếp.`
+                : `Tiến độ cũ ${fulfilled}/${total} tháng không khớp chu kỳ ${targetCycle} tháng/lần; cần Admin đối soát.`,
+            ts,
+            ts,
+            sub.id,
+          );
+          recordSubscriptionEvent(sub.id, 'CYCLE_NORMALIZED', {
+            source: 'SERVICE_CYCLE_MIGRATION',
+            note: aligned
+              ? `Chuẩn hóa ${sub.service_type} từ ${oldCycle} tháng/kỳ sang ${targetCycle} tháng/kỳ; giữ ${normalizedFulfilled}/${total} tháng đã cấp.`
+              : isUntrustedMonthlyNitro
+                ? `Khóa nhắc tự động vì lịch sử Nitro chu kỳ tháng đã có ${sub.times_renewed} lần bấm gia hạn và có thể chứa thao tác lặp.`
+                : `Khóa nhắc tự động vì tiến độ cũ ${fulfilled}/${total} tháng không khớp chu kỳ ${targetCycle} tháng/kỳ.`,
+            fulfilledMonths: normalizedFulfilled,
+            totalMonths: total,
+            scheduledFor: nextRenewal || sub.expiry_at,
+          });
+          normalized += 1;
+          if (!aligned) needsReview += 1;
+        }
       } else if (sub.renewal_mode === 'one_time' && Number(sub.total_duration_months || 1) > 1) {
         db.prepare(`
           UPDATE subscription_accounts

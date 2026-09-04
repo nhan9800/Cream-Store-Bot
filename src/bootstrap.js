@@ -54,12 +54,12 @@ export async function buildClient() {
   for (const failure of subscriptionBackfill.failed) {
     console.error(`[SUBSCRIPTION-SYNC] ${failure.orderCode}: ${failure.error}`);
   }
-  const ownerConfirmedRepairMigrationId = '2026-09-03-cr615637-restore-3-of-12';
+  const ownerConfirmedRepairMigrationId = '2026-09-04-cr615637-restore-nitro-cycle-3-of-6';
   const ownerConfirmedRenewalRepair = applySubscriptionProgressRepairOnce({
     migrationId: ownerConfirmedRepairMigrationId,
     orderCode: 'CR_615637',
-    fulfilledMonths: 3,
-    note: 'Chủ shop xác nhận khách đang ở kỳ 3/12 và chưa tới kỳ 4; khôi phục sau sự cố panel nhắc lặp.',
+    fulfilledMonths: 6,
+    note: 'Chủ shop xác nhận Nitro gia hạn 2 tháng/kỳ: khách đã hoàn tất kỳ 3/6 (6/12 tháng) và chưa tới kỳ 4.',
   });
   console.log(`[SUBSCRIPTION-PROGRESS-REPAIR] order=${ownerConfirmedRenewalRepair.orderCode} skipped=${Boolean(ownerConfirmedRenewalRepair.skipped)} changed=${Boolean(ownerConfirmedRenewalRepair.changed)} next=${ownerConfirmedRenewalRepair.nextRenewalAt || 'unchanged'}`);
 

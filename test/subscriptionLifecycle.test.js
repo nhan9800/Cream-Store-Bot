@@ -19,10 +19,16 @@ import {
 const GUILD_ID = `test_subscription_lifecycle_${Date.now()}`;
 const originalEncryptionKey = process.env.ENCRYPTION_KEY;
 
-function createSubscription({ months, cycle = months > 1 ? 1 : 0, mode = months > 1 ? 'auto_cycle' : 'one_time', suffix = months }) {
+function createSubscription({
+  months,
+  cycle = months > 1 ? 1 : 0,
+  mode = months > 1 ? 'auto_cycle' : 'one_time',
+  serviceType = 'youtube',
+  suffix = months,
+}) {
   return addSubscription({
     guildId: GUILD_ID,
-    serviceType: 'youtube',
+    serviceType,
     renewalMode: mode,
     gmailEmail: `lifecycle-${suffix}@example.com`,
     gmailPassword: 'test-password',
@@ -108,6 +114,33 @@ describe('subscription monthly lifecycle', () => {
       expectedTimesRenewed: 0,
     })).toThrow(/xử lý/i);
     expect(getSubscriptionHistory(created.id).filter((event) => event.event_type === 'RENEWED')).toHaveLength(1);
+  });
+
+  it('tracks Nitro in two-month cycles and schedules cycle 4 only after cycle 3', () => {
+    let sub = createSubscription({ months: 12, serviceType: 'nitro', suffix: 'nitro-two-month-cycle' });
+    expect(sub.renewal_cycle_months).toBe(2);
+    expect(sub.next_renewal_at).toBe('2026-03-31T10:30:00.000Z');
+    expect(getSubscriptionProgress(sub)).toMatchObject({
+      fulfilledMonths: 2,
+      totalMonths: 12,
+      completedCycles: 1,
+      totalCycles: 6,
+      nextCycleNumber: 2,
+      nextCycleStartMonth: 3,
+      nextCycleEndMonth: 4,
+    });
+
+    sub = markRenewed(sub.id, { source: 'TEST', now: new Date('2026-03-31T10:30:00.000Z') });
+    sub = markRenewed(sub.id, { source: 'TEST', now: new Date('2026-05-31T10:30:00.000Z') });
+    expect(getSubscriptionProgress(sub)).toMatchObject({
+      fulfilledMonths: 6,
+      completedCycles: 3,
+      totalCycles: 6,
+      nextCycleNumber: 4,
+      nextCycleStartMonth: 7,
+      nextCycleEndMonth: 8,
+    });
+    expect(sub.next_renewal_at).toBe('2026-07-31T10:30:00.000Z');
   });
 
   it('reserves an admin reminder exactly once across concurrent scheduler scans', () => {
@@ -309,5 +342,77 @@ describe('subscription monthly lifecycle', () => {
     expect(migrated.times_renewed).toBe(1);
     expect(getSubscriptionProgress(migrated).fulfilledMonths).toBe(2);
     expect(migrated.next_renewal_at).toBe('2026-03-31T10:30:00.000Z');
+  });
+
+  it('stops reminders for an old monthly Nitro record until Admin verifies progress', () => {
+    const created = createSubscription({ months: 12, serviceType: 'nitro', suffix: 'restore-nitro-cycle' });
+    db.prepare(`
+      UPDATE subscription_accounts
+      SET renewal_cycle_months = 1, times_renewed = 5,
+          next_renewal_at = '2026-07-31T10:30:00.000Z',
+          admin_reminder_stage = 'OVERDUE', admin_reminder_sent_at = '2026-09-03T00:00:00.000Z'
+      WHERE id = ?
+    `).run(created.id);
+
+    migrateSubscriptionMonthlyCycles({ guildId: GUILD_ID });
+    const migrated = db.prepare('SELECT * FROM subscription_accounts WHERE id = ?').get(created.id);
+    expect(migrated).toMatchObject({
+      renewal_cycle_months: 2,
+      times_renewed: 2,
+      next_renewal_at: '2026-07-31T10:30:00.000Z',
+      progress_status: 'NEEDS_REVIEW',
+      admin_reminder_stage: null,
+      admin_reminder_sent_at: null,
+    });
+    expect(getSubscriptionProgress(migrated)).toMatchObject({
+      fulfilledMonths: 6,
+      completedCycles: 3,
+      totalCycles: 6,
+      nextCycleNumber: 4,
+    });
+  });
+
+  it('upgrades a fresh Nitro record from one month to its initial two-month cycle safely', () => {
+    const created = createSubscription({ months: 12, serviceType: 'nitro', suffix: 'fresh-nitro-cycle' });
+    db.prepare(`
+      UPDATE subscription_accounts
+      SET renewal_cycle_months = 1, times_renewed = 0,
+          next_renewal_at = '2026-02-28T10:30:00.000Z'
+      WHERE id = ?
+    `).run(created.id);
+
+    migrateSubscriptionMonthlyCycles({ guildId: GUILD_ID });
+    const migrated = db.prepare('SELECT * FROM subscription_accounts WHERE id = ?').get(created.id);
+    expect(migrated).toMatchObject({
+      renewal_cycle_months: 2,
+      times_renewed: 0,
+      next_renewal_at: '2026-03-31T10:30:00.000Z',
+      progress_status: 'VERIFIED',
+    });
+    expect(getSubscriptionProgress(migrated)).toMatchObject({ fulfilledMonths: 2, completedCycles: 1 });
+  });
+
+  it('repairs the owner-confirmed Nitro record to cycle 3 of 6', () => {
+    const sub = createSubscription({ months: 12, serviceType: 'nitro', suffix: 'owner-nitro-cycle-3' });
+    db.prepare(`
+      UPDATE subscription_accounts
+      SET renewal_cycle_months = 1, times_renewed = 2,
+          next_renewal_at = '2026-04-30T10:30:00.000Z'
+      WHERE id = ?
+    `).run(sub.id);
+    migrateSubscriptionMonthlyCycles({ guildId: GUILD_ID });
+
+    const repaired = applySubscriptionProgressRepairOnce({
+      migrationId: `nitro-cycle-3-${GUILD_ID}`,
+      orderCode: sub.related_order_code,
+      fulfilledMonths: 6,
+      note: 'Owner confirmed Nitro cycle 3/6.',
+    });
+    expect(repaired).toMatchObject({
+      fulfilledMonths: 6,
+      nextRenewalAt: '2026-07-31T10:30:00.000Z',
+    });
+    expect(getSubscriptionProgress(db.prepare('SELECT * FROM subscription_accounts WHERE id = ?').get(sub.id)))
+      .toMatchObject({ fulfilledMonths: 6, completedCycles: 3, totalCycles: 6, nextCycleNumber: 4 });
   });
 });

@@ -154,7 +154,7 @@ function adminTargets(guild, settings) {
 
 function progressText(sub) {
   const progress = getSubscriptionProgress(sub);
-  return `Đã cấp **${progress.fulfilledMonths}/${progress.totalMonths} tháng** · còn ${progress.remainingMonths} tháng`;
+  return `Đã cấp **${progress.fulfilledMonths}/${progress.totalMonths} tháng** · hoàn tất kỳ **${progress.completedCycles}/${progress.totalCycles}** · còn ${progress.remainingMonths} tháng`;
 }
 
 function buildActionRow(sub, E) {
@@ -233,7 +233,7 @@ export function buildAdminRenewalReminderV2(sub, {
     sub.related_order_code ? `${E('icon_clipboard')} **Đơn gốc** — \`${clean(sub.related_order_code, 40)}\`` : null,
     `${E('icon_history')} **Tiến độ** — ${progressText(sub)}`,
     purchaseTs ? `${E('warranty_purchase')} **Ngày mua** — <t:${purchaseTs}:D>` : null,
-    dueTs ? `${E('icon_clock')} **${isDisconnect ? 'Ngày cần ngắt gói' : `Kỳ ${progress.nextCycleNumber}/${progress.totalMonths} cần cấp`}** — <t:${dueTs}:F> · <t:${dueTs}:R>` : null,
+    dueTs ? `${E('icon_clock')} **${isDisconnect ? 'Ngày cần ngắt gói' : `Kỳ ${progress.nextCycleNumber}/${progress.totalCycles} · cấp tháng ${progress.nextCycleStartMonth}-${progress.nextCycleEndMonth}/${progress.totalMonths}`}** — <t:${dueTs}:F> · <t:${dueTs}:R>` : null,
     expiryTs ? `${E('warranty_expiry')} **Hết hạn toàn gói** — <t:${expiryTs}:F>` : null,
     sub.note ? `${E('icon_edit')} **Ghi chú** — ${clean(sub.note, 240)}` : null,
   ].filter(Boolean).join('\n')));

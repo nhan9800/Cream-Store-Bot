@@ -58,7 +58,7 @@ describe('/giaohang subscription synchronization', () => {
     });
   });
 
-  it('uses a one-month operational cycle even when a Nitro order spans multiple months', () => {
+  it('uses the required two-month renewal cycle for a long Nitro order', () => {
     const input = buildDeliverySubscriptionInput({
       order: {
         ...netflixOrder,
@@ -73,7 +73,7 @@ describe('/giaohang subscription synchronization', () => {
     expect(input).toMatchObject({
       serviceType: 'nitro',
       renewalMode: 'auto_cycle',
-      renewalCycleMonths: 1,
+      renewalCycleMonths: 2,
       totalDurationMonths: 12,
     });
   });

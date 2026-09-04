@@ -61,7 +61,7 @@ export function buildDeliverySubscriptionInput({
 
   if (totalDurationMonths > 1) {
     renewalMode = 'auto_cycle';
-    renewalCycleMonths = 1;
+    renewalCycleMonths = serviceType === 'nitro' ? Math.min(2, totalDurationMonths) : 1;
   }
 
   return {

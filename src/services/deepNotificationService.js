@@ -3,6 +3,7 @@ import { db } from '../database/db.js';
 import {
   getAllDueForRenewalGlobal,
   getAllExpiringOneTimeGlobal,
+  getSubscriptionProgress,
   markRemindSent,
   markCustomerResponse,
 } from './subscriptionService.js';
@@ -66,7 +67,7 @@ function buildRenewalV2(sub) {
   const E = createEmojiResolver(sub.guild_id);
   const label = SERVICE_LABEL[sub.service_type] || sub.service_type;
   const color = SERVICE_COLOR[sub.service_type] || 0xFEE75C;
-  const totalRenewals = sub.renewal_cycle_months > 0 ? Math.max(0, Math.floor(sub.total_duration_months / sub.renewal_cycle_months) - 1) : 0;
+  const progress = getSubscriptionProgress(sub);
   const renewalTs = Math.floor(new Date(sub.next_renewal_at).getTime() / 1000);
   const customer = sub.customer_id ? `<@${sub.customer_id}>` : (sub.customer_discord_name || '_Chưa gán_');
 
@@ -76,7 +77,7 @@ function buildRenewalV2(sub) {
     `> ${E('icon_key')} **Mật khẩu:** Đã ẩn an toàn · xem trong trang quản trị`,
     `> ${E('ticket_user')} **Khách hàng:** ${customer}`,
     `> ${E('icon_clock')} **Hạn gia hạn:** <t:${renewalTs}:F> (<t:${renewalTs}:R>)`,
-    `> ${E('icon_number')} **Lần gia hạn:** ${sub.times_renewed + 1}/${totalRenewals + 1}`,
+    `> ${E('icon_number')} **Kỳ cần cấp:** ${progress.nextCycleNumber}/${progress.totalCycles} · tháng ${progress.nextCycleStartMonth}-${progress.nextCycleEndMonth}/${progress.totalMonths}`,
   ];
   if (sub.related_order_code) lines.push(`> ${E('icon_clipboard')} **Đơn gốc:** \`${sub.related_order_code}\``);
   if (sub.spotify_family_name) lines.push(`> ${E('icon_home')} **Family:** ${sub.spotify_family_name} · ${E('icon_group')} **Slots:** ${sub.spotify_slots_used || 0}/5`);

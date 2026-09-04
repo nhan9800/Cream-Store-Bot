@@ -99,4 +99,21 @@ describe('Store 1 admin renewal reminder', () => {
       users: ['1138315103821889566'],
     });
   });
+
+  test('shows Nitro as two-month cycles instead of monthly renewals', () => {
+    const payload = buildAdminRenewalReminderV2(subscription({
+      service_type: 'nitro',
+      total_duration_months: 12,
+      renewal_cycle_months: 2,
+      times_renewed: 2,
+      purchase_date: '2026-01-31T06:00:00.000Z',
+      next_renewal_at: '2026-07-31T06:00:00.000Z',
+      expiry_at: '2027-01-31T06:00:00.000Z',
+    }), { stage: 'UPCOMING_7D', ping: false });
+    const serialized = JSON.stringify(payload.components.map((component) => component.toJSON()));
+
+    expect(serialized).toContain('hoàn tất kỳ **3/6**');
+    expect(serialized).toContain('Kỳ 4/6 · cấp tháng 7-8/12');
+    expect(serialized).toContain('sub:admin:renew:77:2:1785477600');
+  });
 });

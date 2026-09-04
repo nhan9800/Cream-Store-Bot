@@ -26,7 +26,7 @@ export async function handleSubscriptionAddModal(interaction) {
       duration = Number.parseInt(interaction.fields.getTextInputValue('duration')?.trim(), 10) || 2;
       purchaseDate = parseDateInput(interaction.fields.getTextInputValue('purchase_date'));
       renewalMode = duration > 1 ? 'auto_cycle' : 'one_time';
-      renewalCycle = duration > 1 ? 1 : 0;
+      renewalCycle = duration > 1 ? Math.min(2, duration) : 0;
     } else if (type === 'spotify') {
       spotifyFamilyName = interaction.fields.getTextInputValue('family_name')?.trim() || 'Family';
       spotifySlotsUsed = Number.parseInt(interaction.fields.getTextInputValue('slots')?.trim(), 10) || 5;
@@ -69,7 +69,7 @@ export async function handleSubscriptionAddModal(interaction) {
             duration = order.duration_months || duration;
             if (type === 'nitro') {
                renewalMode = duration > 1 ? 'auto_cycle' : 'one_time';
-               renewalCycle = duration > 1 ? 1 : 0;
+               renewalCycle = duration > 1 ? Math.min(2, duration) : 0;
             } else if (type === 'netflix') {
                renewalMode = duration > 1 ? 'auto_cycle' : 'one_time';
                renewalCycle = duration > 1 ? 1 : 0;

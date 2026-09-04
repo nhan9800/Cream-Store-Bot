@@ -149,7 +149,7 @@ function buildListEmbed(subs, filterType, guildId = null) {
     for (const s of items.slice(0, 15)) {
       const progress = getSubscriptionProgress(s);
       const actionAt = progress.nextActionAt ? Math.floor(new Date(progress.nextActionAt).getTime() / 1000) : null;
-      const renewInfo = `${E('icon_history')} Đã cấp **${progress.fulfilledMonths}/${progress.totalMonths} tháng** · ${progress.nextAction === 'DISCONNECT' ? 'Ngắt gói' : `Cấp kỳ ${progress.nextCycleNumber}/${progress.totalMonths}`}${actionAt ? ` <t:${actionAt}:R>` : ''}`;
+      const renewInfo = `${E('icon_history')} Đã cấp **${progress.fulfilledMonths}/${progress.totalMonths} tháng** · kỳ **${progress.completedCycles}/${progress.totalCycles}** · ${progress.nextAction === 'DISCONNECT' ? 'Ngắt gói' : `kỳ kế ${progress.nextCycleNumber}/${progress.totalCycles} (tháng ${progress.nextCycleStartMonth}-${progress.nextCycleEndMonth})`}${actionAt ? ` <t:${actionAt}:R>` : ''}`;
       const customer = s.customer_id ? `<@${s.customer_id}>` : (s.customer_discord_name || '_Chưa gán_');
       const noteExtra = (s.service_type === 'netflix' && s.note) ? ` ${E('brand_netflix')} ${s.note}` : '';
       const extra = s.spotify_family_name ? ` ${E('icon_home')} ${s.spotify_family_name} (${s.spotify_slots_used}/5)` : noteExtra;
@@ -184,7 +184,7 @@ function buildCheckEmbed(subs, days, guildId = null) {
     const ts = Math.floor(new Date(dateField).getTime() / 1000);
     const customer = s.customer_id ? `<@${s.customer_id}>` : (s.customer_discord_name || '—');
     const extra = s.spotify_family_name ? ` · ${E('icon_home')} ${s.spotify_family_name}` : '';
-    desc += `${emoji} **ID ${s.id}** · \`${s.gmail_email}\` · ${customer}${extra}\n> Đã cấp **${progress.fulfilledMonths}/${progress.totalMonths} tháng** · ${progress.nextAction === 'DISCONNECT' ? 'Ngắt gói' : `Cấp kỳ ${progress.nextCycleNumber}/${progress.totalMonths}`} · <t:${ts}:R>\n\n`;
+    desc += `${emoji} **ID ${s.id}** · \`${s.gmail_email}\` · ${customer}${extra}\n> Đã cấp **${progress.fulfilledMonths}/${progress.totalMonths} tháng** · kỳ **${progress.completedCycles}/${progress.totalCycles}** · ${progress.nextAction === 'DISCONNECT' ? 'Ngắt gói' : `kỳ kế ${progress.nextCycleNumber}/${progress.totalCycles}`} · <t:${ts}:R>\n\n`;
   }
 
   embed.setDescription(desc.slice(0, 4000));
@@ -207,7 +207,7 @@ function buildSearchEmbed(subs, keyword, guildId) {
     lines.push(
       `${serviceEmoji(E, item.service_type)} **ID ${item.id}** · \`${item.gmail_email}\``,
       `> ${customer} · đơn \`${item.related_order_code || 'không có'}\``,
-      `> **${progress.fulfilledMonths}/${progress.totalMonths} tháng** · ${progress.needsReview ? '⚠️ cần xác minh' : progress.nextAction === 'DISCONNECT' ? 'ngắt gói' : `cấp kỳ ${progress.nextCycleNumber}`} · ${due}`,
+      `> **${progress.fulfilledMonths}/${progress.totalMonths} tháng** · kỳ **${progress.completedCycles}/${progress.totalCycles}** · ${progress.needsReview ? '⚠️ cần xác minh' : progress.nextAction === 'DISCONNECT' ? 'ngắt gói' : `kỳ kế ${progress.nextCycleNumber}/${progress.totalCycles}`} · ${due}`,
     );
   }
   return embed.setDescription(lines.join('\n').slice(0, 4000));
@@ -305,7 +305,7 @@ export async function execute(interaction) {
         .setDescription([
           `**ID:** ${updated.id} · \`${updated.gmail_email}\``,
           `**Đã cấp:** ${progress.fulfilledMonths}/${progress.totalMonths} tháng`,
-          `**Việc tiếp theo:** ${progress.nextAction === 'DISCONNECT' ? 'Ngắt gói khi hết hạn' : `Cấp tháng ${progress.nextCycleNumber}/${progress.totalMonths}`}`,
+          `**Việc tiếp theo:** ${progress.nextAction === 'DISCONNECT' ? 'Ngắt gói khi hết hạn' : `Cấp kỳ ${progress.nextCycleNumber}/${progress.totalCycles} · tháng ${progress.nextCycleStartMonth}-${progress.nextCycleEndMonth}/${progress.totalMonths}`}`,
           `**Thời điểm:** ${nextTs}`,
         ].join('\n'))
         .setTimestamp()] });
@@ -362,7 +362,7 @@ export async function execute(interaction) {
           `**ID:** ${updated.id}`,
           `**Gmail:** \`${updated.gmail_email}\``,
           `**Đã cấp:** ${progress.fulfilledMonths}/${progress.totalMonths} tháng`,
-          `**Việc tiếp theo:** ${progress.nextAction === 'DISCONNECT' ? 'Ngắt gói khi hết hạn' : `Cấp tháng ${progress.nextCycleNumber}/${progress.totalMonths}`}`,
+          `**Việc tiếp theo:** ${progress.nextAction === 'DISCONNECT' ? 'Ngắt gói khi hết hạn' : `Cấp kỳ ${progress.nextCycleNumber}/${progress.totalCycles} · tháng ${progress.nextCycleStartMonth}-${progress.nextCycleEndMonth}/${progress.totalMonths}`}`,
           `**Thời điểm:** ${nextTs}`,
           `**Trạng thái:** ${updated.status}`,
         ].join('\n'))

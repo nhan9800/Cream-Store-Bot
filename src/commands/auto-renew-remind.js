@@ -130,7 +130,7 @@ export async function execute(interaction) {
           const ts = Math.floor(new Date(dateField).getTime() / 1000);
           const customer = s.customer_id ? `<@${s.customer_id}>` : (s.customer_discord_name || '—');
           const extra = s.spotify_family_name ? ` · ${E('icon_home')} ${s.spotify_family_name}` : '';
-          desc += `${emoji} **ID ${s.id}** · \`${s.gmail_email}\`${extra}\n> ${E('ticket_user')} ${customer} · ${progress.fulfilledMonths}/${progress.totalMonths} tháng · ${progress.nextAction === 'DISCONNECT' ? 'ngắt gói' : `cấp kỳ ${progress.nextCycleNumber}`} · <t:${ts}:R>\n\n`;
+          desc += `${emoji} **ID ${s.id}** · \`${s.gmail_email}\`${extra}\n> ${E('ticket_user')} ${customer} · ${progress.fulfilledMonths}/${progress.totalMonths} tháng · kỳ ${progress.completedCycles}/${progress.totalCycles} · ${progress.nextAction === 'DISCONNECT' ? 'ngắt gói' : `kỳ kế ${progress.nextCycleNumber}/${progress.totalCycles}`} · <t:${ts}:R>\n\n`;
         }
         embed.setDescription(desc.slice(0, 4000));
         if (subs.length > 20) embed.setFooter({ text: `Và ${subs.length - 20} mục khác...` });
