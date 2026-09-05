@@ -1638,11 +1638,9 @@ export const DEFAULT_PRODUCT_CATALOG = [
     // Discord Nitro Boost Trial
     { product_key: 'discord-nitro-boost-trial-3-months-first-offer', name: 'Discord Nitro Boost Trial 3 Tháng (Ưu Đãi Lần Đầu)', aliases: ['Discord Nitro Boost 3 Tháng (Trail)'], description: 'Đối tượng áp dụng: tài khoản được tạo trên 1 tháng và chưa từng sử dụng Nitro; hoặc tài khoản đã từng sử dụng Nitro nhưng không dùng lại Nitro trong ít nhất 12 tháng liên tục. Vui lòng gửi tài khoản, mật khẩu và 4-5 mã dự phòng khi mua.', price: 50000, ctv_price: 45000, duration_months: 3, service_type: 'GAME', emoji: 'brand_nitro', original_price: 0 },
 
-    // Bót Server
-    { name: 'Discord Server Boost Level 2 (1 Tháng)', description: 'Nâng cấp Server Boost Level 2 trong 1 tháng. Giao hàng nhanh chóng.', price: 75000, duration_months: 1, service_type: 'GAME', emoji: 'brand_boost', original_price: 0 },
-    { name: 'Discord Server Boost Level 3 (1 Tháng)', description: 'Nâng cấp Server Boost Level 3 trong 1 tháng. Giao hàng nhanh chóng.', price: 150000, ctv_price: 90000, duration_months: 1, service_type: 'GAME', emoji: 'brand_boost', original_price: 0 },
-    { name: 'Discord Server Boost Level 2 (3 Tháng)', description: 'Nâng cấp Server Boost Level 2 trong 3 tháng. Giao hàng nhanh chóng.', price: 185000, duration_months: 3, service_type: 'GAME', emoji: 'brand_boost', original_price: 0 },
-    { name: 'Discord Server Boost Level 3 (3 Tháng)', description: 'Nâng cấp Server Boost Level 3 trong 3 tháng. Giao hàng nhanh chóng.', price: 380000, ctv_price: 240000, duration_months: 3, service_type: 'GAME', emoji: 'brand_boost', original_price: 0 },
+    // Boost Server · chỉ giữ hai gói 14 Boosts chính thức
+    { product_key: 'discord-server-boost-14-1-month', name: 'Discord Server Boost 14 Boosts (1 Tháng)', aliases: ['Discord Server Boost Level 3 (1 Tháng)', '14 Nâng Cấp Server Boost Level 3 (1 Tháng)'], description: 'Nâng cấp máy chủ bằng 14 Boosts trong 1 tháng. Giá mới được điều chỉnh theo chi phí nguồn hiện tại.', price: 120000, ctv_price: 90000, duration_months: 1, service_type: 'GAME', emoji: 'brand_boost', original_price: 0, is_featured: 1, virtual_purchase_count: 0 },
+    { product_key: 'discord-server-boost-14-3-months', name: 'Discord Server Boost 14 Boosts (3 Tháng)', aliases: ['Discord Server Boost Level 3 (3 Tháng)', '14 Nâng Cấp Server Boost Level 3 (3 Tháng)'], description: 'Nâng cấp máy chủ bằng 14 Boosts trong 3 tháng. Giá mới được điều chỉnh theo chi phí nguồn hiện tại.', price: 290000, ctv_price: 240000, duration_months: 3, service_type: 'GAME', emoji: 'brand_boost', original_price: 0, is_featured: 1, virtual_purchase_count: 0 },
 
     // Decor Trang Trí - Có Nitro
     { name: 'Decor Discord (Acc Có Nitro) - Gói 25k', description: 'Trang trí hồ sơ cho tài khoản ĐÃ CÓ Nitro. Vui lòng gửi tài khoản, mật khẩu và 4-5 mã dự phòng.', price: 25000, duration_months: 1, service_type: 'decor', emoji: 'icon_sparkle', original_price: 66000 },
@@ -1801,9 +1799,8 @@ export const DEFAULT_PRODUCT_CATALOG = [
     { product_key: 'youtube-premium-continuous-6-months', name: 'YouTube Premium 6 Tháng (Ổn Định Cao)', aliases: ['YouTube Premium 6 Tháng (Gia Hạn Liên Tục)', 'YouTube Premium 6 Tháng (Gia Hạn Đều)'], description: 'Dòng ổn định cao, không vận hành bằng cơ chế đổi Family mỗi tháng; hạn chế tối đa tình trạng mất Premium và bảo hành full trong toàn bộ 6 tháng sử dụng.', warranty_policy: 'Full 6 tháng', price: 320000, ctv_price: 300000, duration_months: 6, service_type: 'STREAMING', emoji: 'brand_youtube', original_price: 0 },
     { product_key: 'youtube-premium-continuous-12-months', name: 'YouTube Premium 12 Tháng (Ổn Định Cao)', aliases: ['YouTube Premium 12 Tháng (Gia Hạn Liên Tục)', 'YouTube Premium 12 Tháng (Gia Hạn Đều)'], description: 'Dòng ổn định cao, không vận hành bằng cơ chế đổi Family mỗi tháng; hạn chế tối đa tình trạng mất Premium và bảo hành full trong toàn bộ 12 tháng sử dụng.', warranty_policy: 'Full 12 tháng', price: 580000, ctv_price: 520000, duration_months: 12, service_type: 'STREAMING', emoji: 'brand_youtube', original_price: 0 },
 
-    // Netflix · hai lựa chọn ổn định
-    { product_key: 'netflix-extra-1-month-renewable', name: 'Netflix Extra 1 Tháng (Ổn Định · Có Gia Hạn)', description: 'Gói Netflix Extra ổn định trong 1 tháng và hỗ trợ gia hạn tiếp trên tài khoản đã cấp.', price: 75000, duration_months: 1, service_type: 'netflix', emoji: 'brand_netflix', original_price: 0, is_featured: 1, virtual_purchase_count: 0 },
-    { product_key: 'netflix-premium-1-month-non-renewable', name: 'Netflix Premium 1 Tháng (Ổn Định · Không Gia Hạn)', aliases: ['Netflix Premium 1 Tháng (Không Gia Hạn)'], description: 'Tài khoản Netflix Premium ổn định, chất lượng Full HD/4K, sử dụng 1 tháng và bảo hành 20 ngày. Không hỗ trợ gia hạn trên tài khoản đã cấp; khi hết hạn, khách muốn sử dụng tiếp cần đổi sang tài khoản mới.', warranty_policy: '20 ngày', price: 35000, duration_months: 1, service_type: 'netflix', emoji: 'brand_netflix', original_price: 0, is_featured: 1, virtual_purchase_count: 0 },
+    // Netflix · chỉ giữ dòng Slot ổn định 75k
+    { product_key: 'netflix-extra-1-month-renewable', name: 'Netflix Slot 1 Tháng (Ổn Định · Có Gia Hạn)', aliases: ['Netflix Extra 1 Tháng (Ổn Định · Có Gia Hạn)', 'Netflix Extra Premium 1 Tháng (Cá Nhân)'], description: 'Netflix Slot ổn định trong 1 tháng, sử dụng chất lượng cao và hỗ trợ gia hạn tiếp trên tài khoản đã cấp.', price: 75000, duration_months: 1, service_type: 'netflix', emoji: 'brand_netflix', original_price: 0, is_featured: 1, virtual_purchase_count: 0 },
  
     // Dịch vụ xây dựng Store · một catalog dùng chung cho Bot + Website
     { product_key: 'discord-store-launch-hosting-3-months', name: 'Setup Discord Store + Bot Custom + Hosting 3 Tháng', description: 'Gói khởi động dành cho store: setup server chuyên nghiệp, bot custom theo nhận diện, hệ thống bảng giá/nhận đơn cơ bản và tặng hosting vận hành 24/7 trong 3 tháng đầu.', price: 500000, duration_months: 3, service_type: 'SERVICE', emoji: 'brand_discord', original_price: 0, is_featured: 1, virtual_purchase_count: 0 },
@@ -1896,10 +1893,7 @@ export function seedProductCatalog(dbInstance) {
         )
         OR (
           LOWER(name) LIKE '%netflix%'
-          AND COALESCE(product_key, '') NOT IN (
-            'netflix-extra-1-month-renewable',
-            'netflix-premium-1-month-non-renewable'
-          )
+          AND COALESCE(product_key, '') != 'netflix-extra-1-month-renewable'
         )
         OR (
           LOWER(name) LIKE '%spotify%'
@@ -1909,6 +1903,23 @@ export function seedProductCatalog(dbInstance) {
             'spotify-premium-12-months'
           )
         )
+      )
+  `);
+  const retireReplacedNetflixCatalogStmt = dbInstance.prepare(`
+    UPDATE product_catalog
+    SET is_active = 0, updated_at = CURRENT_TIMESTAMP
+    WHERE is_active = 1
+      AND LOWER(name) LIKE '%netflix%'
+      AND COALESCE(product_key, '') != 'netflix-extra-1-month-renewable'
+  `);
+  const retireReplacedBoostCatalogStmt = dbInstance.prepare(`
+    UPDATE product_catalog
+    SET is_active = 0, updated_at = CURRENT_TIMESTAMP
+    WHERE is_active = 1
+      AND LOWER(name) LIKE '%server boost%'
+      AND COALESCE(product_key, '') NOT IN (
+        'discord-server-boost-14-1-month',
+        'discord-server-boost-14-3-months'
       )
   `);
   const retireReplacedServiceCatalogStmt = dbInstance.prepare(`
@@ -1962,6 +1973,8 @@ export function seedProductCatalog(dbInstance) {
     // không còn xuất hiện trên bot, website hoặc bảng giá Discord.
     retireReplacedAiCatalogStmt.run();
     retireReplacedStreamingCatalogStmt.run();
+    retireReplacedNetflixCatalogStmt.run();
+    retireReplacedBoostCatalogStmt.run();
     retireReplacedServiceCatalogStmt.run();
 
     dbInstance.prepare(`

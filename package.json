@@ -21,7 +21,7 @@
     "publish:youtube-join-fam-guide": "node scripts/publish-youtube-join-fam-guide.js",
     "publish:nitro-gmail-phone-guide": "node scripts/publish-nitro-gmail-phone-guide.js",
     "publish:gemini-pricing-update": "node scripts/publish-gemini-pricing-update.js",
-    "publish:promotion-board": "node scripts/publish-promotion-board.js",
+    "clear:promotions": "node scripts/clear-promotion-channel.js",
     "sync:promotion-emojis": "node scripts/sync-promotion-emojis.js",
     "publish:boost-level3-sale": "node scripts/publish-server-boost-level3-sale.js",
     "publish:partner-national-day": "node scripts/publish-partner-national-day-update.js",

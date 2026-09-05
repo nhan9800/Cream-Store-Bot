@@ -11,6 +11,7 @@ import { orderLookupLimiter } from './rateLimitMiddleware.js';
 import { anonymizeCustomerEmail } from '../utils/productFormatting.js';
 import { config } from '../config.js';
 import { getSubscriptionProgress } from './subscriptionService.js';
+import { getPriceBoardProducts, PRICE_BOARD_VERSION } from './autoSetupPriceBoardService.js';
 import {
   createSpotifyFamily,
   createSpotifyFamilyMember,
@@ -130,12 +131,15 @@ export function registerDashboardRoutes(app) {
   app.get('/api/public/products', (req, res) => {
     try {
       const rows = db.prepare(`
-        SELECT id, guild_id, name, description, price, original_price, duration_months, service_type, emoji, is_active, sort_order
+        SELECT id, guild_id, product_key, name, description, price, original_price,
+               duration_months, service_type, emoji, is_active, sort_order
         FROM product_catalog
-        WHERE is_active = 1
+        WHERE guild_id = 'WEB' AND is_active = 1
         ORDER BY sort_order ASC
       `).all();
-      res.json({ ok: true, data: rows });
+      const products = getPriceBoardProducts(rows);
+      res.set('X-Cenar-Catalog-Version', PRICE_BOARD_VERSION);
+      res.json({ ok: true, catalogVersion: PRICE_BOARD_VERSION, data: products });
     } catch (e) {
       console.error('[PUBLIC API] Error listing products:', e);
       res.status(500).json({ ok: false, error: 'Lỗi tải danh sách sản phẩm.' });

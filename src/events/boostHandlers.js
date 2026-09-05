@@ -65,7 +65,7 @@ export async function handleBoostBuy(interaction) {
       new TextInputBuilder()
         .setCustomId('package')
         .setLabel('Gói muốn mua (1 hoặc 3)')
-        .setPlaceholder('1 = Gói 1 Tháng (170k) | 3 = Gói 3 Tháng (320k)')
+        .setPlaceholder('1 = Gói 1 Tháng (120k) | 3 = Gói 3 Tháng (290k)')
         .setStyle(TextInputStyle.Short)
         .setRequired(true)
         .setMaxLength(1)

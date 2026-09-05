@@ -19,12 +19,10 @@ import { config } from '../config.js';
 import { isInternationalGuild } from '../utils/locale.js';
 import { formatInternationalPrice, translateCatalogGroup, translateProductName } from '../utils/internationalCatalog.js';
 import { getNitroTrialEligibility, isNitroTrialProduct } from '../constants/nitroTrial.js';
-import { getNetflixPromoDetails, isNetflixPromoProduct } from '../constants/netflixPromotion.js';
 
-export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.16';
+export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.17';
 const PRIMARY_GUILD_ID = '1282637033340403754';
 const PRIMARY_PRICE_CHANNEL_ID = '1514606995842273280';
-const PRIMARY_PROMOTION_CHANNEL_ID = '1515008584549797979';
 const OFFICIAL_SPOTIFY_PRODUCT_KEYS = new Set([
   'spotify-premium-3-months',
   'spotify-premium-6-months',
@@ -39,7 +37,7 @@ export const PRICE_GROUPS = [
   },
   {
     key: 'server_boost', titleSlot: 'brand_boost', title: 'Discord Server Boost', accent: 0xEB459E,
-    note: 'Nâng Level 2–3 theo đúng thời hạn của từng gói.',
+    note: 'Hai gói 14 Boosts chính thức: 1 tháng 120.000đ hoặc 3 tháng 290.000đ.',
     match: (p) => p.service_type === 'GAME' && /server boost/i.test(p.name),
   },
   {
@@ -93,8 +91,8 @@ export const PRICE_GROUPS = [
     match: (p) => String(p.product_key || '').startsWith('spotify-premium-') || p.service_type === 'spotify',
   },
   {
-    key: 'netflix', titleSlot: 'brand_netflix', title: 'Netflix Extra & Premium', accent: 0xE50914,
-    note: 'Netflix Extra 75k hỗ trợ gia hạn; Netflix Premium 35k ổn định nhưng hết hạn cần đổi tài khoản mới.',
+    key: 'netflix', titleSlot: 'brand_netflix', title: 'Netflix Slot · Ổn Định', accent: 0xE50914,
+    note: 'Chỉ mở bán Netflix Slot ổn định 75.000đ/tháng và hỗ trợ gia hạn tiếp.',
     match: (p) => p.service_type === 'netflix' || /netflix/i.test(p.name),
   },
   {
@@ -240,7 +238,7 @@ export function buildPricePortalPayload(guildId, guildConfig, panels = []) {
       international ? `# ${E('icon_store')} CENAR GLOBAL • LIVE PRICING` : `# ${E('icon_store')} BẢNG GIÁ CENAR STORE`,
       international ? `> ${E('status_check')} **Live catalog synchronized across Discord and the website.**` : `> ${E('status_check')} **Đồng bộ trực tiếp từ hệ thống sản phẩm đang hoạt động.**`,
       ...(guildId === PRIMARY_GUILD_ID ? [
-        `> ${E('icon_fire')} **Ưu đãi đang áp dụng:** xem bảng khuyến mãi tại <#${PRIMARY_PROMOTION_CHANNEL_ID}>.`,
+        `> ${E('status_info')} **Hiện không có chương trình khuyến mãi đang áp dụng.**`,
       ] : []),
     ].join('\n'))
   );
@@ -331,9 +329,6 @@ export function buildPriceGroupPayload(guildId, group, products) {
     const trialEligibility = isNitroTrialProduct(product)
       ? getNitroTrialEligibility(international)
       : [];
-    const netflixPromo = isNetflixPromoProduct(product)
-      ? getNetflixPromoDetails(international)
-      : null;
     const fullDurationWarranty = hasFullDurationWarranty(product);
     const warrantyPolicy = String(product.warranty_policy || '').trim();
     container.addTextDisplayComponents(
@@ -345,14 +340,9 @@ export function buildPriceGroupPayload(guildId, group, products) {
           `> ${E('status_check')} **${international ? 'Eligibility' : 'Đối tượng áp dụng'}:**`,
           ...trialEligibility.map((item) => `> - ${item}`),
         ] : []),
-        ...(netflixPromo ? [
-          `> ${E('status_check')} **${international ? 'Quality' : 'Chất lượng'}:** ${netflixPromo.quality}`,
-          `> ${E('warranty_shield')} **${international ? 'Warranty' : 'Bảo hành'}:** ${netflixPromo.warranty}`,
-          `> ${E('status_warn')} **${international ? 'Renewal' : 'Gia hạn'}:** ${netflixPromo.renewal}`,
-        ] : []),
         ...(fullDurationWarranty ? [
           `> ${E('warranty_shield')} **${international ? 'Warranty' : 'Bảo hành'}:** ${international ? 'Full coverage for the entire service period' : 'Full trong suốt thời gian sử dụng'}`,
-        ] : !netflixPromo && warrantyPolicy ? [
+        ] : warrantyPolicy ? [
           `> ${E('warranty_shield')} **${international ? 'Warranty' : 'Bảo hành'}:** ${warrantyPolicy}`,
         ] : []),
       ].join('\n'))

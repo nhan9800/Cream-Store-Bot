@@ -114,6 +114,22 @@ export async function buildClient() {
     startScheduler(readyClient);
     startOtpAutoCheck(readyClient);
 
+    // Kết thúc chiến dịch sale là tác vụ vận hành độc lập: dọn kênh và cập
+    // nhật panel Boost ngay cả khi một auto-setup không liên quan bị lỗi.
+    if (String(config.guildId) === STORE_ONE_GUILD_ID) {
+      try {
+        const { clearPromotionChannel } = await import('./campaigns/promotionBoard2026.js');
+        const promotionBoard = await clearPromotionChannel(readyClient);
+        console.log(`[PROMOTION-BOARD] status=${promotionBoard.status} deleted=${promotionBoard.deleted} failed=${promotionBoard.failed} preserved=${promotionBoard.preservedNonBotMessages}`);
+
+        const { refreshBoostPanel } = await import('./services/boostServerService.js');
+        const boostPanel = await refreshBoostPanel(readyClient, STORE_ONE_GUILD_ID);
+        console.log(`[BOOST-PANEL] status=${boostPanel?.status || 'unknown'} message=${boostPanel?.messageId || 'none'}`);
+      } catch (error) {
+        console.error('[PROMOTION-CLEANUP] Không thể kết thúc chiến dịch hiện tại:', error);
+      }
+    }
+
     // Store 2 is the international storefront. The migration is idempotent,
     // preserves Discord IDs/permission overwrites and creates a recovery
     // snapshot before the first structural rename.
@@ -172,10 +188,6 @@ export async function buildClient() {
       // Promotion and terms channels are Store 1 campaigns. Store 2 has its
       // own international price board and does not belong to these guild IDs.
       if (String(config.guildId) === STORE_ONE_GUILD_ID) {
-        const { publishPromotionBoard } = await import('./campaigns/promotionBoard2026.js');
-        const promotionBoard = await publishPromotionBoard(readyClient);
-        console.log(`[PROMOTION-BOARD] status=${promotionBoard.status} message=${promotionBoard.messageId} removed=${promotionBoard.removed}`);
-
         const { publishTermsBoard } = await import('./campaigns/termsBoard2026.js');
         const termsBoard = await publishTermsBoard(readyClient);
         console.log(`[TERMS-BOARD] status=${termsBoard.status} message=${termsBoard.messageId} removed=${termsBoard.removed}`);

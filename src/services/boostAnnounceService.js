@@ -36,8 +36,9 @@ export async function sendBoostAnnouncement(client) {
 
   const pricing = [
     `## <:cr_pay:1392750857329705000> Bảng Giá Dịch Vụ`,
-    `> <a:starxoay:1481141954346483845> **Gói 1 Tháng** (14 Boosts) — ~~250k~~ **170.000 VND**`,
-    `> <a:starxoay:1481141954346483845> **Gói 3 Tháng** (14 Boosts) — ~~600k~~ **320.000 VND**`,
+    `> <a:starxoay:1481141954346483845> **Gói 1 Tháng** (14 Boosts) — **120.000 VND**`,
+    `> <a:starxoay:1481141954346483845> **Gói 3 Tháng** (14 Boosts) — **290.000 VND**`,
+    `> <:cr_tim:1366636325352116225> *Giá đã được điều chỉnh theo chi phí nguồn hiện tại.*`,
     ``,
     `<a:Dotyellow:1481134440725090315> *Nếu đông đơn, thời gian xử lý có thể lâu hơn — vui lòng kiên nhẫn!*`,
   ].join('\n');

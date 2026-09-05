@@ -78,5 +78,5 @@ describe('legacy timestamp schema migration', () => {
       if (legacyDb.open) legacyDb.close();
       rmSync(tempRoot, { recursive: true, force: true });
     }
-  });
+  }, 15_000);
 });

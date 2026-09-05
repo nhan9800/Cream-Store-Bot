@@ -51,7 +51,8 @@ describe('Cenar price board V3', () => {
     expect(panels.find((panel) => panel.group.key === 'youtube_stable')?.items).toHaveLength(4);
     expect(panels.some((panel) => panel.group.key === 'youtube_family_switch')).toBe(false);
     expect(panels.find((panel) => panel.group.key === 'spotify')?.items).toHaveLength(3);
-    expect(panels.find((panel) => panel.group.key === 'netflix')?.items).toHaveLength(2);
+    expect(panels.find((panel) => panel.group.key === 'server_boost')?.items).toHaveLength(2);
+    expect(panels.find((panel) => panel.group.key === 'netflix')?.items).toHaveLength(1);
     expect(panels.some((panel) => panel.group.key === 'other')).toBe(false);
   });
 
@@ -134,7 +135,8 @@ describe('Cenar price board V3', () => {
       .replace(/<a?:[A-Za-z0-9_]+:\d+>/g, '');
     expect(visibleText).not.toMatch(RAW_EMOJI_NAME);
     expect(allJson).toContain('https://cenarstore.xyz');
-    expect(allJson).toContain('<#1515008584549797979>');
+    expect(allJson).toContain('Hiện không có chương trình khuyến mãi đang áp dụng');
+    expect(allJson).not.toContain('<#1515008584549797979>');
 
     for (const payload of payloads.slice(1)) {
       const row = payload.components.at(-1).toJSON();
@@ -215,43 +217,54 @@ describe('Cenar price board V3', () => {
     expect(announcement).toContain('ít nhất 12 tháng liên tục.');
   });
 
-  it('shows exactly two Netflix choices with the correct renewal policy', () => {
-    const netflix = DEFAULT_PRODUCT_CATALOG.find((product) => (
-      product.product_key === 'netflix-premium-1-month-non-renewable'
-    ));
-    const netflixExtra = DEFAULT_PRODUCT_CATALOG.find((product) => (
+  it('publishes only the stable 75k Netflix Slot and retires the 35k product', () => {
+    const netflixSlot = DEFAULT_PRODUCT_CATALOG.find((product) => (
       product.product_key === 'netflix-extra-1-month-renewable'
     ));
-    expect(netflix?.price).toBe(35000);
-    expect(netflix?.duration_months).toBe(1);
-    expect(netflix?.name).toContain('Ổn Định · Không Gia Hạn');
-    expect(netflix?.description).toContain('Full HD/4K');
-    expect(netflix?.description).toContain('bảo hành 20 ngày');
-    expect(netflix?.description).toContain('đổi sang tài khoản mới');
-    expect(netflixExtra?.price).toBe(75000);
-    expect(netflixExtra?.description).toContain('hỗ trợ gia hạn tiếp');
+    expect(netflixSlot?.price).toBe(75000);
+    expect(netflixSlot?.name).toContain('Netflix Slot');
+    expect(netflixSlot?.description).toContain('ổn định');
+    expect(netflixSlot?.description).toContain('hỗ trợ gia hạn tiếp');
+    expect(DEFAULT_PRODUCT_CATALOG.some((product) => (
+      product.product_key === 'netflix-premium-1-month-non-renewable'
+    ))).toBe(false);
 
     const products = getActiveProducts(GUILD_ID);
     const activeNetflix = products.filter((product) => /netflix/i.test(product.name));
-    expect(activeNetflix).toHaveLength(2);
+    expect(activeNetflix).toHaveLength(1);
+    expect(activeNetflix[0].price).toBe(75000);
 
     const netflixPanel = buildPriceBoardPayloads(GUILD_ID, {}, products)
       .map((payload) => serialize(payload))
-      .find((json) => json.includes('Netflix Extra & Premium'));
-    expect(netflixPanel).toContain('Netflix Extra 1 Tháng');
-    expect(netflixPanel).toContain('Netflix Premium 1 Tháng');
+      .find((json) => json.includes('Netflix Slot · Ổn Định'));
+    expect(netflixPanel).toContain('Netflix Slot 1 Tháng');
     expect(netflixPanel).toContain('75.000');
-    expect(netflixPanel).toContain('35.000');
-    expect(netflixPanel).toContain('Full HD/4K');
-    expect(netflixPanel).toContain('20 ngày');
-    expect(netflixPanel).toContain('đổi sang tài khoản mới');
+    expect(netflixPanel).not.toContain('35.000');
+    expect(netflixPanel).toContain('hỗ trợ gia hạn tiếp');
 
     const announcement = buildPriceAnnouncementContent(GUILD_ID, products);
-    expect(announcement).toContain('Netflix Premium 1 Tháng · Không Gia Hạn');
-    expect(announcement).toContain('35.000');
-    expect(announcement).toContain('Full HD/4K');
-    expect(announcement).toContain('20 ngày');
-    expect(announcement).toContain('đổi sang tài khoản mới');
+    expect(announcement).toContain('Netflix Slot 1 Tháng · Ổn Định');
+    expect(announcement).toContain('75.000');
+    expect(announcement).not.toContain('35.000');
+    expect(announcement).toContain('Hỗ trợ gia hạn tiếp');
+  });
+
+  it('synchronizes exactly two official 14-Boost packages at 120k and 290k', () => {
+    const products = getActiveProducts(GUILD_ID);
+    const boostProducts = products.filter((product) => /server boost/i.test(product.name));
+    expect(boostProducts.map((product) => [product.product_key, product.price])).toEqual([
+      ['discord-server-boost-14-1-month', 120000],
+      ['discord-server-boost-14-3-months', 290000],
+    ]);
+
+    const panel = buildPriceBoardPayloads(GUILD_ID, {}, products)
+      .map(serialize)
+      .find((json) => json.includes('Discord Server Boost'));
+    expect(panel).toContain('1 Tháng');
+    expect(panel).toContain('120.000');
+    expect(panel).toContain('3 Tháng');
+    expect(panel).toContain('290.000');
+    expect(panel).not.toContain('Level 2');
   });
 
   it('publishes only the stable YouTube line and retires monthly Family switching', () => {

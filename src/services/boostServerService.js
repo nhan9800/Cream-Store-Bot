@@ -18,8 +18,8 @@ import { createEmojiResolver } from '../utils/emojiHelper.js';
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 export const BOOST_PACKAGES = [
-  { key: '1m', label: 'Gói 1 Tháng (14 Boosts)', price: 170000, months: 1 },
-  { key: '3m', label: 'Gói 3 Tháng (14 Boosts)', price: 320000, months: 3 },
+  { key: '1m', label: 'Gói 1 Tháng (14 Boosts)', price: 120000, months: 1 },
+  { key: '3m', label: 'Gói 3 Tháng (14 Boosts)', price: 290000, months: 3 },
 ];
 
 const BOOST_BANNER = 'https://i.pinimg.com/originals/68/ae/bf/68aebf3739f455687a90e871bdc04a98.gif';
@@ -303,8 +303,9 @@ export function buildBoostPanelEmbed(guildId) {
       'Thanh toán tự động qua **PayOS** — xác nhận ngay lập tức.',
       '',
       '## <:cr_pay:1392750857329705000> Bảng Giá Dịch Vụ:',
-      '> <a:starxoay:1481141954346483845> **Gói 1 Tháng (14 Boosts):** ~~250k~~ **170.000 VND**',
-      '> <a:starxoay:1481141954346483845> **Gói 3 Tháng (14 Boosts):** ~~600k~~ **320.000 VND**',
+      '> <a:starxoay:1481141954346483845> **Gói 1 Tháng (14 Boosts):** **120.000 VND**',
+      '> <a:starxoay:1481141954346483845> **Gói 3 Tháng (14 Boosts):** **290.000 VND**',
+      '> <:cr_tim:1366636325352116225> *Giá đã được điều chỉnh theo chi phí nguồn hiện tại.*',
       '',
       '## <:cr_muahang:1348622828152426528> Quy Trình Đặt Hàng:',
       '> <:muiten:1481124261501337601> **1.** Nhấn **"Mua Boost Server"** bên dưới',
@@ -509,23 +510,27 @@ export function buildBoostOrderActionRows(order, isStaff = false) {
 
 export async function refreshBoostPanel(client, guildId) {
   const cfg = getGuildConfig(guildId);
-  if (!cfg?.boost_panel_channel_id || !cfg?.boost_panel_message_id) return;
+  if (!cfg?.boost_panel_channel_id || !cfg?.boost_panel_message_id) return { status: 'not_configured' };
 
   const guild = client.guilds.cache.get(guildId);
-  if (!guild) return;
+  if (!guild) return { status: 'guild_not_found' };
 
   const channel = await guild.channels.fetch(cfg.boost_panel_channel_id).catch(() => null);
-  if (!channel) return;
+  if (!channel) return { status: 'channel_not_found' };
 
   const msg = await channel.messages.fetch(cfg.boost_panel_message_id).catch(() => null);
-  if (!msg) return;
+  if (!msg) return { status: 'message_not_found' };
 
   const embed = buildBoostPanelEmbed(guildId);
   const rows  = buildBoostPanelRows(guildId);
 
-  await msg.edit({ embeds: [embed], components: rows }).catch(e =>
-    console.error('[BOOST PANEL] Lỗi refresh:', e.message)
-  );
+  try {
+    await msg.edit({ embeds: [embed], components: rows });
+    return { status: 'updated', channelId: channel.id, messageId: msg.id };
+  } catch (error) {
+    console.error('[BOOST PANEL] Lỗi refresh:', error.message);
+    return { status: 'error', error: error.message };
+  }
 }
 
 // ─── Log helper ───────────────────────────────────────────────────────────────
