@@ -23,6 +23,7 @@ import {
   migrateLegacyTranscriptsToGzip,
 } from './services/transcriptService.js';
 import { reconcileWalletPaidOrders } from './services/orderService.js';
+import { resetLegacyWarrantyAgingStateOnce } from './services/adminOrderCenterService.js';
 
 import { initErrorLogger } from './services/errorLogService.js';
 import { autoSetupDiscountBoard } from './services/autoSetupDiscountBoardService.js';
@@ -32,6 +33,8 @@ import { initializeMusicPlayer } from './services/musicPlayerService.js';
 
 export async function buildClient() {
   initDatabase();
+  const adminOrderAgingMigration = resetLegacyWarrantyAgingStateOnce();
+  console.log(`[ADMIN-ORDER-AGING-MIGRATION] changed=${adminOrderAgingMigration.changed} skipped=${adminOrderAgingMigration.skipped}`);
   const walletReconciliation = reconcileWalletPaidOrders();
   console.log(`[WALLET-RECONCILIATION] scanned=${walletReconciliation.scanned} repaired=${walletReconciliation.repaired.length}`);
   for (const repaired of walletReconciliation.repaired) {
@@ -216,7 +219,7 @@ export async function buildClient() {
         const adminCenter = await refreshAdminOrderCenter(storeOneGuild, { force: true });
         if (adminCenter) console.log(`[ADMIN-ORDER-CENTER] Ready in #${adminCenter.channel.name}`);
         const compactCards = await refreshExistingAdminAgingReminderCards(storeOneGuild);
-        console.log(`[ADMIN-ORDER-CENTER] Compact cards scanned=${compactCards.scanned} updated=${compactCards.updated} failed=${compactCards.failed} skipped=${compactCards.skipped}`);
+        console.log(`[ADMIN-ORDER-CENTER] Cards scanned=${compactCards.scanned} updated=${compactCards.updated} deleted=${compactCards.deleted || 0} failed=${compactCards.failed} skipped=${compactCards.skipped}`);
       }
     } catch (error) {
       console.error('[AUTO-SETUP] Không thể đồng bộ emoji/panel:', error);

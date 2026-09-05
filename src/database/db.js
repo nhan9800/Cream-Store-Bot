@@ -1006,6 +1006,33 @@ export function initDatabase() {
   ensureColumn('orders', 'amount_paid', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn('orders', 'admin_age_reminder_1w_sent_at', 'TEXT');
   ensureColumn('orders', 'admin_age_reminder_2w_sent_at', 'TEXT');
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS admin_order_aging_reminders (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      guild_id TEXT NOT NULL,
+      order_code TEXT NOT NULL,
+      lifecycle_key TEXT NOT NULL,
+      stage TEXT NOT NULL CHECK (stage IN ('week1', 'week2')),
+      state TEXT NOT NULL DEFAULT 'RESERVED'
+        CHECK (state IN ('RESERVED', 'SENT', 'SUPERSEDED', 'RESOLVED')),
+      reservation_token TEXT NOT NULL UNIQUE,
+      previous_marker_at TEXT,
+      message_id TEXT,
+      channel_id TEXT,
+      reserved_at TEXT NOT NULL,
+      sent_at TEXT,
+      resolved_at TEXT,
+      resolution_reason TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_admin_order_aging_reminders_cleanup
+      ON admin_order_aging_reminders (guild_id, state, reserved_at);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_order_aging_active_stage
+      ON admin_order_aging_reminders (order_code, lifecycle_key, stage)
+      WHERE state IN ('RESERVED', 'SENT');
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_admin_order_aging_one_reservation
+      ON admin_order_aging_reminders (order_code, lifecycle_key)
+      WHERE state = 'RESERVED';
+  `);
   ensureColumn('orders', 'payment_provider', "TEXT NOT NULL DEFAULT 'PAYOS'");
   ensureColumn('orders', 'payment_code', 'TEXT');
   ensureColumn('orders', 'payos_order_code', 'INTEGER');

@@ -9,7 +9,10 @@ import { encrypt } from '../utils/crypto.js';
 import { awardOrderPoints, refundOrderPoints } from './loyaltyService.js';
 import { recordStatusChange } from './orderStateMachine.js';
 import { syncCtvOrderLog } from './ctvOrderLogService.js';
-import { scheduleAdminOrderCenterRefresh } from './adminOrderCenterService.js';
+import {
+  markAdminOrderReminderLifecycleChanged,
+  scheduleAdminOrderCenterRefresh,
+} from './adminOrderCenterService.js';
 
 function createOrderStmt() {
   return db.prepare(`
@@ -150,6 +153,7 @@ export function markOrderCompleted(orderCode, completedById, timeoutHours = conf
   clearClaimStmt().run(completedAt, orderCode);
   ensureOrderExpiry(orderCode, new Date(completedAt));
   const updated = getOrderByCode(orderCode);
+  markAdminOrderReminderLifecycleChanged(order, updated);
   if (order.status !== updated.status) {
     recordStatusChange(db, { orderCode, previousStatus: order.status, newStatus: updated.status, changedBy: completedById || 'SYSTEM', reason: 'Order completed and delivered' });
   }
@@ -193,7 +197,8 @@ export function cancelOrder(orderCode, reason = null){
     }
   }
 
-  const updated=getOrderByCode(orderCode); 
+  const updated=getOrderByCode(orderCode);
+  markAdminOrderReminderLifecycleChanged(order, updated);
   syncCustomerStats(updated.guild_id, updated.customer_id); 
   scheduleCtvOrderLogSync(updated);
   scheduleAdminOrderCenterRefresh(updated.guild_id);
@@ -478,6 +483,7 @@ export function setOrderStatus(orderCode,status){
   const order=getOrderByCode(orderCode); if(!order) return null; 
   setOrderStatusStmt().run(status, nowIso(), nowIso(), orderCode); 
   const updated=getOrderByCode(orderCode);
+  markAdminOrderReminderLifecycleChanged(order, updated);
   if (order.status !== updated.status) {
     recordStatusChange(db, { orderCode, previousStatus: order.status, newStatus: updated.status, changedBy: 'SYSTEM', reason: 'setOrderStatus' });
   }
@@ -516,6 +522,7 @@ export function completeWarranty(orderCode, completedById){
   })();
   const updated = getOrderByCode(orderCode);
   if (result.changes > 0) {
+    markAdminOrderReminderLifecycleChanged(order, updated);
     scheduleCtvOrderLogSync(updated);
     try { syncCustomerStats(updated.guild_id, updated.customer_id); }
     catch (error) { console.error('[WARRANTY] Customer stats sync failed:', error.message); }

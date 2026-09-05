@@ -1,4 +1,5 @@
 import sharp from 'sharp';
+import { randomUUID } from 'node:crypto';
 import {
   ActionRowBuilder,
   ButtonBuilder,
@@ -34,6 +35,12 @@ const ACTIVE_STATUSES = [
   'WARRANTY_OPEN',
 ];
 const PROCESSING_AGING_STATUSES = ACTIVE_STATUSES.filter((status) => status !== 'PENDING_PAYMENT');
+const WARRANTY_STATUSES = new Set(['WARRANTY', 'WARRANTY_OPEN']);
+const ADMIN_AGING_ANCHOR_SQL = `CASE
+  WHEN status IN ('WARRANTY', 'WARRANTY_OPEN')
+    THEN COALESCE(NULLIF(status_changed_at, ''), NULLIF(updated_at, ''), created_at)
+  ELSE created_at
+END`;
 const setupCache = new Map();
 const refreshTimers = new Map();
 const lastPanelRefreshAt = new Map();
@@ -41,7 +48,9 @@ const ticketChannelCache = new Map();
 const customerIdentityCache = new Map();
 const TICKET_CHANNEL_CACHE_TTL_MS = 5 * 60 * 1000;
 const CUSTOMER_IDENTITY_CACHE_TTL_MS = 15 * 60 * 1000;
-const COMPACT_CARD_UI_VERSION = '2026-08-14-compact-ticket-v2-customer-name';
+const COMPACT_CARD_UI_VERSION = '2026-09-05-aging-lifecycle-v3';
+const LEGACY_WARRANTY_AGING_MIGRATION = '2026-09-05-reset-warranty-aging-anchor-v1';
+const RESERVATION_TTL_MS = 10 * 60 * 1000;
 
 const CUSTOM_EMOJIS = [
   { name: 'cenar_order_center', slot: 'admin_order_center', label: 'C', colors: ['#8B5CF6', '#EC4899'], glyph: '▤' },
@@ -63,6 +72,40 @@ function ageDays(value, nowMs = Date.now()) {
   const createdMs = new Date(value).getTime();
   if (!Number.isFinite(createdMs)) return 0;
   return Math.max(0, Math.floor((nowMs - createdMs) / 86_400_000));
+}
+
+export function getAdminOrderAgingAnchor(order) {
+  if (!order) return null;
+  if (WARRANTY_STATUSES.has(String(order.status || '').toUpperCase())) {
+    return order.status_changed_at || order.updated_at || order.created_at || null;
+  }
+  return order.created_at || null;
+}
+
+export function getAdminOrderAgeDays(order, nowMs = Date.now()) {
+  return ageDays(getAdminOrderAgingAnchor(order), nowMs);
+}
+
+export function getAdminOrderAgingLifecycleKey(order) {
+  const status = String(order?.status || '').toUpperCase();
+  const scope = WARRANTY_STATUSES.has(status) ? 'WARRANTY' : 'ORDER';
+  const anchor = getAdminOrderAgingAnchor(order);
+  const anchorMs = new Date(anchor).getTime();
+  const normalizedAnchor = Number.isFinite(anchorMs) ? new Date(anchorMs).toISOString() : String(anchor || 'unknown');
+  return `${scope}:${normalizedAnchor}`;
+}
+
+function reminderMarkerBelongsToLifecycle(markerAt, anchorAt) {
+  if (!markerAt) return false;
+  const markerMs = new Date(markerAt).getTime();
+  const anchorMs = new Date(anchorAt).getTime();
+  return Number.isFinite(markerMs) && Number.isFinite(anchorMs) && markerMs >= anchorMs;
+}
+
+function agingStageByElapsedDays(days, { weekOneDays, weekTwoDays }) {
+  if (days >= weekTwoDays) return 'week2';
+  if (days >= weekOneDays) return 'week1';
+  return null;
 }
 
 function trimText(value, max = 80, fallback = '—') {
@@ -172,11 +215,11 @@ function getActiveOrders(guildId, limit = 12) {
     SELECT * FROM orders
     WHERE guild_id = ? AND status IN (${sqlPlaceholders(ACTIVE_STATUSES)})
     ORDER BY
-      CASE WHEN datetime(created_at) <= datetime('now', '-14 days') THEN 0
-           WHEN datetime(created_at) <= datetime('now', '-7 days') THEN 1
+      CASE WHEN datetime(${ADMIN_AGING_ANCHOR_SQL}) <= datetime('now', '-14 days') THEN 0
+           WHEN datetime(${ADMIN_AGING_ANCHOR_SQL}) <= datetime('now', '-7 days') THEN 1
            ELSE 2 END,
       priority_rank DESC,
-      datetime(created_at) ASC,
+      datetime(${ADMIN_AGING_ANCHOR_SQL}) ASC,
       id ASC
     LIMIT ?
   `).all(guildId, ...ACTIVE_STATUSES, limit);
@@ -189,8 +232,8 @@ function getAdminSummary(guildId) {
       SUM(CASE WHEN status = 'PENDING_PAYMENT' THEN 1 ELSE 0 END) AS pending_payment,
       SUM(CASE WHEN status = 'PROCESSING' THEN 1 ELSE 0 END) AS processing,
       SUM(CASE WHEN claimed_by_id IS NULL AND status != 'PENDING_PAYMENT' THEN 1 ELSE 0 END) AS unclaimed,
-      SUM(CASE WHEN status != 'PENDING_PAYMENT' AND datetime(created_at) <= datetime('now', '-7 days') THEN 1 ELSE 0 END) AS week_one,
-      SUM(CASE WHEN status != 'PENDING_PAYMENT' AND datetime(created_at) <= datetime('now', '-14 days') THEN 1 ELSE 0 END) AS week_two
+      SUM(CASE WHEN status != 'PENDING_PAYMENT' AND datetime(${ADMIN_AGING_ANCHOR_SQL}) <= datetime('now', '-7 days') THEN 1 ELSE 0 END) AS week_one,
+      SUM(CASE WHEN status != 'PENDING_PAYMENT' AND datetime(${ADMIN_AGING_ANCHOR_SQL}) <= datetime('now', '-14 days') THEN 1 ELSE 0 END) AS week_two
     FROM orders
     WHERE guild_id = ? AND status IN (${sqlPlaceholders(ACTIVE_STATUSES)})
   `).get(guildId, ...ACTIVE_STATUSES) || {};
@@ -206,12 +249,212 @@ function getAdminSummary(guildId) {
 
 export function selectAgingReminderStage(order, nowMs = Date.now(), options = {}) {
   if (!order || !PROCESSING_AGING_STATUSES.includes(String(order.status))) return null;
-  const days = ageDays(order.created_at, nowMs);
+  const anchor = getAdminOrderAgingAnchor(order);
+  const days = ageDays(anchor, nowMs);
   const weekOneDays = Number(options.weekOneDays ?? config.adminOrderReminderWeekOneDays);
   const weekTwoDays = Number(options.weekTwoDays ?? config.adminOrderReminderWeekTwoDays);
-  if (days >= weekTwoDays && !order.admin_age_reminder_2w_sent_at) return 'week2';
-  if (days >= weekOneDays && !order.admin_age_reminder_1w_sent_at) return 'week1';
+  const weekOneSent = reminderMarkerBelongsToLifecycle(order.admin_age_reminder_1w_sent_at, anchor);
+  const weekTwoSent = reminderMarkerBelongsToLifecycle(order.admin_age_reminder_2w_sent_at, anchor);
+  if (days >= weekTwoDays) return weekTwoSent ? null : 'week2';
+  if (days >= weekOneDays) return (weekOneSent || weekTwoSent) ? null : 'week1';
   return null;
+}
+
+export function resetLegacyWarrantyAgingStateOnce() {
+  const markerKey = `migration:${LEGACY_WARRANTY_AGING_MIGRATION}`;
+  const existing = db.prepare('SELECT value FROM system_settings WHERE key = ?').get(markerKey);
+  if (existing) return { changed: 0, skipped: true };
+  const appliedAt = nowIso();
+  const changed = db.transaction(() => {
+    const result = db.prepare(`
+      UPDATE orders
+      SET admin_age_reminder_1w_sent_at = NULL,
+          admin_age_reminder_2w_sent_at = NULL
+      WHERE status IN ('WARRANTY', 'WARRANTY_OPEN')
+    `).run();
+    db.prepare(`
+      UPDATE admin_order_aging_reminders
+      SET state = CASE WHEN state = 'SENT' THEN 'SUPERSEDED' ELSE 'RESOLVED' END,
+          resolution_reason = 'LEGACY_WARRANTY_AGING_RESET'
+      WHERE state IN ('RESERVED', 'SENT')
+        AND order_code IN (
+          SELECT order_code FROM orders WHERE status IN ('WARRANTY', 'WARRANTY_OPEN')
+        )
+    `).run();
+    db.prepare(`
+      INSERT INTO system_settings (key, value, updated_at)
+      VALUES (?, ?, ?)
+    `).run(markerKey, JSON.stringify({ changed: result.changes, appliedAt }), appliedAt);
+    return result.changes;
+  })();
+  return { changed, skipped: false };
+}
+
+export function markAdminOrderReminderLifecycleChanged(previousOrder, updatedOrder) {
+  if (!previousOrder || !updatedOrder || previousOrder.status === updatedOrder.status) return { changed: false };
+  const previousStatus = String(previousOrder.status || '').toUpperCase();
+  const nextStatus = String(updatedOrder.status || '').toUpperCase();
+  const enteringWarranty = WARRANTY_STATUSES.has(nextStatus) && !WARRANTY_STATUSES.has(previousStatus);
+  const leavingAgingQueue = !PROCESSING_AGING_STATUSES.includes(nextStatus);
+  if (!enteringWarranty && !leavingAgingQueue) return { changed: false };
+
+  const reason = enteringWarranty ? 'WARRANTY_LIFECYCLE_STARTED' : `ORDER_STATUS_${nextStatus || 'UNKNOWN'}`;
+  db.transaction(() => {
+    db.prepare(`
+      UPDATE orders
+      SET admin_age_reminder_1w_sent_at = NULL,
+          admin_age_reminder_2w_sent_at = NULL
+      WHERE id = ?
+    `).run(updatedOrder.id);
+    db.prepare(`
+      UPDATE admin_order_aging_reminders
+      SET state = CASE WHEN state = 'SENT' THEN 'SUPERSEDED' ELSE 'RESOLVED' END,
+          resolution_reason = ?
+      WHERE order_code = ? AND state IN ('RESERVED', 'SENT')
+    `).run(reason, updatedOrder.order_code);
+  })();
+  return { changed: true, enteringWarranty, leavingAgingQueue, reason };
+}
+
+function reminderMarkerColumn(stage) {
+  if (stage === 'week1') return 'admin_age_reminder_1w_sent_at';
+  if (stage === 'week2') return 'admin_age_reminder_2w_sent_at';
+  throw new Error(`Invalid admin aging reminder stage: ${stage}`);
+}
+
+export function releaseStaleAdminOrderAgingReservations(nowMs = Date.now()) {
+  const cutoff = new Date(nowMs - RESERVATION_TTL_MS).toISOString();
+  const stale = db.prepare(`
+    SELECT * FROM admin_order_aging_reminders
+    WHERE state = 'RESERVED' AND datetime(reserved_at) <= datetime(?)
+    ORDER BY id ASC
+    LIMIT 100
+  `).all(cutoff);
+  for (const reservation of stale) releaseAdminOrderAgingReminder(reservation.reservation_token);
+  return stale.length;
+}
+
+export function reserveAdminOrderAgingReminder(orderId, {
+  stage,
+  nowMs = Date.now(),
+  reservedAt = new Date(nowMs).toISOString(),
+} = {}) {
+  const markerColumn = reminderMarkerColumn(stage);
+  const reserve = db.transaction(() => {
+    const order = db.prepare('SELECT * FROM orders WHERE id = ?').get(orderId);
+    if (!order || selectAgingReminderStage(order, nowMs) !== stage) return null;
+    const lifecycleKey = getAdminOrderAgingLifecycleKey(order);
+    const anchor = getAdminOrderAgingAnchor(order);
+    const previousMarkerAt = order[markerColumn] || null;
+    const token = randomUUID();
+    try {
+      db.prepare(`
+        INSERT INTO admin_order_aging_reminders (
+          guild_id, order_code, lifecycle_key, stage, state,
+          reservation_token, previous_marker_at, reserved_at
+        ) VALUES (?, ?, ?, ?, 'RESERVED', ?, ?, ?)
+      `).run(order.guild_id, order.order_code, lifecycleKey, stage, token, previousMarkerAt, reservedAt);
+    } catch (error) {
+      if (String(error?.code || '').startsWith('SQLITE_CONSTRAINT')) return null;
+      throw error;
+    }
+
+    const result = db.prepare(`
+      UPDATE orders
+      SET ${markerColumn} = ?
+      WHERE id = ?
+        AND status = ?
+        AND COALESCE(${ADMIN_AGING_ANCHOR_SQL}, '') = ?
+        AND COALESCE(${markerColumn}, '') = ?
+    `).run(reservedAt, order.id, order.status, String(anchor || ''), String(previousMarkerAt || ''));
+    if (result.changes !== 1) {
+      db.prepare("DELETE FROM admin_order_aging_reminders WHERE reservation_token = ? AND state = 'RESERVED'").run(token);
+      return null;
+    }
+    const previousCards = db.prepare(`
+      SELECT message_id, channel_id
+      FROM admin_order_aging_reminders
+      WHERE order_code = ? AND lifecycle_key = ? AND state = 'SENT' AND message_id IS NOT NULL
+      ORDER BY id DESC
+    `).all(order.order_code, lifecycleKey);
+    return {
+      token,
+      stage,
+      reservedAt,
+      previousMarkerAt,
+      lifecycleKey,
+      anchor: String(anchor || ''),
+      order: db.prepare('SELECT * FROM orders WHERE id = ?').get(order.id),
+      previousCards,
+    };
+  });
+  return reserve();
+}
+
+export function finalizeAdminOrderAgingReminder(token, { messageId, channelId } = {}) {
+  return db.transaction(() => {
+    const reservation = db.prepare(`
+      SELECT * FROM admin_order_aging_reminders
+      WHERE reservation_token = ? AND state = 'RESERVED'
+    `).get(token);
+    if (!reservation) return null;
+    const order = db.prepare('SELECT * FROM orders WHERE order_code = ?').get(reservation.order_code);
+    const markerColumn = reminderMarkerColumn(reservation.stage);
+    const stillCurrent = order
+      && PROCESSING_AGING_STATUSES.includes(String(order.status))
+      && getAdminOrderAgingLifecycleKey(order) === reservation.lifecycle_key
+      && String(order[markerColumn] || '') === String(reservation.reserved_at);
+    if (!stillCurrent) {
+      if (order) {
+        db.prepare(`
+          UPDATE orders SET ${markerColumn} = ?
+          WHERE id = ? AND ${markerColumn} = ?
+        `).run(reservation.previous_marker_at || null, order.id, reservation.reserved_at);
+      }
+      db.prepare(`
+        UPDATE admin_order_aging_reminders
+        SET state = 'RESOLVED', resolved_at = ?, resolution_reason = 'LIFECYCLE_CHANGED_DURING_SEND'
+        WHERE id = ? AND state = 'RESERVED'
+      `).run(nowIso(), reservation.id);
+      return null;
+    }
+    const sentAt = nowIso();
+    const finalized = db.prepare(`
+      UPDATE admin_order_aging_reminders
+      SET state = 'SENT', message_id = ?, channel_id = ?, sent_at = ?
+      WHERE id = ? AND state = 'RESERVED'
+    `).run(messageId || null, channelId || null, sentAt, reservation.id);
+    if (finalized.changes !== 1) return null;
+    const supersededCards = db.prepare(`
+      SELECT message_id, channel_id
+      FROM admin_order_aging_reminders
+      WHERE order_code = ? AND lifecycle_key = ? AND state = 'SENT' AND id != ?
+        AND message_id IS NOT NULL
+    `).all(reservation.order_code, reservation.lifecycle_key, reservation.id);
+    db.prepare(`
+      UPDATE admin_order_aging_reminders
+      SET state = 'SUPERSEDED', resolution_reason = 'STRONGER_STAGE_SENT'
+      WHERE order_code = ? AND lifecycle_key = ? AND state = 'SENT' AND id != ?
+    `).run(reservation.order_code, reservation.lifecycle_key, reservation.id);
+    return { order, reservation: { ...reservation, state: 'SENT', message_id: messageId, channel_id: channelId }, supersededCards };
+  })();
+}
+
+export function releaseAdminOrderAgingReminder(token) {
+  return db.transaction(() => {
+    const reservation = db.prepare(`
+      SELECT * FROM admin_order_aging_reminders
+      WHERE reservation_token = ? AND state = 'RESERVED'
+    `).get(token);
+    if (!reservation) return false;
+    const markerColumn = reminderMarkerColumn(reservation.stage);
+    db.prepare(`
+      UPDATE orders SET ${markerColumn} = ?
+      WHERE order_code = ? AND ${markerColumn} = ?
+    `).run(reservation.previous_marker_at || null, reservation.order_code, reservation.reserved_at);
+    db.prepare("DELETE FROM admin_order_aging_reminders WHERE id = ? AND state = 'RESERVED'").run(reservation.id);
+    return true;
+  })();
 }
 
 function emojiSvg({ label, colors, glyph }) {
@@ -382,7 +625,7 @@ export function buildAdminOrderCenterPanel({ guildId, orders, summary, refreshed
   container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
 
   const rows = orders.length ? orders.map((order, index) => {
-    const age = ageDays(order.created_at, refreshedAt.getTime());
+    const age = getAdminOrderAgeDays(order, refreshedAt.getTime());
     const urgency = age >= config.adminOrderReminderWeekTwoDays
       ? E('admin_order_week2')
       : (age >= config.adminOrderReminderWeekOneDays ? E('admin_order_week1') : E('order_queue'));
@@ -426,7 +669,7 @@ export function buildAdminOrderDetailPayload(order, {
   suppressRoleNotifications = false,
 } = {}) {
   const E = createEmojiResolver(order.guild_id);
-  const age = ageDays(order.created_at);
+  const age = getAdminOrderAgeDays(order);
   const isWeekTwo = reminderStage === 'week2';
   const headerEmoji = reminderStage
     ? E(isWeekTwo ? 'admin_order_week2' : 'admin_order_week1')
@@ -505,8 +748,8 @@ function buildAgingListPayload(guildId) {
     SELECT * FROM orders
     WHERE guild_id = ?
       AND status IN (${sqlPlaceholders(PROCESSING_AGING_STATUSES)})
-      AND datetime(created_at) <= datetime('now', ?)
-    ORDER BY datetime(created_at) ASC, priority_rank DESC
+      AND datetime(${ADMIN_AGING_ANCHOR_SQL}) <= datetime('now', ?)
+    ORDER BY datetime(${ADMIN_AGING_ANCHOR_SQL}) ASC, priority_rank DESC
     LIMIT 15
   `).all(guildId, ...PROCESSING_AGING_STATUSES, `-${config.adminOrderReminderWeekOneDays} days`);
   const container = new ContainerBuilder().setAccentColor(0xF59E0B);
@@ -515,7 +758,7 @@ function buildAgingListPayload(guildId) {
   ));
   container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
   const lines = orders.length ? orders.map((order, index) => {
-    const days = ageDays(order.created_at);
+    const days = getAdminOrderAgeDays(order);
     const icon = days >= config.adminOrderReminderWeekTwoDays ? E('admin_order_week2') : E('admin_order_week1');
     return `${icon} **${index + 1}. \`${order.order_code}\`** · ${days} ngày · <@${order.customer_id}> · ${formatAdminProductName(guildId, order.product_name, E, 55)} · ${order.claimed_by_id ? `<@${order.claimed_by_id}>` : '**chưa claim**'}`;
   }) : [`${E('status_check')} Hiện không có đơn xử lý nào tồn từ ${config.adminOrderReminderWeekOneDays} ngày.`];
@@ -573,12 +816,88 @@ export function scheduleAdminOrderCenterRefresh(guildId, delayMs = 1500) {
     const client = global.discordClient;
     const guild = client?.guilds?.cache?.get(guildId)
       || await client?.guilds?.fetch?.(guildId).catch(() => null);
-    if (guild) await refreshAdminOrderCenter(guild, { force: true }).catch((error) => {
-      console.error('[ADMIN-ORDER-CENTER] Refresh error:', error.message);
-    });
+    if (guild) {
+      await cleanupStaleAdminOrderReminderCards(guild).catch((error) => {
+        console.error('[ADMIN-ORDER-CENTER] Reminder cleanup error:', error.message);
+      });
+      await refreshAdminOrderCenter(guild, { force: true }).catch((error) => {
+        console.error('[ADMIN-ORDER-CENTER] Refresh error:', error.message);
+      });
+    }
   }, delayMs);
   timer.unref?.();
   refreshTimers.set(guildId, timer);
+}
+
+async function deleteTrackedReminderMessage(guild, fallbackChannel, card) {
+  if (!card?.message_id) return false;
+  const channelId = String(card.channel_id || fallbackChannel?.id || '');
+  const channel = String(fallbackChannel?.id || '') === channelId
+    ? fallbackChannel
+    : guild.channels.cache.get(channelId) || await guild.channels.fetch(channelId).catch(() => null);
+  if (!channel?.isTextBased()) return false;
+  const message = await channel.messages.fetch(card.message_id).catch(() => null);
+  if (!message || message.author?.id !== guild.client.user?.id) return false;
+  await message.delete().catch(() => null);
+  return true;
+}
+
+export async function cleanupStaleAdminOrderReminderCards(guild, { setup = null } = {}) {
+  if (!guild || String(guild.id) !== String(config.storeOneGuildId)) {
+    return { scanned: 0, deleted: 0, resolved: 0, releasedReservations: 0, skipped: true };
+  }
+  const center = setup || await ensureAdminOrderCenter(guild);
+  if (!center?.channel?.isTextBased()) {
+    return { scanned: 0, deleted: 0, resolved: 0, releasedReservations: 0, skipped: true };
+  }
+  const releasedReservations = releaseStaleAdminOrderAgingReservations();
+  const cards = db.prepare(`
+    SELECT reminder.*, orders.id AS order_id, orders.status AS order_status,
+           orders.created_at AS order_created_at, orders.updated_at AS order_updated_at,
+           orders.status_changed_at AS order_status_changed_at
+    FROM admin_order_aging_reminders reminder
+    LEFT JOIN orders ON orders.order_code = reminder.order_code
+    WHERE reminder.guild_id = ?
+      AND reminder.state IN ('SENT', 'SUPERSEDED')
+      AND reminder.message_id IS NOT NULL
+    ORDER BY reminder.id ASC
+    LIMIT 500
+  `).all(guild.id);
+  let deleted = 0;
+  let resolved = 0;
+  for (const card of cards) {
+    const order = card.order_id ? {
+      id: card.order_id,
+      status: card.order_status,
+      created_at: card.order_created_at,
+      updated_at: card.order_updated_at,
+      status_changed_at: card.order_status_changed_at,
+    } : null;
+    const current = card.state === 'SENT'
+      && order
+      && PROCESSING_AGING_STATUSES.includes(String(order.status))
+      && getAdminOrderAgingLifecycleKey(order) === card.lifecycle_key;
+    if (current) continue;
+    if (await deleteTrackedReminderMessage(guild, center.channel, card)) deleted += 1;
+    const timestamp = nowIso();
+    const result = db.prepare(`
+      UPDATE admin_order_aging_reminders
+      SET state = 'RESOLVED', resolved_at = ?,
+          resolution_reason = COALESCE(resolution_reason, 'LIFECYCLE_NO_LONGER_ACTIVE')
+      WHERE id = ? AND state IN ('SENT', 'SUPERSEDED')
+    `).run(timestamp, card.id);
+    resolved += result.changes;
+    if (order && (!PROCESSING_AGING_STATUSES.includes(String(order.status))
+      || getAdminOrderAgingLifecycleKey(order) !== card.lifecycle_key)) {
+      db.prepare(`
+        UPDATE orders
+        SET admin_age_reminder_1w_sent_at = NULL,
+            admin_age_reminder_2w_sent_at = NULL
+        WHERE id = ?
+      `).run(order.id);
+    }
+  }
+  return { scanned: cards.length, deleted, resolved, releasedReservations, skipped: false };
 }
 
 export async function processAdminOrderAgingReminders(client) {
@@ -587,6 +906,7 @@ export async function processAdminOrderAgingReminders(client) {
   if (!guild) return { sent: 0, skipped: true };
   const setup = await ensureAdminOrderCenter(guild);
   if (!setup?.channel?.isTextBased()) return { sent: 0, skipped: true };
+  const cleanup = await cleanupStaleAdminOrderReminderCards(guild, { setup });
 
   const guildConfig = getGuildConfig(guild.id);
   const roleIds = [...new Set([guildConfig?.manager_role_id, ...config.ownerRoleIds]
@@ -595,81 +915,150 @@ export async function processAdminOrderAgingReminders(client) {
   const candidates = db.prepare(`
     SELECT * FROM orders
     WHERE guild_id = ? AND status IN (${sqlPlaceholders(PROCESSING_AGING_STATUSES)})
-    ORDER BY datetime(created_at) ASC
+    ORDER BY datetime(${ADMIN_AGING_ANCHOR_SQL}) ASC
     LIMIT 100
   `).all(guild.id, ...PROCESSING_AGING_STATUSES);
 
   let sent = 0;
+  let stale = 0;
+  let errors = 0;
   for (const order of candidates) {
     if (sent >= 10) break;
     const stage = selectAgingReminderStage(order);
     if (!stage) continue;
+    const reservation = reserveAdminOrderAgingReminder(order.id, { stage });
+    if (!reservation) continue;
     const [ticketChannel, customerIdentity] = await Promise.all([
-      resolveOrderTicketChannel(guild, order),
-      resolveOrderCustomerIdentity(guild, order),
+      resolveOrderTicketChannel(guild, reservation.order),
+      resolveOrderCustomerIdentity(guild, reservation.order),
     ]);
-    const message = await setup.channel.send(buildAdminOrderDetailPayload(order, {
-      reminderStage: stage,
-      roleIds,
-      ticketChannelId: ticketChannel?.id || null,
-      customerIdentity,
-    })).catch((error) => {
+    try {
+      const message = await setup.channel.send(buildAdminOrderDetailPayload(reservation.order, {
+        reminderStage: stage,
+        roleIds,
+        ticketChannelId: ticketChannel?.id || null,
+        customerIdentity,
+      }));
+      const finalized = finalizeAdminOrderAgingReminder(reservation.token, {
+        messageId: message.id,
+        channelId: setup.channel.id,
+      });
+      if (!finalized) {
+        stale += 1;
+        if (message.author?.id === client.user?.id) await message.delete().catch(() => null);
+        continue;
+      }
+      for (const previous of finalized.supersededCards) {
+        await deleteTrackedReminderMessage(guild, setup.channel, previous);
+        db.prepare(`
+          UPDATE admin_order_aging_reminders
+          SET state = 'RESOLVED', resolved_at = ?,
+              resolution_reason = 'SUPERSEDED_CARD_REMOVED'
+          WHERE order_code = ? AND lifecycle_key = ? AND message_id = ? AND state = 'SUPERSEDED'
+        `).run(nowIso(), finalized.order.order_code, reservation.lifecycleKey, previous.message_id);
+      }
+      sent += 1;
+    } catch (error) {
+      errors += 1;
+      releaseAdminOrderAgingReminder(reservation.token);
       console.error(`[ADMIN-ORDER-CENTER] Reminder ${order.order_code} failed:`, error.message);
-      return null;
-    });
-    if (!message) continue;
-    const timestamp = nowIso();
-    if (stage === 'week2') {
-      db.prepare(`
-        UPDATE orders
-        SET admin_age_reminder_1w_sent_at = COALESCE(admin_age_reminder_1w_sent_at, ?),
-            admin_age_reminder_2w_sent_at = ?, updated_at = ?
-        WHERE order_code = ?
-      `).run(timestamp, timestamp, timestamp, order.order_code);
-    } else {
-      db.prepare(`
-        UPDATE orders SET admin_age_reminder_1w_sent_at = ?, updated_at = ? WHERE order_code = ?
-      `).run(timestamp, timestamp, order.order_code);
     }
-    sent += 1;
   }
   await refreshAdminOrderCenter(guild, { force: sent > 0 }).catch(() => null);
-  return { sent, skipped: false };
+  return { sent, stale, errors, cleanup, skipped: false };
 }
 
-export async function refreshExistingAdminAgingReminderCards(guild, { force = false, limit = 100 } = {}) {
-  if (!guild || String(guild.id) !== String(config.storeOneGuildId)) return { scanned: 0, updated: 0, failed: 0, skipped: true };
+async function fetchRecentAdminOrderMessages(channel, limit = 500) {
+  const safeLimit = Math.min(Math.max(Number(limit) || 100, 1), 500);
+  const messages = [];
+  let before;
+  while (messages.length < safeLimit) {
+    const page = await channel.messages.fetch({
+      limit: Math.min(100, safeLimit - messages.length),
+      ...(before ? { before } : {}),
+    });
+    if (!page.size) break;
+    const values = [...page.values()];
+    messages.push(...values);
+    before = values.at(-1)?.id;
+    if (page.size < 100) break;
+  }
+  return messages.sort((a, b) => Number(b.createdTimestamp || 0) - Number(a.createdTimestamp || 0));
+}
+
+function isAdminOrderAgingReminderCard(componentJson) {
+  return /TỒN\s+\d+\s+NGÀY/iu.test(componentJson);
+}
+
+export async function refreshExistingAdminAgingReminderCards(guild, { force = false, limit = 500 } = {}) {
+  if (!guild || String(guild.id) !== String(config.storeOneGuildId)) return { scanned: 0, updated: 0, deleted: 0, failed: 0, skipped: true };
   const versionKey = `admin_order_center_card_ui_version:${guild.id}`;
   const currentVersion = db.prepare('SELECT value FROM system_settings WHERE key = ?').get(versionKey)?.value;
   if (!force && currentVersion === COMPACT_CARD_UI_VERSION) {
-    return { scanned: 0, updated: 0, failed: 0, skipped: true };
+    return { scanned: 0, updated: 0, deleted: 0, failed: 0, skipped: true };
   }
 
   const setup = await ensureAdminOrderCenter(guild);
-  if (!setup?.channel?.isTextBased()) return { scanned: 0, updated: 0, failed: 0, skipped: true };
+  if (!setup?.channel?.isTextBased()) return { scanned: 0, updated: 0, deleted: 0, failed: 0, skipped: true };
   const guildConfig = getGuildConfig(guild.id);
   const roleIds = [...new Set([guildConfig?.manager_role_id, ...config.ownerRoleIds]
     .filter((id) => id && guild.roles.cache.has(String(id)))
     .map(String))];
-  const messages = await setup.channel.messages.fetch({ limit: Math.min(Math.max(Number(limit) || 100, 1), 100) });
+  const messages = await fetchRecentAdminOrderMessages(setup.channel, limit);
   let scanned = 0;
   let updated = 0;
+  let deleted = 0;
   let failed = 0;
+  const seenLifecycles = new Set();
 
-  for (const message of messages.values()) {
+  for (const message of messages) {
     if (message.author?.id !== guild.client.user.id) continue;
     const componentJson = JSON.stringify(message.components.map((component) => component.toJSON()));
+    if (!isAdminOrderAgingReminderCard(componentJson)) continue;
     const orderCode = componentJson.match(/order:claim:([A-Za-z0-9_-]{3,32})/)?.[1]
       || componentJson.match(/\b(?:CN|CR)_\d{3,20}\b/)?.[0];
     if (!orderCode) continue;
     scanned += 1;
     const order = db.prepare('SELECT * FROM orders WHERE guild_id = ? AND order_code = ?').get(guild.id, orderCode);
-    if (!order) continue;
+    const days = order ? getAdminOrderAgeDays(order) : 0;
+    const elapsedStage = agingStageByElapsedDays(days, {
+      weekOneDays: config.adminOrderReminderWeekOneDays,
+      weekTwoDays: config.adminOrderReminderWeekTwoDays,
+    });
+    const eligible = order
+      && PROCESSING_AGING_STATUSES.includes(String(order.status))
+      && elapsedStage;
+    const lifecycleKey = eligible ? getAdminOrderAgingLifecycleKey(order) : null;
+    const dedupeKey = eligible ? `${order.order_code}:${lifecycleKey}` : null;
+    if (!eligible || seenLifecycles.has(dedupeKey)) {
+      try {
+        await message.delete();
+        deleted += 1;
+        db.prepare(`
+          UPDATE admin_order_aging_reminders
+          SET state = 'RESOLVED', resolved_at = ?, resolution_reason = 'LEGACY_CARD_NOT_ACTIONABLE'
+          WHERE message_id = ? AND state IN ('SENT', 'SUPERSEDED')
+        `).run(nowIso(), message.id);
+        if (order && !seenLifecycles.has(dedupeKey)) {
+          db.prepare(`
+            UPDATE orders
+            SET admin_age_reminder_1w_sent_at = NULL,
+                admin_age_reminder_2w_sent_at = NULL
+            WHERE id = ?
+          `).run(order.id);
+        }
+      } catch (error) {
+        failed += 1;
+        console.error(`[ADMIN-ORDER-CENTER] Không thể dọn card ${orderCode}:`, error.message);
+      }
+      continue;
+    }
+    seenLifecycles.add(dedupeKey);
     const [ticketChannel, customerIdentity] = await Promise.all([
       resolveOrderTicketChannel(guild, order),
       resolveOrderCustomerIdentity(guild, order),
     ]);
-    const stage = ageDays(order.created_at) >= config.adminOrderReminderWeekTwoDays ? 'week2' : 'week1';
+    const stage = elapsedStage;
     try {
       await message.edit(buildAdminOrderDetailPayload(order, {
         reminderStage: stage,
@@ -678,6 +1067,37 @@ export async function refreshExistingAdminAgingReminderCards(guild, { force = fa
         customerIdentity,
         suppressRoleNotifications: true,
       }));
+      const sentAt = message.createdAt?.toISOString?.() || nowIso();
+      if (stage === 'week2') {
+        db.prepare(`
+          UPDATE orders
+          SET admin_age_reminder_1w_sent_at = COALESCE(admin_age_reminder_1w_sent_at, ?),
+              admin_age_reminder_2w_sent_at = COALESCE(admin_age_reminder_2w_sent_at, ?)
+          WHERE id = ?
+        `).run(sentAt, sentAt, order.id);
+      } else {
+        db.prepare(`
+          UPDATE orders
+          SET admin_age_reminder_1w_sent_at = COALESCE(admin_age_reminder_1w_sent_at, ?)
+          WHERE id = ?
+        `).run(sentAt, order.id);
+      }
+      db.prepare(`
+        INSERT OR IGNORE INTO admin_order_aging_reminders (
+          guild_id, order_code, lifecycle_key, stage, state, reservation_token,
+          previous_marker_at, message_id, channel_id, reserved_at, sent_at
+        ) VALUES (?, ?, ?, ?, 'SENT', ?, NULL, ?, ?, ?, ?)
+      `).run(
+        guild.id,
+        order.order_code,
+        lifecycleKey,
+        stage,
+        `legacy-${message.id}`,
+        message.id,
+        setup.channel.id,
+        sentAt,
+        sentAt,
+      );
       updated += 1;
     } catch (error) {
       failed += 1;
@@ -691,7 +1111,7 @@ export async function refreshExistingAdminAgingReminderCards(guild, { force = fa
       ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
     `).run(versionKey, COMPACT_CARD_UI_VERSION, nowIso());
   }
-  return { scanned, updated, failed, skipped: false };
+  return { scanned, updated, deleted, failed, skipped: false };
 }
 
 export async function handleAdminOrderCenterInteraction(interaction) {
