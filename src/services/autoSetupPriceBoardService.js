@@ -20,7 +20,7 @@ import { isInternationalGuild } from '../utils/locale.js';
 import { formatInternationalPrice, translateCatalogGroup, translateProductName } from '../utils/internationalCatalog.js';
 import { getNitroTrialEligibility, isNitroTrialProduct } from '../constants/nitroTrial.js';
 
-export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.17';
+export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.18';
 const PRIMARY_GUILD_ID = '1282637033340403754';
 const PRIMARY_PRICE_CHANNEL_ID = '1514606995842273280';
 const OFFICIAL_SPOTIFY_PRODUCT_KEYS = new Set([
@@ -238,7 +238,7 @@ export function buildPricePortalPayload(guildId, guildConfig, panels = []) {
       international ? `# ${E('icon_store')} CENAR GLOBAL • LIVE PRICING` : `# ${E('icon_store')} BẢNG GIÁ CENAR STORE`,
       international ? `> ${E('status_check')} **Live catalog synchronized across Discord and the website.**` : `> ${E('status_check')} **Đồng bộ trực tiếp từ hệ thống sản phẩm đang hoạt động.**`,
       ...(guildId === PRIMARY_GUILD_ID ? [
-        `> ${E('status_info')} **Hiện không có chương trình khuyến mãi đang áp dụng.**`,
+        `> ${E('icon_gift')} **Sale Trung Thu 25/9 đang diễn ra tại <#1515008584549797979> · giá ưu đãi áp dụng theo bài chiến dịch.**`,
       ] : []),
     ].join('\n'))
   );
