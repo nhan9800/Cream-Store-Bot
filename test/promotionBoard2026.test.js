@@ -7,8 +7,9 @@ import {
 } from '../src/campaigns/promotionBoard2026.js';
 
 describe('Cenar promotion channel policy', () => {
-  it('marks the current promotion campaign as inactive', () => {
-    expect(PROMOTION_BOARD.status).toBe('INACTIVE');
+  it('marks the Mid-Autumn promotion as active', () => {
+    expect(PROMOTION_BOARD.status).toBe('ACTIVE');
+    expect(PROMOTION_BOARD.campaign).toBe('CENAR-MID-AUTUMN-SALE-2026');
     expect(PROMOTION_BOARD.channelId).toBe('1515008584549797979');
   });
 
@@ -18,7 +19,9 @@ describe('Cenar promotion channel policy', () => {
     expect(isPromotionBoardMessage(null, 'bot-1')).toBe(false);
   });
 
-  it('keeps the legacy publisher name as a safe cleanup alias', () => {
-    expect(publishPromotionBoard).toBe(clearPromotionChannel);
+  it('keeps explicit publish and cleanup operations separate', () => {
+    expect(publishPromotionBoard).toBeTypeOf('function');
+    expect(clearPromotionChannel).toBeTypeOf('function');
+    expect(publishPromotionBoard).not.toBe(clearPromotionChannel);
   });
 });

@@ -17,6 +17,7 @@
     "publish:youtube-family-policy": "node scripts/publish-youtube-family-policy-update.js",
     "publish:youtube-stability-transition": "node scripts/publish-youtube-stability-transition.js",
     "publish:national-day-sale": "node scripts/publish-national-day-sale.js",
+    "publish:mid-autumn-sale": "node scripts/publish-mid-autumn-sale.js",
     "publish:transcript-archive-launch": "node scripts/publish-transcript-archive-launch.js",
     "publish:youtube-join-fam-guide": "node scripts/publish-youtube-join-fam-guide.js",
     "publish:nitro-gmail-phone-guide": "node scripts/publish-nitro-gmail-phone-guide.js",

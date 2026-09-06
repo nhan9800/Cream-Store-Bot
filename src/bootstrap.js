@@ -114,19 +114,19 @@ export async function buildClient() {
     startScheduler(readyClient);
     startOtpAutoCheck(readyClient);
 
-    // Kết thúc chiến dịch sale là tác vụ vận hành độc lập: dọn kênh và cập
-    // nhật panel Boost ngay cả khi một auto-setup không liên quan bị lỗi.
+    // Chiến dịch Trung Thu là tác vụ vận hành độc lập: giữ bài sale đồng bộ
+    // sau restart và cập nhật panel Boost ngay cả khi auto-setup khác bị lỗi.
     if (String(config.guildId) === STORE_ONE_GUILD_ID) {
       try {
-        const { clearPromotionChannel } = await import('./campaigns/promotionBoard2026.js');
-        const promotionBoard = await clearPromotionChannel(readyClient);
-        console.log(`[PROMOTION-BOARD] status=${promotionBoard.status} deleted=${promotionBoard.deleted} failed=${promotionBoard.failed} preserved=${promotionBoard.preservedNonBotMessages}`);
+        const { publishPromotionBoard } = await import('./campaigns/promotionBoard2026.js');
+        const promotionBoard = await publishPromotionBoard(readyClient);
+        console.log(`[PROMOTION-BOARD] status=${promotionBoard.status} messages=${promotionBoard.messages?.length || 0} deletedOld=${promotionBoard.deletedOldMessages || 0} removedEmojis=${promotionBoard.removedEventEmojis?.length || 0}`);
 
         const { refreshBoostPanel } = await import('./services/boostServerService.js');
         const boostPanel = await refreshBoostPanel(readyClient, STORE_ONE_GUILD_ID);
         console.log(`[BOOST-PANEL] status=${boostPanel?.status || 'unknown'} message=${boostPanel?.messageId || 'none'}`);
       } catch (error) {
-        console.error('[PROMOTION-CLEANUP] Không thể kết thúc chiến dịch hiện tại:', error);
+        console.error('[PROMOTION-BOARD] Không thể đồng bộ chiến dịch Trung Thu:', error);
       }
     }
 
