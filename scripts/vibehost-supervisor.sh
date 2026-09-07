@@ -83,12 +83,44 @@ install_dependencies() {
   npm ci --omit=dev --no-audit --no-fund
 }
 
+install_dependencies_for_transition() {
+  local from_sha="$1"
+  local to_sha="$2"
+  local diff_status=0
+
+  if [[ ! -d node_modules ]]; then
+    log "node_modules is missing; installing production dependencies"
+    install_dependencies
+    return $?
+  fi
+
+  git diff --quiet "$from_sha" "$to_sha" -- package.json package-lock.json
+  diff_status=$?
+  if [[ "$diff_status" -eq 0 ]]; then
+    log "Dependency manifests are unchanged; reusing verified node_modules"
+    return 0
+  fi
+  if [[ "$diff_status" -ne 1 ]]; then
+    log "Cannot compare dependency manifests; using a clean dependency install"
+  else
+    log "Dependency manifests changed; installing production dependencies"
+  fi
+  install_dependencies
+}
+
 rollback_source() {
   local previous_sha="$1"
+  local failed_sha=""
+
+  failed_sha="$(git rev-parse HEAD 2>/dev/null || true)"
 
   log "Rolling source back to ${previous_sha}"
   git reset --hard "$previous_sha" || return 1
-  install_dependencies || return 1
+  if [[ -z "$failed_sha" ]]; then
+    install_dependencies || return 1
+  else
+    install_dependencies_for_transition "$failed_sha" "$previous_sha" || return 1
+  fi
   write_marker "$INSTALLED_REVISION_FILE" "$previous_sha"
   write_marker "$REVISION_FILE" "$previous_sha"
 }
@@ -128,7 +160,7 @@ install_revision() {
   local install_failed=false
   if ! git reset --hard "$target_sha"; then
     install_failed=true
-  elif ! install_dependencies; then
+  elif ! install_dependencies_for_transition "$current_sha" "$target_sha"; then
     install_failed=true
   elif ! validate_environment; then
     install_failed=true
