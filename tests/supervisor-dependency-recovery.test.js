@@ -38,4 +38,16 @@ describe('supervisor dependency recovery', () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('[runtime-deps] invalid');
   });
+  it('does not accept dependencies inherited from the parent application', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cenar-parent-dependencies-'));
+    dirs.push(dir);
+    fs.symlinkSync(path.resolve('node_modules'), path.join(dir, 'node_modules'), 'junction');
+    const stage = path.join(dir, 'stage');
+    fs.mkdirSync(stage);
+    fs.copyFileSync('package.json', path.join(stage, 'package.json'));
+    fs.copyFileSync('package-lock.json', path.join(stage, 'package-lock.json'));
+    const result = spawnSync(process.execPath, ['scripts/check-runtime-dependencies.mjs', stage], { encoding: 'utf8' });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain('[runtime-deps] invalid');
+  });
 });

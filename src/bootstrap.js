@@ -72,7 +72,7 @@ export async function buildClient() {
 
   // Music is intentionally isolated: extractor/FFmpeg failure must never stop
   // commerce, wallet, ticket or warranty services from starting.
-  await initializeMusicPlayer(client).catch(() => null);
+  void initializeMusicPlayer(client).catch(() => null);
 
   initErrorLogger(client);
   registerInteractionHandler(client, commands);

@@ -14,11 +14,8 @@ import {
   TextInputStyle,
 } from 'discord.js';
 import { GuildQueueEvent, Player, QueueRepeatMode } from 'discord-player';
-import {
-  YouTubeDlpExtractor,
-  setFFmpegPath as setExtractorFFmpegPath,
-} from 'discord-player-youtubedlp';
 import ffmpegPath from 'ffmpeg-static';
+import { ensureYtDlpRuntime } from '../utils/ytDlpRuntime.js';
 import { config } from '../config.js';
 import { db } from '../database/db.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
@@ -46,6 +43,7 @@ let initializePromise = null;
 let runtimeError = null;
 let initializedAt = null;
 let daveProtocolVersion = null;
+let ytDlpAvailable = false;
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, Number(value) || 0));
@@ -271,6 +269,7 @@ export function getMusicRuntimeStatus() {
     engine: 'Discord Player 7 · yt-dlp · FFmpeg',
     audioProfile: '48 kHz stereo · bitrate tự động theo phòng thoại',
     ffmpegAvailable: Boolean(ffmpegPath && fs.existsSync(ffmpegPath)),
+    ytDlpAvailable,
     daveAvailable: Number.isInteger(daveProtocolVersion),
     daveProtocolVersion,
     error: runtimeError ? String(runtimeError.message || runtimeError) : null,
@@ -424,6 +423,11 @@ export async function initializeMusicPlayer(client) {
         throw new Error('Discord DAVE runtime không hợp lệ.');
       }
       daveProtocolVersion = davey.DAVE_PROTOCOL_VERSION;
+      const binaryPath = await ensureYtDlpRuntime();
+      const { YouTubeDlpExtractor, setFFmpegPath: setExtractorFFmpegPath, setYtDlpPath } =
+        await import('discord-player-youtubedlp');
+      setYtDlpPath(binaryPath);
+      ytDlpAvailable = true;
       setExtractorFFmpegPath(ffmpegPath);
       const instance = new Player(client, {
         ffmpegPath,
@@ -457,7 +461,7 @@ export async function initializeMusicPlayer(client) {
       musicPlayer = instance;
       runtimeError = null;
       initializedAt = new Date().toISOString();
-      console.log(`[MUSIC] Cenar Music ready · DAVE=v${daveProtocolVersion} · FFmpeg=${ffmpegPath}`);
+      console.log(`[MUSIC] Cenar Music ready · yt-dlp=verified · DAVE=v${daveProtocolVersion} · FFmpeg=${ffmpegPath}`);
       return instance;
     } catch (error) {
       runtimeError = error;
