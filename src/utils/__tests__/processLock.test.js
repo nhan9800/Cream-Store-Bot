@@ -19,6 +19,20 @@ function temporaryLockPath() {
 }
 
 describe('launcher process lock', () => {
+  it('still rejects duplicate acquisition within the same live process', () => {
+    const lockPath = temporaryLockPath();
+    const release = acquireProcessLock(lockPath);
+    expect(() => acquireProcessLock(lockPath)).toThrow(/already running/i);
+    release();
+  });
+  it('recovers a persisted PID reused by the new launcher after container restart', () => {
+    const lockPath = temporaryLockPath();
+    fs.writeFileSync(lockPath, JSON.stringify({ pid: 90, startedAt: '2026-09-01T00:00:00Z' }));
+    const release = acquireProcessLock(lockPath, { pid: 90, isAlive: () => true });
+    expect(JSON.parse(fs.readFileSync(lockPath, 'utf8')).startedAt).not.toBe('2026-09-01T00:00:00Z');
+    release();
+    expect(fs.existsSync(lockPath)).toBe(false);
+  });
   it('rejects a second live launcher and releases only its own lock', () => {
     const lockPath = temporaryLockPath();
     const release = acquireProcessLock(lockPath, { pid: 101, isAlive: (pid) => pid === 101 });

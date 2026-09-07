@@ -1,13 +1,21 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
+
+const heldLocks = new Map();
 
 function processIsAlive(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return false;
   try {
     process.kill(pid, 0);
+    if (process.platform === 'linux') {
+      const stat = fs.readFileSync(`/proc/${pid}/stat`, 'utf8');
+      const state = stat.slice(stat.lastIndexOf(')') + 2).split(' ')[0];
+      if (state === 'Z' || state === 'X') return false;
+    }
     return true;
   } catch (error) {
-    return error?.code !== 'ESRCH';
+    return !['ESRCH', 'ENOENT'].includes(error?.code);
   }
 }
 
@@ -34,18 +42,22 @@ export function acquireProcessLock(lockPath, options = {}) {
   const ownerPid = Number(options.pid ?? process.pid);
   const isAlive = options.isAlive || processIsAlive;
   const resolvedPath = path.resolve(lockPath);
+  const instanceId = randomUUID();
   fs.mkdirSync(path.dirname(resolvedPath), { recursive: true });
 
   for (let attempt = 0; attempt < 2; attempt += 1) {
     try {
       const fd = fs.openSync(resolvedPath, 'wx', 0o600);
-      fs.writeFileSync(fd, JSON.stringify({ pid: ownerPid, startedAt: new Date().toISOString() }));
+      fs.writeFileSync(fd, JSON.stringify({ pid: ownerPid, instanceId, startedAt: new Date().toISOString() }));
       fs.closeSync(fd);
+      heldLocks.set(resolvedPath, { pid: ownerPid, instanceId });
 
       let released = false;
       return () => {
         if (released) return;
         released = true;
+        if (heldLocks.get(resolvedPath)?.instanceId !== instanceId) return;
+        heldLocks.delete(resolvedPath);
         if (readLockPid(resolvedPath) !== ownerPid) return;
         try {
           fs.unlinkSync(resolvedPath);
@@ -56,7 +68,7 @@ export function acquireProcessLock(lockPath, options = {}) {
     } catch (error) {
       if (error?.code !== 'EEXIST') throw error;
       const activePid = readLockPid(resolvedPath);
-      if (activePid && isAlive(activePid)) {
+      if (activePid && (activePid !== ownerPid || heldLocks.get(resolvedPath)?.pid === ownerPid) && isAlive(activePid)) {
         const duplicateError = new Error(`Cenar launcher is already running with PID ${activePid}`);
         duplicateError.code = 'EALREADY';
         throw duplicateError;

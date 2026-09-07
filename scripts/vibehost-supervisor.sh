@@ -15,6 +15,9 @@ BOT_PID=""
 TARGET_SHA=""
 STOPPING=false
 SUPERVISOR_EXCLUSIVE=false
+DEPENDENCY_STAGE=""
+RUNTIME_CHECK="${STATE_DIR}/check-runtime-dependencies.mjs"
+SUPERVISOR_HASH=""
 
 export NODE_ENV="${NODE_ENV:-production}"
 export GIT_TERMINAL_PROMPT=0
@@ -80,7 +83,28 @@ validate_environment() {
 }
 
 install_dependencies() {
-  npm ci --omit=dev --no-audit --no-fund
+  local stage=""
+  stage="$(mktemp -d "${STATE_DIR}/dependencies-XXXXXXXX")" || return 1
+  cp package.json package-lock.json "$stage/" || return 1
+  log 'Installing dependencies in an isolated staging directory'
+  if ! (cd "$stage" && timeout --foreground 5m npm ci --omit=dev --no-audit --no-fund 9>&-); then
+    log "Dependency staging failed; existing node_modules preserved (stage: ${stage})"
+    return 1
+  fi
+  node "$RUNTIME_CHECK" "$stage" || return 1
+  if [[ -d node_modules ]]; then
+    mv node_modules "${stage}/previous-node_modules" || return 1
+  fi
+  if ! mv "${stage}/node_modules" node_modules; then
+    [[ ! -d "${stage}/previous-node_modules" ]] || mv "${stage}/previous-node_modules" node_modules
+    return 1
+  fi
+  DEPENDENCY_STAGE="$stage"
+  return 0
+}
+
+runtime_valid() {
+  node "$RUNTIME_CHECK" "$APP_ROOT" >/dev/null 2>&1
 }
 
 install_dependencies_for_transition() {
@@ -88,8 +112,8 @@ install_dependencies_for_transition() {
   local to_sha="$2"
   local diff_status=0
 
-  if [[ ! -d node_modules ]]; then
-    log "node_modules is missing; installing production dependencies"
+  if ! runtime_valid; then
+    log "Dependencies are missing or incomplete; repairing the installation"
     install_dependencies
     return $?
   fi
@@ -116,6 +140,11 @@ rollback_source() {
 
   log "Rolling source back to ${previous_sha}"
   git reset --hard "$previous_sha" || return 1
+  if [[ -n "$DEPENDENCY_STAGE" && -d "${DEPENDENCY_STAGE}/previous-node_modules" ]]; then
+    [[ ! -d node_modules ]] || mv node_modules "${DEPENDENCY_STAGE}/rejected-node_modules" || return 1
+    mv "${DEPENDENCY_STAGE}/previous-node_modules" node_modules || return 1
+    DEPENDENCY_STAGE=""
+  fi
   if [[ -z "$failed_sha" ]]; then
     install_dependencies || return 1
   else
@@ -140,8 +169,14 @@ install_revision() {
     return 0
   fi
 
-  if [[ "$target_sha" == "$current_sha" && "$installed_sha" == "$target_sha" ]]; then
+  if [[ "$target_sha" == "$current_sha" && "$installed_sha" == "$target_sha" ]] && runtime_valid; then
     return 0
+  fi
+
+  # Repair a partial installation before running dependency-backed backup tools.
+  if ! runtime_valid; then
+    write_marker "$INSTALLED_REVISION_FILE" ''
+    install_dependencies || return 1
   fi
 
   # The panel may pull the target revision before the supervisor starts. In that
@@ -157,12 +192,14 @@ install_revision() {
   fi
 
   log "Installing verified revision ${target_sha}"
+  write_marker "$INSTALLED_REVISION_FILE" ''
+  DEPENDENCY_STAGE=""
   local install_failed=false
   if ! git reset --hard "$target_sha"; then
     install_failed=true
   elif ! install_dependencies_for_transition "$current_sha" "$target_sha"; then
     install_failed=true
-  elif ! validate_environment; then
+  elif ! runtime_valid || ! validate_environment; then
     install_failed=true
   fi
 
@@ -181,10 +218,14 @@ install_revision() {
   write_marker "$REVISION_FILE" "$target_sha"
   rm -f "$FAILED_REVISION_FILE"
   log "Revision ${target_sha} is ready"
+  if [[ "$SUPERVISOR_HASH" != "$(sha256sum scripts/vibehost-supervisor.sh | cut -d' ' -f1)" ]]; then
+    log 'Reloading updated supervisor before starting stores'
+    exec bash "$APP_ROOT/scripts/vibehost-supervisor.sh" 9>&-
+  fi
 }
 
 refresh_target() {
-  if ! git fetch --quiet --prune "$GIT_REMOTE" "$GIT_BRANCH"; then
+  if ! timeout --foreground 30s git -c http.lowSpeedLimit=1024 -c http.lowSpeedTime=20 fetch --quiet "$GIT_REMOTE" "$GIT_BRANCH" 9>&-; then
     log "Cannot reach ${GIT_REMOTE}/${GIT_BRANCH}; keeping the current bot online"
     return 1
   fi
@@ -242,6 +283,10 @@ reclaim_orphaned_launcher() {
   fi
   if [[ "$launcher_command" != *node*src/index.js* ]]; then
     fail "Launcher lock points to active PID ${launcher_pid}, but its command is not the Cenar launcher; refusing to signal it"
+    return 1
+  fi
+  if [[ "$(readlink "/proc/${launcher_pid}/cwd" 2>/dev/null)" != "$APP_ROOT" ]]; then
+    fail "PID ${launcher_pid} belongs to a different working directory; refusing to signal it"
     return 1
   fi
 
@@ -313,6 +358,8 @@ if command -v flock >/dev/null 2>&1; then
 fi
 
 cd "$APP_ROOT" || exit 1
+cp scripts/check-runtime-dependencies.mjs "$RUNTIME_CHECK" || exit 1
+SUPERVISOR_HASH="$(sha256sum scripts/vibehost-supervisor.sh | cut -d' ' -f1)"
 
 if ! reclaim_orphaned_launcher; then
   exit 1
@@ -344,7 +391,7 @@ while [[ "$STOPPING" == false ]]; do
 
   CURRENT_READY_SHA="$(git rev-parse HEAD 2>/dev/null || true)"
   INSTALLED_READY_SHA="$(read_marker "$INSTALLED_REVISION_FILE")"
-  if [[ -z "$CURRENT_READY_SHA" || "$CURRENT_READY_SHA" != "$INSTALLED_READY_SHA" ]]; then
+  if [[ -z "$CURRENT_READY_SHA" || "$CURRENT_READY_SHA" != "$INSTALLED_READY_SHA" ]] || ! runtime_valid; then
     log "No validated revision is ready; retrying in ${POLL_SECONDS}s"
     sleep "$POLL_SECONDS" &
     WAIT_PID=$!
@@ -353,7 +400,7 @@ while [[ "$STOPPING" == false ]]; do
   fi
 
   log "Starting bot from revision ${CURRENT_READY_SHA}"
-  node src/index.js &
+  node src/index.js 9>&- &
   BOT_PID=$!
   UPDATE_REQUESTED=false
 

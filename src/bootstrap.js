@@ -217,9 +217,15 @@ export async function buildClient() {
         console.log(`[TERMS-BOARD] status=skipped guild=${config.guildId} reason=store2-international`);
       }
 
-      const { publishCustomServicesLaunch } = await import('./campaigns/customServicesLaunch2026.js');
-      const customServices = await publishCustomServicesLaunch(readyClient);
-      console.log(`[CUSTOM-SERVICES] status=${customServices.status} message=${customServices.messageId} removed=${customServices.removed}`);
+      if (String(config.guildId) === STORE_ONE_GUILD_ID) {
+        try {
+          const { publishCustomServicesLaunch } = await import('./campaigns/customServicesLaunch2026.js');
+          const customServices = await publishCustomServicesLaunch(readyClient);
+          console.log(`[CUSTOM-SERVICES] status=${customServices.status} message=${customServices.messageId} removed=${customServices.removed}`);
+        } catch (error) {
+          console.error('[CUSTOM-SERVICES] Campaign setup failed:', error?.message);
+        }
+      }
 
       const { reconcileRecentCtvOrderLogs } = await import('./services/ctvOrderLogService.js');
       for (const guild of readyClient.guilds.cache.values()) {
