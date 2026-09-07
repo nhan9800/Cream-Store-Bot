@@ -14,7 +14,7 @@ function getTicketByIdStmt(){return db.prepare('SELECT * FROM tickets WHERE id=?
 function scheduleAutoCloseStmt(){return db.prepare(`UPDATE tickets SET auto_close_at=?, keep_open_requested=0 WHERE id=?`);}
 function clearAutoCloseStmt(){return db.prepare(`UPDATE tickets SET auto_close_at=NULL, keep_open_requested=1 WHERE id=?`);}
 function dueAutoCloseTicketsStmt(){return db.prepare(`SELECT * FROM tickets WHERE guild_id=? AND status='OPEN' AND auto_close_at IS NOT NULL AND keep_open_requested=0 AND datetime(auto_close_at) <= datetime(?) ORDER BY auto_close_at ASC LIMIT ?`);}
-function updateTicketAiStatusStmt(){return db.prepare(`UPDATE tickets SET ai_status=? WHERE id=?`);}
+function updateTicketAiStatusStmt(){return db.prepare(`UPDATE tickets SET ai_status=?, ai_paused_until=? WHERE id=?`);}
 function getTicketByClientRequestIdStmt(){return db.prepare('SELECT * FROM tickets WHERE client_request_id=? LIMIT 1');}
 function getOpenWebsiteSupportStmt(){return db.prepare(`SELECT * FROM tickets WHERE guild_id=? AND customer_id=? AND ticket_type='SUPPORT' AND support_source='WEBSITE_AI' AND status='OPEN' ORDER BY id DESC LIMIT 1`);}
 function touchTicketStmt(){return db.prepare('UPDATE tickets SET last_activity_at=? WHERE id=?');}
@@ -145,7 +145,20 @@ export function scheduleMissingFeedbackTicketAutoCloses(guildId, limit=100) {
   const tickets = getFeedbackedTicketsMissingAutoCloseStmt().all(String(guildId), Number(limit));
   return tickets.map((ticket) => scheduleTicketAutoClose(ticket.id, 0));
 }
-export function updateTicketAiStatus(ticketId, status){updateTicketAiStatusStmt().run(status, ticketId); return getTicketById(ticketId);}
+export function updateTicketAiStatus(ticketId, status, pausedUntil = null){
+  updateTicketAiStatusStmt().run(status, pausedUntil, ticketId);
+  return getTicketById(ticketId);
+}
+export function pauseTicketAi(ticketId, minutes = 30){
+  const safeMinutes = Math.min(240, Math.max(1, Number(minutes) || 30));
+  return updateTicketAiStatus(ticketId, 'PAUSED', new Date(Date.now() + safeMinutes * 60_000).toISOString());
+}
+export function canTicketAiRespond(ticket, now = new Date()){
+  if (!ticket || ticket.status !== 'OPEN') return false;
+  if (ticket.ai_status !== 'PAUSED') return true;
+  if (!ticket.ai_paused_until) return false;
+  return new Date(ticket.ai_paused_until).getTime() <= now.getTime();
+}
 export function touchTicket(ticketId){touchTicketStmt().run(nowIso(), ticketId); return getTicketById(ticketId);}
 
 export function isTicketChannel(channel, guildConfig) {

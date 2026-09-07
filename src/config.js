@@ -210,8 +210,17 @@ export const config = {
   protectedOwnerId: getEnv('PROTECTED_OWNER_ID', '1138315103821889566'),
   nitroRoleIds: (getEnv('DISCORD_NITRO_ROLE_IDS') || '').split(',').map(id => id.trim()).filter(Boolean),
   nitroUserIds: (getEnv('DISCORD_NITRO_USER_IDS', '1138315103821889566') || '').split(',').map(id => id.trim()).filter(Boolean),
-  groqApiKey: getEnv('GROQ_API_KEY', getEnv('OPENROUTER_API_KEY', '')), // Dùng chung biến để tiện cho user nếu họ nhác sửa
+  aiProvider: (getEnv('AI_PROVIDER', 'auto') || 'auto').toLowerCase(),
+  groqApiKey: getEnv('GROQ_API_KEY', ''),
   aiModel: getEnv('AI_MODEL', 'llama-3.3-70b-versatile'),
+  geminiApiKeys: (getEnv('GEMINI_API_KEYS', getEnv('GEMINI_API_KEY', '')) || '')
+    .split(',').map(key => key.trim()).filter(Boolean),
+  aiGeminiModel: getEnv('AI_GEMINI_MODEL', 'gemini-2.5-flash'),
+  aiPublicChannelIds: (getEnv('AI_PUBLIC_CHANNEL_IDS', '1519182567151239188,1514607020098191393') || '')
+    .split(',').map(id => id.trim()).filter(Boolean),
+  aiPublicCooldownSeconds: Math.max(10, Number.parseInt(getEnv('AI_PUBLIC_COOLDOWN_SECONDS', '45'), 10) || 45),
+  aiTicketCooldownSeconds: Math.max(3, Number.parseInt(getEnv('AI_TICKET_COOLDOWN_SECONDS', '8'), 10) || 8),
+  aiStaffPauseMinutes: Math.max(5, Number.parseInt(getEnv('AI_STAFF_PAUSE_MINUTES', '30'), 10) || 30),
   antiScamEnabled: getBooleanEnv('ANTI_SCAM_ENABLED', !isStoreTwoEnvironment),
   antiScamVisionModel: getEnv('ANTI_SCAM_VISION_MODEL', 'gemini-2.5-flash'),
   antiScamConfidenceThreshold: parseNumberEnv('ANTI_SCAM_CONFIDENCE_THRESHOLD', '0.9'),

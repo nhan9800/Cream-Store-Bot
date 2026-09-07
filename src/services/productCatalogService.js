@@ -145,9 +145,11 @@ export function generateProductKnowledgeText(guildId) {
   const lines = ['=== DANH SÁCH SẢN PHẨM HIỆN TẠI ==='];
   for (const p of products) {
     const priceText = p.price > 0 ? `${Number(p.price).toLocaleString('vi-VN')} VND` : 'Liên hệ';
-    const durationText = p.duration_months > 1 ? `${p.duration_months} tháng` : '1 tháng';
+    const durationText = p.duration_days
+      ? `${p.duration_days} ngày`
+      : `${p.duration_months || 1} tháng`;
     const emoji = resolveProductEmoji(guildId, p.emoji);
-    lines.push(`• ${emoji} ${p.name} — ${priceText} / ${durationText}${p.description ? ` — ${p.description}` : ''}`);
+    lines.push(`• [MÃ SP: ${p.id}] ${emoji} ${p.name} — ${priceText} / ${durationText}${p.warranty_policy ? ` — Bảo hành: ${p.warranty_policy}` : ''}${p.description ? ` — ${p.description}` : ''}`);
   }
   lines.push('=====================================');
   return lines.join('\n');

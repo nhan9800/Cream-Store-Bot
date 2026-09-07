@@ -1,6 +1,19 @@
 import { Events, AttachmentBuilder, ContainerBuilder, EmbedBuilder, MessageFlags, TextDisplayBuilder } from 'discord.js';
-import { getTicketByChannelId, updateTicketAiStatus, isTicketChannel, touchTicket } from '../services/ticketService.js';
+import {
+  canTicketAiRespond,
+  getTicketByChannelId,
+  isTicketChannel,
+  pauseTicketAi,
+  touchTicket,
+  updateTicketAiStatus,
+} from '../services/ticketService.js';
 import { processAiMessage } from '../services/aiService.js';
+import {
+  claimAiResponseSlot,
+  shouldAiReplyInPublic,
+  shouldAiReplyInTicket,
+  triageWarrantyMessage,
+} from '../services/aiSupportAutomationService.js';
 import { getGuildConfig } from '../services/guildConfigService.js';
 import { moderateMessage } from '../services/aiModerationService.js';
 import { scanScamMessage, incrementLinkWarningCount, logAbuseEvent } from '../utils/antiScam.js';
@@ -410,17 +423,27 @@ export async function execute(message) {
         await withChannelLock(message.channel.id, () => processAiMessage(message, true, true));
         return;
       } else {
-        // Staff chat bình thường -> tắt AI tự động
-        if (ticket.ai_status !== 'PAUSED') {
-          updateTicketAiStatus(ticket.id, 'PAUSED');
-        }
+        // Staff tiếp quản tạm thời. AI tự quay lại sau khoảng nghỉ cấu hình để
+        // ticket không bị bỏ quên khi chủ shop bận trở lại.
+        pauseTicketAi(ticket.id, config.aiStaffPauseMinutes);
         return;
       }
     }
 
-    // Khách hàng chat và AI đang bật
-    if (isCustomer && ticket.ai_status !== 'PAUSED') {
-      await withChannelLock(message.channel.id, () => processAiMessage(message, true, false));
+    if (isCustomer) {
+      if (!canTicketAiRespond(ticket)) return;
+      if (ticket.ai_status === 'PAUSED') updateTicketAiStatus(ticket.id, 'ACTIVE');
+
+      // Bảo hành được định tuyến bằng dữ liệu DB trước khi gọi mô hình AI:
+      // tra đúng đơn của khách, không tạo đơn bù giả khi thiếu mã.
+      if (await triageWarrantyMessage(message, ticket)) return;
+
+      if (
+        shouldAiReplyInTicket(message, ticket)
+        && claimAiResponseSlot(`ticket:${message.channel.id}:${message.author.id}`, config.aiTicketCooldownSeconds)
+      ) {
+        await withChannelLock(message.channel.id, () => processAiMessage(message, true, false));
+      }
     }
     return;
   }
@@ -428,11 +451,7 @@ export async function execute(message) {
   // ═══════════════════════════════════════════════
   // TRƯỜNG HỢP 2: TIN NHẮN KÊNH CHUNG (PUBLIC CHAT)
   // ═══════════════════════════════════════════════
-  const purchaseKeywords = ['giá', 'nhiêu', 'shop ơi', 'hỏi', 'còn hàng', 'mua', 'tư vấn', 'hỗ trợ', 'lỗi', 'bảo hành', 'cách làm', 'thế nào', 'sao', 'không', 'ko'];
-  
-  const hasIntent = !isStaff && contentLower.length >= 5 && purchaseKeywords.some(kw => contentLower.includes(kw));
-
-  if (isMentioned || hasIntent) {
+  if (shouldAiReplyInPublic(message, { mentioned: isMentioned, isStaff })) {
     // Không reply ở các kênh log
     if (message.channel.id === guildConfig.order_log_channel_id || 
         message.channel.id === guildConfig.staff_log_channel_id ||
@@ -441,6 +460,10 @@ export async function execute(message) {
       return;
     }
     
+    if (!claimAiResponseSlot(
+      `public:${message.channel.id}:${message.author.id}`,
+      config.aiPublicCooldownSeconds,
+    )) return;
     await withChannelLock(message.channel.id, () => processAiMessage(message, false, isStaff));
   }
 }

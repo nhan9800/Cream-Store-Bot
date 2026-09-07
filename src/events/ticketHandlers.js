@@ -33,6 +33,7 @@ import { exportTicketTranscript } from '../services/transcriptService.js';
 import { deliverTranscript, sendOrderCancelledFlow, updateOrderLogMessage } from '../services/notificationService.js';
 import { cancelPayOSPaymentLink } from '../services/paymentService.js';
 import { ensureRateLimit } from '../services/abuseService.js';
+import { sendTicketAiWelcome } from '../services/aiSupportAutomationService.js';
 import { getCenarHub } from '../services/cenarHub.js';
 import { buildTicketChannelName } from '../utils/formatters.js';
 import {
@@ -385,6 +386,11 @@ export async function handleTicketCreate(interaction, ticketType = 'ORDER', gmai
           allowedMentions: { parse: [] },
         }).catch(() => null);
       }
+      await sendTicketAiWelcome({
+        channel,
+        ticket,
+        guildId: interaction.guildId,
+      }).catch((error) => console.error('[AI TICKET WELCOME]', error.message));
     }
 
     await emitStaffLog(interaction.client, {

@@ -119,6 +119,8 @@ export function initDatabase() {
       last_activity_at TEXT,
       auto_close_at TEXT,
       keep_open_requested INTEGER NOT NULL DEFAULT 0,
+      ai_status TEXT NOT NULL DEFAULT 'ACTIVE',
+      ai_paused_until TEXT,
       status TEXT NOT NULL DEFAULT 'OPEN',
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
       closed_at TEXT,
@@ -977,6 +979,7 @@ export function initDatabase() {
   ensureColumn('tickets', 'auto_close_at', 'TEXT');
   ensureColumn('tickets', 'keep_open_requested', 'INTEGER NOT NULL DEFAULT 0');
   ensureColumn('tickets', 'ai_status', "TEXT NOT NULL DEFAULT 'ACTIVE'");
+  ensureColumn('tickets', 'ai_paused_until', 'TEXT');
   ensureColumn('tickets', 'support_source', 'TEXT');
   ensureColumn('tickets', 'client_request_id', 'TEXT');
   ensureColumn('tickets', 'last_activity_at', 'TEXT');

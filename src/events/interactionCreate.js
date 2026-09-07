@@ -91,6 +91,7 @@ import { ensureRateLimit } from '../services/abuseService.js';
 import { keepTicketOpen, scheduleTicketAutoClose } from '../services/ticketService.js';
 import { getActiveProducts, getProductById, updateProduct, addProduct, getAllProducts, getProductByName } from '../services/productCatalogService.js';
 import { handlePremiumProductInteraction } from '../services/premiumProductSetupService.js';
+import { handleAiSupportInteraction } from '../services/aiSupportAutomationService.js';
 import { getCenarHub } from '../services/cenarHub.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { isInternationalGuild } from '../utils/locale.js';
@@ -366,6 +367,11 @@ export function registerInteractionHandler(client, commands) {
 
       if (interaction.customId && interaction.customId.startsWith('music:')) {
         const handled = await handleMusicInteraction(interaction);
+        if (handled) return;
+      }
+
+      if (interaction.customId && interaction.customId.startsWith('ai:support:')) {
+        const handled = await handleAiSupportInteraction(interaction);
         if (handled) return;
       }
 
