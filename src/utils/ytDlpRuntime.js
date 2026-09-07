@@ -61,11 +61,24 @@ export async function prepareVerifiedBinary({
 }
 
 let preparing;
+export async function configureMediaTempDirectory({
+  platform = process.platform, env = process.env, root = process.cwd(),
+} = {}) {
+  if (platform !== 'linux') return;
+  // PyInstaller expands the standalone Linux executable before each invocation.
+  // Hosting /tmp may be a small tmpfs shared by both stores. Child processes
+  // (including the extractor's spawns) inherit this disk-backed location instead.
+  const directory = path.resolve(root, '.vibehost', 'media', 'tmp');
+  await fs.mkdir(directory, { recursive: true, mode: 0o700 });
+  env.TMPDIR = directory;
+}
+
 export function ensureYtDlpRuntime() {
   if (preparing) return preparing;
   preparing = (async () => {
     const selected = ASSETS[`${process.platform}-${process.arch}`];
     if (!selected) throw new Error('Chưa hỗ trợ yt-dlp trên nền tảng này.');
+    await configureMediaTempDirectory();
     const [asset, sha256] = selected;
     const binaryPath = await prepareVerifiedBinary({
       cacheDir: path.resolve('.vibehost', 'media', VERSION), asset, sha256, version: VERSION,

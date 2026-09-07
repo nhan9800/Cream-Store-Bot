@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { prepareVerifiedBinary } from '../src/utils/ytDlpRuntime.js';
+import { configureMediaTempDirectory, prepareVerifiedBinary } from '../src/utils/ytDlpRuntime.js';
 
 const dirs = [];
 afterEach(async () => {
@@ -23,6 +23,16 @@ async function fixture() {
 }
 
 describe('optional yt-dlp runtime recovery', () => {
+  it('gives Linux media subprocesses a disk-backed temp directory', async () => {
+    const { cacheDir: root } = await fixture();
+    const env = { KEEP: 'unchanged', TMPDIR: '/tmp' };
+    await configureMediaTempDirectory({ platform: 'linux', root, env });
+    expect(env).toEqual({ KEEP: 'unchanged', TMPDIR: path.join(root, '.vibehost', 'media', 'tmp') });
+    expect((await fs.stat(env.TMPDIR)).isDirectory()).toBe(true);
+    const windowsEnv = { TMPDIR: 'original' };
+    await configureMediaTempDirectory({ platform: 'win32', root, env: windowsEnv });
+    expect(windowsEnv.TMPDIR).toBe('original');
+  });
   it('checks checksum and executable version before activation, then reuses cache', async () => {
     const options = await fixture();
     const file = await prepareVerifiedBinary(options);
