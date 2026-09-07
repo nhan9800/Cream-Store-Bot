@@ -114,6 +114,27 @@ export async function buildClient() {
     startScheduler(readyClient);
     startOtpAutoCheck(readyClient);
 
+    // Probe Store 1 once per process start so production can distinguish a
+    // configured key from a key that Google actually accepts. This never posts
+    // to Discord and deliberately logs no response content or credential data.
+    if (process.env.ENV_FILE === '.env') {
+      import('./services/aiService.js')
+        .then(({ probeConfiguredAiProvider }) => probeConfiguredAiProvider())
+        .then((probe) => {
+          if (probe.ok) {
+            console.log(`[AI-PROBE] provider=${probe.provider} model=${probe.model} status=ready`);
+          } else {
+            console.warn(`[AI-PROBE] provider=${probe.provider || 'none'} status=failed code=${probe.code}`);
+          }
+        })
+        .catch((error) => {
+          const code = String(error?.status || error?.code || error?.name || 'REQUEST_FAILED')
+            .replace(/[^A-Za-z0-9_-]/g, '_')
+            .slice(0, 40);
+          console.warn(`[AI-PROBE] provider=unknown status=failed code=${code}`);
+        });
+    }
+
     // Chiến dịch Trung Thu là tác vụ vận hành độc lập: giữ bài sale đồng bộ
     // sau restart và cập nhật panel Boost ngay cả khi auto-setup khác bị lỗi.
     if (String(config.guildId) === STORE_ONE_GUILD_ID) {
