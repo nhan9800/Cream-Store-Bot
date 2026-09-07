@@ -65,6 +65,6 @@
     "esbuild": true,
     "ffmpeg-static": true,
     "protobufjs": true,
-    "ytdlp-nodejs": true
+    "ytdlp-nodejs": false
   }
 }
