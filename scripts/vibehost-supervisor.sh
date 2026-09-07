@@ -14,6 +14,7 @@ REVISION_FILE="${APP_ROOT}/REVISION"
 BOT_PID=""
 TARGET_SHA=""
 STOPPING=false
+SUPERVISOR_EXCLUSIVE=false
 
 export NODE_ENV="${NODE_ENV:-production}"
 export GIT_TERMINAL_PROMPT=0
@@ -171,6 +172,75 @@ stop_bot() {
   BOT_PID=""
 }
 
+process_is_running() {
+  local pid="$1"
+  local state=""
+
+  kill -0 "$pid" 2>/dev/null || return 1
+  if [[ -r "/proc/${pid}/stat" ]]; then
+    state="$(awk '{ print $3 }' "/proc/${pid}/stat" 2>/dev/null || true)"
+    [[ "$state" == "Z" || "$state" == "X" ]] && return 1
+  fi
+  return 0
+}
+
+reclaim_orphaned_launcher() {
+  local lock_file="${STATE_DIR}/launcher.lock"
+  local launcher_pid=""
+  local launcher_command=""
+  local attempt=0
+
+  [[ "$SUPERVISOR_EXCLUSIVE" == true && -f "$lock_file" ]] || return 0
+
+  launcher_pid="$(sed -n 's/.*"pid"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p' "$lock_file" | head -n 1)"
+  if [[ ! "$launcher_pid" =~ ^[1-9][0-9]*$ ]]; then
+    log "Removing malformed launcher lock left by an earlier run"
+    rm -f "$lock_file"
+    return 0
+  fi
+
+  if ! process_is_running "$launcher_pid"; then
+    log "Removing stale launcher lock for inactive PID ${launcher_pid}"
+    rm -f "$lock_file"
+    return 0
+  fi
+
+  if [[ -r "/proc/${launcher_pid}/cmdline" ]]; then
+    launcher_command="$(tr '\000' ' ' < "/proc/${launcher_pid}/cmdline" 2>/dev/null || true)"
+  fi
+  if [[ "$launcher_command" != *node*src/index.js* ]]; then
+    fail "Launcher lock points to active PID ${launcher_pid}, but its command is not the Cenar launcher; refusing to signal it"
+    return 1
+  fi
+
+  # Holding supervisor.lock proves that no managed supervisor owns this Node
+  # launcher anymore. Stop the orphan before starting a replacement so the
+  # public/internal ports and Discord sessions cannot overlap.
+  log "Stopping orphaned Cenar launcher PID ${launcher_pid}"
+  kill -TERM "$launcher_pid" 2>/dev/null || true
+  for attempt in {1..32}; do
+    process_is_running "$launcher_pid" || break
+    sleep 0.25
+  done
+
+  if process_is_running "$launcher_pid"; then
+    log "Orphaned launcher PID ${launcher_pid} ignored SIGTERM; sending SIGKILL"
+    kill -KILL "$launcher_pid" 2>/dev/null || true
+    for attempt in {1..8}; do
+      process_is_running "$launcher_pid" || break
+      sleep 0.25
+    done
+  fi
+
+  if process_is_running "$launcher_pid"; then
+    fail "Orphaned launcher PID ${launcher_pid} is still active; refusing duplicate startup"
+    return 1
+  fi
+
+  rm -f "$lock_file"
+  log "Orphaned launcher cleanup completed"
+}
+
 shutdown_supervisor() {
   STOPPING=true
   log "Shutdown requested"
@@ -207,9 +277,14 @@ if command -v flock >/dev/null 2>&1; then
     log "Another VibeHost supervisor is already active; duplicate startup stopped"
     exit 0
   fi
+  SUPERVISOR_EXCLUSIVE=true
 fi
 
 cd "$APP_ROOT" || exit 1
+
+if ! reclaim_orphaned_launcher; then
+  exit 1
+fi
 
 git config --global --add safe.directory "$APP_ROOT" >/dev/null 2>&1 || true
 
