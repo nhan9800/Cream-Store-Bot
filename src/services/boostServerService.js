@@ -1,6 +1,7 @@
 import { db, nowIso } from '../database/db.js';
 import { randomDigits } from '../utils/id.js';
-import { getGuildConfig } from './guildConfigService.js';
+import { getGuildConfig, upsertGuildConfig } from './guildConfigService.js';
+import { STORE_ONE_GUILD_ID } from '../utils/locale.js';
 import crypto from 'node:crypto';
 import QRCode from 'qrcode';
 import {
@@ -26,6 +27,11 @@ export const BOOST_PACKAGES = [
   { key: '1m', label: '14x Boost Server · 1 Tháng', price: 120000, months: 1, availability: 'Có liền' },
   { key: '3m', label: '14x Boost Server · 3 Tháng', price: 320000, months: 3, availability: 'Có liền' },
 ];
+
+const STORE_ONE_BOOST_PANEL = Object.freeze({
+  channelId: '1524080488233435336',
+  messageId: '1524080492968935487',
+});
 
 // ─── DB helpers ───────────────────────────────────────────────────────────────
 
@@ -807,22 +813,48 @@ export function buildBoostOrderActionRows(order, isStaff = false) {
 
 export async function refreshBoostPanel(client, guildId) {
   const cfg = getGuildConfig(guildId);
-  if (!cfg?.boost_panel_channel_id || !cfg?.boost_panel_message_id) return { status: 'not_configured' };
+  const hasConfiguredPanel = Boolean(cfg?.boost_panel_channel_id && cfg?.boost_panel_message_id);
+  const mayRecoverStoreOnePanel = String(guildId) === STORE_ONE_GUILD_ID
+    && !cfg?.boost_panel_channel_id
+    && !cfg?.boost_panel_message_id;
+
+  const channelId = hasConfiguredPanel
+    ? cfg.boost_panel_channel_id
+    : mayRecoverStoreOnePanel ? STORE_ONE_BOOST_PANEL.channelId : null;
+  const messageId = hasConfiguredPanel
+    ? cfg.boost_panel_message_id
+    : mayRecoverStoreOnePanel ? STORE_ONE_BOOST_PANEL.messageId : null;
+
+  if (!channelId || !messageId) return { status: 'not_configured' };
 
   const guild = client.guilds.cache.get(guildId);
   if (!guild) return { status: 'guild_not_found' };
 
-  const channel = await guild.channels.fetch(cfg.boost_panel_channel_id).catch(() => null);
+  const channel = await guild.channels.fetch(channelId).catch(() => null);
   if (!channel) return { status: 'channel_not_found' };
 
-  const msg = await channel.messages.fetch(cfg.boost_panel_message_id).catch(() => null);
+  const msg = await channel.messages.fetch(messageId).catch(() => null);
   if (!msg) return { status: 'message_not_found' };
+  if (msg.author?.id !== client.user?.id) return { status: 'message_not_owned' };
 
   const payload = buildBoostPanelPayload(guildId);
 
   try {
     await msg.edit({ ...payload, embeds: [], content: null });
-    return { status: 'updated', channelId: channel.id, messageId: msg.id };
+    if (mayRecoverStoreOnePanel) {
+      upsertGuildConfig({
+        guild_id: guildId,
+        boost_panel_channel_id: channel.id,
+        boost_panel_message_id: msg.id,
+        updated_by: client.user?.id ?? null,
+      });
+    }
+    return {
+      status: 'updated',
+      channelId: channel.id,
+      messageId: msg.id,
+      recoveredConfig: mayRecoverStoreOnePanel,
+    };
   } catch (error) {
     console.error('[BOOST PANEL] Lỗi refresh:', error.message);
     return { status: 'error', error: error.message };
