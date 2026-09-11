@@ -644,13 +644,16 @@ export async function handlePayOSWebhook({ client, body }) {
       const { getBoostOrderByPayOSCode, handleBoostPayOSWebhook } = await import('./boostServerService.js');
       const boostOrder = getBoostOrderByPayOSCode(payosOrderCode);
       if (boostOrder) {
-        await handleBoostPayOSWebhook({
+        const confirmedBoost = await handleBoostPayOSWebhook({
           client,
           payosOrderCode,
           amount:      Number(payload.data.amount ?? 0),
           reference:   payload.data.reference ?? null,
           description: payload.data.description ?? null,
         });
+        if (!confirmedBoost) {
+          return { ok: true, status: 200, body: { ok: true, message: 'Ignored insufficient boost payment', order_code: boostOrder.order_code } };
+        }
         return { ok: true, status: 200, body: { ok: true, message: 'Boost payment confirmed', order_code: boostOrder.order_code } };
       }
     }

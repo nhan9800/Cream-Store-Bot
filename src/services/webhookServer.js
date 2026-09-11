@@ -81,6 +81,12 @@ export function registerPaymentRoutes(app) {
     if (topup?.topup_code) {
       return res.redirect(`${webUrl}/account/wallet?payment=success&topup=${encodeURIComponent(topup.topup_code)}`);
     }
+    const boost = Number.isSafeInteger(payosOrderCode)
+      ? db.prepare('SELECT order_code FROM boost_server_orders WHERE payos_order_code = ?').get(payosOrderCode)
+      : null;
+    if (boost?.order_code) {
+      return res.redirect(`${webUrl}/payment?status=success&type=boost&order=${encodeURIComponent(boost.order_code)}`);
+    }
     return res.redirect(`${webUrl}/payment?status=success`);
   });
 
@@ -98,6 +104,12 @@ export function registerPaymentRoutes(app) {
       : null;
     if (topup?.topup_code) {
       return res.redirect(`${webUrl}/account/wallet?payment=cancel&topup=${encodeURIComponent(topup.topup_code)}`);
+    }
+    const boost = Number.isSafeInteger(payosOrderCode)
+      ? db.prepare('SELECT order_code FROM boost_server_orders WHERE payos_order_code = ?').get(payosOrderCode)
+      : null;
+    if (boost?.order_code) {
+      return res.redirect(`${webUrl}/payment?status=cancel&type=boost&order=${encodeURIComponent(boost.order_code)}`);
     }
     return res.redirect(`${webUrl}/payment?status=cancel`);
   });

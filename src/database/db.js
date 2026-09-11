@@ -1223,6 +1223,15 @@ export function initDatabase() {
   ensureColumn('boost_server_orders', 'payment_link_id', 'TEXT');
   ensureColumn('boost_server_orders', 'payment_status', 'TEXT NOT NULL DEFAULT "PENDING"');
   ensureColumn('boost_server_orders', 'payment_qr_code', 'TEXT');
+  ensureColumn('boost_server_orders', 'access_key_hash', 'TEXT');
+  ensureColumn('boost_server_orders', 'access_key_encrypted', 'TEXT');
+  ensureColumn('boost_server_orders', 'access_key_issued_at', 'TEXT');
+  ensureColumn('boost_server_orders', 'customer_status_note', 'TEXT');
+  db.exec(`
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_boost_orders_access_key
+    ON boost_server_orders (access_key_hash)
+    WHERE access_key_hash IS NOT NULL;
+  `);
   // ─────────────────────────────────────────────────────────────────────────
 
   // Add missing columns to oauth_backups for backward compatibility
@@ -1642,8 +1651,8 @@ export const DEFAULT_PRODUCT_CATALOG = [
     { product_key: 'discord-nitro-boost-trial-3-months-first-offer', name: 'Discord Nitro Boost Trial 3 Tháng (Ưu Đãi Lần Đầu)', aliases: ['Discord Nitro Boost 3 Tháng (Trail)'], description: 'Đối tượng áp dụng: tài khoản được tạo trên 1 tháng và chưa từng sử dụng Nitro; hoặc tài khoản đã từng sử dụng Nitro nhưng không dùng lại Nitro trong ít nhất 12 tháng liên tục. Vui lòng gửi tài khoản, mật khẩu và 4-5 mã dự phòng khi mua.', price: 50000, ctv_price: 45000, duration_months: 3, service_type: 'GAME', emoji: 'brand_nitro', original_price: 0 },
 
     // Boost Server · chỉ giữ hai gói 14 Boosts chính thức
-    { product_key: 'discord-server-boost-14-1-month', name: 'Discord Server Boost 14 Boosts (1 Tháng)', aliases: ['Discord Server Boost Level 3 (1 Tháng)', '14 Nâng Cấp Server Boost Level 3 (1 Tháng)'], description: 'Nâng cấp máy chủ bằng 14 Boosts trong 1 tháng. Giá mới được điều chỉnh theo chi phí nguồn hiện tại.', price: 120000, ctv_price: 90000, duration_months: 1, service_type: 'GAME', emoji: 'brand_boost', original_price: 0, is_featured: 1, virtual_purchase_count: 0 },
-    { product_key: 'discord-server-boost-14-3-months', name: 'Discord Server Boost 14 Boosts (3 Tháng)', aliases: ['Discord Server Boost Level 3 (3 Tháng)', '14 Nâng Cấp Server Boost Level 3 (3 Tháng)'], description: 'Nâng cấp máy chủ bằng 14 Boosts trong 3 tháng. Giá mới được điều chỉnh theo chi phí nguồn hiện tại.', price: 290000, ctv_price: 240000, duration_months: 3, service_type: 'GAME', emoji: 'brand_boost', original_price: 0, is_featured: 1, virtual_purchase_count: 0 },
+    { product_key: 'discord-server-boost-14-1-month', name: 'Discord Server Boost 14 Boosts (1 Tháng)', aliases: ['Discord Server Boost Level 3 (1 Tháng)', '14 Nâng Cấp Server Boost Level 3 (1 Tháng)'], description: 'Loại có liền: nâng cấp máy chủ bằng 14 Boosts trong 1 tháng.', price: 120000, ctv_price: 90000, duration_months: 1, service_type: 'GAME', emoji: 'brand_boost', original_price: 0, is_featured: 1, virtual_purchase_count: 0 },
+    { product_key: 'discord-server-boost-14-3-months', name: 'Discord Server Boost 14 Boosts (3 Tháng)', aliases: ['Discord Server Boost Level 3 (3 Tháng)', '14 Nâng Cấp Server Boost Level 3 (3 Tháng)'], description: 'Loại có liền: nâng cấp máy chủ bằng 14 Boosts trong 3 tháng.', price: 320000, ctv_price: 240000, duration_months: 3, service_type: 'GAME', emoji: 'brand_boost', original_price: 0, is_featured: 1, virtual_purchase_count: 0 },
 
     // Decor Trang Trí - Có Nitro
     { name: 'Decor Discord (Acc Có Nitro) - Gói 25k', description: 'Trang trí hồ sơ cho tài khoản ĐÃ CÓ Nitro. Vui lòng gửi tài khoản, mật khẩu và 4-5 mã dự phòng.', price: 25000, duration_months: 1, service_type: 'decor', emoji: 'icon_sparkle', original_price: 66000 },

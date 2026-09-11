@@ -249,12 +249,12 @@ describe('Cenar price board V3', () => {
     expect(announcement).toContain('Hỗ trợ gia hạn tiếp');
   });
 
-  it('synchronizes exactly two official 14-Boost packages at 120k and 290k', () => {
+  it('synchronizes exactly two official 14-Boost packages at 120k and 320k', () => {
     const products = getActiveProducts(GUILD_ID);
     const boostProducts = products.filter((product) => /server boost/i.test(product.name));
     expect(boostProducts.map((product) => [product.product_key, product.price])).toEqual([
       ['discord-server-boost-14-1-month', 120000],
-      ['discord-server-boost-14-3-months', 290000],
+      ['discord-server-boost-14-3-months', 320000],
     ]);
 
     const panel = buildPriceBoardPayloads(GUILD_ID, {}, products)
@@ -263,7 +263,7 @@ describe('Cenar price board V3', () => {
     expect(panel).toContain('1 Tháng');
     expect(panel).toContain('120.000');
     expect(panel).toContain('3 Tháng');
-    expect(panel).toContain('290.000');
+    expect(panel).toContain('320.000');
     expect(panel).not.toContain('Level 2');
   });
 

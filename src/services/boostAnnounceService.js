@@ -29,16 +29,16 @@ export async function sendBoostAnnouncement(client) {
     `## <:cr_muahang:1348622828152426528> Cách Thức Hoạt Động`,
     `> <:muiten:1481124261501337601> **Bước 1:** Vào kênh <#${BOOST_CHANNEL_ID}> → bấm **Mua Boost Server**`,
     `> <:muiten:1481124261501337601> **Bước 2:** Điền thông tin server + chọn gói muốn mua`,
-    `> <:muiten:1481124261501337601> **Bước 3:** Bot gửi **mã QR PayOS** vào DM — quét là thanh toán xong`,
-    `> <:muiten:1481124261501337601> **Bước 4:** Hệ thống tự xác nhận — Admin boost trong **5–10 phút**`,
-    `> <:muiten:1481124261501337601> **Bước 5:** Nhận thông báo hoàn thành qua DM <a:tickgreen:1384069022831874169>`,
+    `> <:muiten:1481124261501337601> **Bước 3:** Mã QR PayOS hiện ngay trên màn hình và được gửi thêm qua DM`,
+    `> <:muiten:1481124261501337601> **Bước 4:** PayOS tự xác nhận — bot cấp key tra cứu riêng`,
+    `> <:muiten:1481124261501337601> **Bước 5:** Nhập key để xem trạng thái Boost Server live`,
   ].join('\n');
 
   const pricing = [
     `## <:cr_pay:1392750857329705000> Bảng Giá Dịch Vụ`,
     `> <a:starxoay:1481141954346483845> **Gói 1 Tháng** (14 Boosts) — **120.000 VND**`,
-    `> <a:starxoay:1481141954346483845> **Gói 3 Tháng** (14 Boosts) — **290.000 VND**`,
-    `> <:cr_tim:1366636325352116225> *Giá đã được điều chỉnh theo chi phí nguồn hiện tại.*`,
+    `> <a:starxoay:1481141954346483845> **Gói 3 Tháng** (14 Boosts) — **320.000 VND**`,
+    `> <:cr_tim:1366636325352116225> *Cả hai gói đều là loại có liền.*`,
     ``,
     `<a:Dotyellow:1481134440725090315> *Nếu đông đơn, thời gian xử lý có thể lâu hơn — vui lòng kiên nhẫn!*`,
   ].join('\n');

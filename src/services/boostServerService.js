@@ -1,28 +1,31 @@
 import { db, nowIso } from '../database/db.js';
 import { randomDigits } from '../utils/id.js';
 import { getGuildConfig } from './guildConfigService.js';
-import { config } from '../config.js';
+import crypto from 'node:crypto';
+import QRCode from 'qrcode';
 import {
   ActionRowBuilder,
+  AttachmentBuilder,
   ButtonBuilder,
   ButtonStyle,
   ContainerBuilder,
   TextDisplayBuilder,
+  SeparatorBuilder,
+  SeparatorSpacingSize,
   MediaGalleryBuilder,
   MediaGalleryItemBuilder,
   EmbedBuilder,
   MessageFlags,
 } from 'discord.js';
-import { createEmojiResolver } from '../utils/emojiHelper.js';
+import { createEmojiResolver, withButtonEmoji } from '../utils/emojiHelper.js';
+import { decrypt, encrypt } from '../utils/crypto.js';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 export const BOOST_PACKAGES = [
-  { key: '1m', label: 'Gói 1 Tháng (14 Boosts)', price: 120000, months: 1 },
-  { key: '3m', label: 'Gói 3 Tháng (14 Boosts)', price: 290000, months: 3 },
+  { key: '1m', label: '14x Boost Server · 1 Tháng', price: 120000, months: 1, availability: 'Có liền' },
+  { key: '3m', label: '14x Boost Server · 3 Tháng', price: 320000, months: 3, availability: 'Có liền' },
 ];
-
-const BOOST_BANNER = 'https://i.pinimg.com/originals/68/ae/bf/68aebf3739f455687a90e871bdc04a98.gif';
 
 // ─── DB helpers ───────────────────────────────────────────────────────────────
 
@@ -30,16 +33,46 @@ function generateOrderCode() {
   return `BST_${randomDigits(6)}`;
 }
 
-export function createBoostOrder({ guildId, customerId, customerTag, serverLink, serverId, serverName, pkg, durationMonths, amount }) {
-  let code;
-  for (let i = 0; i < 10; i++) {
+function generatePayOSOrderCode() {
+  // Tách riêng namespace Boost khỏi đơn CN_ 6 số và đơn nạp ví.
+  return 8_000_000_000_000 + Number(randomDigits(8));
+}
+
+function payosCodeExists(code) {
+  return Boolean(
+    db.prepare('SELECT 1 FROM boost_server_orders WHERE payos_order_code = ?').get(code)
+    || db.prepare('SELECT 1 FROM orders WHERE payos_order_code = ?').get(code)
+    || db.prepare('SELECT 1 FROM wallet_topup_orders WHERE payos_order_code = ?').get(code)
+  );
+}
+
+export function getBoostPackage(packageKey) {
+  return BOOST_PACKAGES.find(item => item.key === String(packageKey || '').toLowerCase()) ?? null;
+}
+
+export function createBoostOrder({ guildId, customerId, customerTag, serverLink, serverId, serverName, packageKey, pkg, durationMonths }) {
+  const selectedPackage = getBoostPackage(packageKey)
+    || BOOST_PACKAGES.find(item => item.label === pkg || item.months === Number(durationMonths));
+  if (!selectedPackage) throw new Error('Gói Boost Server không hợp lệ.');
+
+  let code = null;
+  for (let i = 0; i < 25; i++) {
     code = generateOrderCode();
     const exists = db.prepare('SELECT 1 FROM boost_server_orders WHERE order_code = ?').get(code);
     if (!exists) break;
+    code = null;
   }
+  if (!code) throw new Error('Không thể cấp mã đơn Boost Server. Vui lòng thử lại.');
 
-  // payos_order_code: lấy 6 chữ số cuối từ mã đơn để dùng làm orderCode số cho PayOS
-  const payosOrderCode = Number(code.replace('BST_', ''));
+  let payosOrderCode = null;
+  for (let i = 0; i < 25; i++) {
+    const candidate = generatePayOSOrderCode();
+    if (!payosCodeExists(candidate)) {
+      payosOrderCode = candidate;
+      break;
+    }
+  }
+  if (!payosOrderCode) throw new Error('Không thể cấp mã thanh toán PayOS. Vui lòng thử lại.');
 
   const now = nowIso();
   db.prepare(`
@@ -48,7 +81,7 @@ export function createBoostOrder({ guildId, customerId, customerTag, serverLink,
        package, duration_months, amount, status, payment_status, payos_order_code, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'PENDING', 'PENDING', ?, ?, ?)
   `).run(code, guildId, customerId, customerTag ?? null, serverLink, serverId, serverName ?? null,
-         pkg, durationMonths, amount, payosOrderCode, now, now);
+         selectedPackage.label, selectedPackage.months, selectedPackage.price, payosOrderCode, now, now);
 
   return getBoostOrderByCode(code);
 }
@@ -59,6 +92,72 @@ export function getBoostOrderByCode(code) {
 
 export function getBoostOrderByPayOSCode(payosCode) {
   return db.prepare('SELECT * FROM boost_server_orders WHERE payos_order_code = ?').get(Number(payosCode));
+}
+
+function normalizeAccessKey(key) {
+  return String(key || '').trim().toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+function hashAccessKey(key) {
+  return crypto.createHash('sha256').update(normalizeAccessKey(key)).digest('hex');
+}
+
+function generateAccessKey() {
+  const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let value = '';
+  for (let i = 0; i < 12; i++) value += alphabet[crypto.randomInt(0, alphabet.length)];
+  return `BST-${value.slice(0, 4)}-${value.slice(4, 8)}-${value.slice(8, 12)}`;
+}
+
+function protectAccessKey(key) {
+  try {
+    return encrypt(key);
+  } catch (error) {
+    console.warn('[BOOST KEY] ENCRYPTION_KEY chưa sẵn sàng; dùng lớp tương thích cục bộ:', error.message);
+    return `compat:v1:${Buffer.from(key, 'utf8').toString('base64')}`;
+  }
+}
+
+function revealAccessKey(value) {
+  if (!value) return null;
+  if (String(value).startsWith('compat:v1:')) {
+    return Buffer.from(String(value).slice('compat:v1:'.length), 'base64').toString('utf8');
+  }
+  const revealed = decrypt(value);
+  return revealed && !String(revealed).startsWith('enc:v1:') ? String(revealed) : null;
+}
+
+export function ensureBoostAccessKey(code) {
+  let order = getBoostOrderByCode(code);
+  if (!order) throw new Error(`Không tìm thấy đơn boost ${code}`);
+  if (order.payment_status !== 'PAID') throw new Error('Đơn Boost Server chưa thanh toán.');
+
+  const existingKey = revealAccessKey(order.access_key_encrypted);
+  if (existingKey) return { order, accessKey: existingKey, created: false };
+
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const accessKey = generateAccessKey();
+    const keyHash = hashAccessKey(accessKey);
+    try {
+      db.prepare(`
+        UPDATE boost_server_orders
+        SET access_key_hash = ?, access_key_encrypted = ?, access_key_issued_at = ?, updated_at = ?
+        WHERE order_code = ? AND access_key_hash IS NULL
+      `).run(keyHash, protectAccessKey(accessKey), nowIso(), nowIso(), order.order_code);
+      order = getBoostOrderByCode(order.order_code);
+      const storedKey = revealAccessKey(order.access_key_encrypted);
+      if (storedKey) return { order, accessKey: storedKey, created: storedKey === accessKey };
+    } catch (error) {
+      if (!/UNIQUE constraint failed/i.test(error.message)) throw error;
+    }
+  }
+  throw new Error('Không thể cấp key tra cứu Boost Server.');
+}
+
+export function getBoostOrderByAccessKey(key) {
+  const normalized = normalizeAccessKey(key);
+  if (normalized.length < 12) return null;
+  return db.prepare('SELECT * FROM boost_server_orders WHERE access_key_hash = ?').get(hashAccessKey(normalized)) ?? null;
 }
 
 export function getBoostOrdersByGuild(guildId, status = null) {
@@ -97,6 +196,7 @@ export function updateBoostOrderStatus(code, status, extra = {}) {
         boost_expires_at = COALESCE(?, boost_expires_at),
         handled_by = COALESCE(?, handled_by),
         note = COALESCE(?, note),
+        customer_status_note = COALESCE(?, customer_status_note),
         updated_at = ?
     WHERE order_code = ?
   `).run(
@@ -106,9 +206,33 @@ export function updateBoostOrderStatus(code, status, extra = {}) {
     extra.boostExpiresAt ?? null,
     extra.handledBy ?? null,
     extra.note ?? null,
+    extra.customerStatusNote ?? null,
     now,
     order.order_code,
   );
+  return getBoostOrderByCode(order.order_code);
+}
+
+export function updateBoostLiveStatus(code, { status, boostExpiresAt, handledBy, customerStatusNote, note } = {}) {
+  const order = getBoostOrderByCode(code);
+  if (!order) throw new Error(`Không tìm thấy đơn boost ${code}`);
+  const nextStatus = String(status || order.status).toUpperCase();
+  if (!['PENDING', 'ACTIVE', 'WARRANTY', 'COMPLETED', 'CANCELLED'].includes(nextStatus)) {
+    throw new Error('Trạng thái Boost Server không hợp lệ.');
+  }
+  if (['ACTIVE', 'WARRANTY', 'COMPLETED'].includes(nextStatus) && order.payment_status !== 'PAID') {
+    throw new Error('Không thể chuyển trạng thái khi PayOS chưa xác nhận thanh toán.');
+  }
+
+  const startedAt = nextStatus === 'ACTIVE' && !order.boost_started_at ? nowIso() : order.boost_started_at;
+  db.prepare(`
+    UPDATE boost_server_orders
+    SET status = ?, boost_started_at = ?, boost_expires_at = COALESCE(?, boost_expires_at),
+        handled_by = COALESCE(?, handled_by), customer_status_note = COALESCE(?, customer_status_note),
+        note = COALESCE(?, note), updated_at = ?
+    WHERE order_code = ?
+  `).run(nextStatus, startedAt, boostExpiresAt ?? null, handledBy ?? null,
+    customerStatusNote ?? null, note ?? null, nowIso(), order.order_code);
   return getBoostOrderByCode(order.order_code);
 }
 
@@ -127,15 +251,19 @@ export async function createBoostPayOSLink(order) {
   assertPaymentConfig();
 
   // Cache hit — đã có link rồi
-  if (order.payment_checkout_url && order.payment_link_id) return order.payment_checkout_url;
+  if (order.payment_checkout_url && order.payment_link_id) {
+    return { checkoutUrl: order.payment_checkout_url, qrCode: order.payment_qr_code ?? null };
+  }
 
   const { createHmac } = await import('node:crypto');
 
   const orderCode  = Number(order.payos_order_code);
   const amount     = Number(order.amount);
   const description = order.order_code; // max 25 chars — "BST_123456" = 10 chars ✓
-  const returnUrl  = (cfg.publicBaseUrl || '') + '/payments/payos/return';
-  const cancelUrl  = (cfg.publicBaseUrl || '') + '/payments/payos/cancel';
+  const baseUrl = String(cfg.publicBaseUrl || '').replace(/\/$/, '');
+  if (!baseUrl) throw new Error('Thiếu PUBLIC_BASE_URL để tạo thanh toán PayOS.');
+  const returnUrl  = baseUrl + '/payments/payos/return';
+  const cancelUrl  = baseUrl + '/payments/payos/cancel';
   const expiredAt  = Math.floor(Date.now() / 1000) + 60 * 60; // 1 giờ
 
   const sigData = `amount=${amount}&cancelUrl=${cancelUrl}&description=${description}&orderCode=${orderCode}&returnUrl=${returnUrl}`;
@@ -160,14 +288,16 @@ export async function createBoostPayOSLink(order) {
       'x-api-key': cfg.payosApiKey,
     },
     body: JSON.stringify(body),
+    signal: AbortSignal.timeout(15_000),
   });
 
-  const data = await res.json();
-  if (data.code !== '00') throw new Error(data.desc || 'PayOS API lỗi');
+  const data = await res.json().catch(() => null);
+  if (!res.ok || data?.code !== '00') throw new Error(data?.desc || `PayOS API trả về HTTP ${res.status}`);
 
   const checkoutUrl   = data.data?.checkoutUrl;
   const paymentLinkId = data.data?.paymentLinkId ?? data.data?.id;
   const qrCode        = data.data?.qrCode ?? null; // chuỗi EMVCo thật để render QR hợp lệ
+  if (!checkoutUrl || !paymentLinkId) throw new Error('PayOS không trả về đường dẫn thanh toán hợp lệ.');
   saveBoostPaymentLink(order.order_code, { checkoutUrl, paymentLinkId, qrCode });
 
   return { checkoutUrl, qrCode };
@@ -179,34 +309,49 @@ export async function handleBoostPayOSWebhook({ client, payosOrderCode, amount, 
   const order = getBoostOrderByPayOSCode(payosOrderCode);
   if (!order) return null; // không phải đơn boost
 
-  if (order.payment_status === 'PAID') return order; // đã xử lý rồi
+  if (order.payment_status === 'PAID' && order.access_key_hash) return order;
 
-  if (Number(amount) < Number(order.amount)) return null; // số tiền không đủ
+  if (order.payment_status !== 'PAID' && Number(amount) < Number(order.amount)) return null; // số tiền không đủ
 
   // Đánh dấu đã thanh toán — giữ status PENDING để admin kích hoạt boost
-  const updated = updateBoostOrderStatus(order.order_code, 'PENDING', {
-    paymentStatus: 'PAID',
-    note: `Thanh toán PayOS: ${reference ?? description ?? ''}`,
-  });
+  let updated = order.payment_status === 'PAID'
+    ? order
+    : updateBoostOrderStatus(order.order_code, 'PENDING', {
+      paymentStatus: 'PAID',
+      note: `Thanh toán PayOS: ${reference ?? description ?? ''}`,
+      customerStatusNote: 'PayOS đã xác nhận thanh toán. Đơn đang trong hàng đợi xử lý 14 Boosts.',
+    });
+  const issued = ensureBoostAccessKey(updated.order_code);
+  updated = issued.order;
 
   // Gửi thông báo vào kênh log để admin biết cần boost
-  const guildConfig = getGuildConfig(order.guild_id);
-  await sendBoostLog(client, order.guild_id, updated, '✅ Đã thanh toán — Cần boost thủ công', null);
+  await sendBoostLog(client, order.guild_id, updated, 'PayOS đã xác nhận — đơn chờ xử lý', null).catch(error => {
+    console.error('[BOOST WEBHOOK] Không thể gửi log:', error.message);
+  });
 
   // DM khách báo đã nhận tiền
   try {
     const user = await client.users.fetch(order.customer_id);
-    await user.send([
-      `<a:tickgreen:1384069022831874169> **Cenar Store** — Đã nhận thanh toán cho đơn \`${order.order_code}\`!`,
-      ``,
-      `<:cr_carttt:1348626032747614268> **Gói:** ${order.package}`,
-      `<:cr_muahang:1348622828152426528> **Server:** ${order.server_name ?? order.server_id}`,
-      `<:cr_pay:1392750857329705000> **Số tiền:** ${Number(order.amount).toLocaleString('vi-VN')} VND`,
-      ``,
-      `<:muiten:1481124261501337601> Admin sẽ boost server của bạn trong thời gian sớm nhất!`,
-      `-# <:cr_tim:1366636325352116225> Cenar Store — Cảm ơn bạn đã tin tưởng sử dụng dịch vụ`,
-    ].join('\n')).catch(() => null);
-  } catch {}
+    const E = createEmojiResolver(order.guild_id);
+    const container = new ContainerBuilder().setAccentColor(0x57F287);
+    container.addTextDisplayComponents(new TextDisplayBuilder().setContent([
+      `## ${E('payment_success')} THANH TOÁN BOOST THÀNH CÔNG`,
+      '',
+      `> ${E('order_id')} **Mã đơn:** \`${order.order_code}\``,
+      `> ${E('order_product')} **Gói:** ${order.package}`,
+      `> ${E('icon_store')} **Server:** ${order.server_name ?? order.server_id}`,
+      `> ${E('payment_money')} **Số tiền:** **${Number(order.amount).toLocaleString('vi-VN')} VND**`,
+      '',
+      `${E('icon_key')} **KEY TRA CỨU LIVE**`,
+      `\`\`\`${issued.accessKey}\`\`\``,
+      `${E('status_warn')} Giữ kín key này. Vào panel Boost và bấm **Nhập Key / Xem Live** để theo dõi.`,
+      '',
+      `-# ${E('icon_heart')} PayOS đã tự xác nhận · hệ thống đang xếp lịch 14 Boosts`,
+    ].join('\n')));
+    await user.send({ components: [container], flags: MessageFlags.IsComponentsV2 });
+  } catch (error) {
+    console.warn('[BOOST WEBHOOK] Không thể DM key cho khách:', error.message);
+  }
 
   // Refresh panel
   refreshBoostPanel(client, order.guild_id).catch(() => null);
@@ -216,7 +361,8 @@ export async function handleBoostPayOSWebhook({ client, payosOrderCode, amount, 
 
 // ─── DM Payment — gửi link PayOS kèm nút bấm ────────────────────────────────
 
-export async function sendBoostPaymentDM(dmChannel, order, guildId) {
+export async function createBoostPaymentPayload(order, guildId) {
+  const E = createEmojiResolver(guildId ?? order.guild_id);
   const amountFmt = Number(order.amount).toLocaleString('vi-VN');
 
   let checkoutUrl = order.payment_checkout_url;
@@ -224,120 +370,173 @@ export async function sendBoostPaymentDM(dmChannel, order, guildId) {
 
   // Tạo link PayOS nếu chưa có
   if (!checkoutUrl) {
-    try {
-      const result = await createBoostPayOSLink(order);
-      checkoutUrl = result.checkoutUrl;
-      qrCodeStr   = result.qrCode ?? null;
-      // Lấy lại từ DB để chắc chắn có đủ data
-      const fresh = getBoostOrderByCode(order.order_code);
-      checkoutUrl = fresh?.payment_checkout_url ?? checkoutUrl;
-      qrCodeStr   = fresh?.payment_qr_code ?? qrCodeStr;
-    } catch (err) {
-      console.error('[BOOST-PAYOS] Không thể tạo link PayOS:', err.message);
-    }
+    const result = await createBoostPayOSLink(order);
+    checkoutUrl = result.checkoutUrl;
+    qrCodeStr   = result.qrCode ?? null;
+    const fresh = getBoostOrderByCode(order.order_code);
+    checkoutUrl = fresh?.payment_checkout_url ?? checkoutUrl;
+    qrCodeStr   = fresh?.payment_qr_code ?? qrCodeStr;
   }
 
-  // QR từ chuỗi EMVCo thật (quét được) — fallback sang checkoutUrl nếu không có
-  const qrData   = qrCodeStr || checkoutUrl;
-  const qrImgUrl = qrData
-    ? `https://api.qrserver.com/v1/create-qr-code/?size=400x400&margin=15&ecc=M&data=${encodeURIComponent(qrData)}`
-    : null;
+  const qrData = qrCodeStr || checkoutUrl;
+  if (!qrData || !checkoutUrl) throw new Error('Không thể tạo mã QR PayOS cho đơn Boost Server.');
+  const attachmentName = `boost-payos-${order.order_code}.png`;
+  const qrBuffer = await QRCode.toBuffer(qrData, {
+    type: 'png', width: 720, margin: 2,
+    color: { dark: '#111827', light: '#FFFFFFFF' },
+  });
 
   const serverDisplay = order.server_name
     ? `**${order.server_name}**`
     : `\`${order.server_id}\``;
 
   const lines = [
-    `## <a:tsm_fire:1327553120842158111> Đơn Boost Server Đã Được Tiếp Nhận!`,
+    `## ${E('brand_boost')} THANH TOÁN BOOST SERVER`,
     ``,
-    `> <:cr_shop:1392749981332541501> **Mã đơn:** \`${order.order_code}\``,
-    `> <:cr_carttt:1348626032747614268> **Gói:** ${order.package}`,
-    `> <:cr_pay:1392750857329705000> **Số tiền:** **${amountFmt} VND**`,
-    `> <:cr_muahang:1348622828152426528> **Server:** ${serverDisplay}`,
+    `> ${E('order_id')} **Mã đơn:** \`${order.order_code}\``,
+    `> ${E('order_product')} **Gói:** ${order.package}`,
+    `> ${E('status_check')} **Loại:** Có liền · 14 Boosts`,
+    `> ${E('payment_money')} **Số tiền:** **${amountFmt} VND**`,
+    `> ${E('icon_store')} **Server:** ${serverDisplay}`,
     ``,
-    checkoutUrl
-      ? `<a:tickgreen:1384069022831874169> **Quét mã QR** bên dưới hoặc bấm nút để hoàn tất thanh toán!`
-      : `<a:tick_red51:1384069065626222632> Không thể tạo link PayOS. Vui lòng liên hệ Admin.`,
+    `${E('payment_qr')} **Quét QR hoặc bấm Thanh Toán PayOS.**`,
+    `${E('status_info')} PayOS xác nhận thành công, bot sẽ tự cấp key tra cứu trạng thái live qua DM.`,
     ``,
-    `-# <:cr_tim:1366636325352116225> Cenar Store — Bot tự xác nhận khi nhận được thanh toán`,
+    `-# ${E('icon_heart')} Cenar Store · QR có hiệu lực trong 60 phút`,
   ].join('\n');
 
   const container = new ContainerBuilder().setAccentColor(0xEB459E);
   container.addTextDisplayComponents(new TextDisplayBuilder().setContent(lines));
   container.addMediaGalleryComponents(
     new MediaGalleryBuilder().addItems(
-      new MediaGalleryItemBuilder().setURL(qrImgUrl ?? BOOST_BANNER)
+      new MediaGalleryItemBuilder().setURL(`attachment://${attachmentName}`)
     )
   );
 
-  const components = [container];
-
-  if (checkoutUrl) {
-    components.push(
-      new ActionRowBuilder().addComponents(
-        new ButtonBuilder()
-          .setLabel('Thanh Toán PayOS')
-          .setStyle(ButtonStyle.Link)
-          .setURL(checkoutUrl)
-          .setEmoji({ id: '1392750857329705000', name: 'cr_pay' })
-      )
-    );
-  }
-
-  await dmChannel.send({
+  const payButton = withButtonEmoji(
+    new ButtonBuilder().setLabel('Thanh Toán PayOS').setStyle(ButtonStyle.Link).setURL(checkoutUrl),
+    E.component('payment_payos'),
+  );
+  const components = [container, new ActionRowBuilder().addComponents(payButton)];
+  return {
     components,
+    files: [new AttachmentBuilder(qrBuffer, { name: attachmentName })],
     flags: MessageFlags.IsComponentsV2,
-  }).catch(() => null);
+    allowedMentions: { parse: [] },
+  };
+}
+
+export async function sendBoostPaymentDM(dmChannel, order, guildId) {
+  const payload = await createBoostPaymentPayload(order, guildId);
+  return dmChannel.send(payload);
 }
 
 // ─── Panel builder — Components V2 ───────────────────────────────────────────
 
 export function buildBoostPanelEmbed(guildId) {
+  const E = createEmojiResolver(guildId ?? '');
   const activeOrders = getActiveBoostOrders(guildId);
 
   const embed = new EmbedBuilder()
     .setColor(0xEB459E)
-    .setTitle('<a:tsm_fire:1327553120842158111> HỆ THỐNG BOOST SERVER TỰ ĐỘNG <a:tsm_fire:1327553120842158111>')
+    .setTitle('HỆ THỐNG BOOST SERVER LEVEL 3')
     .setDescription([
-      'Nâng cấp server của bạn đạt ngay **Level 3** cực xịn xò!',
-      'Thanh toán tự động qua **PayOS** — xác nhận ngay lập tức.',
+      `${E('brand_boost')} **14x Boosts · loại có liền**`,
+      `${E('payment_payos')} PayOS tự xác nhận và cấp key tra cứu live.`,
       '',
-      '## <:cr_pay:1392750857329705000> Bảng Giá Dịch Vụ:',
-      '> <a:starxoay:1481141954346483845> **Gói 1 Tháng (14 Boosts):** **120.000 VND**',
-      '> <a:starxoay:1481141954346483845> **Gói 3 Tháng (14 Boosts):** **290.000 VND**',
-      '> <:cr_tim:1366636325352116225> *Giá đã được điều chỉnh theo chi phí nguồn hiện tại.*',
+      `${E('icon_price')} **1 Tháng:** **120.000 VND**`,
+      `${E('icon_price')} **3 Tháng:** **320.000 VND**`,
       '',
-      '## <:cr_muahang:1348622828152426528> Quy Trình Đặt Hàng:',
-      '> <:muiten:1481124261501337601> **1.** Nhấn **"Mua Boost Server"** bên dưới',
-      '> <:muiten:1481124261501337601> **2.** Điền link mời + ID server + gói muốn mua',
-      '> <:muiten:1481124261501337601> **3.** Bot gửi mã QR + link **PayOS** vào DM',
-      '> <:muiten:1481124261501337601> **4.** Bot tự xác nhận sau khi nhận tiền',
-      '> <:muiten:1481124261501337601> **5.** Admin boost thủ công → nhận thông báo qua DM',
+      `${E('status_info')} Chọn gói, quét QR, nhận key rồi nhập key để theo dõi tiến độ.`,
     ].join('\n'));
 
-  const liveSection = buildLiveListSection(activeOrders);
+  const liveSection = buildLiveListSection(activeOrders, guildId);
   embed.addFields({
-    name: `<a:tsm_fire:1327553120842158111> Server Đang Boost Live (${activeOrders.length})`,
-    value: liveSection,
+    name: `${E('status_loading')} Server Đang Boost Live (${activeOrders.length})`,
+    value: liveSection || 'Chưa có server nào đang boost.',
   });
-  embed.setFooter({ text: 'Cenar Store — Uy Tín • Chất Lượng • Tự Động 24/7' });
+  embed.setFooter({ text: 'Cenar Store · PayOS xác nhận tự động · vận hành theo hàng đợi' });
   embed.setTimestamp();
 
   return embed;
 }
 
-function buildLiveListSection(activeOrders) {
+function buildLiveListSection(activeOrders, guildId = '') {
+  const E = createEmojiResolver(guildId);
   if (!activeOrders.length) {
-    return '<a:Dotyellow:1481134440725090315> *Chưa có server nào đang boost. Hãy là người đầu tiên!*';
+    return `${E('status_warn')} *Chưa có server nào đang boost. Hãy là người đầu tiên!*`;
   }
   const lines = activeOrders.slice(0, 15).map((o, i) => {
     const expiry = o.boost_expires_at
       ? `<t:${Math.floor(new Date(o.boost_expires_at).getTime() / 1000)}:R>`
       : 'Đang boost';
     const name = o.server_name ? `**${o.server_name}**` : `\`${o.server_id}\``;
-    return `> <a:chamxanh:1481124932447371374> **${i + 1}.** ${name} — \`${o.package}\` — ${expiry}`;
+    return `> ${E('status_check')} **${i + 1}.** ${name} · ${expiry}`;
   });
   return lines.join('\n');
+}
+
+export function buildBoostPanelPayload(guildId) {
+  const E = createEmojiResolver(guildId ?? '');
+  const activeOrders = getActiveBoostOrders(guildId);
+  const container = new ContainerBuilder().setAccentColor(0xEB459E);
+  container.addTextDisplayComponents(new TextDisplayBuilder().setContent([
+    `## ${E('brand_boost')} BOOST SERVER LEVEL 3 · LIVE`,
+    `${E('cenar_verified')} **14x Boosts · Loại có liền**`,
+    `${E('payment_payos')} PayOS tự xác nhận thanh toán và cấp key tra cứu riêng cho từng đơn.`,
+  ].join('\n')));
+  container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
+  container.addTextDisplayComponents(new TextDisplayBuilder().setContent([
+    `### ${E('icon_price')} BẢNG GIÁ CHÍNH THỨC`,
+    `> ${E('icon_duration')} **1 Tháng · 14 Boosts** — **120.000 VND** · Có liền`,
+    `> ${E('icon_duration')} **3 Tháng · 14 Boosts** — **320.000 VND** · Có liền`,
+  ].join('\n')));
+  container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
+  container.addTextDisplayComponents(new TextDisplayBuilder().setContent([
+    `### ${E('icon_settings')} QUY TRÌNH VẬN HÀNH`,
+    `> ${E('order_created')} Chọn gói và gửi thông tin server`,
+    `> ${E('payment_qr')} Quét QR PayOS ngay trên màn hình`,
+    `> ${E('payment_success')} PayOS xác nhận và bot gửi key qua DM`,
+    `> ${E('icon_key')} Nhập key để theo dõi trạng thái Boost Live`,
+  ].join('\n')));
+  container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
+  container.addTextDisplayComponents(new TextDisplayBuilder().setContent([
+    `### ${E('status_loading')} SERVER ĐANG BOOST LIVE · ${activeOrders.length}`,
+    buildLiveListSection(activeOrders, guildId),
+    '',
+    `-# ${E('icon_heart')} Cenar Store · cập nhật trạng thái theo thời gian thực`,
+  ].join('\n')));
+
+  return {
+    components: [container, ...buildBoostPanelRows(guildId)],
+    flags: MessageFlags.IsComponentsV2,
+    allowedMentions: { parse: [] },
+  };
+}
+
+export function buildBoostPackagePickerPayload(guildId) {
+  const E = createEmojiResolver(guildId ?? '');
+  const container = new ContainerBuilder().setAccentColor(0x5865F2);
+  container.addTextDisplayComponents(new TextDisplayBuilder().setContent([
+    `## ${E('brand_boost')} CHỌN GÓI 14x BOOST SERVER`,
+    `${E('status_check')} Cả hai gói đều là **loại có liền**. Giá được khóa theo nút bạn chọn.`,
+    '',
+    `> ${E('icon_duration')} **1 Tháng:** 120.000 VND`,
+    `> ${E('icon_duration')} **3 Tháng:** 320.000 VND`,
+  ].join('\n')));
+
+  const oneMonth = withButtonEmoji(
+    new ButtonBuilder().setCustomId('boost:buy:1m').setLabel('1 Tháng · 120K').setStyle(ButtonStyle.Primary),
+    E.component('brand_boost'),
+  );
+  const threeMonths = withButtonEmoji(
+    new ButtonBuilder().setCustomId('boost:buy:3m').setLabel('3 Tháng · 320K').setStyle(ButtonStyle.Success),
+    E.component('icon_duration'),
+  );
+  return {
+    components: [container, new ActionRowBuilder().addComponents(oneMonth, threeMonths)],
+    flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
+  };
 }
 
 export function buildBoostPanelRows(guildId) {
@@ -351,11 +550,18 @@ export function buildBoostPanelRows(guildId) {
   if (buyEmo) buyBtn.setEmoji(buyEmo);
 
   const checkBtn = new ButtonBuilder()
-    .setCustomId('boost:check')
-    .setLabel('Kiểm Tra Đơn')
+    .setCustomId('boost:key')
+    .setLabel('Nhập Key / Xem Live')
     .setStyle(ButtonStyle.Secondary);
-  const checkEmo = E.component('order_id');
+  const checkEmo = E.component('icon_key');
   if (checkEmo) checkBtn.setEmoji(checkEmo);
+
+  const recoverBtn = new ButtonBuilder()
+    .setCustomId('boost:check')
+    .setLabel('Đơn Của Tôi')
+    .setStyle(ButtonStyle.Secondary);
+  const recoverEmo = E.component('order_id');
+  if (recoverEmo) recoverBtn.setEmoji(recoverEmo);
 
   const warrantyBtn = new ButtonBuilder()
     .setCustomId('boost:warranty')
@@ -364,12 +570,85 @@ export function buildBoostPanelRows(guildId) {
   const warEmo = E.component('ticket_claim');
   if (warEmo) warrantyBtn.setEmoji(warEmo);
 
-  return [new ActionRowBuilder().addComponents(buyBtn, checkBtn, warrantyBtn)];
+  return [new ActionRowBuilder().addComponents(buyBtn, checkBtn, recoverBtn, warrantyBtn)];
+}
+
+function boostStatusMeta(order, guildId) {
+  const E = createEmojiResolver(guildId ?? order.guild_id ?? '');
+  if (order.status === 'ACTIVE') return { label: `${E('status_check')} Đang Boost Live`, color: 0x57F287, step: '3/3' };
+  if (order.status === 'WARRANTY') return { label: `${E('warranty_shield')} Đang bảo hành`, color: 0x5865F2, step: '3/3' };
+  if (order.status === 'COMPLETED') return { label: `${E('order_complete')} Đã hoàn thành`, color: 0x95A5A6, step: '3/3' };
+  if (order.status === 'CANCELLED') return { label: `${E('status_cross')} Đã huỷ`, color: 0xED4245, step: '0/3' };
+  if (order.payment_status === 'PAID') return { label: `${E('order_queue')} Đã thanh toán · đang xử lý`, color: 0xFEE75C, step: '2/3' };
+  return { label: `${E('status_warn')} Chờ thanh toán`, color: 0xFEE75C, step: '1/3' };
+}
+
+function discordTime(value, style = 'F') {
+  const millis = new Date(value).getTime();
+  return Number.isFinite(millis) ? `<t:${Math.floor(millis / 1000)}:${style}>` : 'Chưa cập nhật';
+}
+
+export function buildBoostLiveStatusPayload(order, guildId, { isStaff = false, accessKey = null } = {}) {
+  const E = createEmojiResolver(guildId ?? order.guild_id ?? '');
+  const meta = boostStatusMeta(order, guildId);
+  const amount = Number(order.amount).toLocaleString('vi-VN');
+  const server = order.server_name ? `**${order.server_name}** (\`${order.server_id}\`)` : `\`${order.server_id}\``;
+  const payment = order.payment_status === 'PAID'
+    ? `${E('payment_success')} Đã được PayOS xác nhận`
+    : `${E('status_warn')} Chưa thanh toán`;
+
+  const container = new ContainerBuilder().setAccentColor(meta.color);
+  container.addTextDisplayComponents(new TextDisplayBuilder().setContent([
+    `## ${E('brand_boost')} BOOST SERVER · LIVE STATUS`,
+    `> ${E('order_id')} **Đơn:** \`${order.order_code}\``,
+    `> ${E('status_loading')} **Trạng thái:** ${meta.label}`,
+    `> ${E('icon_chart')} **Tiến trình hệ thống:** \`${meta.step}\``,
+  ].join('\n')));
+  container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
+  container.addTextDisplayComponents(new TextDisplayBuilder().setContent([
+    `### ${E('icon_store')} THÔNG TIN BOOST`,
+    `> ${E('order_product')} **Gói:** ${order.package} · Có liền`,
+    `> ${E('payment_money')} **Giá:** ${amount} VND`,
+    `> ${E('icon_store')} **Server:** ${server}`,
+    `> ${E('payment_payos')} **Thanh toán:** ${payment}`,
+    order.boost_started_at ? `> ${E('icon_calendar')} **Bắt đầu:** ${discordTime(order.boost_started_at)}` : null,
+    order.boost_expires_at ? `> ${E('icon_expire')} **Hết hạn:** ${discordTime(order.boost_expires_at)} (${discordTime(order.boost_expires_at, 'R')})` : null,
+  ].filter(Boolean).join('\n')));
+  container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
+  container.addTextDisplayComponents(new TextDisplayBuilder().setContent([
+    `### ${E('icon_settings')} CẬP NHẬT TỪ HỆ THỐNG`,
+    `> ${order.customer_status_note || 'Đơn đã được ghi nhận và đang chờ cập nhật trạng thái tiếp theo.'}`,
+    accessKey ? `\n${E('icon_key')} **Key của bạn:** \`${accessKey}\`` : null,
+    `\n-# ${E('icon_clock')} Cập nhật lần cuối: ${discordTime(order.updated_at, 'R')}`,
+  ].filter(Boolean).join('\n')));
+
+  const refreshButton = withButtonEmoji(
+    new ButtonBuilder().setCustomId(`boost:live:${order.order_code}`).setLabel('Làm Mới Trạng Thái').setStyle(ButtonStyle.Primary),
+    E.component('status_loading'),
+  );
+  const row = new ActionRowBuilder().addComponents(refreshButton);
+  if (order.status === 'ACTIVE') {
+    row.addComponents(withButtonEmoji(
+      new ButtonBuilder().setCustomId(`boost:warranty_req:${order.order_code}`).setLabel('Yêu Cầu Bảo Hành').setStyle(ButtonStyle.Secondary),
+      E.component('warranty_shield'),
+    ));
+  }
+  if (isStaff) {
+    row.addComponents(withButtonEmoji(
+      new ButtonBuilder().setCustomId(`boost:manage:${order.order_code}`).setLabel('Cập Nhật Live').setStyle(ButtonStyle.Success),
+      E.component('icon_settings'),
+    ));
+  }
+  return {
+    components: [container, row],
+    flags: MessageFlags.IsComponentsV2,
+    allowedMentions: { parse: [] },
+  };
 }
 
 // ─── Order detail embed ───────────────────────────────────────────────────────
 
-export function buildBoostOrderDetailEmbed(order) {
+export function buildBoostOrderDetailEmbed(order, isStaff = false) {
   const statusMap = {
     PENDING:   { label: '<a:Dotyellow:1481134440725090315> Chờ xử lý',  color: 0xFEE75C },
     ACTIVE:    { label: '<a:tickgreen:1384069022831874169> Đang boost',  color: 0x57F287 },
@@ -418,10 +697,11 @@ export function buildBoostOrderDetailEmbed(order) {
       inline: true,
     });
   }
-  if (order.note) {
+  const visibleNote = isStaff ? order.note : order.customer_status_note;
+  if (visibleNote) {
     embed.addFields({
       name: '<:cr_voucher:1392749775794737286> Ghi chú',
-      value: order.note,
+      value: visibleNote,
       inline: false,
     });
   }
@@ -448,57 +728,74 @@ export function buildBoostOrderDetailEmbed(order) {
 
 export function buildBoostOrderActionRows(order, isStaff = false) {
   const rows = [];
+  const E = createEmojiResolver(order.guild_id ?? '');
 
-  if (!['PENDING', 'ACTIVE', 'WARRANTY'].includes(order.status)) return rows;
+  if (!['PENDING', 'ACTIVE', 'WARRANTY', 'COMPLETED', 'CANCELLED'].includes(order.status)) return rows;
 
   const row1 = new ActionRowBuilder();
 
   // Nút thanh toán PayOS — hiển thị đầu tiên nếu chưa trả
   if (order.payment_status !== 'PAID' && order.payment_checkout_url) {
     row1.addComponents(
-      new ButtonBuilder()
+      withButtonEmoji(new ButtonBuilder()
         .setLabel('Thanh Toán PayOS')
         .setStyle(ButtonStyle.Link)
-        .setURL(order.payment_checkout_url)
-        .setEmoji({ id: '1392750857329705000', name: 'cr_pay' })
+        .setURL(order.payment_checkout_url), E.component('payment_payos'))
     );
+  }
+  if (order.payment_status !== 'PAID' && !order.payment_checkout_url) {
+    row1.addComponents(withButtonEmoji(
+      new ButtonBuilder()
+        .setCustomId(`boost:payment:${order.order_code}`)
+        .setLabel('Tạo QR PayOS')
+        .setStyle(ButtonStyle.Primary),
+      E.component('payment_qr'),
+    ));
   }
 
   // Huỷ đơn
-  if (['PENDING', 'ACTIVE'].includes(order.status)) {
+  if (order.status === 'PENDING' && (isStaff || order.payment_status !== 'PAID')) {
     row1.addComponents(
-      new ButtonBuilder()
+      withButtonEmoji(new ButtonBuilder()
         .setCustomId(`boost:cancel:${order.order_code}`)
         .setLabel('Huỷ Đơn')
-        .setStyle(ButtonStyle.Danger)
-        .setEmoji({ id: '1384069065626222632', name: 'tick_red51', animated: true })
+        .setStyle(ButtonStyle.Danger), E.component('order_cancel'))
     );
   }
 
   // Staff actions
-  if (isStaff && ['PENDING', 'ACTIVE'].includes(order.status)) {
-    row1.addComponents(
+  if (isStaff && order.payment_status === 'PAID' && order.status === 'PENDING') {
+    row1.addComponents(withButtonEmoji(
       new ButtonBuilder()
         .setCustomId(`boost:activate:${order.order_code}`)
         .setLabel('Đã Boost (Kích Hoạt)')
-        .setStyle(ButtonStyle.Primary)
-        .setEmoji({ id: '1384069022831874169', name: 'tickgreen', animated: true }),
+        .setStyle(ButtonStyle.Primary), E.component('status_check')),
+    );
+  }
+  if (isStaff && ['ACTIVE', 'WARRANTY'].includes(order.status)) {
+    row1.addComponents(withButtonEmoji(
       new ButtonBuilder()
         .setCustomId(`boost:complete:${order.order_code}`)
         .setLabel('Hoàn Thành')
-        .setStyle(ButtonStyle.Success)
-        .setEmoji({ id: '1366636327415713832', name: 'cr_green' })
+        .setStyle(ButtonStyle.Success), E.component('order_complete')),
+    );
+  }
+  if (isStaff) {
+    row1.addComponents(withButtonEmoji(
+      new ButtonBuilder()
+        .setCustomId(`boost:manage:${order.order_code}`)
+        .setLabel('Cập Nhật Live')
+        .setStyle(ButtonStyle.Secondary), E.component('icon_settings')),
     );
   }
 
   // Bảo hành
   if (order.status === 'ACTIVE') {
     row1.addComponents(
-      new ButtonBuilder()
+      withButtonEmoji(new ButtonBuilder()
         .setCustomId(`boost:warranty_req:${order.order_code}`)
         .setLabel('Báo Cáo Bảo Hành')
-        .setStyle(ButtonStyle.Secondary)
-        .setEmoji({ id: '1366636325352116225', name: 'cr_tim' })
+        .setStyle(ButtonStyle.Secondary), E.component('warranty_shield'))
     );
   }
 
@@ -521,11 +818,10 @@ export async function refreshBoostPanel(client, guildId) {
   const msg = await channel.messages.fetch(cfg.boost_panel_message_id).catch(() => null);
   if (!msg) return { status: 'message_not_found' };
 
-  const embed = buildBoostPanelEmbed(guildId);
-  const rows  = buildBoostPanelRows(guildId);
+  const payload = buildBoostPanelPayload(guildId);
 
   try {
-    await msg.edit({ embeds: [embed], components: rows });
+    await msg.edit({ ...payload, embeds: [], content: null });
     return { status: 'updated', channelId: channel.id, messageId: msg.id };
   } catch (error) {
     console.error('[BOOST PANEL] Lỗi refresh:', error.message);
@@ -547,6 +843,7 @@ const BOOST_STATUS_LABEL = {
 };
 
 export async function sendBoostLog(client, guildId, order, action, actorId = null) {
+  const E = createEmojiResolver(guildId ?? '');
   const cfg = getGuildConfig(guildId);
   const logChannelId = cfg?.boost_log_channel_id || DEFAULT_BOOST_LOG_CHANNEL;
 
@@ -587,23 +884,29 @@ export async function sendBoostLog(client, guildId, order, action, actorId = nul
 
   if (order.payment_status === 'PAID' && order.status === 'PENDING') {
     actionRow.addComponents(
-      new ButtonBuilder()
+      withButtonEmoji(new ButtonBuilder()
         .setCustomId(`boost:activate:${order.order_code}`)
         .setLabel('Kích Hoạt Boost Ngay')
-        .setStyle(ButtonStyle.Success)
-        .setEmoji({ id: '1384069022831874169', name: 'tickgreen', animated: true })
+        .setStyle(ButtonStyle.Success), E.component('status_check'))
     );
   }
 
-  if (order.status === 'PENDING' || order.status === 'ACTIVE') {
+  if (order.payment_status === 'PAID' && ['ACTIVE', 'WARRANTY'].includes(order.status)) {
     actionRow.addComponents(
-      new ButtonBuilder()
+      withButtonEmoji(new ButtonBuilder()
         .setCustomId(`boost:complete:${order.order_code}`)
         .setLabel('Hoàn Thành')
-        .setStyle(ButtonStyle.Primary)
-        .setEmoji({ id: '1366636327415713832', name: 'cr_green' })
+        .setStyle(ButtonStyle.Primary), E.component('order_complete'))
     );
   }
+
+  actionRow.addComponents(withButtonEmoji(
+    new ButtonBuilder()
+      .setCustomId(`boost:manage:${order.order_code}`)
+      .setLabel('Cập Nhật Live')
+      .setStyle(ButtonStyle.Secondary),
+    E.component('icon_settings'),
+  ));
 
   if (actionRow.components.length > 0) components.push(actionRow);
 
@@ -614,7 +917,7 @@ export async function sendBoostLog(client, guildId, order, action, actorId = nul
     .setFooter({ text: 'Cenar Store — Boost Server' })
     .setTimestamp();
 
-  await channel.send({ embeds: [embed], components }).catch(e =>
+  await channel.send({ embeds: [embed], components, allowedMentions: { parse: [] } }).catch(e =>
     console.error('[BOOST LOG] Gửi log thất bại:', e.message)
   );
 }

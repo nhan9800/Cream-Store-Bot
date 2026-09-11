@@ -37,7 +37,7 @@ export const PRICE_GROUPS = [
   },
   {
     key: 'server_boost', titleSlot: 'brand_boost', title: 'Discord Server Boost', accent: 0xEB459E,
-    note: 'Hai gói 14 Boosts chính thức: 1 tháng 120.000đ hoặc 3 tháng 290.000đ.',
+    note: 'Hai gói 14 Boosts loại có liền: 1 tháng 120.000đ hoặc 3 tháng 320.000đ.',
     match: (p) => p.service_type === 'GAME' && /server boost/i.test(p.name),
   },
   {

@@ -126,8 +126,16 @@ import {
 } from "./shared.js";
 import {
   handleBoostBuy,
+  handleBoostBuyPackage,
   handleBoostBuyModal,
   handleBoostCheck,
+  handleBoostKeyButton,
+  handleBoostKeyModal,
+  handleBoostLiveRefresh,
+  handleBoostPaymentButton,
+  handleBoostManageButton,
+  handleBoostManageModal,
+  handleBoostStaffCheckModal,
   handleBoostWarrantyPanel,
   handleBoostCancelButton,
   handleBoostCancelModal,
@@ -534,8 +542,20 @@ export function registerInteractionHandler(client, commands) {
       }
 
       // ═══════ BOOST SERVER MODAL HANDLERS ═══════
-      if (interaction.isModalSubmit() && interaction.customId === 'boost:buy:modal') {
-        await handleBoostBuyModal(interaction);
+      if (interaction.isModalSubmit() && interaction.customId.startsWith('boost:buy:modal:')) {
+        const packageKey = interaction.customId.split(':')[3];
+        await handleBoostBuyModal(interaction, packageKey);
+        return;
+      }
+
+      if (interaction.isModalSubmit() && interaction.customId === 'boost:key:modal') {
+        await handleBoostKeyModal(interaction);
+        return;
+      }
+
+      if (interaction.isModalSubmit() && interaction.customId.startsWith('boost:manage:modal:')) {
+        const code = interaction.customId.split(':').slice(3).join(':');
+        await handleBoostManageModal(interaction, code);
         return;
       }
 
@@ -559,32 +579,7 @@ export function registerInteractionHandler(client, commands) {
 
       // Staff check modal
       if (interaction.isModalSubmit() && interaction.customId === 'boost:check:modal_staff') {
-        const E_bs = createEmojiResolver(interaction.guildId);
-        const codeInput = interaction.fields.getTextInputValue('order_code')?.trim().toUpperCase();
-        const { getBoostOrderByCode, getBoostOrdersByCustomer, buildBoostOrderDetailEmbed, buildBoostOrderActionRows } = await import('../services/boostServerService.js');
-        const guildConfig = getGuildConfig(interaction.guildId);
-        const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
-        const isStaff = isStaffMember(member, guildConfig);
-
-        let order;
-        if (codeInput) {
-          order = getBoostOrderByCode(codeInput);
-          if (!order || order.guild_id !== interaction.guildId) {
-            await interaction.reply({ content: `${E_bs('status_cross')} Không tìm thấy đơn \`${codeInput}\` trong server này.`, ephemeral: true });
-            return;
-          }
-        } else {
-          const orders = getBoostOrdersByCustomer(interaction.guildId, interaction.user.id);
-          if (!orders.length) {
-            await interaction.reply({ content: `${E_bs('status_info')} Bạn chưa có đơn boost nào.`, ephemeral: true });
-            return;
-          }
-          order = orders[0];
-        }
-
-        const embed = buildBoostOrderDetailEmbed(order);
-        const rows = buildBoostOrderActionRows(order, isStaff);
-        await interaction.reply({ embeds: [embed], components: rows, ephemeral: true });
+        await handleBoostStaffCheckModal(interaction);
         return;
       }
 
@@ -2504,8 +2499,37 @@ export function registerInteractionHandler(client, commands) {
         return;
       }
 
+      if (interaction.customId.startsWith('boost:buy:')) {
+        const packageKey = interaction.customId.split(':')[2];
+        await handleBoostBuyPackage(interaction, packageKey);
+        return;
+      }
+
+      if (interaction.customId === 'boost:key') {
+        await handleBoostKeyButton(interaction);
+        return;
+      }
+
       if (interaction.customId === 'boost:check') {
         await handleBoostCheck(interaction);
+        return;
+      }
+
+      if (interaction.customId.startsWith('boost:live:')) {
+        const code = interaction.customId.split(':').slice(2).join(':');
+        await handleBoostLiveRefresh(interaction, code);
+        return;
+      }
+
+      if (interaction.customId.startsWith('boost:payment:')) {
+        const code = interaction.customId.split(':').slice(2).join(':');
+        await handleBoostPaymentButton(interaction, code);
+        return;
+      }
+
+      if (interaction.customId.startsWith('boost:manage:')) {
+        const code = interaction.customId.split(':').slice(2).join(':');
+        await handleBoostManageButton(interaction, code);
         return;
       }
 
