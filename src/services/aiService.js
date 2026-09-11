@@ -338,6 +338,47 @@ async function requestAiCompletion(input) {
   throw lastError || new Error('Chưa cấu hình nhà cung cấp AI.');
 }
 
+export async function probeConfiguredAiProvider() {
+  const providers = getConfiguredAiProviders();
+  if (!providers.length) {
+    return { ok: false, provider: null, code: 'NOT_CONFIGURED' };
+  }
+
+  let lastFailure = null;
+  for (const provider of providers) {
+    try {
+      const result = provider === 'groq'
+        ? await requestGroq({
+          systemPrompt: 'This is a health check. Reply with READY only.',
+          history: [{ role: 'user', content: 'READY' }],
+          tools: [],
+        })
+        : await requestGemini({
+          systemPrompt: 'This is a health check. Reply with READY only.',
+          history: [{ role: 'user', content: 'READY' }],
+          tools: [],
+        });
+      if (String(result?.content || '').trim()) {
+        return {
+          ok: true,
+          provider,
+          model: provider === 'gemini' ? config.aiGeminiModel : config.aiModel,
+        };
+      }
+      lastFailure = { provider, code: 'EMPTY_RESPONSE' };
+    } catch (error) {
+      lastFailure = {
+        provider,
+        code: String(error?.status || error?.code || error?.name || 'REQUEST_FAILED')
+          .replace(/[^A-Za-z0-9_-]/g, '_')
+          .slice(0, 40),
+      };
+    }
+  }
+
+  return { ok: false, ...(lastFailure || { provider: null, code: 'REQUEST_FAILED' }) };
+}
+
 async function safeReply(message, content) {
   const clean = cleanAssistantReply(content);
   if (!clean) return false;

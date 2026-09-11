@@ -72,7 +72,7 @@ export async function buildClient() {
 
   // Music is intentionally isolated: extractor/FFmpeg failure must never stop
   // commerce, wallet, ticket or warranty services from starting.
-  await initializeMusicPlayer(client).catch(() => null);
+  void initializeMusicPlayer(client).catch(() => null);
 
   initErrorLogger(client);
   registerInteractionHandler(client, commands);
@@ -113,6 +113,27 @@ export async function buildClient() {
     // thể gửi reminder trước khi bị cơ chế khóa launcher dừng lại.
     startScheduler(readyClient);
     startOtpAutoCheck(readyClient);
+
+    // Probe Store 1 once per process start so production can distinguish a
+    // configured key from a key that Google actually accepts. This never posts
+    // to Discord and deliberately logs no response content or credential data.
+    if (process.env.ENV_FILE === '.env') {
+      import('./services/aiService.js')
+        .then(({ probeConfiguredAiProvider }) => probeConfiguredAiProvider())
+        .then((probe) => {
+          if (probe.ok) {
+            console.log(`[AI-PROBE] provider=${probe.provider} model=${probe.model} status=ready`);
+          } else {
+            console.warn(`[AI-PROBE] provider=${probe.provider || 'none'} status=failed code=${probe.code}`);
+          }
+        })
+        .catch((error) => {
+          const code = String(error?.status || error?.code || error?.name || 'REQUEST_FAILED')
+            .replace(/[^A-Za-z0-9_-]/g, '_')
+            .slice(0, 40);
+          console.warn(`[AI-PROBE] provider=unknown status=failed code=${code}`);
+        });
+    }
 
     // Chiến dịch Trung Thu là tác vụ vận hành độc lập: giữ bài sale đồng bộ
     // sau restart và cập nhật panel Boost ngay cả khi auto-setup khác bị lỗi.
@@ -196,9 +217,15 @@ export async function buildClient() {
         console.log(`[TERMS-BOARD] status=skipped guild=${config.guildId} reason=store2-international`);
       }
 
-      const { publishCustomServicesLaunch } = await import('./campaigns/customServicesLaunch2026.js');
-      const customServices = await publishCustomServicesLaunch(readyClient);
-      console.log(`[CUSTOM-SERVICES] status=${customServices.status} message=${customServices.messageId} removed=${customServices.removed}`);
+      if (String(config.guildId) === STORE_ONE_GUILD_ID) {
+        try {
+          const { publishCustomServicesLaunch } = await import('./campaigns/customServicesLaunch2026.js');
+          const customServices = await publishCustomServicesLaunch(readyClient);
+          console.log(`[CUSTOM-SERVICES] status=${customServices.status} message=${customServices.messageId} removed=${customServices.removed}`);
+        } catch (error) {
+          console.error('[CUSTOM-SERVICES] Campaign setup failed:', error?.message);
+        }
+      }
 
       const { reconcileRecentCtvOrderLogs } = await import('./services/ctvOrderLogService.js');
       for (const guild of readyClient.guilds.cache.values()) {
