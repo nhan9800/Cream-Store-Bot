@@ -26,15 +26,16 @@ describe('Daily Color sale campaign', () => {
     const content = Object.values(buildDailyColorSaleSections({ E: emojiResolver, customEmojis })).join('\n');
     for (const price of [
       '85.000đ', '99.000đ', '115.000đ', '210.000đ', '310.000đ', '450.000đ',
-      '550.000đ', '800.000đ', '55.000đ', '90.000đ', '230.000đ', '30.000đ',
-      '50.000đ', '119.000đ', '150.000đ', '180.000đ', '390.000đ', '1.900.000đ',
+      '550.000đ', '800.000đ', '55.000đ', '90.000đ', '230.000đ',
+      '119.000đ', '150.000đ', '180.000đ', '390.000đ', '1.900.000đ',
       '295.000đ', '280.000đ', '65.000đ', '185.000đ', '530.000đ',
     ]) expect(content).toContain(price);
 
     for (const product of [
-      'NITRO BOOST LOGIN', 'BOOST SERVER', 'NETFLIX PREMIUM', 'GEMINI PRO',
+      'NITRO BOOST LOGIN', 'BOOST SERVER', 'GEMINI PRO',
       'OFFICE 365', 'CHATGPT PLUS', 'CAPCUT PRO', 'SPOTIFY PREMIUM', 'YOUTUBE PREMIUM',
     ]) expect(content).toContain(product);
+    expect(content).not.toContain('NETFLIX');
     expect(content).not.toContain('CANVA PRO');
   });
 

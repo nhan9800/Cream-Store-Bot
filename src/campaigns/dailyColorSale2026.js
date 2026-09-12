@@ -183,14 +183,10 @@ export function buildDailyColorSaleSections({
       `${gift} **Trial Boost** · \`03 tháng\` — **55.000đ**`,
       `-# ${E('status_info')} Hai lựa chọn Nitro 02 tháng được shop xác nhận đúng loại tại ticket trước khi thanh toán.`,
     ].join('\n'),
-    boostNetflix: [
+    boost: [
       `## ${E('brand_boost')} BOOST SERVER · NÂNG CẤP MÁY CHỦ`,
       `${leaf} \`01 tháng\` — **90.000đ**`,
       `${leaf} \`03 tháng\` — **230.000đ**`,
-      '',
-      `## ${E('brand_netflix')} NETFLIX PREMIUM · 4K PRIVATE`,
-      `${leaf} \`01 tháng\` — **30.000đ**`,
-      `${leaf} \`02 tháng\` — **50.000đ**`,
     ].join('\n'),
     productivityHeader: [
       `# ${tag} AI & CÔNG CỤ BẢN QUYỀN`,
@@ -281,7 +277,7 @@ export function buildDailyColorSaleMessages({
 
   return [
     {
-      components: [panel(theme.colors[0], [`${mentions ? `${mentions}\n` : ''}${sections.hero}`, sections.nitro, sections.boostNetflix])],
+      components: [panel(theme.colors[0], [`${mentions ? `${mentions}\n` : ''}${sections.hero}`, sections.nitro, sections.boost])],
       flags: MessageFlags.IsComponentsV2,
       allowedMentions: {
         parse: tagEveryone ? ['everyone'] : [],
