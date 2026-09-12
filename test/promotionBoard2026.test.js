@@ -7,9 +7,9 @@ import {
 } from '../src/campaigns/promotionBoard2026.js';
 
 describe('Cenar promotion channel policy', () => {
-  it('marks the Mid-Autumn promotion as active', () => {
+  it('marks the Daily Color promotion as active', () => {
     expect(PROMOTION_BOARD.status).toBe('ACTIVE');
-    expect(PROMOTION_BOARD.campaign).toBe('CENAR-MID-AUTUMN-SALE-2026');
+    expect(PROMOTION_BOARD.campaign).toBe('CENAR-DAILY-COLOR-SALE-2026-09');
     expect(PROMOTION_BOARD.channelId).toBe('1515008584549797979');
   });
 

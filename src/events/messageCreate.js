@@ -33,6 +33,7 @@ import {
   registerOwnerPing,
 } from '../services/ownerPingGuardService.js';
 import { emitAutomationLog } from '../services/automationLogService.js';
+import { handleGiveawayProofMessage } from '../services/giveawayProofService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -195,6 +196,10 @@ export async function execute(message) {
   const isStaff = message.member?.roles?.cache?.has(guildConfig.support_role_id) || 
                   message.member?.roles?.cache?.has(guildConfig.manager_role_id) || 
                   message.member?.permissions?.has('ManageGuild');
+
+  // Kênh req giveaway chỉ nhận ảnh hồ sơ/bio. Xử lý reaction trước bộ quét
+  // ảnh quảng cáo để ảnh bằng chứng hợp lệ không bị anti-scam xoá nhầm.
+  if (await handleGiveawayProofMessage(message)) return;
 
   if (await enforceProtectedOwnerPing(message, E, isStaff)) return;
 

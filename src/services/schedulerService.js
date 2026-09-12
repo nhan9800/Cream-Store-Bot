@@ -22,6 +22,7 @@ import { processAdminOrderAgingReminders } from './adminOrderCenterService.js';
 import { runSpotifyFamilyReminders } from './spotifyFamilyReminderService.js';
 import { runYoutubeRenewalReminders } from './youtubeRenewalReminderService.js';
 import { syncYoutubeWarrantyClaimsAcrossGuilds } from './youtubeWarrantyClaimService.js';
+import { DAILY_COLOR_SALE, dailySaleDateKey, publishDailyColorSale } from '../campaigns/dailyColorSale2026.js';
 
 let schedulerHandle = null;
 let backupHandle = null;
@@ -29,6 +30,7 @@ let bootstrapped = false;
 let lastVinhDanhRun = 0;
 let lastDiscountBoardRun = 0;
 let lastYoutubeWarrantySync = 0;
+let lastDailySaleDateKey = '';
 
 function autoBackupDatabase() {
   backupDatabase().catch(e => console.error('[BACKUP] Lỗi hệ thống sao lưu tự động:', e));
@@ -132,6 +134,19 @@ export function startScheduler(client) {
         lastDiscountBoardRun = nowMs;
       } catch (error) {
         console.error('[SCHEDULER] Lỗi tự động cập nhật bảng chiết khấu:', error);
+      }
+    }
+
+    // Mỗi ngày theo giờ Việt Nam, đổi màu accent của cùng ba bài sale. Bài đã
+    // tồn tại được edit im lặng, không ping lại @everyone/Cenar Member.
+    const todaySaleKey = dailySaleDateKey();
+    if (String(config.guildId) === DAILY_COLOR_SALE.guildId && todaySaleKey !== lastDailySaleDateKey) {
+      try {
+        const result = await publishDailyColorSale(client, { tagEveryone: false, tagMember: false });
+        lastDailySaleDateKey = todaySaleKey;
+        console.log(`[DAILY-COLOR-SALE] date=${todaySaleKey} theme=${result.theme.name} messages=${result.messages.length}`);
+      } catch (error) {
+        console.error('[SCHEDULER] Lỗi đổi màu bảng giá khuyến mãi:', error);
       }
     }
 

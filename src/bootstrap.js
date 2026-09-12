@@ -135,7 +135,7 @@ export async function buildClient() {
         });
     }
 
-    // Chiến dịch Trung Thu là tác vụ vận hành độc lập: giữ bài sale đồng bộ
+    // Daily Color Sale là tác vụ vận hành độc lập: giữ bài sale đồng bộ
     // sau restart và cập nhật panel Boost ngay cả khi auto-setup khác bị lỗi.
     if (String(config.guildId) === STORE_ONE_GUILD_ID) {
       try {
@@ -143,11 +143,15 @@ export async function buildClient() {
         const promotionBoard = await publishPromotionBoard(readyClient);
         console.log(`[PROMOTION-BOARD] status=${promotionBoard.status} messages=${promotionBoard.messages?.length || 0} deletedOld=${promotionBoard.deletedOldMessages || 0} removedEmojis=${promotionBoard.removedEventEmojis?.length || 0}`);
 
+        const { publishProfileEffectGiveaway } = await import('./campaigns/profileEffectGiveaway2026.js');
+        const profileGiveaway = await publishProfileEffectGiveaway(readyClient);
+        console.log(`[PROFILE-EFFECT-GIVEAWAY] action=${profileGiveaway.action} message=${profileGiveaway.messageId} proofChannel=${profileGiveaway.proofChannelId}`);
+
         const { refreshBoostPanel } = await import('./services/boostServerService.js');
         const boostPanel = await refreshBoostPanel(readyClient, STORE_ONE_GUILD_ID);
         console.log(`[BOOST-PANEL] status=${boostPanel?.status || 'unknown'} message=${boostPanel?.messageId || 'none'}`);
       } catch (error) {
-        console.error('[PROMOTION-BOARD] Không thể đồng bộ chiến dịch Trung Thu:', error);
+        console.error('[PROMOTION-BOARD] Không thể đồng bộ Daily Color Sale/giveaway:', error);
       }
     }
 
