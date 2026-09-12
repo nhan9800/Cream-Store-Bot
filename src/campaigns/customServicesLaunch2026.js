@@ -1,15 +1,22 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import {
   ActionRowBuilder,
   ButtonBuilder,
   ButtonStyle,
   ContainerBuilder,
   MessageFlags,
+  PermissionFlagsBits,
   SeparatorBuilder,
   SeparatorSpacingSize,
   TextDisplayBuilder,
 } from 'discord.js';
 import { createEmojiResolver, withButtonEmoji } from '../utils/emojiHelper.js';
 import { normalizeV2Text } from '../utils/uiKit.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const emojiAssetRoot = path.resolve(__dirname, '../../assets/emojis');
 
 export const CUSTOM_SERVICES_LAUNCH = Object.freeze({
   guildId: '1282637033340403754',
@@ -23,12 +30,66 @@ export const CUSTOM_SERVICES_LAUNCH = Object.freeze({
   marker: 'CENAR-CUSTOM-SERVICES-LAUNCH-V1',
   flags: MessageFlags.IsComponentsV2,
   packages: Object.freeze([
-    Object.freeze({ name: 'STORE LAUNCH', price: 500_000, copy: 'Setup Discord + bot custom + bảng giá/nhận đơn cơ bản + hosting 3 tháng.' }),
-    Object.freeze({ name: 'STORE AUTOMATION PRO', price: 750_000, copy: 'Bot booking, bot bảng giá, bot store, ticket và catalog giá nguồn.' }),
-    Object.freeze({ name: 'FULL BUSINESS', price: 1_000_000, copy: 'Discord Store + bot custom + website đồng bộ theo thương hiệu.' }),
-    Object.freeze({ name: 'BOT RESCUE & UI', price: 500_000, copy: 'Tìm lỗi, sửa bot và nâng cấp Components V2/emoji custom; giá từ mức niêm yết.' }),
+    Object.freeze({ name: 'BOT CUSTOM STARTER', price: 500_000, copy: 'Bot theo nhận diện riêng, đầy đủ tính năng cốt lõi và tặng hosting 24/7 trong 3 tháng.' }),
+    Object.freeze({ name: 'STORE AUTOMATION PRO', price: 750_000, copy: 'Bot bảng giá, catalog, ticket, đơn hàng, bảo hành, booking và luồng tự động hóa.' }),
+    Object.freeze({ name: 'BOT + WEBSITE BUSINESS', price: 1_000_000, copy: 'Combo bot custom + website đồng bộ theo thương hiệu; tối ưu chi phí theo phạm vi.' }),
+    Object.freeze({ name: 'BOT RESCUE & REDESIGN', price: 500_000, copy: 'Kiểm tra lỗi, cứu mã nguồn và thiết kế lại giao diện Components V2; giá từ mức niêm yết.' }),
   ]),
 });
+
+export const CUSTOM_SERVICES_EMOJIS = Object.freeze([
+  Object.freeze({ name: 'cenar_dev_bot', fileName: 'cenar_dev_bot.png' }),
+  Object.freeze({ name: 'cenar_dev_web', fileName: 'cenar_dev_web.png' }),
+  Object.freeze({ name: 'cenar_dev_sale', fileName: 'cenar_dev_sale.png' }),
+  Object.freeze({ name: 'cenar_dev_lifetime', fileName: 'cenar_dev_lifetime.png' }),
+]);
+
+function emojiAssetPath(asset) {
+  return path.join(emojiAssetRoot, asset.fileName);
+}
+
+function validateEmojiAssets() {
+  for (const asset of CUSTOM_SERVICES_EMOJIS) {
+    const filePath = emojiAssetPath(asset);
+    if (!fs.existsSync(filePath)) throw new Error(`Thiếu emoji dịch vụ custom: ${filePath}`);
+    const size = fs.statSync(filePath).size;
+    if (!size || size > 256 * 1024) {
+      throw new Error(`${asset.name} có kích thước ${size} bytes, không hợp lệ với Discord.`);
+    }
+  }
+}
+
+function asCustomEmoji(emoji) {
+  return emoji.animated
+    ? `<a:${emoji.name}:${emoji.id}>`
+    : `<:${emoji.name}:${emoji.id}>`;
+}
+
+export async function syncCustomServicesEmojis(guild) {
+  validateEmojiAssets();
+  await guild.emojis.fetch();
+  const emojis = {};
+
+  for (const asset of CUSTOM_SERVICES_EMOJIS) {
+    let emoji = guild.emojis.cache.find((item) => item.name === asset.name);
+    let status = 'reused';
+    if (!emoji) {
+      emoji = await guild.emojis.create({
+        attachment: emojiAssetPath(asset),
+        name: asset.name,
+        reason: 'Cenar Store · quảng bá dịch vụ code bot và website custom',
+      });
+      status = 'created';
+    }
+    emojis[asset.name] = {
+      status,
+      text: asCustomEmoji(emoji),
+      component: { id: emoji.id, name: emoji.name, animated: emoji.animated },
+    };
+  }
+
+  return emojis;
+}
 
 const divider = () => new SeparatorBuilder()
   .setDivider(true)
@@ -36,78 +97,97 @@ const divider = () => new SeparatorBuilder()
 
 const money = (value) => `${Number(value).toLocaleString('vi-VN')}đ`;
 
-export function buildCustomServicesLaunchPayload() {
+function campaignIcon(customEmojis, name, fallback) {
+  return customEmojis?.[name]?.text || fallback;
+}
+
+export function buildCustomServicesLaunchPayload({
+  customEmojis = {},
+  tagEveryone = true,
+  tagRoles = true,
+} = {}) {
   const campaign = CUSTOM_SERVICES_LAUNCH;
   const E = createEmojiResolver(campaign.guildId);
-  const mentions = ['@everyone', ...campaign.audienceRoleIds.map((id) => `<@&${id}>`)].join(' ');
+  const bot = campaignIcon(customEmojis, 'cenar_dev_bot', E('icon_brain'));
+  const web = campaignIcon(customEmojis, 'cenar_dev_web', E('icon_store'));
+  const sale = campaignIcon(customEmojis, 'cenar_dev_sale', E('cenar_price'));
+  const lifetime = campaignIcon(customEmojis, 'cenar_dev_lifetime', E('warranty_shield'));
+  const mentions = [
+    tagEveryone ? '@everyone' : null,
+    ...(tagRoles ? campaign.audienceRoleIds.map((id) => `<@&${id}>`) : []),
+  ].filter(Boolean).join(' ');
 
   const header = new ContainerBuilder()
-    .setAccentColor(0x5865F2)
+    .setAccentColor(0xA855F7)
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(normalizeV2Text([
-      mentions,
-      `# ${E('cenar_announce')} CENAR DIGITAL LAB · BIẾN STORE THÀNH HỆ THỐNG`,
-      `### SETUP DISCORD · BOT CUSTOM · WEBSITE ĐỒNG BỘ`,
-      `> ${E('icon_sparkle')} Không chỉ làm một con bot — Cenar xây dựng **bộ máy vận hành có nhận diện riêng**, dễ dùng và sẵn sàng phục vụ khách hàng của store.`,
-      `> ${E('status_check')} Dự án triển khai mới được **tặng hosting bot 24/7 trong 3 tháng đầu**.`,
-    ].join('\n'))));
+      mentions || null,
+      `# ${bot} CODE BOT · CODE WEB GIÁ TỐT`,
+      `## ${web} BOT CUSTOM ĐẸP · ĐỦ TÍNH NĂNG · THIẾT KẾ THEO YÊU CẦU`,
+      '> Có ý tưởng, Cenar biến thành sản phẩm thật: giao diện theo thương hiệu, thao tác dễ hiểu, vận hành ổn định và phù hợp ngân sách.',
+      `${sale} **Nhận dự án từ bot cơ bản đến hệ thống bot + website hoàn chỉnh.** Báo giá rõ ràng sau khi chốt phạm vi.`,
+    ].filter(Boolean).join('\n'))));
 
-  const audience = new ContainerBuilder()
-    .setAccentColor(0x7C3AED)
+  const capabilities = new ContainerBuilder()
+    .setAccentColor(0x06B6D4)
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(normalizeV2Text([
-      `## ${E('icon_store')} DÀNH RIÊNG CHO STORE MUỐN PHÁT TRIỂN BÀI BẢN`,
-      `${E('cenar_partner')} Store bán sản phẩm số, nhận cung cấp **giá nguồn cho reseller/store khác**.`,
-      `${E('icon_chart')} Store cần quản lý bảng giá, booking, ticket, đơn hàng và luồng chăm sóc khách thuận tiện hơn.`,
-      `${E('icon_art')} Giao diện thiết kế theo thương hiệu, dùng **Components V2 + emoji custom mới mẻ**, rõ ràng và tạo thiện cảm ngay từ lần đầu truy cập.`,
+      `## ${bot} BẠN CẦN BOT GÌ, CENAR THIẾT KẾ BOT ĐÓ`,
+      `${bot} **Bot store / bán hàng** · bảng giá, catalog, ticket, đơn hàng, thanh toán và bảo hành.`,
+      `${bot} **Bot cộng đồng** · quản lý, phân quyền, chào mừng, log, chống spam/raid và kiểm duyệt.`,
+      `${bot} **Bot theo ý tưởng riêng** · booking, giveaway, economy, mini-game, âm nhạc, AI, API ngoài và workflow đặc thù.`,
+      `${web} **Website custom** · landing page, store, portfolio, dashboard, cổng thanh toán và dữ liệu đồng bộ với bot.`,
     ].join('\n'))));
 
   const packages = new ContainerBuilder()
-    .setAccentColor(0x10B981)
+    .setAccentColor(0xEC4899)
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(normalizeV2Text([
-      `## ${E('cenar_price')} GÓI TRIỂN KHAI · GIÁ HẠT DẺ 500K–1 TRIỆU`,
+      `## ${sale} GÓI TRIỂN KHAI · GIÁ DỄ TIẾP CẬN TỪ 500K`,
       ...campaign.packages.map((item, index) => (
-        `${index === 0 ? E('brand_discord') : index === 1 ? E('icon_settings') : index === 2 ? E('icon_store') : E('warranty_shield')} **${item.name} — ${money(item.price)}**\n> ${item.copy}`
+        `${index === 2 ? web : index === 3 ? lifetime : bot} **${item.name} — ${index === 2 || index === 3 ? 'TỪ ' : ''}${money(item.price)}**\n> ${item.copy}`
       )),
-      `-# Phạm vi và báo giá cuối được xác nhận sau khi khảo sát yêu cầu/mã nguồn thực tế.`,
+      '-# Giá cuối phụ thuộc số tính năng, độ phức tạp, hạ tầng và thời hạn bàn giao; shop xác nhận trước khi bắt đầu.',
     ].join('\n'))));
 
-  const capabilities = new ContainerBuilder()
-    .setAccentColor(0x0EA5E9)
+  const benefits = new ContainerBuilder()
+    .setAccentColor(0x22C55E)
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(normalizeV2Text([
-      `## ${E('icon_settings')} CENAR CÓ THỂ XÂY DỰNG CHO BẠN`,
-      `${E('status_check')} **Bot booking** · form đặt lịch, duyệt yêu cầu và thông báo trạng thái.`,
-      `${E('status_check')} **Bot bảng giá / bot store** · catalog, menu sản phẩm, ticket và nhận đơn.`,
-      `${E('status_check')} **Bot custom** · tính năng được thiết kế theo đúng quy trình riêng của store.`,
-      `${E('status_check')} **Website đầy đủ** · giao diện thương hiệu, catalog và dữ liệu đồng bộ với bot.`,
+      `## ${sale} NHIỀU ƯU ĐÃI CHO DỰ ÁN MỚI`,
+      `${sale} **Tặng tư vấn và phác thảo luồng giao diện** trước khi chốt dự án.`,
+      `${sale} **Tặng hosting bot 24/7 trong 03 tháng đầu** cho dự án bot triển khai mới.`,
+      `${sale} **Ưu đãi riêng** cho combo bot + website, dự án nhiều hạng mục và khách hàng quay lại.`,
+      `${web} Giao diện **Components V2 + emoji custom 100%**, đồng bộ màu sắc và nhận diện thương hiệu.`,
     ].join('\n'))))
     .addSeparatorComponents(divider())
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(normalizeV2Text([
-      `### ${E('warranty_shield')} NHẬN CỨU BOT LỖI · BOT “LỎ” · GIAO DIỆN CŨ`,
-      `> Cenar nhận kiểm tra nguyên nhân, sửa luồng hỏng, tối ưu độ ổn định và thiết kế lại panel để bot **đẹp, thân thiện, dễ vận hành** hơn.`,
-      `> ${E('icon_search')} Có mã nguồn cũ? Hãy gửi tình trạng và log lỗi trong ticket để được đánh giá chính xác trước khi triển khai.`,
+      `### ${lifetime} BẢO HÀNH LỖI CODE TRỌN ĐỜI`,
+      '> Lỗi phát sinh từ mã nguồn thuộc phạm vi Cenar bàn giao sẽ được kiểm tra và sửa không tính phí trong suốt thời gian sử dụng.',
+      `${lifetime} Bàn giao mã nguồn theo thỏa thuận, hướng dẫn vận hành và hỗ trợ kỹ thuật trực tiếp từ developer.`,
+      '-# Tính năng mới, thay đổi API bên thứ ba hoặc chi phí hosting/domain không thuộc bảo hành; mọi khoản phát sinh đều được báo trước.',
     ].join('\n'))));
 
   const footer = new ContainerBuilder()
     .setAccentColor(0xF59E0B)
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(normalizeV2Text([
-      `## ${E('icon_fire')} BIẾN Ý TƯỞNG CỦA BẠN THÀNH SẢN PHẨM THẬT`,
-      `> Từ một server mới đến hệ thống store hoàn chỉnh: **khảo sát → lên giao diện → phát triển → kiểm thử → bàn giao → đồng hành vận hành**.`,
-      `${E('cenar_support')} Mở ticket, mô tả loại hình store và tính năng mong muốn để nhận phương án phù hợp.`,
-      `${E('cenar_price')} Bảng giá mới đã được đồng bộ tại <#${campaign.priceChannelId}> và trên website.`,
+      `## ${bot} GỬI Ý TƯỞNG · NHẬN LỘ TRÌNH VÀ BÁO GIÁ`,
+      '> Chỉ cần gửi: loại bot/website, danh sách tính năng, mẫu tham khảo, ngân sách dự kiến và thời hạn mong muốn.',
+      `${web} Quy trình rõ ràng: **khảo sát → chốt giao diện → phát triển → kiểm thử → bàn giao → đồng hành vận hành**.`,
+      `${sale} Xem thông tin tại <#${campaign.priceChannelId}> hoặc mở ticket để được tư vấn đúng nhu cầu.`,
       `-# ${campaign.marker}`,
     ].join('\n'))));
 
   const orderButton = withButtonEmoji(
     new ButtonBuilder()
       .setCustomId('ticket:create:ORDER')
-      .setLabel('Nhận Tư Vấn Dự Án')
+      .setLabel('Nhận Báo Giá Ngay')
       .setStyle(ButtonStyle.Success),
+    customEmojis?.cenar_dev_bot?.component,
     E.component('ticket_open'),
   );
   const priceButton = withButtonEmoji(
     new ButtonBuilder()
-      .setLabel('Xem Bảng Giá Mới')
+      .setLabel('Xem Bảng Giá')
       .setStyle(ButtonStyle.Link)
       .setURL(`https://discord.com/channels/${campaign.guildId}/${campaign.priceChannelId}`),
+    customEmojis?.cenar_dev_sale?.component,
     E.component('icon_price'),
   );
   const websiteButton = withButtonEmoji(
@@ -115,22 +195,23 @@ export function buildCustomServicesLaunchPayload() {
       .setLabel('Mở Website Cenar')
       .setStyle(ButtonStyle.Link)
       .setURL('https://cenarstore.xyz'),
+    customEmojis?.cenar_dev_web?.component,
     E.component('icon_store'),
   );
 
   return {
     components: [
       header,
-      audience,
-      packages,
       capabilities,
+      packages,
+      benefits,
       footer,
       new ActionRowBuilder().addComponents(orderButton, priceButton, websiteButton),
     ],
     flags: campaign.flags,
     allowedMentions: {
-      parse: ['everyone'],
-      roles: [...campaign.audienceRoleIds],
+      parse: tagEveryone ? ['everyone'] : [],
+      roles: tagRoles ? [...campaign.audienceRoleIds] : [],
       users: [],
       repliedUser: false,
     },
@@ -152,7 +233,11 @@ export function isCustomServicesLaunchMessage(message, botUserId) {
   return message?.author?.id === botUserId && messageContainsMarker(message);
 }
 
-export async function publishCustomServicesLaunch(client) {
+export async function publishCustomServicesLaunch(client, {
+  repost = false,
+  tagEveryone = false,
+  tagRoles = false,
+} = {}) {
   const campaign = CUSTOM_SERVICES_LAUNCH;
   const guild = client.guilds.cache.get(campaign.guildId)
     || await client.guilds.fetch(campaign.guildId).catch(() => null);
@@ -164,18 +249,48 @@ export async function publishCustomServicesLaunch(client) {
     throw new Error(`Kênh thông báo ${campaign.channelId} không khả dụng`);
   }
 
+  const member = guild.members.me || await guild.members.fetchMe();
+  const required = [
+    PermissionFlagsBits.ViewChannel,
+    PermissionFlagsBits.SendMessages,
+    PermissionFlagsBits.ReadMessageHistory,
+    PermissionFlagsBits.ManageMessages,
+    PermissionFlagsBits.ManageGuildExpressions,
+  ];
+  if (tagEveryone || tagRoles) required.push(PermissionFlagsBits.MentionEveryone);
+  if (!channel.permissionsFor(member)?.has(required)) {
+    throw new Error('Bot thiếu quyền gửi, quản lý thông báo/emoji hoặc tag tại kênh thông báo.');
+  }
+
+  const customEmojis = await syncCustomServicesEmojis(guild);
   const recent = await channel.messages.fetch({ limit: 100 });
   const boards = [...recent.values()]
     .filter((message) => isCustomServicesLaunchMessage(message, client.user.id));
-  const payload = buildCustomServicesLaunchPayload();
+  const payload = buildCustomServicesLaunchPayload({ customEmojis, tagEveryone, tagRoles });
   const current = boards[0];
+
+  if (repost) {
+    const message = await channel.send(payload);
+    await Promise.all(boards.map((item) => item.delete().catch(() => null)));
+    return {
+      status: current ? 'reposted' : 'published',
+      messageId: message.id,
+      removed: boards.length,
+      customEmojis,
+    };
+  }
 
   if (current) {
     await current.edit(payload);
     await Promise.all(boards.slice(1).map((message) => message.delete().catch(() => null)));
-    return { status: 'updated', messageId: current.id, removed: Math.max(0, boards.length - 1) };
+    return {
+      status: 'updated',
+      messageId: current.id,
+      removed: Math.max(0, boards.length - 1),
+      customEmojis,
+    };
   }
 
   const message = await channel.send(payload);
-  return { status: 'published', messageId: message.id, removed: 0 };
+  return { status: 'published', messageId: message.id, removed: 0, customEmojis };
 }
