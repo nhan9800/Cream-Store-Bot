@@ -16,7 +16,11 @@ import {
 } from 'discord.js';
 import { db } from '../database/db.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
-import { GIVEAWAY_PROOF, ensureGiveawayProofChannel } from '../services/giveawayProofService.js';
+import {
+  GIVEAWAY_PROOF,
+  customCampaignEmoji,
+  ensureGiveawayProofChannel,
+} from '../services/giveawayProofService.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const bannerPath = path.resolve(__dirname, '../../assets/campaigns/daily-color-2026/profile-effect-giveaway-66k.png');
@@ -56,11 +60,14 @@ export function buildProfileEffectGiveawayPayload({
     throw new Error('Thiếu hostUserId, proofChannelId hoặc endTime cho giveaway.');
   }
   const E = createEmojiResolver(guildId);
+  const gift = customCampaignEmoji(guildId, 'cenar_daily_gift', E('icon_gift'));
+  const leaf = customCampaignEmoji(guildId, 'cenar_daily_leaf', E('status_check'));
+  const tag = customCampaignEmoji(guildId, 'cenar_daily_tag', E('icon_price'));
   const endUnix = asUnix(endTime);
   const container = new ContainerBuilder().setAccentColor(0xF9736B);
 
   container.addTextDisplayComponents(new TextDisplayBuilder().setContent([
-    `# ${E('icon_gift')} GIVEAWAY · HIỆU ỨNG HỒ SƠ DISCORD`,
+    `# ${gift} GIVEAWAY · HIỆU ỨNG HỒ SƠ DISCORD`,
     '> Quà xịn cho profile nổi bật hơn — hoàn thành req, gửi ảnh xác nhận và nhấn nút tham gia.',
     `-# ${PROFILE_EFFECT_GIVEAWAY.marker}`,
   ].join('\n')));
@@ -71,19 +78,19 @@ export function buildProfileEffectGiveawayPayload({
   );
   container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
   container.addTextDisplayComponents(new TextDisplayBuilder().setContent([
-    `## ${E('icon_trophy')} PHẦN THƯỞNG`,
-    `${E('icon_gift')} **${PROFILE_EFFECT_GIVEAWAY.prize}**`,
+    `## ${leaf} PHẦN THƯỞNG`,
+    `${gift} **${PROFILE_EFFECT_GIVEAWAY.prize}**`,
     `${E('icon_group')} **Số người thắng:** ${PROFILE_EFFECT_GIVEAWAY.winnersCount}`,
     `${E('icon_clock')} **Kết thúc:** <t:${endUnix}:F> · <t:${endUnix}:R>`,
     `${E('icon_crown')} **Tổ chức:** <@${hostUserId}>`,
   ].join('\n')));
   container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
   container.addTextDisplayComponents(new TextDisplayBuilder().setContent([
-    `## ${E('status_check')} YÊU CẦU THAM GIA`,
+    `## ${leaf} YÊU CẦU THAM GIA`,
     `${E('icon_link')} Đặt bio có link shop theo mẫu:`,
     `> \`${GIVEAWAY_PROOF.requiredBio}\``,
     `${E('icon_clock')} Giữ nguyên link shop và bio **trong suốt 07 ngày diễn ra giveaway**.`,
-    `${E('icon_art')} Gửi ảnh chụp hồ sơ + bio tại <#${proofChannelId}>.`,
+    `${tag} Gửi ảnh chụp hồ sơ + bio tại <#${proofChannelId}>.`,
     `${E('icon_sparkle')} Sau đó nhấn **Tham Gia Giveaway** bên dưới.`,
     `-# Staff sẽ đối soát req trước khi công nhận kết quả; reaction bot chỉ xác nhận đã nhận ảnh.`,
   ].join('\n')));
@@ -132,10 +139,17 @@ export async function publishProfileEffectGiveaway(client) {
     && messageComponentText(message).includes(PROFILE_EFFECT_GIVEAWAY.marker)
   ));
   if (existing) {
-    const row = db.prepare('SELECT status, end_time FROM giveaways WHERE message_id = ?').get(existing.id);
+    const row = db.prepare('SELECT status, end_time, host_id FROM giveaways WHERE message_id = ?').get(existing.id);
     if (row?.status === 'ACTIVE') {
+      const payload = buildProfileEffectGiveawayPayload({
+        guildId: guild.id,
+        hostUserId: row.host_id,
+        proofChannelId: proofChannel.id,
+        endTime: row.end_time,
+      });
+      await existing.edit({ ...payload, attachments: [] });
       return {
-        action: 'reused',
+        action: 'updated',
         messageId: existing.id,
         url: `https://discord.com/channels/${guild.id}/${channel.id}/${existing.id}`,
         proofChannelId: proofChannel.id,

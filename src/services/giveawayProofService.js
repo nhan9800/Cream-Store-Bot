@@ -45,6 +45,16 @@ export function isImageProofMessage(message) {
   });
 }
 
+export function customCampaignEmoji(guildId, name, fallback = '') {
+  const emoji = global.discordClient?.guilds?.cache
+    ?.get(String(guildId))?.emojis?.cache
+    ?.find((item) => item.name === name);
+  if (!emoji) return fallback;
+  return emoji.animated
+    ? `<a:${emoji.name}:${emoji.id}>`
+    : `<:${emoji.name}:${emoji.id}>`;
+}
+
 export async function handleGiveawayProofMessage(message) {
   if (!isGiveawayProofChannel(message?.channel)) return false;
   if (!isImageProofMessage(message)) return true;
@@ -64,19 +74,22 @@ export async function handleGiveawayProofMessage(message) {
 
 export function buildGiveawayProofPanel(guildId = GIVEAWAY_PROOF.guildId) {
   const E = createEmojiResolver(guildId);
+  const gift = customCampaignEmoji(guildId, 'cenar_daily_gift', E('icon_gift'));
+  const leaf = customCampaignEmoji(guildId, 'cenar_daily_leaf', E('status_check'));
+  const tag = customCampaignEmoji(guildId, 'cenar_daily_tag', E('icon_art'));
   const container = new ContainerBuilder().setAccentColor(0x34D399);
   container.addTextDisplayComponents(new TextDisplayBuilder().setContent([
-    `# ${E('icon_art')} GỬI REQ GIVEAWAY · DECOR 66K`,
+    `# ${gift} GỬI REQ GIVEAWAY · DECOR 66K`,
     '> Đây là kênh nhận ảnh xác nhận yêu cầu tham gia. Bot sẽ reaction khi ảnh đã vào hàng chờ kiểm tra.',
     `-# ${GIVEAWAY_PROOF.panelMarker}`,
   ].join('\n')));
   container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
   container.addTextDisplayComponents(new TextDisplayBuilder().setContent([
-    `## ${E('status_check')} ẢNH CẦN THỂ HIỆN`,
+    `## ${leaf} ẢNH CẦN THỂ HIỆN`,
     `${E('icon_link')} Bio có link shop, ví dụ:`,
     `> \`${GIVEAWAY_PROOF.requiredBio}\``,
     `${E('icon_clock')} Giữ nguyên link shop và bio này **trong suốt thời gian giveaway**.`,
-    `${E('icon_art')} Gửi **01 ảnh chụp đầy đủ hồ sơ + phần bio** trong mỗi tin nhắn.`,
+    `${tag} Gửi **01 ảnh chụp đầy đủ hồ sơ + phần bio** trong mỗi tin nhắn.`,
   ].join('\n')));
   container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
   container.addTextDisplayComponents(new TextDisplayBuilder().setContent([
