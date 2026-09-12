@@ -185,8 +185,8 @@ export function buildDailyColorSaleSections({
     ].join('\n'),
     boost: [
       `## ${E('brand_boost')} BOOST SERVER · NÂNG CẤP MÁY CHỦ`,
-      `${leaf} \`01 tháng\` — **90.000đ**`,
-      `${leaf} \`03 tháng\` — **230.000đ**`,
+      `${leaf} \`01 tháng\` — **110.000đ**`,
+      `${leaf} \`03 tháng\` — **260.000đ**`,
     ].join('\n'),
     productivityHeader: [
       `# ${tag} AI & CÔNG CỤ BẢN QUYỀN`,
