@@ -60,9 +60,28 @@ import {
 
 let storeInviteCache = { url: '', expiresAt: 0 };
 const websiteSupportProvisioning = new Map();
+const WEBSITE_SUPPORT_LEASE_MS = 30_000;
 
 function isDiscordChannelId(value) {
     return /^\d{15,22}$/.test(String(value || ''));
+}
+
+function websiteSupportLeaseStartedAt(value) {
+    const match = String(value || '').match(/^web-provisioning-(\d{10,})-/);
+    return match ? Number(match[1]) : 0;
+}
+
+async function waitForWebsiteSupportChannel(guild, ticketId, timeoutMs = 2_500) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+        const current = db.prepare('SELECT channel_id FROM tickets WHERE id = ?').get(ticketId);
+        if (isDiscordChannelId(current?.channel_id)) {
+            const channel = await guild.channels.fetch(current.channel_id).catch(() => null);
+            if (channel?.isTextBased()) return channel;
+        }
+        await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    return null;
 }
 
 async function provisionWebsiteSupportChannel({ client, ticket, contact, context }) {
@@ -71,9 +90,31 @@ async function provisionWebsiteSupportChannel({ client, ticket, contact, context
     const guild = await client.guilds.fetch(ticket.guild_id).catch(() => null);
     if (!guild) throw new Error('Discord guild is unavailable');
 
-    if (isDiscordChannelId(ticket.channel_id)) {
-        const existingChannel = await guild.channels.fetch(ticket.channel_id).catch(() => null);
+    const currentTicket = db.prepare('SELECT * FROM tickets WHERE id = ?').get(ticket.id) || ticket;
+    if (currentTicket.status !== 'OPEN') throw new Error('Website support ticket is no longer open');
+
+    if (isDiscordChannelId(currentTicket.channel_id)) {
+        const existingChannel = await guild.channels.fetch(currentTicket.channel_id).catch(() => null);
         if (existingChannel?.isTextBased()) return existingChannel;
+    }
+
+    const leaseStartedAt = websiteSupportLeaseStartedAt(currentTicket.channel_id);
+    if (leaseStartedAt && Date.now() - leaseStartedAt < WEBSITE_SUPPORT_LEASE_MS) {
+        const connected = await waitForWebsiteSupportChannel(guild, ticket.id);
+        if (connected) return connected;
+        throw new Error('Website support channel provisioning is already in progress');
+    }
+
+    const previousChannelId = String(currentTicket.channel_id || '');
+    const leaseId = `web-provisioning-${Date.now()}-${process.pid}-${Math.random().toString(36).slice(2, 10)}`;
+    const claimed = db.prepare(`
+        UPDATE tickets SET channel_id = ?
+        WHERE id = ? AND channel_id = ? AND status = 'OPEN' AND support_source = 'WEBSITE_AI'
+    `).run(leaseId, ticket.id, previousChannelId);
+    if (claimed.changes !== 1) {
+        const connected = await waitForWebsiteSupportChannel(guild, ticket.id);
+        if (connected) return connected;
+        throw new Error('Website support channel provisioning was claimed by another process');
     }
 
     const { getGuildConfig } = await import('./guildConfigService.js');
@@ -101,19 +142,40 @@ async function provisionWebsiteSupportChannel({ client, ticket, contact, context
     const member = await guild.members.fetch(ticket.customer_id).catch(() => null);
     if (member) overwrites.push({ id: ticket.customer_id, allow: TICKET_MEMBER_PERMISSIONS });
 
-    const channel = await guild.channels.create({
-        name: `web-${ticket.ticket_code.toLowerCase().replace('_', '-')}`,
-        type: ChannelType.GuildText,
-        parent: guildConfig.support_category_id || guildConfig.ticket_category_id,
-        permissionOverwrites: overwrites,
-        reason: `Website AI support ${ticket.ticket_code}`,
-    });
-
+    const channelName = `web-${ticket.ticket_code.toLowerCase().replace('_', '-')}`;
+    let channel = null;
+    let persisted = false;
     try {
-        db.prepare(`UPDATE tickets SET channel_id = ?, support_source = 'WEBSITE_AI', last_activity_at = ? WHERE id = ?`)
-            .run(channel.id, nowIso(), ticket.id);
+        const channels = await guild.channels.fetch().catch(() => null);
+        channel = channels?.find((candidate) => candidate?.name === channelName && candidate.isTextBased()) || null;
+        if (!channel) {
+            channel = await guild.channels.create({
+                name: channelName,
+                type: ChannelType.GuildText,
+                parent: guildConfig.support_category_id || guildConfig.ticket_category_id,
+                permissionOverwrites: overwrites,
+                reason: `Website AI support ${ticket.ticket_code}`,
+            });
+        }
+
+        const saved = db.prepare(`
+            UPDATE tickets
+            SET channel_id = ?, support_source = 'WEBSITE_AI', last_activity_at = ?
+            WHERE id = ? AND channel_id = ?
+        `).run(channel.id, nowIso(), ticket.id, leaseId);
+        if (saved.changes !== 1) {
+            throw new Error('Website support provisioning lease was lost');
+        }
+        persisted = true;
     } catch (error) {
-        await channel.delete('Rollback website support channel after database update failure').catch(() => null);
+        if (channel && !persisted) {
+            const adoptedElsewhere = db.prepare('SELECT channel_id FROM tickets WHERE id = ?').get(ticket.id)?.channel_id === channel.id;
+            if (!adoptedElsewhere) {
+                await channel.delete('Rollback duplicate website support channel').catch(() => null);
+            }
+        }
+        db.prepare('UPDATE tickets SET channel_id = ? WHERE id = ? AND channel_id = ?')
+            .run(previousChannelId, ticket.id, leaseId);
         throw error;
     }
 

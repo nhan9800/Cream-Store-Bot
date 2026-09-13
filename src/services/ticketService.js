@@ -88,7 +88,17 @@ export function createTicket({
 const reserveWebsiteSupportTransaction = db.transaction(({ guildId, customerId, contact, clientRequestId }) => {
   if (clientRequestId) {
     const requested = getTicketByClientRequestIdStmt().get(clientRequestId);
-    if (requested) return { ticket: requested, reused: true };
+    if (
+      requested
+      && requested.status === 'OPEN'
+      && String(requested.guild_id) === String(guildId)
+      && String(requested.customer_id) === String(customerId)
+    ) {
+      return { ticket: requested, reused: true };
+    }
+    // A browser may retain an idempotency key after logout or after a ticket is
+    // closed. Never attach the new customer to that old ticket or reuse its key.
+    if (requested) clientRequestId = null;
   }
 
   const openTicket = getOpenWebsiteSupportStmt().get(guildId, customerId);
