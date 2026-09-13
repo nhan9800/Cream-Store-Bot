@@ -350,9 +350,11 @@ export async function publishDailyColorSale(client, { tagEveryone = true, tagMem
   }
 
   const { emojis, removed } = await syncDailyColorSaleEmojis(guild);
-  const recent = await channel.messages.fetch({ limit: 100 });
+  // Bài sale có thể đã trôi khỏi 100 tin gần nhất. Tìm trên toàn bộ lịch sử
+  // trước khi gửi để một lần restart/deploy không tạo thêm một bộ bảng giá.
+  const allMessages = await fetchAllMessages(channel);
   const existingParts = new Map();
-  for (const message of recent.values()) {
+  for (const message of allMessages) {
     const part = dailyColorSalePart(message, client.user.id);
     if (part && !existingParts.has(part)) existingParts.set(part, message);
   }
@@ -389,7 +391,6 @@ export async function publishDailyColorSale(client, { tagEveryone = true, tagMem
     });
   }
 
-  const allMessages = await fetchAllMessages(channel);
   let deletedOldMessages = 0;
   let preservedMemberMessages = 0;
   for (const message of allMessages) {
@@ -397,7 +398,7 @@ export async function publishDailyColorSale(client, { tagEveryone = true, tagMem
       preservedMemberMessages += 1;
       continue;
     }
-    if (activeMessageIds.has(message.id)) continue;
+    if (activeMessageIds.has(message.id) || !dailyColorSalePart(message, client.user.id)) continue;
     await message.delete();
     deletedOldMessages += 1;
   }

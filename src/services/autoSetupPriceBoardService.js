@@ -414,11 +414,22 @@ async function findPriceChannel(guild, guildConfig) {
 }
 
 async function hasCurrentPriceBoard(channel, botId) {
-  const messages = await channel.messages.fetch({ limit: 50 }).catch(() => null);
-  if (!messages) return false;
-  return messages.some((message) =>
-    message.author.id === botId && JSON.stringify(message.toJSON()).includes(PRICE_BOARD_VERSION)
-  );
+  let before;
+  for (let scanned = 0; scanned < 5000;) {
+    const messages = await channel.messages.fetch({
+      limit: Math.min(100, 5000 - scanned),
+      ...(before ? { before } : {}),
+    }).catch(() => null);
+    if (!messages?.size) return false;
+    if (messages.some((message) =>
+      message.author.id === botId && JSON.stringify(message.toJSON()).includes(PRICE_BOARD_VERSION)
+    )) return true;
+    const values = [...messages.values()];
+    scanned += values.length;
+    before = values.at(-1)?.id;
+    if (messages.size < 100) return false;
+  }
+  return false;
 }
 
 async function clearBotMessages(channel, botId, keepIds = new Set()) {
