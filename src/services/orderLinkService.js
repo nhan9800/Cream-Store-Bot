@@ -53,6 +53,14 @@ function discordIdFrom(row) {
   return /^\d{15,22}$/.test(customerId || '') ? customerId : null;
 }
 
+function isGeneratedDiscordName(value, discordId = null) {
+  const name = clean(value, 160);
+  if (!name) return true;
+  return name === String(discordId || '')
+    || /^discord\s+\d{15,22}$/i.test(name)
+    || /^khách\s*#\d{1,8}$/i.test(name);
+}
+
 function orderLinkRow(orderCode) {
   return db.prepare(`
     SELECT
@@ -100,6 +108,8 @@ function serializeOrderLink(row, { includeCredentials = false } = {}) {
   const serviceFamily = detectLinkedOrderService(productName, row.service_type);
   const durationMonths = Math.max(0, Number(row.duration_months || 0));
   const durationDays = row.duration_days == null ? null : Math.max(0, Number(row.duration_days || 0));
+  const discordId = discordIdFrom(row);
+  const storedCustomerName = clean(row.order_customer_name, 160);
   const serialized = {
     orderId: Number(row.id),
     orderCode: normalizeLinkedOrderCode(row.order_code),
@@ -109,11 +119,12 @@ function serializeOrderLink(row, { includeCredentials = false } = {}) {
     serviceFamily,
     suggestedYoutubePlan: serviceFamily === 'YOUTUBE' ? detectYoutubePlan(productName) : null,
     customerId: clean(row.customer_id, 80),
-    customerName: clean(row.order_customer_name, 160)
+    customerName: (!isGeneratedDiscordName(storedCustomerName, discordId) ? storedCustomerName : null)
       || clean(row.web_discord_username, 160)
       || clean(row.web_display_name, 160)
-      || (discordIdFrom(row) ? `Discord ${discordIdFrom(row)}` : null),
-    discordId: discordIdFrom(row),
+      || storedCustomerName
+      || (discordId ? `Discord ${discordId}` : null),
+    discordId,
     customerEmail: clean(row.customer_gmail, 240)
       || clean(row.web_google_email, 240)
       || clean(row.web_email, 240),
@@ -141,6 +152,34 @@ function serializeOrderLink(row, { includeCredentials = false } = {}) {
     credentialPassword: clean(decrypt(row.credential_password), 500),
     credentialProfile: clean(decrypt(row.credential_profile), 160),
   };
+}
+
+export async function hydrateOrderDiscordCustomer(client, order) {
+  const discordId = clean(order?.discordId, 30);
+  if (!client || !order || !/^\d{15,22}$/.test(discordId || '')) return order;
+
+  let member = null;
+  if (/^\d{15,22}$/.test(String(order.guildId || ''))) {
+    const guild = client.guilds?.cache?.get(String(order.guildId))
+      || await client.guilds?.fetch?.(String(order.guildId)).catch(() => null);
+    member = guild?.members?.cache?.get(discordId)
+      || await guild?.members?.fetch?.(discordId).catch(() => null);
+  }
+
+  const user = member?.user
+    || client.users?.cache?.get(discordId)
+    || await client.users?.fetch?.(discordId).catch(() => null);
+  const resolvedName = clean(member?.displayName || user?.globalName || user?.username, 160);
+  if (!resolvedName) return order;
+
+  if (resolvedName !== order.customerName) {
+    db.prepare(`
+      UPDATE orders
+      SET customer_name = ?, updated_at = CURRENT_TIMESTAMP
+      WHERE id = ?
+    `).run(resolvedName, order.orderId);
+  }
+  return { ...order, customerName: resolvedName };
 }
 
 export function resolveOrderLink(orderCode, {

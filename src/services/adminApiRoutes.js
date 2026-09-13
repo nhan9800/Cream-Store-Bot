@@ -14,7 +14,7 @@ import { createCoupon, listCoupons, deactivateCoupon } from './couponService.js'
 import * as subService from './subscriptionService.js';
 import { getAiKnowledge, updateAiKnowledge } from './aiKnowledgeService.js';
 import { transitionOrderStatus } from './orderStateMachine.js';
-import { OrderLinkError, resolveOrderLink } from './orderLinkService.js';
+import { hydrateOrderDiscordCustomer, OrderLinkError, resolveOrderLink } from './orderLinkService.js';
 import { encrypt, decrypt } from '../utils/crypto.js';
 import { sendCompletedFlow, updateOrderLogMessage } from './notificationService.js';
 import { syncPublishedFeedbackMessage } from './feedbackService.js';
@@ -503,13 +503,14 @@ export function registerAdminRoutes(app) {
   });
 
   // ==== 3. ORDERS ====
-  app.get('/api/bot/admin/order-links/:code', requireAdminRole, (req, res) => {
+  app.get('/api/bot/admin/order-links/:code', requireAdminRole, async (req, res) => {
     try {
-      const order = resolveOrderLink(req.params.code, {
+      let order = resolveOrderLink(req.params.code, {
         expectedService: req.query.service || null,
         guildId: config.guildId || null,
         includeCredentials: req.query.includeCredentials === '1',
       });
+      order = await hydrateOrderDiscordCustomer(req.app.locals.discordClient, order);
       if (req.query.includeCredentials === '1') validateSubscriptionOrderState(order);
       return res.json({ ok: true, data: order });
     } catch (error) {

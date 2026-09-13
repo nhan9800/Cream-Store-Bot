@@ -76,6 +76,7 @@ beforeAll(async () => {
     channel: 'spotify',
     product: 'Spotify Premium 3 Tháng',
     customerId: '123456789012345678',
+    customerName: 'Discord 123456789012345678',
     months: 3,
     amount: 150_000,
   });
