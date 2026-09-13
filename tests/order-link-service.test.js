@@ -8,10 +8,12 @@ let db;
 let orderLinks;
 let spotify;
 let youtube;
+let createSubscriptionHandler;
 const previousEnv = {
   ENV_FILE: process.env.ENV_FILE,
   DATABASE_PATH: process.env.DATABASE_PATH,
   ENCRYPTION_KEY: process.env.ENCRYPTION_KEY,
+  GUILD_ID: process.env.GUILD_ID,
 };
 
 function insertOrder({ code, channel, product, customerId, customerName = null, customerGmail = null, months, amount }) {
@@ -45,12 +47,25 @@ beforeAll(async () => {
   process.env.ENV_FILE = path.join(tempRoot, '.env.test');
   process.env.DATABASE_PATH = path.join(tempRoot, 'order-link.sqlite');
   process.env.ENCRYPTION_KEY = 'order-link-service-test-key';
+  process.env.GUILD_ID = 'TEST_GUILD';
   const database = await import('../src/database/db.js');
   db = database.db;
   database.initDatabase();
   orderLinks = await import('../src/services/orderLinkService.js');
   spotify = await import('../src/services/spotifyFamilyService.js');
   youtube = await import('../src/services/youtubeRenewalService.js');
+  const adminRoutes = await import('../src/services/adminApiRoutes.js');
+  const app = {
+    get() {},
+    put() {},
+    delete() {},
+    post(pathname, ...handlers) {
+      if (pathname === '/api/bot/admin/subscriptions') {
+        createSubscriptionHandler = handlers.at(-1);
+      }
+    },
+  };
+  adminRoutes.registerAdminRoutes(app);
 
   db.prepare(`
     INSERT INTO web_users (id, email, display_name, discord_id, discord_username, google_email, role)
@@ -104,6 +119,25 @@ describe('Order link service', () => {
     expect(order).not.toHaveProperty('credentialPassword');
   });
 
+  test('only exposes delivery credentials when an admin lookup explicitly requests them', () => {
+    const order = orderLinks.resolveOrderLink('CN_SPOTIFY_01', {
+      expectedService: 'SPOTIFY',
+      guildId: 'TEST_GUILD',
+      includeCredentials: true,
+    });
+    expect(order).toMatchObject({
+      credentialEmail: 'encrypted-delivery-email',
+      credentialPassword: 'encrypted-delivery-password',
+      startedAt: '2026-08-01T00:10:00.000Z',
+    });
+  });
+
+  test('detects every service supported by the subscription dashboard', () => {
+    expect(orderLinks.detectLinkedOrderService('Discord Nitro Boost 6 Tháng')).toBe('NITRO');
+    expect(orderLinks.detectLinkedOrderService('Netflix Premium 4K')).toBe('NETFLIX');
+    expect(orderLinks.detectLinkedOrderService('CapCut Pro 1 Tháng')).toBe('OTHER');
+  });
+
   test('autofills Spotify member fields from the linked order', () => {
     const family = spotify.createSpotifyFamily({
       guildId: 'TEST_GUILD',
@@ -146,4 +180,52 @@ describe('Order link service', () => {
     expect(() => orderLinks.resolveOrderLink('CN_SPOTIFY_01', { expectedService: 'YOUTUBE' }))
       .toThrow(/không phải đơn YouTube/i);
   });
+
+  test('creates one subscription from the confirmed Discord order and rejects a duplicate code', () => {
+    const request = {
+      body: {
+        serviceType: 'spotify',
+        renewalMode: 'auto_cycle',
+        gmailEmail: '',
+        gmailPassword: '',
+        relatedOrderCode: 'cn_spotify_01',
+        purchaseDate: '2020-01-01T00:00:00.000Z',
+        totalDurationMonths: 1,
+      },
+    };
+    const first = responseRecorder();
+    createSubscriptionHandler(request, first);
+    expect(first.statusCode).toBe(200);
+    expect(first.payload.ok).toBe(true);
+
+    const saved = db.prepare('SELECT * FROM subscription_accounts WHERE related_order_code = ?').get('CN_SPOTIFY_01');
+    expect(saved).toMatchObject({
+      service_type: 'spotify',
+      gmail_email: 'encrypted-delivery-email',
+      customer_id: '123456789012345678',
+      customer_discord_name: 'discord.customer',
+      purchase_date: '2026-08-01T00:10:00.000Z',
+      total_duration_months: 3,
+    });
+
+    const duplicate = responseRecorder();
+    createSubscriptionHandler(request, duplicate);
+    expect(duplicate.statusCode).toBe(409);
+    expect(duplicate.payload).toMatchObject({ ok: false, code: 'ORDER_ALREADY_LINKED' });
+  });
 });
+
+function responseRecorder() {
+  return {
+    statusCode: 200,
+    payload: null,
+    status(code) {
+      this.statusCode = code;
+      return this;
+    },
+    json(payload) {
+      this.payload = payload;
+      return this;
+    },
+  };
+}

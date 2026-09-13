@@ -1,6 +1,7 @@
 import { db } from '../database/db.js';
+import { decrypt } from '../utils/crypto.js';
 
-const SUPPORTED_SERVICES = new Set(['SPOTIFY', 'YOUTUBE']);
+const SUPPORTED_SERVICES = new Set(['NITRO', 'SPOTIFY', 'YOUTUBE', 'NETFLIX', 'OTHER']);
 
 export class OrderLinkError extends Error {
   constructor(message, code = 'ORDER_LINK_INVALID') {
@@ -31,6 +32,8 @@ export function detectLinkedOrderService(productName, serviceType = '') {
   const haystack = searchable(`${productName || ''} ${serviceType || ''}`);
   if (haystack.includes('spotify')) return 'SPOTIFY';
   if (haystack.includes('youtube') || haystack.includes('you tube')) return 'YOUTUBE';
+  if (haystack.includes('netflix')) return 'NETFLIX';
+  if (haystack.includes('nitro')) return 'NITRO';
   return 'OTHER';
 }
 
@@ -72,7 +75,11 @@ function orderLinkRow(orderCode) {
       o.created_at,
       o.paid_at,
       o.completed_at,
+      o.delivered_at,
       o.expiry_at,
+      o.credential_email,
+      o.credential_password,
+      o.credential_profile,
       u.display_name AS web_display_name,
       u.discord_username AS web_discord_username,
       u.discord_id AS web_discord_id,
@@ -88,12 +95,12 @@ function orderLinkRow(orderCode) {
   `).get(orderCode) || null;
 }
 
-function serializeOrderLink(row) {
+function serializeOrderLink(row, { includeCredentials = false } = {}) {
   const productName = clean(row.product_name, 300) || 'Sản phẩm chưa đặt tên';
   const serviceFamily = detectLinkedOrderService(productName, row.service_type);
   const durationMonths = Math.max(0, Number(row.duration_months || 0));
   const durationDays = row.duration_days == null ? null : Math.max(0, Number(row.duration_days || 0));
-  return {
+  const serialized = {
     orderId: Number(row.id),
     orderCode: normalizeLinkedOrderCode(row.order_code),
     guildId: String(row.guild_id || ''),
@@ -118,7 +125,7 @@ function serializeOrderLink(row) {
     orderStatus: clean(row.status, 60),
     paymentStatus: clean(row.payment_status, 60),
     createdAt: row.created_at || null,
-    startedAt: row.paid_at || row.completed_at || row.created_at || null,
+    startedAt: row.delivered_at || row.completed_at || row.paid_at || row.created_at || null,
     completedAt: row.completed_at || null,
     expiresAt: row.expiry_at || null,
     existingLinks: {
@@ -126,16 +133,28 @@ function serializeOrderLink(row) {
       youtube: Math.max(0, Number(row.youtube_link_count || 0)),
     },
   };
+  if (!includeCredentials) return serialized;
+
+  return {
+    ...serialized,
+    credentialEmail: clean(decrypt(row.credential_email), 240),
+    credentialPassword: clean(decrypt(row.credential_password), 500),
+    credentialProfile: clean(decrypt(row.credential_profile), 160),
+  };
 }
 
-export function resolveOrderLink(orderCode, { expectedService = null, guildId = null } = {}) {
+export function resolveOrderLink(orderCode, {
+  expectedService = null,
+  guildId = null,
+  includeCredentials = false,
+} = {}) {
   const normalizedCode = normalizeLinkedOrderCode(orderCode);
   if (!normalizedCode) throw new OrderLinkError('Hãy nhập mã đơn cần liên kết.', 'ORDER_CODE_REQUIRED');
 
   const row = orderLinkRow(normalizedCode);
   if (!row) throw new OrderLinkError(`Không tìm thấy mã đơn ${normalizedCode} trong dữ liệu bot.`, 'ORDER_NOT_FOUND');
 
-  const order = serializeOrderLink(row);
+  const order = serializeOrderLink(row, { includeCredentials });
   if (guildId && ![String(guildId), 'WEB'].includes(order.guildId)) {
     throw new OrderLinkError('Mã đơn không thuộc cửa hàng Discord hiện tại.', 'ORDER_WRONG_STORE');
   }
@@ -145,7 +164,13 @@ export function resolveOrderLink(orderCode, { expectedService = null, guildId = 
     throw new OrderLinkError('Loại liên kết mã đơn không được hỗ trợ.', 'ORDER_SERVICE_INVALID');
   }
   if (normalizedExpected && order.serviceFamily !== normalizedExpected) {
-    const expectedLabel = normalizedExpected === 'SPOTIFY' ? 'Spotify' : 'YouTube';
+    const expectedLabel = {
+      NITRO: 'Discord Nitro',
+      SPOTIFY: 'Spotify',
+      YOUTUBE: 'YouTube',
+      NETFLIX: 'Netflix',
+      OTHER: 'dịch vụ khác',
+    }[normalizedExpected];
     throw new OrderLinkError(
       `Mã ${normalizedCode} là đơn “${order.productName}”, không phải đơn ${expectedLabel}.`,
       'ORDER_SERVICE_MISMATCH',

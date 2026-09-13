@@ -206,10 +206,97 @@ export function registerAdminRoutes(app) {
     }
     const status = error.code === 'ORDER_NOT_FOUND'
       ? 404
-      : ['ORDER_SERVICE_MISMATCH', 'ORDER_WRONG_STORE'].includes(error.code)
+      : [
+          'ORDER_SERVICE_MISMATCH',
+          'ORDER_WRONG_STORE',
+          'ORDER_CANCELLED',
+          'ORDER_NOT_PAID',
+          'ORDER_ALREADY_LINKED',
+        ].includes(error.code)
         ? 409
         : 400;
     return res.status(status).json({ ok: false, error: error.message, code: error.code });
+  }
+
+  function linkedServiceForSubscription(serviceType) {
+    const normalized = String(serviceType || '').trim().toLowerCase();
+    if (normalized === 'nitro') return 'NITRO';
+    if (normalized === 'spotify') return 'SPOTIFY';
+    if (normalized === 'youtube') return 'YOUTUBE';
+    if (normalized === 'netflix') return 'NETFLIX';
+    return 'OTHER';
+  }
+
+  function subscriptionServiceFromOrder(order) {
+    return {
+      NITRO: 'nitro',
+      SPOTIFY: 'spotify',
+      YOUTUBE: 'youtube',
+      NETFLIX: 'netflix',
+      OTHER: 'other',
+    }[order.serviceFamily] || 'other';
+  }
+
+  function validateSubscriptionOrderState(order) {
+    const paymentStatus = String(order.paymentStatus || '').toUpperCase();
+    const orderStatus = String(order.orderStatus || '').toUpperCase();
+    if (orderStatus === 'CANCELLED') {
+      throw new OrderLinkError('Đơn Discord này đã bị hủy.', 'ORDER_CANCELLED');
+    }
+    if (!['PAID', 'FREE'].includes(paymentStatus)) {
+      throw new OrderLinkError('Đơn Discord này chưa được xác nhận thanh toán.', 'ORDER_NOT_PAID');
+    }
+  }
+
+  function resolveSubscriptionOrder(body, { existingId = null, required = false } = {}) {
+    const relatedOrderCode = String(body.relatedOrderCode || '').trim();
+    if (!relatedOrderCode) {
+      if (required) {
+        throw new OrderLinkError(
+          'Hãy nhập và xác nhận mã đơn Discord trước khi tạo hồ sơ.',
+          'ORDER_CODE_REQUIRED',
+        );
+      }
+      return null;
+    }
+
+    const order = resolveOrderLink(relatedOrderCode, {
+      expectedService: linkedServiceForSubscription(body.serviceType),
+      guildId: config.guildId || null,
+      includeCredentials: true,
+    });
+    validateSubscriptionOrderState(order);
+
+    const duplicate = db.prepare(`
+      SELECT id FROM subscription_accounts
+      WHERE UPPER(TRIM(related_order_code)) = ?
+      ORDER BY id DESC
+      LIMIT 1
+    `).get(order.orderCode);
+    if (duplicate && Number(duplicate.id) !== Number(existingId)) {
+      throw new OrderLinkError(
+        `Mã đơn ${order.orderCode} đã được gắn với hồ sơ gia hạn #${duplicate.id}.`,
+        'ORDER_ALREADY_LINKED',
+      );
+    }
+
+    const duration = order.durationMonths > 0
+      ? order.durationMonths
+      : Math.max(1, Number(body.totalDurationMonths || 1));
+    return {
+      ...body,
+      serviceType: subscriptionServiceFromOrder(order),
+      relatedOrderCode: order.orderCode,
+      gmailEmail: order.credentialEmail || body.gmailEmail,
+      gmailPassword: order.credentialPassword || body.gmailPassword,
+      customerId: order.discordId || order.customerId || body.customerId || null,
+      customerDiscordName: order.customerName || body.customerDiscordName || null,
+      purchaseDate: order.startedAt || body.purchaseDate,
+      totalDurationMonths: duration,
+      spotifyFamilyName: order.serviceFamily === 'SPOTIFY'
+        ? (order.credentialProfile || body.spotifyFamilyName || null)
+        : (body.spotifyFamilyName || null),
+    };
   }
 
   // ==== 1. DASHBOARD STATS ====
@@ -421,7 +508,9 @@ export function registerAdminRoutes(app) {
       const order = resolveOrderLink(req.params.code, {
         expectedService: req.query.service || null,
         guildId: config.guildId || null,
+        includeCredentials: req.query.includeCredentials === '1',
       });
+      if (req.query.includeCredentials === '1') validateSubscriptionOrderState(order);
       return res.json({ ok: true, data: order });
     } catch (error) {
       return sendOrderLinkError(res, error);
@@ -1121,6 +1210,7 @@ const fetchWithTimeout = (promise, ms) => {
 
   app.post('/api/bot/admin/subscriptions', requireAdminRole, (req, res) => {
     try {
+      const linkedInput = resolveSubscriptionOrder(req.body, { required: true });
       const {
         serviceType,
         renewalMode,
@@ -1135,7 +1225,7 @@ const fetchWithTimeout = (promise, ms) => {
         spotifyFamilyName,
         spotifySlotsUsed,
         note
-      } = req.body;
+      } = linkedInput;
 
       if (!gmailEmail || !gmailPassword || !purchaseDate) {
         return res.status(400).json({ ok: false, error: 'Thiếu email, mật khẩu hoặc ngày mua' });
@@ -1167,6 +1257,7 @@ const fetchWithTimeout = (promise, ms) => {
 
       res.json({ ok: true, data: newSub });
     } catch (e) {
+      if (e instanceof OrderLinkError) return sendOrderLinkError(res, e);
       console.error('[ADMIN]', e); res.status(500).json({ ok: false, error: 'Lỗi máy chủ nội bộ.' });
     }
   });
@@ -1198,6 +1289,17 @@ const fetchWithTimeout = (promise, ms) => {
       if (!existing) {
         return res.status(404).json({ ok: false, error: 'Không tìm thấy tài khoản gia hạn' });
       }
+
+      const linkedInput = resolveSubscriptionOrder(req.body, { existingId: id });
+      const resolvedServiceType = linkedInput?.serviceType || serviceType;
+      const resolvedGmailEmail = linkedInput?.gmailEmail || gmailEmail;
+      const resolvedGmailPassword = linkedInput?.gmailPassword ?? gmailPassword;
+      const resolvedCustomerId = linkedInput?.customerId || customerId;
+      const resolvedCustomerDiscordName = linkedInput?.customerDiscordName || customerDiscordName;
+      const resolvedOrderCode = linkedInput?.relatedOrderCode || relatedOrderCode;
+      const resolvedPurchaseDate = linkedInput?.purchaseDate || purchaseDate;
+      const resolvedDuration = linkedInput?.totalDurationMonths || totalDurationMonths;
+      const resolvedSpotifyFamilyName = linkedInput?.spotifyFamilyName || spotifyFamilyName;
 
       db.prepare(`
         UPDATE subscription_accounts
@@ -1231,21 +1333,21 @@ const fetchWithTimeout = (promise, ms) => {
             updated_at = CURRENT_TIMESTAMP
          WHERE id = ?
       `).run(
-        serviceType || 'nitro',
+        resolvedServiceType || 'nitro',
         renewalMode || 'auto_cycle',
-        gmailEmail,
-        gmailPassword != null ? encrypt(gmailPassword) : existing.gmail_password,
-        customerId || null,
-        customerDiscordName || null,
-        relatedOrderCode || null,
-        purchaseDate,
-        Number(totalDurationMonths),
+        resolvedGmailEmail,
+        resolvedGmailPassword != null ? encrypt(resolvedGmailPassword) : existing.gmail_password,
+        resolvedCustomerId || null,
+        resolvedCustomerDiscordName || null,
+        resolvedOrderCode || null,
+        resolvedPurchaseDate,
+        Number(resolvedDuration),
         subService.getDefaultRenewalCycleMonths(
-          serviceType || existing.service_type || 'nitro',
-          Number(totalDurationMonths || existing.total_duration_months || 1),
+          resolvedServiceType || existing.service_type || 'nitro',
+          Number(resolvedDuration || existing.total_duration_months || 1),
           renewalMode || existing.renewal_mode || 'auto_cycle',
         ),
-        spotifyFamilyName || null,
+        resolvedSpotifyFamilyName || null,
         Number(spotifySlotsUsed || 0),
         note || null,
         status || 'ACTIVE',
@@ -1258,6 +1360,7 @@ const fetchWithTimeout = (promise, ms) => {
       const updated = subService.getSubscriptionById(id);
       res.json({ ok: true, data: updated });
     } catch (e) {
+      if (e instanceof OrderLinkError) return sendOrderLinkError(res, e);
       console.error('[ADMIN]', e); res.status(500).json({ ok: false, error: 'Lỗi máy chủ nội bộ.' });
     }
   });
