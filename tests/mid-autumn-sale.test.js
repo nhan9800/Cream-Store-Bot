@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { MessageFlags } from 'discord.js';
 import {
   MID_AUTUMN_SALE,
+  buildMidAutumnSaleAnnouncement,
   buildMidAutumnSaleMessages,
   buildMidAutumnSaleSections,
   isStaleCampaignEmojiName,
@@ -78,6 +79,20 @@ describe('Mid-Autumn 2026 sale campaign', () => {
     const actionRow = finalPanel.components.at(-1);
     expect(actionRow.components).toHaveLength(3);
     expect(actionRow.components.every((button) => button.emoji?.id)).toBe(true);
+  });
+
+  it('sends one explicit notification with both everyone and the largest member role', () => {
+    const payload = buildMidAutumnSaleAnnouncement({
+      priceBoardMessageId: '1549749951221862572',
+      customEmojis,
+    });
+    expect(payload.content).toContain('@everyone');
+    expect(payload.content).toContain(`<@&${MID_AUTUMN_SALE.memberRoleId}>`);
+    expect(payload.content).toContain(MID_AUTUMN_SALE.announcementMarker);
+    expect(payload.content).toContain('/1549749951221862572');
+    expect(payload.allowedMentions.parse).toEqual(['everyone']);
+    expect(payload.allowedMentions.roles).toEqual([MID_AUTUMN_SALE.memberRoleId]);
+    expect(payload.content).not.toMatch(NATIVE_EMOJI);
   });
 
   it('cleans prior event-only emoji names without touching the current set', () => {

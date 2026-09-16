@@ -25,6 +25,7 @@ export const MID_AUTUMN_SALE = Object.freeze({
   memberRoleId: '1282638730812854345',
   storeUrl: 'https://cenarstore.xyz/products',
   marker: 'CENAR-MID-AUTUMN-SALE-2026',
+  announcementMarker: 'CENAR-MID-AUTUMN-SALE-2026-ANNOUNCEMENT',
   campaignName: 'Hội Trăng Cenar',
 });
 
@@ -283,6 +284,33 @@ export function buildMidAutumnSaleMessages({
   ];
 }
 
+export function buildMidAutumnSaleAnnouncement({
+  guildId = MID_AUTUMN_SALE.guildId,
+  priceBoardMessageId,
+  customEmojis = {},
+} = {}) {
+  if (!/^\d{15,22}$/.test(String(priceBoardMessageId || ''))) {
+    throw new Error('Thiếu ID bài bảng giá Trung Thu để gắn vào thông báo.');
+  }
+  const rabbit = campaignIcon(customEmojis, 'cenar_moonfest_rabbit', '');
+  const lantern = campaignIcon(customEmojis, 'cenar_moonfest_lantern', '');
+  const boardUrl = `https://discord.com/channels/${guildId}/${MID_AUTUMN_SALE.promotionChannelId}/${priceBoardMessageId}`;
+  return {
+    content: [
+      `@everyone · <@&${MID_AUTUMN_SALE.memberRoleId}>`,
+      `${rabbit} **HỘI TRĂNG CENAR ĐÃ MỞ — BẢNG GIÁ TRUNG THU MỚI ĐÃ LÊN SÓNG!** ${lantern}`,
+      `Nitro, Boost Server, AI, giải trí, Meitu và Duolingo đều có trong [bảng giá sự kiện](${boardUrl}). Mở ticket để shop tư vấn đúng gói trước khi thanh toán.`,
+      `-# ${MID_AUTUMN_SALE.announcementMarker}`,
+    ].join('\n'),
+    allowedMentions: {
+      parse: ['everyone'],
+      roles: [MID_AUTUMN_SALE.memberRoleId],
+      users: [],
+      repliedUser: false,
+    },
+  };
+}
+
 export function midAutumnSalePart(message, botId = null) {
   if (!message || (botId && message.author?.id !== botId)) return null;
   const serialized = JSON.stringify(message.toJSON?.() || message);
@@ -362,6 +390,20 @@ export async function publishMidAutumnSale(client, { tagEveryone = true, tagMemb
     });
   }
 
+  const priorAnnouncement = allMessages.find((message) =>
+    message.author?.id === client.user.id
+    && String(message.content || '').includes(MID_AUTUMN_SALE.announcementMarker)
+  );
+  let announcement = priorAnnouncement;
+  if (!announcement && tagEveryone && tagMember) {
+    announcement = await channel.send(buildMidAutumnSaleAnnouncement({
+      guildId: guild.id,
+      priceBoardMessageId: results[0].messageId,
+      customEmojis: emojis,
+    }));
+  }
+  if (announcement) activeMessageIds.add(announcement.id);
+
   // Sau khi cả ba phần mới đã tồn tại an toàn, xoá mọi bài cũ của bot trong
   // kênh khuyến mãi. Tin nhắn do thành viên gửi luôn được giữ nguyên.
   let deletedOldMessages = 0;
@@ -382,6 +424,13 @@ export async function publishMidAutumnSale(client, { tagEveryone = true, tagMemb
     emojis,
     removedEventEmojis: removed,
     messages: results,
+    announcement: announcement ? {
+      action: priorAnnouncement ? 'reused' : 'created',
+      messageId: announcement.id,
+      url: `https://discord.com/channels/${guild.id}/${channel.id}/${announcement.id}`,
+      mentionEveryone: announcement.mentions.everyone,
+      mentionedMemberRole: announcement.mentions.roles.has(MID_AUTUMN_SALE.memberRoleId),
+    } : null,
     deletedOldMessages,
     preservedMemberMessages,
   };
