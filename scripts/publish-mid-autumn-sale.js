@@ -12,7 +12,7 @@ try {
   const ready = new Promise((resolve) => client.once(Events.ClientReady, resolve));
   await client.login(process.env.BOT_TOKEN);
   await ready;
-  const result = await publishMidAutumnSale(client, { tagEveryone: true });
+  const result = await publishMidAutumnSale(client, { tagEveryone: true, tagMember: true });
   console.log(JSON.stringify(result, null, 2));
 } finally {
   client.destroy();

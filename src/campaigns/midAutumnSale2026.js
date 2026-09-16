@@ -22,16 +22,16 @@ export const MID_AUTUMN_SALE = Object.freeze({
   promotionChannelId: '1515008584549797979',
   supportChannelId: '1514607020098191393',
   priceChannelId: '1514606995842273280',
+  memberRoleId: '1282638730812854345',
   storeUrl: 'https://cenarstore.xyz/products',
   marker: 'CENAR-MID-AUTUMN-SALE-2026',
-  eventDate: '25/09/2026',
-  campaignName: 'Nguyệt Thỏ Du Hành',
+  campaignName: 'Hội Trăng Cenar',
 });
 
 export const MID_AUTUMN_SALE_EMOJIS = Object.freeze([
-  Object.freeze({ name: 'cenar_event_moon', fileName: 'cenar_event_moon.png' }),
-  Object.freeze({ name: 'cenar_event_mooncake', fileName: 'cenar_event_mooncake.png' }),
-  Object.freeze({ name: 'cenar_event_lantern', fileName: 'cenar_event_lantern.png' }),
+  Object.freeze({ name: 'cenar_moonfest_rabbit', fileName: 'cenar_moonfest_rabbit.png' }),
+  Object.freeze({ name: 'cenar_moonfest_cake', fileName: 'cenar_moonfest_cake.png' }),
+  Object.freeze({ name: 'cenar_moonfest_lantern', fileName: 'cenar_moonfest_lantern.png' }),
 ]);
 
 // Chỉ những emoji từng được tạo riêng cho một chiến dịch đã kết thúc mới nằm
@@ -47,7 +47,9 @@ const currentEmojiNames = new Set(MID_AUTUMN_SALE_EMOJIS.map((asset) => asset.na
 export function isStaleCampaignEmojiName(name) {
   const normalized = String(name || '').toLowerCase();
   return LEGACY_EVENT_EMOJI_NAMES.includes(normalized)
-    || (normalized.startsWith('cenar_event_') && !currentEmojiNames.has(normalized));
+    || normalized.startsWith('cenar_daily_')
+    || normalized.startsWith('cenar_event_')
+    || (normalized.startsWith('cenar_moonfest_') && !currentEmojiNames.has(normalized));
 }
 
 function assetPath(asset) {
@@ -128,93 +130,89 @@ export function buildMidAutumnSaleSections({
   E = createEmojiResolver(guildId),
   customEmojis = {},
 } = {}) {
-  const moon = campaignIcon(customEmojis, 'cenar_event_moon', E('cenar_verified'));
-  const mooncake = campaignIcon(customEmojis, 'cenar_event_mooncake', E('icon_price'));
-  const lantern = campaignIcon(customEmojis, 'cenar_event_lantern', E('cenar_announce'));
+  const rabbit = campaignIcon(customEmojis, 'cenar_moonfest_rabbit', E('cenar_verified'));
+  const mooncake = campaignIcon(customEmojis, 'cenar_moonfest_cake', E('icon_price'));
+  const lantern = campaignIcon(customEmojis, 'cenar_moonfest_lantern', E('cenar_announce'));
 
   return {
     hero: [
-      `# ${moon} ${MID_AUTUMN_SALE.campaignName.toUpperCase()}`,
-      `## ${lantern} MID-AUTUMN SALE · ${MID_AUTUMN_SALE.eventDate}`,
-      '> Khi ánh trăng lên, một mùa ưu đãi mới cũng vừa cập bến Cenar Store.',
-      '> Lấy cảm hứng từ những bộ sưu tập giới hạn theo mùa, Cenar ra mắt bộ nhận diện **Thỏ Ngọc · Bánh Trăng · Lồng Đèn** dành riêng cho đêm hội năm nay.',
-      '',
-      `${mooncake} **Mở hội trăng · chạm giá tốt · chọn đúng gói cho nhu cầu của bạn.**`,
-      `-# ${MID_AUTUMN_SALE.marker}-PART-1 · Áp dụng từ khi đăng đến khi shop công bố kết thúc hoặc hết số lượng từng gói.`,
+      `# ${rabbit} ${MID_AUTUMN_SALE.campaignName.toUpperCase()}`,
+      `## ${lantern} TRĂNG LÊN · GIÁ XUỐNG`,
+      '> Cenar khoác sắc ngọc, thắp đèn vàng và mở mâm ưu đãi công nghệ mùa Trung Thu.',
+      `${mooncake} **Chọn gói ưng ý · xem rõ giá và bảo hành · mở ticket để shop chốt đơn.**`,
+      `-# ${MID_AUTUMN_SALE.marker}-PART-1 · Bảng giá sự kiện Trung Thu 2026; áp dụng đến khi shop công bố cập nhật hoặc hết số lượng.`,
     ].join('\n'),
     nitro: [
       `## ${E('brand_nitro')} NITRO BOOST LOGIN`,
       `${mooncake} \`01 tháng\` — **85.000đ**`,
-      `${mooncake} \`02 tháng · xử lý 4–5 ngày\` — **99.000đ**`,
-      `${mooncake} \`02 tháng · có liền\` — **115.000đ**`,
-      `${mooncake} \`04 tháng · có liền\` — **210.000đ**`,
-      `${mooncake} \`06 tháng · có liền\` — **310.000đ**`,
+      `${mooncake} \`02 tháng · có liền\` — **99.000đ / 115.000đ**`,
+      `${mooncake} \`04 tháng · có liền\` — **220.000đ**`,
+      `${mooncake} \`06 tháng · có liền\` — **350.000đ**`,
       `${mooncake} \`08 tháng · có liền\` — **450.000đ**`,
       `${mooncake} \`12 tháng · có liền · gia hạn tự động\` — **550.000đ**`,
       `${mooncake} \`12 tháng · mua thẳng 01 năm · có liền\` — **800.000đ**`,
-      `${moon} **Nitro Trial Boost** · \`03 tháng\` — **55.000đ**`,
-      `-# ${E('status_info')} Nitro Trial cần được shop kiểm tra điều kiện tài khoản trước khi nhận thanh toán.`,
+      `${rabbit} **Trial Boost** · \`03 tháng\` — **55.000đ**`,
+      `-# ${lantern} Hai mức giá gói 02 tháng và điều kiện Trial được shop xác nhận tại ticket trước khi thanh toán.`,
     ].join('\n'),
-    boostNetflix: [
+    boost: [
       `## ${E('brand_boost')} BOOST SERVER · NÂNG CẤP MÁY CHỦ`,
       `${lantern} \`01 tháng\` — **100.000đ**`,
       `${lantern} \`03 tháng\` — **250.000đ**`,
-      '',
-      `## ${E('brand_netflix')} NETFLIX PREMIUM · 4K PRIVATE`,
-      `${lantern} \`01 tháng\` — **30.000đ**`,
-      `${lantern} \`02 tháng\` — **50.000đ**`,
-      `-# ${E('status_info')} Số lượng và hình thức bàn giao Netflix được xác nhận tại ticket trước khi thanh toán.`,
     ].join('\n'),
     productivityHeader: [
-      `# ${mooncake} TIỆC TRĂNG · AI & CÔNG CỤ BẢN QUYỀN`,
-      '> Chọn đúng thời hạn, nắm rõ chính sách hỗ trợ và nhận tư vấn trước khi chốt đơn.',
+      `# ${mooncake} MÂM TRĂNG 02 · AI & CÔNG CỤ BẢN QUYỀN`,
+      '> Làm việc và sáng tạo trọn mùa trăng — chọn đúng thời hạn, xem rõ bảo hành.',
       `-# ${MID_AUTUMN_SALE.marker}-PART-2`,
     ].join('\n'),
     geminiOffice: [
       `## ${E('brand_gemini')} GEMINI PRO + GOOGLE ONE 5 TB`,
-      `${mooncake} \`12 tháng\` — **200.000đ** · **Full bảo hành**`,
-      `${mooncake} \`18 tháng\` — **250.000đ** · **Full bảo hành**`,
+      `${mooncake} \`12 tháng\` — **119.000đ**`,
+      `${mooncake} \`18 tháng\` — **150.000đ**`,
       '',
       `## ${E('brand_office')} OFFICE 365 + ONEDRIVE 1 TB`,
-      `${mooncake} \`12 tháng\` — **190.000đ**`,
+      `${mooncake} \`12 tháng\` — **180.000đ**`,
     ].join('\n'),
     chatgptCapcut: [
-      `## ${E('brand_chatgpt')} CHATGPT PLUS · THANH TOÁN MOMO`,
+      `## ${E('brand_chatgpt')} CHATGPT PLUS · MOMO PAY`,
       `${lantern} \`01 tháng\` — **150.000đ** · **Bảo hành 02 ngày**`,
-      `${lantern} \`Add Team chính chủ · không bảo hành\` — **390.000đ**`,
-      `-# ${E('status_info')} Tỷ lệ lỗi nguồn MoMo Pay shop ghi nhận ở mức khoảng 2%; đây là số liệu tham khảo, không phải cam kết tuyệt đối.`,
+      `${lantern} \`01 tháng · add Team chính chủ\` — **390.000đ** · **Không bảo hành**`,
+      `${lantern} \`12 tháng Plus · cấp tài khoản\` — **1.900.000đ**`,
+      `-# ${lantern} Nguồn MoMo Pay có tỷ lệ lỗi shop ghi nhận khoảng 2%; số liệu tham khảo, không phải cam kết tuyệt đối.`,
       '',
       `## ${E('brand_capcut')} CAPCUT PRO`,
       `${lantern} \`01 tháng\` — **55.000đ**`,
-      `${lantern} \`06 tháng\` — **305.000đ**`,
+      `${lantern} \`06 tháng\` — **295.000đ**`,
     ].join('\n'),
     entertainmentHeader: [
-      `# ${moon} ĐÊM TRĂNG GIẢI TRÍ · ƯU ĐÃI DÀI HẠN`,
-      '> Một lần chọn gói, nhiều tháng tận hưởng — mọi điều kiện đều được báo rõ trước khi thanh toán.',
+      `# ${rabbit} MÂM TRĂNG 03 · GIẢI TRÍ & HỌC TẬP`,
+      '> Một mùa hội, nhiều lựa chọn — giá gọn, điều kiện rõ, có người tư vấn.',
       `-# ${MID_AUTUMN_SALE.marker}-PART-3`,
     ].join('\n'),
     spotifyYoutube: [
       `## ${E('brand_spotify')} SPOTIFY PREMIUM`,
-      `${mooncake} \`03 tháng\` — **95.000đ**`,
+      `${mooncake} \`03 tháng\` — **90.000đ**`,
       `${mooncake} \`06 tháng\` — **180.000đ**`,
       `${mooncake} \`12 tháng\` — **280.000đ**`,
       '',
       `## ${E('brand_youtube')} YOUTUBE PREMIUM · DÒNG ỔN ĐỊNH`,
-      `${lantern} \`01 tháng\` — **65.000đ**`,
-      `${lantern} \`03 tháng\` — **185.000đ**`,
-      `${lantern} \`06 tháng\` — **295.000đ**`,
-      `${lantern} \`12 tháng\` — **530.000đ**`,
+      `${lantern} \`01 tháng\` — **56.000đ**`,
+      `${lantern} \`03 tháng\` — **180.000đ**`,
+      `${lantern} \`06 tháng\` — **285.000đ**`,
+      `${lantern} \`12 tháng\` — **500.000đ**`,
     ].join('\n'),
-    canvaClosing: [
-      `## ${E('brand_canva') || E('icon_art')} CANVA PRO`,
-      `${mooncake} \`12 tháng · không bảo hành\` — **150.000đ**`,
+    extrasClosing: [
+      `## ${mooncake} MEITU · CHỈNH ẢNH MÙA TRĂNG`,
+      `${mooncake} **Meitu SVIP** · \`07 ngày\` — **35.000đ**`,
+      `${mooncake} **Meitu VIP** · \`07 ngày\` — **20.000đ**`,
       '',
-      `## ${lantern} CÒN NHIỀU SẢN PHẨM KHÁC ĐANG CÓ GIÁ ƯU ĐÃI`,
-      `${E('status_check')} Mở ticket để shop kiểm tra tồn kho, điều kiện tài khoản và thời gian xử lý thực tế.`,
-      `${E('warranty_shield')} Chính sách bảo hành áp dụng đúng theo từng dòng sản phẩm ghi trong bài và trên đơn hàng.`,
-      `${E('cenar_support')} Không gửi mật khẩu, mã OTP hoặc thông tin thanh toán tại kênh công khai.`,
+      `## ${rabbit} DUOLINGO SUPER · LINK`,
+      `${rabbit} \`12 tháng\` — **85.000đ** · **Bảo hành 06 tháng**`,
       '',
-      `> ${moon} **Cenar Store chúc mọi người một mùa Trung Thu đủ đầy, ấm áp và luôn có người đồng hành dưới ánh trăng.**`,
+      `## ${lantern} CÒN NHIỀU SẢN PHẨM KHÁC GIÁ ƯU ĐÃI`,
+      `${mooncake} Mở ticket để shop xác nhận tồn kho, điều kiện tài khoản và thời gian xử lý.`,
+      `${lantern} Chính sách bảo hành theo đúng từng gói; không gửi mật khẩu hoặc OTP tại kênh công khai.`,
+      '',
+      `> ${rabbit} **Rước trăng cùng Cenar · chọn đúng gói · vui trọn mùa hội.**`,
     ].join('\n'),
   };
 }
@@ -224,31 +222,36 @@ export function buildMidAutumnSaleMessages({
   E = createEmojiResolver(guildId),
   customEmojis = {},
   tagEveryone = true,
+  tagMember = true,
 } = {}) {
   const sections = buildMidAutumnSaleSections({ guildId, E, customEmojis });
   const supportUrl = `https://discord.com/channels/${guildId}/${MID_AUTUMN_SALE.supportChannelId}`;
   const priceUrl = `https://discord.com/channels/${guildId}/${MID_AUTUMN_SALE.priceChannelId}`;
-  const moonButtonEmoji = customEmojis?.cenar_event_moon?.component;
-  const cakeButtonEmoji = customEmojis?.cenar_event_mooncake?.component;
-  const lanternButtonEmoji = customEmojis?.cenar_event_lantern?.component;
+  const rabbitButtonEmoji = customEmojis?.cenar_moonfest_rabbit?.component;
+  const cakeButtonEmoji = customEmojis?.cenar_moonfest_cake?.component;
+  const lanternButtonEmoji = customEmojis?.cenar_moonfest_lantern?.component;
 
   const supportButton = withButtonEmoji(
-    new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('Mở Ticket Chốt Sale').setURL(supportUrl),
-    moonButtonEmoji,
+    new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('Mở Ticket Chốt Đơn').setURL(supportUrl),
+    rabbitButtonEmoji,
     E.component?.('ticket_open'),
   );
   const storeButton = withButtonEmoji(
-    new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('Xem Thêm Sản Phẩm').setURL(MID_AUTUMN_SALE.storeUrl),
+    new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('Xem Shop Cenar').setURL(MID_AUTUMN_SALE.storeUrl),
     cakeButtonEmoji,
     E.component?.('icon_store'),
   );
   const priceButton = withButtonEmoji(
-    new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('Xem Bảng Giá Gốc').setURL(priceUrl),
+    new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('Bảng Giá Gốc').setURL(priceUrl),
     lanternButtonEmoji,
     E.component?.('icon_price'),
   );
   const actions = new ActionRowBuilder().addComponents(supportButton, storeButton, priceButton);
   const silentMentions = { parse: [], roles: [], users: [], repliedUser: false };
+  const mentions = [
+    tagEveryone ? '@everyone' : null,
+    tagMember ? `<@&${MID_AUTUMN_SALE.memberRoleId}>` : null,
+  ].filter(Boolean).join(' · ');
   const common = {
     flags: MessageFlags.IsComponentsV2,
     allowedMentions: silentMentions,
@@ -257,25 +260,25 @@ export function buildMidAutumnSaleMessages({
   return [
     {
       ...common,
-      components: [panel(0x6d3fd3, [
-        `${tagEveryone ? '@everyone\n' : ''}${sections.hero}`,
+      components: [panel(0x1D6B63, [
+        `${mentions ? `${mentions}\n` : ''}${sections.hero}`,
         sections.nitro,
-        sections.boostNetflix,
+        sections.boost,
       ])],
       allowedMentions: {
         parse: tagEveryone ? ['everyone'] : [],
-        roles: [],
+        roles: tagMember ? [MID_AUTUMN_SALE.memberRoleId] : [],
         users: [],
         repliedUser: false,
       },
     },
     {
       ...common,
-      components: [panel(0xf2b84b, [sections.productivityHeader, sections.geminiOffice, sections.chatgptCapcut])],
+      components: [panel(0xD5A64E, [sections.productivityHeader, sections.geminiOffice, sections.chatgptCapcut])],
     },
     {
       ...common,
-      components: [panel(0xde5f67, [sections.entertainmentHeader, sections.spotifyYoutube, sections.canvaClosing], actions)],
+      components: [panel(0xC96265, [sections.entertainmentHeader, sections.spotifyYoutube, sections.extrasClosing], actions)],
     },
   ];
 }
@@ -304,14 +307,17 @@ async function fetchAllMessages(channel, limit = 5000) {
   return messages;
 }
 
-export async function publishMidAutumnSale(client, { tagEveryone = true } = {}) {
+export async function publishMidAutumnSale(client, { tagEveryone = true, tagMember = true } = {}) {
   const guild = client.guilds.cache.get(MID_AUTUMN_SALE.guildId)
     || await client.guilds.fetch(MID_AUTUMN_SALE.guildId);
-  await guild.channels.fetch();
+  await Promise.all([guild.channels.fetch(), guild.roles.fetch()]);
   const channel = await guild.channels.fetch(MID_AUTUMN_SALE.promotionChannelId);
   if (!channel?.isTextBased?.() || channel.isThread?.() || !channel.messages
     || !/khuyến-mãi|khuyen-mai/i.test(channel.name)) {
     throw new Error('Kênh khuyến mãi không hợp lệ hoặc không thể gửi tin nhắn.');
+  }
+  if (tagMember && !guild.roles.cache.has(MID_AUTUMN_SALE.memberRoleId)) {
+    throw new Error(`Không tìm thấy role Cenar Member ${MID_AUTUMN_SALE.memberRoleId}.`);
   }
 
   const member = guild.members.me || await guild.members.fetchMe();
@@ -319,23 +325,25 @@ export async function publishMidAutumnSale(client, { tagEveryone = true } = {}) 
     PermissionFlagsBits.ViewChannel,
     PermissionFlagsBits.SendMessages,
     PermissionFlagsBits.ReadMessageHistory,
+    PermissionFlagsBits.ManageMessages,
+    PermissionFlagsBits.ManageGuildExpressions,
   ];
-  if (tagEveryone) required.push(PermissionFlagsBits.MentionEveryone);
+  if (tagEveryone || tagMember) required.push(PermissionFlagsBits.MentionEveryone);
   if (!channel.permissionsFor(member)?.has(required)) {
-    throw new Error('Bot thiếu quyền xem, gửi, đọc lịch sử hoặc tag everyone tại kênh khuyến mãi.');
+    throw new Error('Bot thiếu quyền gửi, quản lý bài/emoji hoặc tag tại kênh khuyến mãi.');
   }
 
   const { emojis, removed } = await syncMidAutumnSaleEmojis(guild);
   global.discordClient = client;
-  const recent = await channel.messages.fetch({ limit: 100 });
+  const allMessages = await fetchAllMessages(channel);
   const existingParts = new Map();
-  for (const message of recent.values()) {
+  for (const message of allMessages) {
     const part = midAutumnSalePart(message, client.user.id);
     if (part && !existingParts.has(part)) existingParts.set(part, message);
   }
 
-  const payloadsWithMention = buildMidAutumnSaleMessages({ guildId: guild.id, customEmojis: emojis, tagEveryone });
-  const payloadsSilent = buildMidAutumnSaleMessages({ guildId: guild.id, customEmojis: emojis, tagEveryone: false });
+  const payloadsWithMention = buildMidAutumnSaleMessages({ guildId: guild.id, customEmojis: emojis, tagEveryone, tagMember });
+  const payloadsSilent = buildMidAutumnSaleMessages({ guildId: guild.id, customEmojis: emojis, tagEveryone: false, tagMember: false });
   const results = [];
   const activeMessageIds = new Set();
   for (let index = 0; index < payloadsSilent.length; index += 1) {
@@ -350,12 +358,12 @@ export async function publishMidAutumnSale(client, { tagEveryone = true } = {}) 
       messageId: message.id,
       url: `https://discord.com/channels/${guild.id}/${channel.id}/${message.id}`,
       mentionEveryone: message.mentions.everyone,
+      mentionedMemberRole: message.mentions.roles.has(MID_AUTUMN_SALE.memberRoleId),
     });
   }
 
   // Sau khi cả ba phần mới đã tồn tại an toàn, xoá mọi bài cũ của bot trong
   // kênh khuyến mãi. Tin nhắn do thành viên gửi luôn được giữ nguyên.
-  const allMessages = await fetchAllMessages(channel);
   let deletedOldMessages = 0;
   let preservedMemberMessages = 0;
   for (const message of allMessages) {

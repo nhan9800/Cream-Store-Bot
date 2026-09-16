@@ -135,8 +135,7 @@ export async function buildClient() {
         });
     }
 
-    // Daily Color Sale là tác vụ vận hành độc lập: giữ bài sale đồng bộ
-    // sau restart và cập nhật panel Boost ngay cả khi auto-setup khác bị lỗi.
+    // Đồng bộ bài Trung Thu bằng cách sửa ba bài hiện có; chỉ bài mới mới ping.
     if (String(config.guildId) === STORE_ONE_GUILD_ID) {
       try {
         const { publishPromotionBoard } = await import('./campaigns/promotionBoard2026.js');
@@ -151,7 +150,7 @@ export async function buildClient() {
         const boostPanel = await refreshBoostPanel(readyClient, STORE_ONE_GUILD_ID);
         console.log(`[BOOST-PANEL] status=${boostPanel?.status || 'unknown'} message=${boostPanel?.messageId || 'none'}`);
       } catch (error) {
-        console.error('[PROMOTION-BOARD] Không thể đồng bộ Daily Color Sale/giveaway:', error);
+        console.error('[PROMOTION-BOARD] Không thể đồng bộ Hội Trăng Cenar/giveaway:', error);
       }
     }
 

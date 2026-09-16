@@ -22,8 +22,6 @@ import { processAdminOrderAgingReminders } from './adminOrderCenterService.js';
 import { runSpotifyFamilyReminders } from './spotifyFamilyReminderService.js';
 import { runYoutubeRenewalReminders } from './youtubeRenewalReminderService.js';
 import { syncYoutubeWarrantyClaimsAcrossGuilds } from './youtubeWarrantyClaimService.js';
-import { DAILY_COLOR_SALE, dailySaleDateKey, publishDailyColorSale } from '../campaigns/dailyColorSale2026.js';
-import { db } from '../database/db.js';
 
 let schedulerHandle = null;
 let backupHandle = null;
@@ -31,20 +29,6 @@ let bootstrapped = false;
 let lastVinhDanhRun = 0;
 let lastDiscountBoardRun = 0;
 let lastYoutubeWarrantySync = 0;
-let lastDailySaleDateKey = '';
-const DAILY_SALE_SETTING_KEY = `scheduler:${DAILY_COLOR_SALE.marker}:last-date`;
-
-function savedDailySaleDateKey() {
-  return String(db.prepare('SELECT value FROM system_settings WHERE key = ?').get(DAILY_SALE_SETTING_KEY)?.value || '');
-}
-
-function saveDailySaleDateKey(dateKey) {
-  db.prepare(`
-    INSERT INTO system_settings (key, value, updated_at)
-    VALUES (?, ?, CURRENT_TIMESTAMP)
-    ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP
-  `).run(DAILY_SALE_SETTING_KEY, dateKey);
-}
 
 function autoBackupDatabase() {
   backupDatabase().catch(e => console.error('[BACKUP] Lỗi hệ thống sao lưu tự động:', e));
@@ -148,21 +132,6 @@ export function startScheduler(client) {
         lastDiscountBoardRun = nowMs;
       } catch (error) {
         console.error('[SCHEDULER] Lỗi tự động cập nhật bảng chiết khấu:', error);
-      }
-    }
-
-    // Mỗi ngày theo giờ Việt Nam, đổi màu accent của cùng ba bài sale. Bài đã
-    // tồn tại được edit im lặng, không ping lại @everyone/Cenar Member.
-    const todaySaleKey = dailySaleDateKey();
-    const completedSaleKey = lastDailySaleDateKey || savedDailySaleDateKey();
-    if (String(config.guildId) === DAILY_COLOR_SALE.guildId && todaySaleKey !== completedSaleKey) {
-      try {
-        const result = await publishDailyColorSale(client, { tagEveryone: false, tagMember: false });
-        saveDailySaleDateKey(todaySaleKey);
-        lastDailySaleDateKey = todaySaleKey;
-        console.log(`[DAILY-COLOR-SALE] date=${todaySaleKey} theme=${result.theme.name} messages=${result.messages.length}`);
-      } catch (error) {
-        console.error('[SCHEDULER] Lỗi đổi màu bảng giá khuyến mãi:', error);
       }
     }
 
