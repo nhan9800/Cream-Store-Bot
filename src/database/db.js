@@ -842,6 +842,36 @@ export function initDatabase() {
       sold_at TEXT
     );
     CREATE INDEX IF NOT EXISTS idx_account_stock_service ON account_stock (service_type, status);
+
+    CREATE TABLE IF NOT EXISTS order_fulfillments (
+      order_code TEXT PRIMARY KEY REFERENCES orders(order_code) ON DELETE CASCADE,
+      status TEXT NOT NULL DEFAULT 'PENDING',
+      attempts INTEGER NOT NULL DEFAULT 0,
+      retry_at TEXT NOT NULL,
+      lease_token TEXT,
+      lease_until TEXT,
+      last_error TEXT,
+      updated_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_fulfillment_retry ON order_fulfillments(status, retry_at);
+    CREATE TABLE IF NOT EXISTS order_delivery_items (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      order_code TEXT NOT NULL REFERENCES orders(order_code) ON DELETE CASCADE,
+      stock_id INTEGER NOT NULL UNIQUE,
+      credentials TEXT NOT NULL,
+      dm_channel_id TEXT,
+      dm_message_id TEXT,
+      sent_at TEXT
+    );
+    CREATE INDEX IF NOT EXISTS idx_delivery_order ON order_delivery_items(order_code);
+    CREATE TABLE IF NOT EXISTS checkout_requests (
+      customer_id TEXT NOT NULL,
+      request_id TEXT NOT NULL,
+      request_hash TEXT NOT NULL,
+      order_code TEXT NOT NULL UNIQUE REFERENCES orders(order_code),
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (customer_id, request_id)
+    );
   `);
 
   // Legacy releases may have created these tables without the timestamp

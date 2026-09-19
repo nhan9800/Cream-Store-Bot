@@ -42,6 +42,7 @@ import {
 } from './supportIdentity.js';
 import fs from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import {
     createQuestRequest,
     getQuestRequest,
@@ -283,7 +284,13 @@ function requireApiKey(req, res, next) {
 
 function canAccessCustomerResource(req, customerId) {
     const role = String(req.header('x-user-role') || '').trim().toLowerCase();
-    if (role === 'admin' || role === 'staff') return true;
+    if (role === 'admin' || role === 'staff') {
+        const userId = String(req.header('x-user-id') || '').trim();
+        const current = userId
+            ? db.prepare('SELECT role FROM web_users WHERE id = ? LIMIT 1').get(userId)
+            : null;
+        if (current?.role === 'admin' || current?.role === 'staff') return true;
+    }
     const discordId = String(req.header('x-discord-id') || '').trim();
     return Boolean(discordId && customerId && discordId === String(customerId));
 }
@@ -408,7 +415,7 @@ function enrichFeedbackAuthor(feedback, req) {
 export function registerBotApiRoutes(app) {
     // CORS — allowlist (server-to-server callers không gửi Origin nên không bị chặn)
     const corsHandler = (req, res, next) => {
-        if (applyCors(req, res, { methods: 'GET, POST, OPTIONS', headers: 'Content-Type, X-Bot-Api-Key, x-bot-api-key' })) return;
+        if (applyCors(req, res, { methods: 'GET, POST, OPTIONS', headers: 'Content-Type, X-Bot-Api-Key, x-bot-api-key, X-Idempotency-Key, x-idempotency-key, X-User-Id, X-User-Role, X-Discord-Id' })) return;
         next();
     };
 
@@ -1283,6 +1290,10 @@ export function registerBotApiRoutes(app) {
             if (!/^\d{15,22}$/.test(customerId)) {
                 return res.status(401).json({ ok: false, error: 'Discord login is required.' });
             }
+            const requestId = String(req.header('x-idempotency-key') || '').trim();
+            if (!/^[A-Za-z0-9_-]{16,100}$/.test(requestId)) {
+                return res.status(400).json({ ok: false, code: 'IDEMPOTENCY_KEY_REQUIRED', error: 'Mã yêu cầu checkout không hợp lệ.' });
+            }
 
             const requestedItem = items[0] || {};
             const requestedProductId = String(requestedItem.id || requestedItem.product_id || '').trim();
@@ -1358,12 +1369,22 @@ export function registerBotApiRoutes(app) {
                     `Nitro Boost: ${collectibleMetadata.nitroEligible ? 'Có' : 'Không'}`,
                   ].filter(Boolean).join('\n').slice(0, 1_000)
                 : customerNote;
+            const requestHash = createHash('sha256').update(JSON.stringify({
+                customerId,
+                requestedProductId,
+                quantity,
+                paymentProvider,
+                contact,
+                note,
+                deliveryEmail: String(req.body.deliveryEmail || '').trim().slice(0, 200),
+                deliveryPhone: String(req.body.deliveryPhone || '').trim().slice(0, 30),
+                collectibleMetadata,
+            })).digest('hex');
             
             // Lấy db helpers và orderService
-            const { generateUniqueOrderCode, createOrder, saveOrderLogMessage } = await import('./orderService.js');
+            const { generateUniqueOrderCode, createOrder, getOrderByCode, saveOrderLogMessage } = await import('./orderService.js');
             
             const firstItem = catalogProduct;
-            const orderCode = generateUniqueOrderCode();
             
             // Xử lý duration_months, tránh undefined/null
             let durationMonths = firstItem.duration_months;
@@ -1374,61 +1395,87 @@ export function registerBotApiRoutes(app) {
             }
             
             const guildId = config.guildId;
+            const { getGuildConfig } = await import('./guildConfigService.js');
+            const guildConfig = getGuildConfig(guildId);
 
             // Giữ một channel ID placeholder để phần DB + thanh toán hoàn tất
             // ngay. Kênh Discord được provision sau khi đã trả response cho web,
             // tránh website timeout trong lúc Discord API chậm.
-            let channelId = `web-${orderCode.toLowerCase().replace('_', '-')}`;
+            let orderCode = null;
+            let channelId = null;
             let ticketId = 0;
             let discordChannel = null;
+            let order = null;
+            let reusedRequest = false;
 
-            // Kiểm tra nhanh trước khi tạo đơn/ticket. Việc trừ tiền thật được
-            // thực hiện sau khi đơn tồn tại và nằm cùng transaction xác nhận đơn.
-            if (paymentProvider === 'WALLET') {
-                const { getWalletBalance } = await import('./walletService.js');
-                const balance = getWalletBalance(guildId, customerId);
-                if (balance < totalAmount) {
-                    return res.status(400).json({ ok: false, code: 'INSUFFICIENT_BALANCE', error: 'Số dư ví không đủ.' });
+            const requireTicketService = await import('./ticketService.js');
+            const createOrReuseOrder = db.transaction(() => {
+                const existing = db.prepare(`SELECT request_hash, order_code FROM checkout_requests
+                    WHERE customer_id = ? AND request_id = ?`).get(customerId, requestId);
+                if (existing) {
+                    if (existing.request_hash !== requestHash) {
+                        const conflict = new Error('Mã checkout đã được dùng cho nội dung khác.');
+                        conflict.code = 'IDEMPOTENCY_CONFLICT';
+                        throw conflict;
+                    }
+                    const existingOrder = getOrderByCode(existing.order_code);
+                    if (!existingOrder) throw new Error('Đơn checkout cũ không còn tồn tại.');
+                    return { order: existingOrder, reused: true };
                 }
-            }
 
-            // Tạo ticket trong DB
-            const { createTicket } = await import('./ticketService.js');
-            const ticket = createTicket({
-                guildId,
-                channelId,
-                customerId,
-                openedById: customerId,
-                ticketType: 'ORDER',
-                relatedOrderCode: orderCode,
-                supportSource: 'WEBSITE_ORDER',
+                if (paymentProvider === 'WALLET') {
+                    const balance = Number(db.prepare(`SELECT wallet_balance FROM customer_profiles
+                        WHERE guild_id = ? AND customer_id = ?`).get(guildId, customerId)?.wallet_balance || 0);
+                    if (balance < totalAmount) {
+                        const insufficient = new Error('Số dư ví không đủ.');
+                        insufficient.name = 'WalletPaymentError';
+                        insufficient.code = 'INSUFFICIENT_BALANCE';
+                        throw insufficient;
+                    }
+                }
+
+                const newOrderCode = generateUniqueOrderCode();
+                const placeholderChannelId = `web-${newOrderCode.toLowerCase().replace('_', '-')}`;
+                const { createTicket } = requireTicketService;
+                const ticket = createTicket({
+                    guildId,
+                    channelId: placeholderChannelId,
+                    customerId,
+                    openedById: customerId,
+                    ticketType: 'ORDER',
+                    relatedOrderCode: newOrderCode,
+                    supportSource: 'WEBSITE_ORDER',
+                    clientRequestId: `checkout:${customerId}:${requestId}`,
+                });
+                const created = createOrder({
+                    orderCode: newOrderCode,
+                    guildId,
+                    ticketId: ticket.id,
+                    ticketChannelId: placeholderChannelId,
+                    customerId,
+                    productName: firstItem.name,
+                    quantity,
+                    totalAmount,
+                    durationMonths,
+                    note: note || '',
+                    orderLogChannelId: guildConfig?.order_log_channel_id || placeholderChannelId || 'default_log',
+                    createdById: customerId,
+                    discordSkuId: collectibleMetadata?.skuId || null,
+                    discordProductUrl: collectibleMetadata?.productUrl || null,
+                    discordOriginalPrice: collectibleMetadata?.originalPrice || null,
+                    discordNitroEligible: collectibleMetadata?.nitroEligible || false,
+                });
+                db.prepare(`INSERT INTO checkout_requests
+                    (customer_id, request_id, request_hash, order_code, created_at)
+                    VALUES (?, ?, ?, ?, ?)`).run(customerId, requestId, requestHash, newOrderCode, nowIso());
+                return { order: created, reused: false };
             });
-            ticketId = ticket.id;
-
-            const { getGuildConfig } = await import('./guildConfigService.js');
-            const guildConfig = getGuildConfig(guildId);
-            const orderLogChannelId = guildConfig?.order_log_channel_id || channelId || 'default_log';
-
-            const orderPayload = {
-                orderCode,
-                guildId,
-                ticketId,
-                ticketChannelId: channelId,
-                customerId,
-                productName: firstItem.name,
-                quantity,
-                totalAmount: totalAmount,
-                durationMonths: durationMonths,
-                note: note || '',
-                orderLogChannelId,
-                createdById: customerId,
-                discordSkuId: collectibleMetadata?.skuId || null,
-                discordProductUrl: collectibleMetadata?.productUrl || null,
-                discordOriginalPrice: collectibleMetadata?.originalPrice || null,
-                discordNitroEligible: collectibleMetadata?.nitroEligible || false,
-            };
-            
-            const order = createOrder(orderPayload);
+            const created = createOrReuseOrder.immediate();
+            order = created.order;
+            reusedRequest = created.reused;
+            orderCode = order.order_code;
+            ticketId = order.ticket_id;
+            channelId = order.ticket_channel_id;
             let currentOrder = order;
             let payment_qr_code = null;
             let finalStatus = order.status;
@@ -1503,14 +1550,15 @@ export function registerBotApiRoutes(app) {
                     payment_checkout_url: payment_checkout_url,
                     payment_qr_code: payment_qr_code,
                     total_amount: totalAmount,
-                    status: finalStatus
+                    status: finalStatus,
+                    reused: reusedRequest,
                 }
             });
 
             // Response đã về tới khách; phần Discord dưới đây là hậu xử lý.
             // Nếu Discord API tạm chậm/lỗi, thanh toán và đơn vẫn giữ nguyên,
             // không còn làm trình duyệt báo thất bại sau khi đã trừ ví.
-            try {
+            if (!reusedRequest) try {
                 const client = req.app.locals.discordClient;
                 if (client) {
                     const guild = await client.guilds.fetch(guildId).catch(() => null);
@@ -1564,7 +1612,7 @@ export function registerBotApiRoutes(app) {
             }
 
             // Gửi welcome embed và components vào kênh Discord mới
-            if (discordChannel) {
+            if (!reusedRequest && discordChannel) {
                 try {
                     const { buildTicketWelcomeV2, buildTicketControlComponents } = await import('../utils/embeds.js');
                     const { container: welcomeV2, flags: welcomeV2Flags } = buildTicketWelcomeV2(
@@ -1586,7 +1634,7 @@ export function registerBotApiRoutes(app) {
             }
             
             // Gửi thông báo về kênh bot log
-            try {
+            if (!reusedRequest) try {
                 const client = req.app.locals.discordClient;
                 if (client) {
                     const guild = await client.guilds.fetch(guildId).catch(() => null);
@@ -1627,6 +1675,9 @@ export function registerBotApiRoutes(app) {
             if (e?.name === 'WalletPaymentError') {
                 const status = e.code === 'INSUFFICIENT_BALANCE' ? 400 : 409;
                 return res.status(status).json({ ok: false, code: e.code, error: e.message });
+            }
+            if (e?.code === 'IDEMPOTENCY_CONFLICT') {
+                return res.status(409).json({ ok: false, code: e.code, error: e.message });
             }
             res.status(500).json({ ok: false, error: 'Lỗi máy chủ nội bộ.' });
         }

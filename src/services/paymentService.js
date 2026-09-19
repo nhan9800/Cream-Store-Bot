@@ -2,24 +2,19 @@ import crypto from 'node:crypto';
 import { AttachmentBuilder, EmbedBuilder, ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, SeparatorSpacingSize, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } from 'discord.js';
 import QRCode from 'qrcode';
 import { assertPaymentConfig, config, getPayOSCancelUrl, getPayOSReturnUrl, getWebhookUrl } from '../config.js';
-import { db, nowIso } from '../database/db.js';
 import {
   getLatestOrderByTicketChannel,
   getOrderByCode,
   getOrderByPayOSCode,
   getOrderByPaymentCode,
-  markOrderPaid,
-  recordPaymentEvent,
+  recordOrderPayment,
   savePaymentLinkData,
   savePaymentMessage,
   setOrderStatus,
-  markOrderCompleted,
-  saveDelivery,
   resetPaymentLinkForRegen,
 } from './orderService.js';
 import { findOrderByIncomingPaymentCode, syncPaymentCodeIfPossible } from './paymentOrderMatcher.js';
 import { getTopupByPayOSCode, finalizeTopup } from './walletService.js';
-import { syncCustomerStats } from './customerService.js';
 import { applyCustomerRoles } from './roleService.js';
 import { emitStaffLog } from './staffLogService.js';
 import { sendPaymentConfirmedFlow, updateOrderLogMessage } from './notificationService.js';
@@ -27,8 +22,8 @@ import {
   buildPaymentQrV2,
 } from '../utils/embeds.js';
 import { formatCurrency } from '../utils/formatters.js';
-import { decrypt } from '../utils/crypto.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
+import { deliverPaidOrder } from './autoDeliveryService.js';
 
 const PAYOS_API_BASE = 'https://api-merchant.payos.vn';
 
@@ -444,7 +439,7 @@ function normalizePayOSWebhookBody(body) {
 }
 
 export async function finalizePaidOrder(client, order, paymentData, transactionId, transactionContent, provider = 'PAYOS') {
-  const eventState = recordPaymentEvent({
+  const payment = recordOrderPayment({
     orderCode: order.order_code,
     provider,
     transactionId,
@@ -452,101 +447,25 @@ export async function finalizePaidOrder(client, order, paymentData, transactionI
     content: transactionContent,
     rawPayload: paymentData,
   });
+  const delivery = await deliverPaidOrder(client, order.order_code);
+  const autoDelivered = delivery.delivered;
+  const finalOrder = delivery.updated || getOrderByCode(order.order_code) || payment.updated;
 
-  if (eventState.duplicate || order.payment_status === 'PAID') {
-    return { updated: order, duplicate: true };
-  }
-
-  const updated = markOrderPaid(order.order_code, {
-    amountPaid: paymentData.amount ?? order.total_amount,
-    transactionId,
-    transactionContent,
-  });
-
-  // TỰ ĐỘNG GIAO HÀNG TỪ KHO (AUTO-DELIVERY)
-  let autoDelivered = false;
-  let finalOrder = updated;
-  try {
-    // Làm sạch tên sản phẩm để so khớp kho hàng chính xác theo từng sản phẩm cụ thể
-    const cleanProductName = (updated.product_name || '')
-      .replace(/<a?:[a-zA-Z0-9_]+:[0-9]+>/g, '') // Bỏ Discord custom emoji
-      .replace(/[\u2700-\u27BF]|[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDD10-\uDDFF]/g, '') // Bỏ emoji
-      .trim()
-      .toLowerCase();
-
-    const serviceType = updated.service_type || 'netflix';
-    
-    // Claim kho ATOMIC: gộp SELECT + UPDATE vào một câu lệnh để hai webhook
-    // đồng thời không thể grab cùng một tài khoản (chống giao trùng).
-    const claimStock = (type) => db.prepare(
-      `UPDATE account_stock SET status = 'SOLD', order_code = ?, sold_at = ?
-       WHERE id = (
-         SELECT id FROM account_stock
-         WHERE status = 'AVAILABLE' AND LOWER(service_type) = ?
-         ORDER BY id ASC LIMIT 1
-       )
-       RETURNING *`
-    ).get(updated.order_code, nowIso(), type);
-
-    // Ưu tiên khớp chính xác tên sản phẩm, fallback khớp service_type
-    let stockItem = claimStock(cleanProductName);
-    if (!stockItem) {
-      stockItem = claimStock(serviceType.toLowerCase());
-    }
-
-    if (stockItem) {
-      const parts = decrypt(stockItem.credentials).split('|').map(p => p.trim());
-      const email = parts[0] || '';
-      const password = parts[1] || '';
-      const profile = parts[2] || '';
-      const pin = parts[3] || '';
-
-      // Cập nhật thông tin giao hàng trong order và đổi trạng thái thành COMPLETED
-      markOrderCompleted(updated.order_code, 'SYSTEM_AUTO', config.feedbackTimeoutHours);
-
-      const customer = await client.users.fetch(updated.customer_id).catch(() => null);
-      let dmChannelId = null;
-      let dmMessageId = null;
-
-      if (customer) {
-        const dmChannel = await customer.createDM().catch(() => null);
-        if (dmChannel) {
-          dmChannelId = dmChannel.id;
-          // Gửi DM chứa tài khoản cho khách
-          const { buildDeliveryCredentialEmbeds, buildDeliveryLoginComponents } = await import('../utils/embeds.js');
-
-          // Lấy thông tin order đầy đủ sau khi saveDelivery
-          const tempOrder = saveDelivery(updated.order_code, 'SYSTEM_AUTO', email, password, profile, pin, config.defaultLoginUrl, config.defaultDeliveryTerms, dmChannelId, null);
-
-          const dmMessage = await dmChannel.send({ 
-            embeds: buildDeliveryCredentialEmbeds(tempOrder), 
-            components: buildDeliveryLoginComponents(tempOrder) 
-          }).catch(() => null);
-
-          if (dmMessage) {
-            dmMessageId = dmMessage.id;
-            saveDelivery(updated.order_code, 'SYSTEM_AUTO', email, password, profile, pin, config.defaultLoginUrl, config.defaultDeliveryTerms, dmChannelId, dmMessageId);
-          }
-        }
-      }
-
-      autoDelivered = true;
-      finalOrder = getOrderByCode(updated.order_code) || updated;
-    }
-  } catch (err) {
-    console.error('[AUTO-DELIVERY ERROR]', err);
-  }
+  // A replay may repair an interrupted payment/delivery, but must not repeat notifications.
+  if (payment.duplicate) return { updated: finalOrder, duplicate: true };
 
   const guild = await client.guilds.fetch(finalOrder.guild_id).catch(() => null);
   if (guild) {
     await updateOrderLogMessage(guild, finalOrder);
-    await sendPaymentConfirmedFlow({
-      guild,
-      order: finalOrder,
-      amount: finalOrder.amount_paid,
-      transactionContent,
-    });
-    await applyCustomerRoles(guild, finalOrder.customer_id);
+    if (finalOrder.status !== 'CANCELLED') {
+      await sendPaymentConfirmedFlow({
+        guild,
+        order: finalOrder,
+        amount: finalOrder.amount_paid,
+        transactionContent,
+      });
+      await applyCustomerRoles(guild, finalOrder.customer_id);
+    }
 
     if (autoDelivered) {
       // Ghi log giao hàng tự động thành công
@@ -559,40 +478,19 @@ export async function finalizePaidOrder(client, order, paymentData, transactionI
         await ticketChannel.send(buildDeliveryLogText(finalOrder)).catch(() => null);
       }
     } else {
-      // Ghi log thanh toán thành công thông thường
-      await emitStaffLog(client, { guildId: finalOrder.guild_id, targetId: finalOrder.customer_id, action: 'PAYMENT_CONFIRMED', detail: transactionContent, relatedOrderCode: finalOrder.order_code });
-
-      // Nếu kho hết hàng, bắn cảnh báo vào kênh staff_log
-      try {
-        const cleanProductName = (finalOrder.product_name || '')
-          .replace(/<a?:[a-zA-Z0-9_]+:[0-9]+>/g, '')
-          .replace(/[\u2700-\u27BF]|[\uE000-\uF8FF]|\uD83C[\uDC00-\uDFFF]|\uD83D[\uDC00-\uDFFF]|[\u2011-\u26FF]|\uD83E[\uDD10-\uDDFF]/g, '')
-          .trim()
-          .toLowerCase();
-        const serviceType = finalOrder.service_type || 'netflix';
-        
-        let counts = db.prepare("SELECT COUNT(*) AS count FROM account_stock WHERE status = 'AVAILABLE' AND LOWER(service_type) = ?").get(cleanProductName);
-        if (!counts || counts.count === 0) {
-          counts = db.prepare("SELECT COUNT(*) AS count FROM account_stock WHERE status = 'AVAILABLE' AND LOWER(service_type) = ?").get(serviceType.toLowerCase());
-        }
-        
-        if (!counts || counts.count === 0) {
-          const { getGuildConfig } = await import('./guildConfigService.js');
-          const gCfg = getGuildConfig(finalOrder.guild_id);
-          if (gCfg?.staff_log_channel_id) {
-            const chan = await guild.channels.fetch(gCfg.staff_log_channel_id).catch(() => null);
-            if (chan?.isTextBased()) {
-              await chan.send(`**CANH BAO HET KHO:** Don hang \`${finalOrder.order_code}\` (**${finalOrder.product_name}**) da thanh toan thanh cong nhung **KHO HANG DA HET**. Vui long giao hang thu cong!`);
-            }
-          }
-        }
-      } catch (errStock) {
-        console.error('[STOCK WARNING ERROR]', errStock);
-      }
+      const latePayment = finalOrder.status === 'CANCELLED';
+      await emitStaffLog(client, {
+        guildId: finalOrder.guild_id,
+        targetId: finalOrder.customer_id,
+        action: latePayment ? 'PAYMENT_RECEIVED_AFTER_CANCEL' : 'PAYMENT_CONFIRMED_PENDING_DELIVERY',
+        detail: latePayment
+          ? `Thanh toán đến sau khi hủy: ${transactionContent}`
+          : `Đã nhận tiền, đang chờ kho hoặc thử lại giao hàng: ${transactionContent}`,
+        relatedOrderCode: finalOrder.order_code,
+      });
     }
   }
 
-  syncCustomerStats(finalOrder.guild_id, finalOrder.customer_id);
   return { updated: finalOrder, duplicate: false };
 }
 
@@ -750,11 +648,17 @@ export async function confirmOrderPaidManually(guild, orderCode, amount = null) 
     throw new Error('Không tìm thấy đơn hàng.');
   }
 
-  const updated = markOrderPaid(order.order_code, {
-    amountPaid: amount ?? order.total_amount,
-    transactionId: `MANUAL_${Date.now()}`,
-    transactionContent: 'Manual confirmation',
+  const transactionId = `MANUAL_${Date.now()}`;
+  const payment = recordOrderPayment({
+    orderCode: order.order_code,
+    provider: 'MANUAL',
+    transactionId,
+    amount: amount ?? order.total_amount,
+    content: 'Manual confirmation',
+    rawPayload: { source: 'discord_command' },
   });
+  const delivery = await deliverPaidOrder(guild.client, order.order_code);
+  const updated = delivery.updated || payment.updated;
 
   await updateOrderLogMessage(guild, updated);
   await sendPaymentConfirmedFlow({

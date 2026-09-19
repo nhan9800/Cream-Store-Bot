@@ -39,6 +39,16 @@ Không backup mật khẩu Discord, DM hoặc toàn bộ lịch sử tin nhắn.
 Trước khi có sự cố, Owner có thể chạy `/khoi-phuc-server hanh_dong:Tạo snapshot ngay` để tạo điểm phục hồi thủ
 công. Scheduler cũng tự chụp snapshot trước mỗi lần backup SQLite.
 
+Mỗi lần scheduler sao lưu, bot tạo một tệp có timestamp riêng, sao chép nó sang vùng tạm, mở database vừa khôi
+phục, chạy `PRAGMA integrity_check` và thử một giao dịch ghi có rollback. Chỉ sau khi bước này thành công hệ thống
+mới dọn bản cũ và tải bản mới lên dịch vụ ngoài. Kết quả gần nhất nằm tại `backups/latest-status.json`, trong đó
+`local`, `restoreVerification`, `telegram` và `googleDrive` có trạng thái độc lập:
+
+- `success`: bước đã hoàn tất.
+- `skipped` với `not_configured`: dịch vụ ngoài chưa được cấu hình.
+- `failed`: cấu hình thiếu hoặc thao tác thất bại; bản sao cục bộ đã xác minh vẫn được giữ nếu có.
+- `overallStatus: local_only`: bản cục bộ và phép thử khôi phục thành công nhưng chưa cấu hình nơi lưu từ xa.
+
 ## Cấu hình OAuth bắt buộc
 
 - `CLIENT_SECRET`: secret của đúng Discord Application đang chạy bot.
