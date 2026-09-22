@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [Unreleased] - 2026-09-22
+
+### Added
+
+- Recovery snapshots now preserve the server identity, linked system channels, role/channel ordering, custom role icons and stickers with bounded local asset copies.
+- Automated coverage for legacy recovery snapshots, Discord rate limits, transient network retries and member role synchronization.
+
+### Changed
+
+- `/khoi-phuc-server` now restores reusable resources idempotently and reports partial failures instead of abandoning the full recovery.
+- `/chuyen-server` now refreshes rotated OAuth tokens safely, retries Discord throttling/network failures and synchronizes roles for both new and existing members.
+
 ## [2.1.0] - 2026-08-08
 
 ### Added

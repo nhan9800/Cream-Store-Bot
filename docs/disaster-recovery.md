@@ -9,8 +9,9 @@
 ## Dữ liệu nằm trong recovery backup
 
 - Toàn bộ dữ liệu nghiệp vụ trong SQLite: hồ sơ khách, đơn hàng, ví, bảo hành, CTV/Partner và cấu hình bot.
-- Recovery snapshot mới nhất của vai trò, kênh, danh mục, permission overwrite và custom emoji. Asset emoji được
-  lưu dạng base64 tối đa 256 KB mỗi file để không phụ thuộc hoàn toàn vào Discord CDN.
+- Recovery snapshot mới nhất của tên/nhận diện server, cài đặt cơ bản, vai trò, thứ tự vai trò, kênh, danh mục,
+  permission overwrite, custom emoji và sticker. Asset icon/banner/role/sticker/emoji được lưu dạng base64 trong
+  giới hạn kích thước an toàn để có thể khôi phục ngay cả khi CDN không còn trả URL cũ.
 - Discord ID, tên hiển thị, danh sách vai trò và OAuth access/refresh token của người đã đồng ý. Token được mã hóa
   AES-256-GCM bằng `ENCRYPTION_KEY` trước khi ghi database.
 
@@ -29,12 +30,14 @@ Không backup mật khẩu Discord, DM hoặc toàn bộ lịch sử tin nhắn.
 5. Chạy `npm ci --omit=dev --no-audit --no-fund`.
 6. Cấu hình Startup command là `npm start`, sau đó Start server từ panel.
 7. Kiểm tra Console, trạng thái hai bot Discord và hai health endpoint qua cổng public `20022`.
-8. Mời đúng bot vào server Discord dự phòng và cấp `Manage Roles`, `Manage Channels`, `Manage Expressions` và
-   `Create Invite`.
+8. Mời đúng bot (cùng Discord Application đã cấp OAuth) vào server Discord dự phòng và cấp `Manage Server`,
+   `Manage Roles`, `Manage Channels`, `Manage Expressions` và `Create Invite`. Đặt role cao nhất của bot cao hơn
+   các role cần khôi phục để Discord cho phép bot quản lý chúng.
 9. Trong server nguồn, chạy `/khoi-phuc-server hanh_dong:Khôi phục guild_dich:<ID> xac_nhan:True` để tái tạo cấu
    trúc. Lệnh idempotent theo tên nên có thể chạy lại sau khi sửa quyền.
 10. Chạy `/chuyen-server guild_id:<ID server dự phòng>` để thêm các thành viên còn OAuth hợp lệ và gán lại các vai
-    trò trùng tên.
+    trò trùng tên. Lệnh xử lý cả người đã có sẵn ở server đích, tự refresh token sắp hết hạn, retry theo
+    `Retry-After` khi Discord trả 429 và báo riêng các role không thể gán do hierarchy/quyền.
 
 Trước khi có sự cố, Owner có thể chạy `/khoi-phuc-server hanh_dong:Tạo snapshot ngay` để tạo điểm phục hồi thủ
 công. Scheduler cũng tự chụp snapshot trước mỗi lần backup SQLite.
@@ -58,7 +61,9 @@ mới dọn bản cũ và tải bản mới lên dịch vụ ngoài. Kết quả
   `<PUBLIC_BASE_URL>/oauth/callback` ở OAuth2 Redirects.
 
 Discord chỉ cho phép Add Guild Member bằng access token có scope `guilds.join`; bot cùng application phải có mặt ở
-server đích và có quyền `Create Invite`. Tham khảo [Discord Guild Resource](https://docs.discord.com/developers/resources/guild#add-guild-member)
-và [Discord OAuth2](https://docs.discord.com/developers/topics/oauth2).
+server đích và có quyền `Create Invite`. Trường `roles` cần `Manage Roles`, và bot chỉ quản lý được role thấp hơn
+role cao nhất của bot. Tham khảo [Discord Guild Resource](https://docs.discord.com/developers/resources/guild#add-guild-member),
+[Discord OAuth2](https://docs.discord.com/developers/topics/oauth2), [Discord Permissions](https://docs.discord.com/developers/topics/permissions)
+và [Discord Rate Limits](https://docs.discord.com/developers/topics/rate-limits).
 
 Nếu SFTP credential hoặc secret có khả năng bị lộ, phải rotate trước khi khôi phục production.
