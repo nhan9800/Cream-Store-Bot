@@ -22,6 +22,7 @@ import { processAdminOrderAgingReminders } from './adminOrderCenterService.js';
 import { runSpotifyFamilyReminders } from './spotifyFamilyReminderService.js';
 import { runYoutubeRenewalReminders } from './youtubeRenewalReminderService.js';
 import { syncYoutubeWarrantyClaimsAcrossGuilds } from './youtubeWarrantyClaimService.js';
+import { processPendingDeliveries } from './autoDeliveryService.js';
 
 let schedulerHandle = null;
 let backupHandle = null;
@@ -30,8 +31,13 @@ let lastVinhDanhRun = 0;
 let lastDiscountBoardRun = 0;
 let lastYoutubeWarrantySync = 0;
 
-function autoBackupDatabase() {
-  backupDatabase().catch(e => console.error('[BACKUP] Lỗi hệ thống sao lưu tự động:', e));
+async function autoBackupDatabase() {
+  try {
+    const report = await backupDatabase();
+    console.log(`[BACKUP] Hoàn tất với trạng thái ${report.overallStatus}; Telegram=${report.telegram.status}, GoogleDrive=${report.googleDrive.status}.`);
+  } catch (error) {
+    console.error('[BACKUP] Lỗi hệ thống sao lưu tự động:', error);
+  }
 }
 
 export function startScheduler(client) {
@@ -40,6 +46,12 @@ export function startScheduler(client) {
   const intervalMinutes = Number(process.env.DEEP_NOTIFICATION_INTERVAL_MINUTES ?? 5);
 
   const tick = async () => {
+    try {
+      await processPendingDeliveries(client);
+    } catch (error) {
+      console.error('[SCHEDULER] Lỗi thử lại giao hàng tự động:', error);
+    }
+
     try {
       await processPendingPaymentTickets(client);
     } catch (error) {

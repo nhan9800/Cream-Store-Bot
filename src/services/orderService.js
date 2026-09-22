@@ -274,6 +274,34 @@ export function markOrderPaid(orderCode,{amountPaid,transactionId,transactionCon
   return updated;
 }
 
+// The durable queue is committed with the payment; Discord may be unavailable.
+export function queueOrderDelivery(orderCode) {
+  const timestamp = nowIso();
+  db.prepare(`INSERT INTO order_fulfillments (order_code, retry_at, updated_at)
+    SELECT order_code, ?, ? FROM orders
+    WHERE order_code = ? AND payment_status = 'PAID' AND status = 'PROCESSING'
+      AND delivered_at IS NULL
+    ON CONFLICT(order_code) DO NOTHING`).run(timestamp, timestamp, orderCode);
+}
+
+export function recordOrderPayment({ orderCode, provider, transactionId, amount, content, rawPayload }) {
+  return db.transaction(() => {
+    const order = getOrderByCode(orderCode);
+    if (!order) throw new Error('Không tìm thấy đơn hàng.');
+    const event = recordPaymentEvent({ orderCode, provider, transactionId, amount, content, rawPayload });
+    if (event.event && event.event.order_code !== orderCode) {
+      throw new Error('Giao dịch thanh toán đã thuộc một đơn hàng khác.');
+    }
+    // Recover legacy events inserted before a failed order update as well.
+    const duplicate = order.payment_status === 'PAID';
+    const updated = duplicate ? order : markOrderPaid(orderCode, {
+      amountPaid: amount, transactionId, transactionContent: content,
+    });
+    queueOrderDelivery(orderCode);
+    return { updated, duplicate };
+  }).immediate();
+}
+
 export class WalletPaymentError extends Error {
   constructor(code, message) {
     super(message);
@@ -369,6 +397,8 @@ export function payOrderWithWallet({ orderCode, guildId, customerId, amount }) {
       reason: 'Wallet debit and order confirmation committed atomically',
       metadata: { walletTransactionId: Number(ledger.lastInsertRowid) },
     });
+
+    queueOrderDelivery(orderCode);
 
     return {
       order: getOrderByCodeStmt().get(orderCode),

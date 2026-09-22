@@ -49,7 +49,12 @@ export async function execute(interaction) {
   const action = interaction.options.getString('hanh_dong', true);
 
   if (action === 'SNAPSHOT') {
-    const snapshot = await snapshotGuildForRecovery(interaction.guild, { force: true });
+    let snapshot;
+    try {
+      snapshot = await snapshotGuildForRecovery(interaction.guild, { force: true });
+    } catch (error) {
+      return interaction.editReply(`${E('status_cross')} Không thể tạo recovery snapshot: ${String(error?.message || error).slice(0, 180)}`);
+    }
     const container = new ContainerBuilder()
       .setAccentColor(0x10B981)
       .addTextDisplayComponents(new TextDisplayBuilder().setContent([
@@ -57,6 +62,7 @@ export async function execute(interaction) {
         `> ${E('icon_group')} **Vai trò:** ${snapshot.roles.length}`,
         `> ${E('icon_folder')} **Kênh & danh mục:** ${snapshot.channels.length}`,
         `> ${E('icon_sparkle')} **Custom emoji:** ${snapshot.emojis.length}`,
+        `> ${E('icon_sparkle')} **Sticker:** ${(snapshot.stickers || []).length}`,
         `> ${E('icon_clock')} **Thời điểm:** <t:${Math.floor(new Date(snapshot.capturedAt).getTime() / 1000)}:F>`,
         '',
         `-# ${E('icon_lock')} Snapshot nằm trong SQLite và đi cùng backup cục bộ, Telegram hoặc Google Drive đã cấu hình.`,
@@ -75,14 +81,21 @@ export async function execute(interaction) {
   }
   const botPermissions = targetGuild.members.me?.permissions;
   if (
+    !botPermissions?.has(PermissionFlagsBits.ManageGuild)
+    ||
     !botPermissions?.has(PermissionFlagsBits.ManageRoles)
     || !botPermissions?.has(PermissionFlagsBits.ManageChannels)
     || !botPermissions?.has(PermissionFlagsBits.ManageGuildExpressions)
   ) {
-    return interaction.editReply(`${E('status_cross')} Bot cần quyền quản lý vai trò, kênh và emoji tại server dự phòng.`);
+    return interaction.editReply(`${E('status_cross')} Bot cần quyền **Manage Server**, **Manage Roles**, **Manage Channels** và **Manage Expressions** tại server dự phòng.`);
   }
 
-  const result = await restoreGuildStructure(interaction.guildId, targetGuild);
+  let result;
+  try {
+    result = await restoreGuildStructure(interaction.guildId, targetGuild);
+  } catch (error) {
+    return interaction.editReply(`${E('status_cross')} Không thể khôi phục cấu trúc server: ${String(error?.message || error).slice(0, 180)}`);
+  }
   const container = new ContainerBuilder()
     .setAccentColor(result.failures.length ? 0xF59E0B : 0x10B981)
     .addTextDisplayComponents(new TextDisplayBuilder().setContent([
@@ -93,6 +106,7 @@ export async function execute(interaction) {
       `${E('icon_group')} **Vai trò:** ${result.created.roles} mới • ${result.reused.roles} có sẵn`,
       `${E('icon_folder')} **Kênh:** ${result.created.channels} mới • ${result.reused.channels} có sẵn`,
       `${E('icon_sparkle')} **Emoji:** ${result.created.emojis} mới • ${result.reused.emojis} có sẵn`,
+      `${E('icon_sparkle')} **Sticker:** ${result.created.stickers} mới • ${result.reused.stickers} có sẵn`,
       `${E('status_cross')} **Lỗi:** ${result.failures.length}`,
       ...(result.failures.length
         ? ['', ...result.failures.slice(0, 6).map((failure) => `> ${failure}`)]

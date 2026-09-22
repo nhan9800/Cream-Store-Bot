@@ -195,7 +195,12 @@ export function registerAuthRoutes(app) {
       const callerId = String(req.header('x-user-id') || '').trim();
       const callerRole = String(req.header('x-user-role') || '').trim().toLowerCase();
       const requestedId = String(req.params.id || '').trim();
-      const isStaff = callerRole === 'admin' || callerRole === 'staff';
+      const caller = callerId
+        ? db.prepare('SELECT role FROM web_users WHERE id = ? LIMIT 1').get(callerId)
+        : null;
+      const currentRole = String(caller?.role || '').trim().toLowerCase();
+      const isStaff = (callerRole === 'admin' || callerRole === 'staff')
+        && (currentRole === 'admin' || currentRole === 'staff');
       if (!callerId || (!isStaff && callerId !== requestedId)) {
         return res.status(403).json({ ok: false, error: 'Forbidden' });
       }
