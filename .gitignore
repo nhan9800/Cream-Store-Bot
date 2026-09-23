@@ -48,6 +48,7 @@ scripts/*
 !scripts/publish-ai-creative-pricing-update.js
 !scripts/publish-youtube-family-policy-update.js
 !scripts/publish-national-day-sale.js
+!scripts/publish-pubg-drama-sale.js
 !scripts/clear-promotion-channel.js
 !scripts/publish-partner-national-day-update.js
 !scripts/setup-sale-channels.js

@@ -140,7 +140,7 @@ export async function execute(interaction) {
         quantity: quantity,
         total_amount: amount,
         ticket_channel_id: ticketChannel.id,
-        service_type: 'other',
+        service_type: order.service_type || 'other',
         duration_months: durationMonths,
         duration_days: durationDays,
         payment_provider: amount > 0 ? 'PAYOS' : 'FREE',

@@ -6,6 +6,7 @@ import { afterAll, beforeAll, describe, expect, test } from 'vitest';
 let tempRoot;
 let db;
 let orderLinks;
+let orderService;
 let spotify;
 let youtube;
 let createSubscriptionHandler;
@@ -16,7 +17,7 @@ const previousEnv = {
   GUILD_ID: process.env.GUILD_ID,
 };
 
-function insertOrder({ code, channel, product, customerId, customerName = null, customerGmail = null, months, amount }) {
+function insertOrder({ code, channel, product, serviceType = 'other', customerId, customerName = null, customerGmail = null, months, amount }) {
   const expiryAt = new Date(Date.UTC(2026, 7 + months, 1)).toISOString();
   const ticket = db.prepare(`
     INSERT INTO tickets (ticket_code, guild_id, channel_id, customer_id, opened_by_id, created_at)
@@ -25,21 +26,21 @@ function insertOrder({ code, channel, product, customerId, customerName = null, 
   db.prepare(`
     INSERT INTO orders (
       order_code, guild_id, ticket_id, ticket_channel_id, customer_id,
-      product_name, customer_name, customer_gmail, quantity,
+      product_name, service_type, customer_name, customer_gmail, quantity,
       total_amount, amount_paid, payment_status, status,
       duration_months, order_log_channel_id, created_by_id,
       paid_at, completed_at, expiry_at, created_at, updated_at,
       credential_email, credential_password
     ) VALUES (
       ?, 'TEST_GUILD', ?, ?, ?,
-      ?, ?, ?, 1,
+      ?, ?, ?, ?, 1,
       ?, ?, 'PAID', 'COMPLETED',
       ?, 'ORDER_LOG', 'ADMIN',
       '2026-08-01T00:00:00.000Z', '2026-08-01T00:10:00.000Z', ?,
       '2026-08-01T00:00:00.000Z', '2026-08-01T00:10:00.000Z',
       'encrypted-delivery-email', 'encrypted-delivery-password'
     )
-  `).run(code, Number(ticket.lastInsertRowid), `order-${channel}`, customerId, product, customerName, customerGmail, amount, amount, months, expiryAt);
+  `).run(code, Number(ticket.lastInsertRowid), `order-${channel}`, customerId, product, serviceType, customerName, customerGmail, amount, amount, months, expiryAt);
 }
 
 beforeAll(async () => {
@@ -52,6 +53,7 @@ beforeAll(async () => {
   db = database.db;
   database.initDatabase();
   orderLinks = await import('../src/services/orderLinkService.js');
+  orderService = await import('../src/services/orderService.js');
   spotify = await import('../src/services/spotifyFamilyService.js');
   youtube = await import('../src/services/youtubeRenewalService.js');
   const adminRoutes = await import('../src/services/adminApiRoutes.js');
@@ -89,6 +91,16 @@ beforeAll(async () => {
     customerGmail: 'youtube@gmail.com',
     months: 6,
     amount: 300_000,
+  });
+  insertOrder({
+    code: 'CN_LEGACY_SPOTIFY_01',
+    channel: 'legacy-spotify',
+    product: 'Sờ Pót Ti Fy 12 Tháng',
+    serviceType: 'other',
+    customerId: '123456789012345678',
+    customerName: 'Discord 123456789012345678',
+    months: 12,
+    amount: 320_000,
   });
 });
 
@@ -137,6 +149,16 @@ describe('Order link service', () => {
     expect(orderLinks.detectLinkedOrderService('Discord Nitro Boost 6 Tháng')).toBe('NITRO');
     expect(orderLinks.detectLinkedOrderService('Netflix Premium 4K')).toBe('NETFLIX');
     expect(orderLinks.detectLinkedOrderService('CapCut Pro 1 Tháng')).toBe('OTHER');
+  });
+
+  test('recognizes phonetic Spotify labels used by legacy Discord products', () => {
+    expect(orderLinks.detectLinkedOrderService('Sờ Pót Ti Fy 12 Tháng', 'other')).toBe('SPOTIFY');
+    expect(orderService.detectServiceType('Sờ Pót Ti Fy 12 Tháng')).toBe('spotify');
+    expect(orderService.detectServiceType('Gói Premium 12 Tháng', 'spotify')).toBe('spotify');
+    expect(orderLinks.resolveOrderLink('CN_LEGACY_SPOTIFY_01', {
+      expectedService: 'SPOTIFY',
+      guildId: 'TEST_GUILD',
+    }).serviceFamily).toBe('SPOTIFY');
   });
 
   test('autofills Spotify member fields from the linked order', () => {

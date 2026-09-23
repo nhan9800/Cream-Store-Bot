@@ -135,12 +135,12 @@ export async function buildClient() {
         });
     }
 
-    // Đồng bộ bài Trung Thu bằng cách sửa ba bài hiện có; chỉ bài mới mới ping.
+    // Đồng bộ bài PUBG Trend Sale bằng cách sửa ba bài hiện có; chỉ bài mới mới ping.
     if (String(config.guildId) === STORE_ONE_GUILD_ID) {
       try {
         const { publishPromotionBoard } = await import('./campaigns/promotionBoard2026.js');
         const promotionBoard = await publishPromotionBoard(readyClient);
-        console.log(`[PROMOTION-BOARD] status=${promotionBoard.status} messages=${promotionBoard.messages?.length || 0} deletedOld=${promotionBoard.deletedOldMessages || 0} removedEmojis=${promotionBoard.removedEventEmojis?.length || 0}`);
+        console.log(`[PROMOTION-BOARD] campaign=PUBG-TREND-SALE status=${promotionBoard.status} messages=${promotionBoard.messages?.length || 0} deletedOld=${promotionBoard.deletedOldMessages || 0} removedEmojis=${promotionBoard.removedEventEmojis?.length || 0}`);
 
         const { publishProfileEffectGiveaway } = await import('./campaigns/profileEffectGiveaway2026.js');
         const profileGiveaway = await publishProfileEffectGiveaway(readyClient);
@@ -150,7 +150,7 @@ export async function buildClient() {
         const boostPanel = await refreshBoostPanel(readyClient, STORE_ONE_GUILD_ID);
         console.log(`[BOOST-PANEL] status=${boostPanel?.status || 'unknown'} message=${boostPanel?.messageId || 'none'}`);
       } catch (error) {
-        console.error('[PROMOTION-BOARD] Không thể đồng bộ Hội Trăng Cenar/giveaway:', error);
+        console.error('[PROMOTION-BOARD] Không thể đồng bộ PUBG Trend Sale/giveaway:', error);
       }
     }
 

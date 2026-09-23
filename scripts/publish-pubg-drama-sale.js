@@ -12,7 +12,6 @@ try {
   const ready = new Promise((resolve) => client.once(Events.ClientReady, resolve));
   await client.login(process.env.BOT_TOKEN);
   await ready;
-  // Giữ lệnh vận hành cũ tương thích, nhưng luôn xuất bản chiến dịch đang hoạt động.
   const result = await publishPubgDramaSale(client, { tagEveryone: true, tagMember: true });
   console.log(JSON.stringify(result, null, 2));
 } finally {
