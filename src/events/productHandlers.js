@@ -242,6 +242,7 @@ export async function handleProductPurchaseFlow(interaction, productId) {
         ticketChannelId: channel.id,
         customerId: interaction.user.id,
         productName: product.name,
+        serviceType: product.service_type,
         quantity,
         totalAmount: totalPrice,
         durationMonths: product.duration_months,

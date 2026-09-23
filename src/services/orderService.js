@@ -4,6 +4,7 @@ import { config } from '../config.js';
 import { randomDigits } from '../utils/id.js';
 import { syncCustomerStats, getCustomerProfile } from './customerService.js';
 import { addOrderDuration, normalizeOrderDurationStorage, normalizeQueueGroup } from '../utils/formatters.js';
+import { isSpotifyProductName, normalizeServiceSearch } from '../utils/serviceDetection.js';
 import { broadcastDashboardEvent } from './dashboardMiniServer.js';
 import { encrypt } from '../utils/crypto.js';
 import { awardOrderPoints, refundOrderPoints } from './loyaltyService.js';
@@ -65,7 +66,7 @@ function getOrdersExpiringBetweenStmt(){return db.prepare(`SELECT * FROM orders 
 function topProductsSalesStmt(){return db.prepare(`SELECT product_name, COUNT(*) AS total_orders FROM orders WHERE guild_id=? GROUP BY product_name ORDER BY total_orders DESC, product_name ASC LIMIT ?`);}
 function claimOrderStmt(){return db.prepare('UPDATE orders SET claimed_by_id=?, claimed_at=?, updated_at=? WHERE order_code=?');}
 function clearClaimStmt(){return db.prepare('UPDATE orders SET claimed_by_id=NULL, claimed_at=NULL, updated_at=? WHERE order_code=?');}
-function updateOrderFieldsStmt(){return db.prepare(`UPDATE orders SET product_name=?, quantity=?, total_amount=?, queue_group=?, priority_rank=?, updated_at=? WHERE order_code=?`);}
+function updateOrderFieldsStmt(){return db.prepare(`UPDATE orders SET product_name=?, service_type=?, quantity=?, total_amount=?, queue_group=?, priority_rank=?, updated_at=? WHERE order_code=?`);}
 function getStaffKpiStmt(){return db.prepare(`SELECT actor_id, COUNT(*) total_actions, SUM(CASE WHEN action IN ('ORDER_COMPLETE_MANUAL','ORDER_COMPLETE_AUTO','ORDER_COMPLETED') THEN 1 ELSE 0 END) completed_orders, SUM(CASE WHEN action IN ('DELIVERY_SENT','ORDER_DELIVERED') THEN 1 ELSE 0 END) deliveries, SUM(CASE WHEN action IN ('ORDER_CLAIM','ORDER_CLAIMED') THEN 1 ELSE 0 END) claims FROM staff_logs WHERE guild_id=? AND actor_id IS NOT NULL GROUP BY actor_id ORDER BY completed_orders DESC, deliveries DESC, total_actions DESC LIMIT ?`);}
 function averageCompletionTimeStmt(){return db.prepare(`SELECT AVG((julianday(completed_at)-julianday(created_at))*86400.0) avg_seconds FROM orders WHERE guild_id=? AND completed_by_id=? AND completed_at IS NOT NULL`);}
 
@@ -73,11 +74,27 @@ export function generateUniqueOrderCode(){while(true){const c=`CN_${randomDigits
 function ensureAmountValue(v){const a=Number(v ?? 0); return Number.isFinite(a)&&a>0?Math.trunc(a):0;}
 function computePriority(guildId, customerId, productName){const profile=getCustomerProfile(guildId, customerId); const completed=Number(profile?.total_completed_orders ?? 0); let rank=0; if (completed >= config.vipRoleThreshold) rank += 100; if ((productName||'').toLowerCase().includes('vip')) rank += 20; return rank;}
 
-function detectServiceType(name) {
+function normalizeCatalogServiceType(value) {
+  const normalized = normalizeServiceSearch(value);
+  if (!normalized || normalized === 'other') return null;
+  if (normalized === 'spotify') return 'spotify';
+  if (normalized === 'youtube') return 'youtube';
+  if (normalized === 'netflix') return 'netflix';
+  if (['discord', 'nitro', 'boost', 'game'].includes(normalized)) return 'discord';
+  if (normalized === 'service') return 'service';
+  if (normalized === 'ai') return 'ai';
+  if (normalized === 'gearup' || normalized === 'gear') return 'gearup';
+  if (normalized === 'decor') return 'decor';
+  return null;
+}
+
+export function detectServiceType(name, explicitServiceType = null) {
+  const explicit = normalizeCatalogServiceType(explicitServiceType);
+  if (explicit) return explicit;
   if (!name) return 'netflix';
-  const l = name.toLowerCase();
+  const l = normalizeServiceSearch(name);
   if (l.includes('setup') || l.includes('bot custom') || l.includes('website custom') || l.includes('duy trì bot')) return 'service';
-  if (l.includes('spotify') || l.includes('spot')) return 'spotify';
+  if (isSpotifyProductName(name) || l.includes('spot')) return 'spotify';
   if (l.includes('discord') || l.includes('nitro') || l.includes('boost')) return 'discord';
   if (l.includes('youtube') || l.includes('yt') || l.includes('yout') || l.includes('pre')) return 'youtube';
   if (l.includes('netflix') || l.includes('net')) return 'netflix';
@@ -96,7 +113,7 @@ function scheduleCtvOrderLogSync(order) {
   });
 }
 
-export function createOrder({ guildId, ticketId, ticketChannelId, customerId, productName, quantity, note, totalAmount = 0, durationMonths = config.defaultOrderDurationMonths, durationDays = null, orderLogChannelId, createdById, orderCode, discordSkuId = null, discordProductUrl = null, discordOriginalPrice = null, discordNitroEligible = false }) {
+export function createOrder({ guildId, ticketId, ticketChannelId, customerId, productName, serviceType = null, quantity, note, totalAmount = 0, durationMonths = config.defaultOrderDurationMonths, durationDays = null, orderLogChannelId, createdById, orderCode, discordSkuId = null, discordProductUrl = null, discordOriginalPrice = null, discordNitroEligible = false }) {
   const timestamp = nowIso();
   const safeAmount = ensureAmountValue(totalAmount);
   const finalOrderCode = orderCode || generateUniqueOrderCode();
@@ -112,11 +129,11 @@ export function createOrder({ guildId, ticketId, ticketChannelId, customerId, pr
   );
   const safeDurationDays = normalizedDuration.durationDays;
   const safeDurationMonths = normalizedDuration.durationMonths;
-  const serviceType = detectServiceType(productName);
+  const normalizedServiceType = detectServiceType(productName, serviceType);
 
   let resultId;
   const transaction = db.transaction(() => {
-    const result = createOrderStmt().run(finalOrderCode,guildId,ticketId,ticketChannelId,customerId,productName,quantity,note ?? null,safeAmount,safeAmount > 0 ? 0 : safeAmount,config.paymentProvider,paymentCode,payosOrderCode,paymentStatus,status,timestamp,queueGroup,priorityRank,safeDurationMonths,safeDurationDays,orderLogChannelId,createdById,timestamp,timestamp,serviceType,discordSkuId,discordProductUrl,discordOriginalPrice,discordNitroEligible ? 1 : 0);
+    const result = createOrderStmt().run(finalOrderCode,guildId,ticketId,ticketChannelId,customerId,productName,quantity,note ?? null,safeAmount,safeAmount > 0 ? 0 : safeAmount,config.paymentProvider,paymentCode,payosOrderCode,paymentStatus,status,timestamp,queueGroup,priorityRank,safeDurationMonths,safeDurationDays,orderLogChannelId,createdById,timestamp,timestamp,normalizedServiceType,discordSkuId,discordProductUrl,discordOriginalPrice,discordNitroEligible ? 1 : 0);
     resultId = result.lastInsertRowid;
     syncCustomerStats(guildId, customerId);
   });
@@ -561,7 +578,7 @@ export function completeWarranty(orderCode, completedById){
   }
   return { completed: result.changes > 0, order: updated };
 }
-export function updateOrderEditableFields(orderCode,{productName,quantity,totalAmount,priorityRank}){const order=getOrderByCode(orderCode); if(!order) return null; const nextName=productName ?? order.product_name; const nextQty=quantity ?? order.quantity; const nextAmount=totalAmount === undefined ? order.total_amount : ensureAmountValue(totalAmount); const nextPriority=priorityRank === undefined ? Number(order.priority_rank ?? 0) : Number(priorityRank); updateOrderFieldsStmt().run(nextName, nextQty, nextAmount, normalizeQueueGroup(nextName) || 'mac-dinh', nextPriority, nowIso(), orderCode); return getOrderByCode(orderCode);}
+export function updateOrderEditableFields(orderCode,{productName,quantity,totalAmount,priorityRank}){const order=getOrderByCode(orderCode); if(!order) return null; const nextName=productName ?? order.product_name; const nextQty=quantity ?? order.quantity; const nextAmount=totalAmount === undefined ? order.total_amount : ensureAmountValue(totalAmount); const nextPriority=priorityRank === undefined ? Number(order.priority_rank ?? 0) : Number(priorityRank); const nextServiceType=productName === undefined ? detectServiceType(nextName, order.service_type) : detectServiceType(nextName); updateOrderFieldsStmt().run(nextName, nextServiceType, nextQty, nextAmount, normalizeQueueGroup(nextName) || 'mac-dinh', nextPriority, nowIso(), orderCode); return getOrderByCode(orderCode);}
 
 export const getOutstandingOrders = (guildId, customerId=null, limit=20, offset=0) => getOutstandingOrdersStmt().all(guildId, customerId, customerId, limit, offset);
 export const getOutstandingSummary = (guildId, customerId=null) => getOutstandingSummaryStmt().get(guildId, customerId, customerId) ?? { total_orders:0, waiting_payment:0, processing:0, warranty_open:0 };

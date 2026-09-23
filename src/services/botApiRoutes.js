@@ -1454,6 +1454,7 @@ export function registerBotApiRoutes(app) {
                     ticketChannelId: placeholderChannelId,
                     customerId,
                     productName: firstItem.name,
+                    serviceType: firstItem.service_type,
                     quantity,
                     totalAmount,
                     durationMonths,

@@ -1,5 +1,6 @@
 import { db } from '../database/db.js';
 import { decrypt } from '../utils/crypto.js';
+import { isSpotifyProductName, normalizeServiceSearch } from '../utils/serviceDetection.js';
 
 const SUPPORTED_SERVICES = new Set(['NITRO', 'SPOTIFY', 'YOUTUBE', 'NETFLIX', 'OTHER']);
 
@@ -16,29 +17,31 @@ function clean(value, maxLength = 160) {
   return normalized ? normalized.slice(0, maxLength) : null;
 }
 
-function searchable(value) {
-  return String(value || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/đ/gi, 'd')
-    .toLowerCase();
-}
-
 export function normalizeLinkedOrderCode(value) {
   return clean(value, 80)?.toUpperCase() || null;
 }
 
 export function detectLinkedOrderService(productName, serviceType = '') {
-  const haystack = searchable(`${productName || ''} ${serviceType || ''}`);
-  if (haystack.includes('spotify')) return 'SPOTIFY';
-  if (haystack.includes('youtube') || haystack.includes('you tube')) return 'YOUTUBE';
-  if (haystack.includes('netflix')) return 'NETFLIX';
-  if (haystack.includes('nitro')) return 'NITRO';
+  const productText = normalizeServiceSearch(productName);
+  const metadataText = normalizeServiceSearch(serviceType);
+
+  // Prefer a clear product label over stale/legacy metadata.  This is what
+  // lets old orders such as "Sờ Pót Ti Fy 12 Tháng" link to Spotify even
+  // though their stored service_type is "other".
+  if (isSpotifyProductName(productName)) return 'SPOTIFY';
+  if (productText.includes('youtube') || productText.includes('you tube')) return 'YOUTUBE';
+  if (productText.includes('netflix')) return 'NETFLIX';
+  if (productText.includes('nitro')) return 'NITRO';
+
+  if (isSpotifyProductName(serviceType)) return 'SPOTIFY';
+  if (metadataText.includes('youtube')) return 'YOUTUBE';
+  if (metadataText.includes('netflix')) return 'NETFLIX';
+  if (metadataText.includes('nitro') || metadataText === 'discord' || metadataText === 'game') return 'NITRO';
   return 'OTHER';
 }
 
 function detectYoutubePlan(productName) {
-  const haystack = searchable(productName);
+  const haystack = normalizeServiceSearch(productName);
   return haystack.includes('doi family')
     || haystack.includes('family moi thang')
     || haystack.includes('monthly family switch')
