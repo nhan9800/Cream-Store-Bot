@@ -4,7 +4,7 @@ export const PROMOTION_BOARD = Object.freeze({
   guildId: '1282637033340403754',
   channelId: '1515008584549797979',
   status: 'ACTIVE',
-  campaign: 'CENAR-MID-AUTUMN-SALE-2026',
+  campaign: 'CENAR-PUBG-TREND-SALE-2026',
 });
 
 async function fetchAllMessages(channel, limit = 5000) {
@@ -83,6 +83,6 @@ export async function clearPromotionChannel(client) {
 }
 
 export async function publishPromotionBoard(client) {
-  const { publishMidAutumnSale } = await import('./midAutumnSale2026.js');
-  return publishMidAutumnSale(client, { tagEveryone: true, tagMember: true });
+  const { publishPubgDramaSale } = await import('./pubgDramaSale2026.js');
+  return publishPubgDramaSale(client, { tagEveryone: true, tagMember: true });
 }

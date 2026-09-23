@@ -19,6 +19,7 @@
     "publish:national-day-sale": "node scripts/publish-national-day-sale.js",
     "publish:mid-autumn-sale": "node scripts/publish-mid-autumn-sale.js",
     "publish:daily-color-sale": "node scripts/publish-daily-color-sale.js",
+    "publish:pubg-drama-sale": "node scripts/publish-pubg-drama-sale.js",
     "publish:profile-effect-giveaway": "node scripts/publish-profile-effect-giveaway.js",
     "publish:custom-services": "node scripts/publish-custom-services-launch.js",
     "publish:transcript-archive-launch": "node scripts/publish-transcript-archive-launch.js",
