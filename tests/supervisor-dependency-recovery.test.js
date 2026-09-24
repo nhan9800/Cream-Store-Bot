@@ -50,4 +50,25 @@ describe('supervisor dependency recovery', () => {
     expect(result.status).toBe(1);
     expect(result.stderr).toContain('[runtime-deps] invalid');
   });
+
+  it('backs up when the panel pre-pulled the target but the installed marker is older', () => {
+    const dir = setup();
+    fs.writeFileSync(path.join(dir, '.vibehost', 'installed-revision'), 'previoussha\n');
+    const result = spawnSync(bash, ['-c', [
+      'export VIBEHOST_APP_ROOT="$PWD"',
+      'source functions.sh',
+      'git() { if [[ "$1" == rev-parse && "$2" == HEAD ]]; then printf targetsha; return 0; fi; if [[ "$1" == reset && "$2" == --hard && "${3:-}" == targetsha ]]; then return 0; fi; return 0; }',
+      'runtime_valid() { return 0; }',
+      'install_dependencies_for_transition() { return 0; }',
+      'validate_environment() { return 0; }',
+      'backup_databases() { printf "%s" "$1" > backup-revision; }',
+      'SUPERVISOR_HASH=supervisor-hash',
+      'sha256sum() { printf "%s  scripts/vibehost-supervisor.sh\\n" "$SUPERVISOR_HASH"; }',
+      'install_revision targetsha',
+    ].join('; ')], { cwd: dir, encoding: 'utf8' });
+
+    expect(result.status).toBe(0);
+    expect(fs.readFileSync(path.join(dir, 'backup-revision'), 'utf8')).toBe('previoussha');
+    expect(fs.readFileSync(path.join(dir, '.vibehost', 'installed-revision'), 'utf8').trim()).toBe('targetsha');
+  });
 });

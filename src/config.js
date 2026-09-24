@@ -42,6 +42,11 @@ function isPlaceholder(name, value) {
     PAYOS_CLIENT_ID: ['YOUR_PAYOS_CLIENT_ID', 'PAYOS_CLIENT_ID_HERE'],
     PAYOS_API_KEY: ['YOUR_PAYOS_API_KEY', 'PAYOS_API_KEY_HERE'],
     PAYOS_CHECKSUM_KEY: ['YOUR_PAYOS_CHECKSUM_KEY', 'PAYOS_CHECKSUM_KEY_HERE'],
+    BOT_API_KEY: ['YOUR_BOT_API_KEY', 'BOT_API_KEY_HERE', 'PASTE_BOT_API_KEY_HERE'],
+    ENCRYPTION_KEY: ['YOUR_ENCRYPTION_KEY', 'YOUR_64_CHAR_HEX_KEY', 'ENCRYPTION_KEY_HERE'],
+    DASHBOARD_TOKEN: ['YOUR_DASHBOARD_TOKEN', 'DASHBOARD_TOKEN_HERE'],
+    CLIENT_SECRET: ['YOUR_CLIENT_SECRET', 'CLIENT_SECRET_HERE', 'PASTE_CLIENT_SECRET_HERE'],
+    OAUTH_STATE_SECRET: ['YOUR_OAUTH_STATE_SECRET', 'OAUTH_STATE_SECRET_HERE'],
   };
 
   return (placeholders[name] ?? []).includes(normalized);
@@ -84,6 +89,55 @@ export const environmentInfo = {
   envExamplePath,
   envFileExists,
 };
+
+function isEnabled(value) {
+  return ['1', 'true', 'yes', 'on'].includes(String(normalizeEnvValue(value) ?? '').toLowerCase());
+}
+
+/**
+ * Validate secrets that must be present before a production revision is
+ * marked ready. `env` is injectable so check-env tests can exercise fail-closed
+ * behavior without mutating the process environment imported by config.js.
+ */
+export function collectProductionConfigIssues({
+  env = process.env,
+  requireDashboard = isEnabled(env.DASHBOARD_ENABLED),
+  requireOAuth = isEnabled(env.OAUTH_ENABLED)
+    || Boolean(normalizeEnvValue(env.CLIENT_SECRET))
+    || Boolean(normalizeEnvValue(env.OAUTH_STATE_SECRET)),
+} = {}) {
+  const issues = [];
+  const requireSecret = (name, label = name) => {
+    const value = normalizeEnvValue(env[name]);
+    if (!value) {
+      issues.push(`Thiếu ${label}`);
+      return;
+    }
+    if (isPlaceholder(name, value)) issues.push(`${label} vẫn đang dùng placeholder`);
+  };
+
+  requireSecret('ENCRYPTION_KEY');
+  requireSecret('BOT_API_KEY');
+
+  if (requireDashboard) requireSecret('DASHBOARD_TOKEN');
+
+  if (requireOAuth) {
+    requireSecret('CLIENT_SECRET');
+    const stateSecret = normalizeEnvValue(env.OAUTH_STATE_SECRET);
+    if (stateSecret && isPlaceholder('OAUTH_STATE_SECRET', stateSecret)) {
+      issues.push('OAUTH_STATE_SECRET vẫn đang dùng placeholder');
+    }
+  } else {
+    // Optional integrations may stay disabled, but an explicitly configured
+    // placeholder must never be allowed to look like a valid secret.
+    for (const name of ['CLIENT_SECRET', 'OAUTH_STATE_SECRET']) {
+      const value = normalizeEnvValue(env[name]);
+      if (value && isPlaceholder(name, value)) issues.push(`${name} vẫn đang dùng placeholder`);
+    }
+  }
+
+  return issues;
+}
 
 const isStoreTwoEnvironment = getEnv('GUILD_ID') === '1070676180103086132';
 

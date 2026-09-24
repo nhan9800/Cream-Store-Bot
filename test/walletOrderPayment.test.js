@@ -13,6 +13,7 @@ import {
 } from '../src/services/orderService.js';
 import {
   addWalletBalance,
+  finalizeTopup,
   getWalletBalance,
   getWalletTransactions,
 } from '../src/services/walletService.js';
@@ -102,6 +103,28 @@ describe('atomic website wallet payment', () => {
       .filter((tx) => tx.type === 'PAYMENT' && tx.related_code === order.order_code);
     expect(payments).toHaveLength(1);
     expect(payments[0].amount).toBe(-140_000);
+  });
+
+  it('credits a top-up once when PayOS callbacks are replayed concurrently', async () => {
+    const topupCode = `TOPUP_REPLAY_${Date.now()}`;
+    const topupCustomerId = `${customerId}_topup`;
+    db.prepare(`INSERT INTO wallet_topup_orders
+      (topup_code, guild_id, customer_id, amount, payos_order_code, created_at)
+      VALUES (?, ?, ?, ?, ?, ?)`)
+      .run(topupCode, guildId, topupCustomerId, 75_000, Date.now(), new Date().toISOString());
+
+    const results = await Promise.all([
+      Promise.resolve().then(() => finalizeTopup(topupCode)),
+      Promise.resolve().then(() => finalizeTopup(topupCode)),
+    ]);
+
+    expect(results.filter(Boolean)).toHaveLength(1);
+    expect(db.prepare('SELECT status FROM wallet_topup_orders WHERE topup_code = ?').get(topupCode).status)
+      .toBe('PAID');
+    expect(getWalletBalance(guildId, topupCustomerId)).toBe(75_000);
+    expect(getWalletTransactions(guildId, topupCustomerId, 20)
+      .filter((transaction) => transaction.type === 'TOPUP' && transaction.related_code === topupCode))
+      .toHaveLength(1);
   });
 
   it('rolls back without a ledger entry when the balance is insufficient', () => {
