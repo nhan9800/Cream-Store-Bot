@@ -1,5 +1,6 @@
 import {
   assertDeployConfig,
+  collectProductionConfigIssues,
   collectPaymentConfigIssues,
   config,
   environmentInfo,
@@ -28,6 +29,12 @@ console.log('payosCancelUrl      :', getPayOSCancelUrl() ?? '(missing PUBLIC_BAS
 
 try {
   assertDeployConfig();
+  const productionIssues = collectProductionConfigIssues();
+  if (productionIssues.length) {
+    console.log('RESULT              : FAIL');
+    console.error(productionIssues.join('\n'));
+    process.exit(1);
+  }
   const paymentIssues = collectPaymentConfigIssues();
   if (paymentIssues.length) {
     console.log('RESULT              : WARN');

@@ -39,7 +39,7 @@
     "publish:verify": "node scripts/publish-verification-panel.js",
     "backup": "node scripts/backup-production.js",
     "verify:backup": "node scripts/verify-backup.js",
-    "test": "vitest run"
+    "test": "vitest run --maxWorkers=1 --fileParallelism=false"
   },
   "engines": {
     "node": ">=22.12.0"
@@ -51,13 +51,13 @@
     "@tesseract.js-data/eng": "1.0.0",
     "better-sqlite3": "12.11.1",
     "discord-player": "^7.2.0",
-    "discord-player-youtubedlp": "^1.2.1",
+    "discord-player-youtubedlp": "1.2.2",
     "discord.js": "14.27.0",
     "dotenv": "16.6.1",
-    "express": "4.22.2",
+    "express": "4.22.3",
     "ffmpeg-static": "^5.3.0",
     "qrcode": "1.5.4",
-    "sharp": "0.35.3",
+    "sharp": "0.35.4",
     "tesseract.js": "7.0.0"
   },
   "devDependencies": {

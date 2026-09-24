@@ -68,7 +68,7 @@ function convertObjToQueryStr(object) {
     .join('&');
 }
 
-function verifyPayOSWebhookSignature(data, signature) {
+export function verifyPayOSWebhookSignature(data, signature) {
   if (!config.payosChecksumKey || !signature || !data) {
     console.warn('[PAYOS-SIGNATURE] Thiếu checksum key, signature hoặc data:', {
       hasChecksumKey: !!config.payosChecksumKey,
@@ -80,16 +80,17 @@ function verifyPayOSWebhookSignature(data, signature) {
   const sortedData = sortObjDataByKey(data);
   const queryString = convertObjToQueryStr(sortedData);
   const expected = createHmacHex(config.payosChecksumKey, queryString);
-  const matched = expected.toLowerCase() === String(signature).toLowerCase();
+  const normalizedSignature = String(signature).trim().toLowerCase();
+  const isValidHex = /^[a-f0-9]{64}$/.test(normalizedSignature);
+  const matched = isValidHex && crypto.timingSafeEqual(
+    Buffer.from(expected, 'hex'),
+    Buffer.from(normalizedSignature, 'hex'),
+  );
   if (!matched) {
     console.error('[PAYOS-SIGNATURE] Sai chữ ký PayOS!', {
-      queryString,
-      expectedSignature: expected.toLowerCase(),
-      receivedSignature: String(signature).toLowerCase(),
-      checksumKeyUsed: config.payosChecksumKey ? `${config.payosChecksumKey.slice(0, 4)}...${config.payosChecksumKey.slice(-4)}` : 'empty'
+      orderCode: data?.orderCode ?? null,
+      signatureFormatValid: isValidHex,
     });
-  } else {
-    console.log('[PAYOS-SIGNATURE] Xác thực chữ ký PayOS thành công cho đơn:', data.orderCode);
   }
   return matched;
 }

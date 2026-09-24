@@ -102,13 +102,19 @@ export function registerAdminRoutes(app) {
     const userId = req.header('x-user-id');
     if (!userId) return res.status(401).json({ ok: false, error: 'Thiếu x-user-id' });
 
-    const user = db.prepare('SELECT role FROM web_users WHERE id = ?').get(userId);
+    const user = db.prepare('SELECT id, email, display_name, role FROM web_users WHERE id = ?').get(userId);
 
     if (!user || (user.role !== 'admin' && user.role !== 'staff')) {
       return res.status(403).json({ ok: false, error: 'Forbidden. Cần quyền Admin hoặc Staff.' });
     }
 
     req.adminRole = user.role; // 'admin' or 'staff'
+    req.user = {
+      id: user.id,
+      email: user.email,
+      name: user.display_name,
+      role: user.role,
+    };
     next();
   }
 

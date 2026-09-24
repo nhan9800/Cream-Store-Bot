@@ -32,6 +32,9 @@ jobs:
       - name: Install locked dependencies
         run: npm ci
 
+      - name: Audit production dependencies
+        run: npm audit --omit=dev --audit-level=high
+
       - name: Validate VibeHost supervisor
         run: bash -n scripts/vibehost-supervisor.sh
 

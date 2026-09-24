@@ -142,13 +142,21 @@ export function getTopupByPayOSCode(payosOrderCode) {
 }
 
 export function finalizeTopup(topupCode) {
-  const topup = db.prepare('SELECT * FROM wallet_topup_orders WHERE topup_code = ?').get(topupCode);
-  if (!topup || topup.status === 'PAID') return null;
-
-  const updateStmt = db.prepare('UPDATE wallet_topup_orders SET status = ?, paid_at = ? WHERE topup_code = ?');
-  
   const transaction = db.transaction(() => {
-    updateStmt.run('PAID', nowIso(), topupCode);
+    // Read and claim the row in the same SQLite transaction. PayOS may retry a
+    // webhook while the first callback is still being processed; the
+    // conditional status transition makes only one callback eligible to credit
+    // the wallet.
+    const topup = db.prepare('SELECT * FROM wallet_topup_orders WHERE topup_code = ?').get(topupCode);
+    if (!topup || topup.status !== 'PENDING') return null;
+
+    const updateResult = db.prepare(`
+      UPDATE wallet_topup_orders
+      SET status = ?, paid_at = ?
+      WHERE topup_code = ? AND status = 'PENDING'
+    `).run('PAID', nowIso(), topupCode);
+    if (updateResult.changes !== 1) return null;
+
     addWalletBalance(
       topup.guild_id, 
       topup.customer_id, 
@@ -157,8 +165,8 @@ export function finalizeTopup(topupCode) {
       'Nạp tiền qua PayOS', 
       topup.topup_code
     );
+    return topup;
   });
   
-  transaction();
-  return topup;
+  return transaction();
 }

@@ -184,8 +184,13 @@ install_revision() {
   # a verified backup before dependencies and runtime validation can proceed.
   # Do not install here: package.json still belongs to current_sha when target_sha
   # is newer. Installing before git reset leaves new runtime packages missing.
-  if [[ "$target_sha" != "$current_sha" || -z "$installed_sha" ]]; then
-    if ! backup_databases "$current_sha"; then
+  if [[ "$target_sha" != "$current_sha" || "$installed_sha" != "$target_sha" ]]; then
+    # A panel may pull the target into the worktree before this process runs.
+    # In that case current_sha already equals target_sha, so the marker is the
+    # only reliable record of the last validated revision to label the backup.
+    local backup_revision="$installed_sha"
+    [[ -n "$backup_revision" ]] || backup_revision="$current_sha"
+    if ! backup_databases "$backup_revision"; then
       write_marker "$FAILED_REVISION_FILE" "$target_sha"
       return 1
     fi
