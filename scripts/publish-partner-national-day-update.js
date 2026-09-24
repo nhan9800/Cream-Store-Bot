@@ -7,6 +7,14 @@ import {
   isPartnerNationalDayAnnouncement,
 } from '../src/campaigns/partnerNationalDayUpdate2026.js';
 
+if (PARTNER_NATIONAL_DAY_UPDATE.lifecycle === 'LEGACY') {
+  throw new Error(
+    `Campaign ${PARTNER_NATIONAL_DAY_UPDATE.marker} đã kết thúc và chỉ được giữ để đối soát lịch sử. `
+    + `Không đăng lại bài cũ; dùng ${PARTNER_NATIONAL_DAY_UPDATE.activePublishCommand} `
+    + `cho campaign hiện hành ${PARTNER_NATIONAL_DAY_UPDATE.activeCampaign}.`,
+  );
+}
+
 if (!process.env.BOT_TOKEN) throw new Error('BOT_TOKEN is required.');
 
 initDatabase();

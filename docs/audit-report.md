@@ -11,5 +11,11 @@ Bot Discord/API đang chạy trên VibeHost, tách biệt với hosting website.
 Website giao tiếp với bot qua REST API server-to-server và đọc `BOT_API_URL`/`BOT_API_KEY` từ biến môi trường.
 Không được hardcode địa chỉ hạ tầng vào source.
 
-GitHub Actions của bot hiện chỉ chạy kiểm thử. Triển khai production thực hiện qua SFTP và Restart trên panel cho
-đến khi API restart chính thức của VibeHost được xác minh.
+GitHub Actions của bot chạy workflow `Bot Production - Verify and Promote` trên mỗi push vào `main`. Workflow
+kiểm tra dependency lock, cú pháp supervisor, unit test và smoke test; chỉ SHA vượt qua toàn bộ bước mới được
+promote nguyên vẹn lên nhánh `bot-production`.
+
+Startup command VibeHost là `npm run start:vibehost`. Supervisor poll nhánh `bot-production` mỗi 60 giây, backup
+và kiểm tra integrity hai SQLite trước khi cập nhật, xác thực hai file môi trường, cài dependency và restart
+launcher. Nếu revision mới không cài hoặc không chạy được, supervisor rollback về revision trước. SFTP và nút
+Restart trên panel chỉ dành cho bootstrap hoặc khôi phục thủ công.

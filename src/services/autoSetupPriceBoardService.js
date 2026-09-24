@@ -37,7 +37,7 @@ export const PRICE_GROUPS = [
   },
   {
     key: 'server_boost', titleSlot: 'brand_boost', title: 'Discord Server Boost', accent: 0xEB459E,
-    note: 'Hai gói 14 Boosts loại có liền: 1 tháng 120.000đ hoặc 3 tháng 320.000đ.',
+    note: 'Catalog hiện có hai gói 14 Boosts: 1 tháng 120.000đ hoặc 3 tháng 320.000đ. PUBG Trend Sale có giá ticket 3 tháng 280.000đ khi staff xác nhận.',
     match: (p) => p.service_type === 'GAME' && /server boost/i.test(p.name),
   },
   {
@@ -238,7 +238,7 @@ export function buildPricePortalPayload(guildId, guildConfig, panels = []) {
       international ? `# ${E('icon_store')} CENAR GLOBAL • LIVE PRICING` : `# ${E('icon_store')} BẢNG GIÁ CENAR STORE`,
       international ? `> ${E('status_check')} **Live catalog synchronized across Discord and the website.**` : `> ${E('status_check')} **Đồng bộ trực tiếp từ hệ thống sản phẩm đang hoạt động.**`,
       ...(guildId === PRIMARY_GUILD_ID ? [
-        `> ${E('icon_gift')} **Sale Trung Thu 25/9 đang diễn ra tại <#1515008584549797979> · giá ưu đãi áp dụng theo bài chiến dịch.**`,
+        `> ${E('icon_gift')} **PUBG Trend Sale đang diễn ra tại <#1515008584549797979> · giá ưu đãi và điều kiện được xác nhận tại ticket.**`,
       ] : []),
     ].join('\n'))
   );

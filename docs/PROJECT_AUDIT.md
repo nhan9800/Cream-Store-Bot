@@ -16,5 +16,7 @@
 
 - Không làm mất `.env*` hoặc SQLite khi upload source.
 - Không để lộ SFTP credential, Discord token, PayOS key hoặc `BOT_API_KEY`.
-- Không bật auto-deploy nếu chưa có cơ chế restart/health-check đáng tin cậy.
+- Chỉ promote SHA đã vượt qua workflow test/smoke; không đẩy trực tiếp source chưa verify lên `bot-production`.
+- Supervisor phải backup hai SQLite và kiểm tra môi trường trước khi đổi revision; sau đó người vận hành phải
+  kiểm tra cả hai health endpoint. Nếu rollout lỗi phải giữ bot cũ hoặc rollback tự động.
 - Dùng HTTPS custom domain cho webhook và API production.

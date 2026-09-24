@@ -5,6 +5,10 @@ export const PARTNER_NATIONAL_DAY_UPDATE = Object.freeze({
   guildId: '1282637033340403754',
   announcementChannelId: '1514598369597587546',
   marker: 'CENAR PARTNER OPEN CALL · QUỐC KHÁNH 2/9',
+  // Giữ nội dung để đối soát các bài lịch sử; không cho script vận hành đăng lại.
+  lifecycle: 'LEGACY',
+  activeCampaign: 'CENAR-PUBG-TREND-SALE-2026',
+  activePublishCommand: 'npm run publish:pubg-drama-sale',
 });
 
 export function buildPartnerNationalDayContent(guildId = PARTNER_NATIONAL_DAY_UPDATE.guildId) {
