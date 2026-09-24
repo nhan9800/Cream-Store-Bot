@@ -70,5 +70,9 @@
     "ffmpeg-static": true,
     "protobufjs": true,
     "ytdlp-nodejs": false
+  },
+  "overrides": {
+    "qs": "6.16.0",
+    "esbuild": "0.28.1"
   }
 }
