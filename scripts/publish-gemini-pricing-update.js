@@ -10,12 +10,6 @@ import {
   buildAiCreativePricingAnnouncement,
   isAiCreativePricingAnnouncement,
 } from '../src/campaigns/aiCreativePricingUpdate2026.js';
-import {
-  NATIONAL_DAY_SALE,
-  buildNationalDaySaleMessages,
-  nationalDaySalePart,
-  syncNationalDaySaleEmojis,
-} from '../src/campaigns/nationalDaySale2026.js';
 import { publishPromotionBoard } from '../src/campaigns/promotionBoard2026.js';
 import {
   GEMINI_PRICING_UPDATE,
@@ -61,23 +55,9 @@ try {
   // hiển thị đúng hai gói mới ngay lập tức.
   const priceBoard = await publishPriceBoard(guild, { force: true });
 
-  // Cập nhật bảng khuyến mãi ghim cũ mà không đụng tới các bài sale 2/9.
+  // Cập nhật bảng khuyến mãi đang hoạt động (PUBG Trend Sale) cùng các bảng giá.
   const promotionBoard = await publishPromotionBoard(client);
   const ctvPriceBoard = await publishCtvPricePanel(guild);
-
-  // Sửa phần Gemini của bài sale 2/9 đang hoạt động, giữ nguyên hai phần còn lại.
-  const saleEmojis = await syncNationalDaySaleEmojis(guild);
-  const salePayload = buildNationalDaySaleMessages({
-    guildId: guild.id,
-    customEmojis: saleEmojis,
-  })[1];
-  const promotionChannel = await guild.channels.fetch(NATIONAL_DAY_SALE.promotionChannelId);
-  const promotionMessages = await promotionChannel.messages.fetch({ limit: 100 });
-  const salePartTwo = promotionMessages.find((message) => (
-    nationalDaySalePart(message, client.user.id) === 2
-  ));
-  if (!salePartTwo) throw new Error('Không tìm thấy phần 2 của bảng sale 2/9 để cập nhật Gemini.');
-  await salePartTwo.edit(salePayload);
 
   // Loại gói phương thức cũ khỏi thông báo danh mục AI đã đăng trước đây.
   const announcementChannel = await guild.channels.fetch(
@@ -117,7 +97,6 @@ try {
     priceBoard,
     promotionBoard,
     ctvPriceBoard: ctvPriceBoard.id,
-    nationalDaySalePartTwo: salePartTwo.id,
     aiCatalogMessage: aiCatalogMessage?.id || null,
   }, null, 2));
 } finally {

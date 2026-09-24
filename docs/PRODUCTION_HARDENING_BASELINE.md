@@ -19,13 +19,23 @@
 
 ## CI/CD
 
-GitHub Actions hiện chỉ verify source bằng dependency lock, unit test và smoke test. Auto-upload và auto-restart
-production chưa được bật cho đến khi xác minh API restart chính thức của VibeHost.
+Mỗi push vào `main` chạy workflow `Bot Production - Verify and Promote`. Workflow cài dependency theo lockfile,
+kiểm tra cú pháp supervisor, chạy unit test và smoke test trên đúng SHA. Chỉ khi toàn bộ bước xanh workflow mới
+đẩy chính SHA đã kiểm thử lên nhánh `bot-production`.
+
+Startup command production là `npm run start:vibehost`. Supervisor trên VibeHost poll `bot-production` mỗi 60
+giây; trước khi cập nhật source, supervisor backup và kiểm tra integrity cả hai SQLite, kiểm tra `.env` và
+`.env.store2`, cài dependency cần thiết rồi restart launcher. Nếu cài đặt hoặc kiểm tra runtime thất bại, source
+được rollback về revision trước. Deploy thường ngày không cần upload SFTP hoặc restart thủ công từ panel.
+
+SFTP/panel chỉ dùng cho bootstrap hoặc khôi phục khi supervisor không thể chạy. Quy trình chi tiết và các lệnh
+khôi phục nằm trong [`VIBEHOST_DEPLOY_GUIDE.md`](./VIBEHOST_DEPLOY_GUIDE.md).
 
 ## Kiểm tra sau deploy
 
 - Console không có vòng lặp crash/restart.
 - Hai bot Discord đều ready và đúng guild.
+- Revision đang chạy khớp SHA đã promote trên `bot-production`.
 - Health Store 1 và Store 2 trả thành công qua launcher.
 - Database không bị tạo nhầm ngoài `/home/container/data`.
 - Website chỉ gọi URL bot hiện tại từ biến môi trường.

@@ -135,7 +135,7 @@ describe('Cenar price board V3', () => {
       .replace(/<a?:[A-Za-z0-9_]+:\d+>/g, '');
     expect(visibleText).not.toMatch(RAW_EMOJI_NAME);
     expect(allJson).toContain('https://cenarstore.xyz');
-    expect(allJson).toContain('Sale Trung Thu 25/9 đang diễn ra');
+    expect(allJson).toContain('PUBG Trend Sale đang diễn ra');
     expect(allJson).toContain('<#1515008584549797979>');
 
     for (const payload of payloads.slice(1)) {
@@ -264,6 +264,7 @@ describe('Cenar price board V3', () => {
     expect(panel).toContain('120.000');
     expect(panel).toContain('3 Tháng');
     expect(panel).toContain('320.000');
+    expect(panel).toContain('PUBG Trend Sale có giá ticket 3 tháng 280.000đ');
     expect(panel).not.toContain('Level 2');
   });
 
