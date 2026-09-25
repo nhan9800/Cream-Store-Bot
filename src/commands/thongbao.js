@@ -1,5 +1,9 @@
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import {
+  clearAnnouncementDraftImage,
+  setAnnouncementDraftImage,
+} from '../services/announcementService.js';
+import {
   ActionRowBuilder,
   ModalBuilder,
   PermissionFlagsBits,
@@ -11,10 +15,27 @@ import {
 export const data = new SlashCommandBuilder()
   .setName('thongbao')
   .setDescription('Gửi thông báo và tag các role tùy chọn.')
+  .addAttachmentOption((option) => option
+    .setName('anh')
+    .setDescription('Ảnh đính kèm thông báo (PNG, JPG, WEBP hoặc GIF).')
+    .setRequired(false))
   .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages);
 
 export async function execute(interaction) {
   const E = createEmojiResolver(interaction?.guildId);
+  const image = interaction.options.getAttachment('anh');
+
+  try {
+    if (image) setAnnouncementDraftImage(interaction, image);
+    else clearAnnouncementDraftImage(interaction);
+  } catch (error) {
+    await interaction.reply({
+      content: `${E('status_cross')} ${error.message}`,
+      ephemeral: true,
+    });
+    return;
+  }
+
   // Show a Modal to get the announcement content
   const modal = new ModalBuilder()
     .setCustomId('announcement:modal')

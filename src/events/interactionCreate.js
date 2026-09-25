@@ -99,7 +99,11 @@ import { buildVerificationPromptV2, buildVerificationUnavailableV2 } from '../se
 import { getRecoveryStatus } from '../services/guildRecoveryService.js';
 import { memberHasVerificationRole, resolveVerificationRole } from '../services/verificationRoleService.js';
 import { refreshAllShopPanels } from '../services/shopPanelService.js';
-import { publishAnnouncement } from '../services/announcementService.js';
+import {
+  consumeAnnouncementDraftImage,
+  publishAnnouncement,
+  setAnnouncementDraftImage,
+} from '../services/announcementService.js';
 import {
   FEEDBACK_TEXT_INPUT_ID,
   WARRANTY_ORDER_INPUT_ID,
@@ -1046,6 +1050,7 @@ export function registerInteractionHandler(client, commands) {
 
       if (interaction.isModalSubmit() && interaction.customId === 'announcement:modal') {
         const content = interaction.fields.getTextInputValue('announcement_content');
+        const image = consumeAnnouncementDraftImage(interaction);
         
         const roleSelect = new RoleSelectMenuBuilder()
           .setCustomId('announcement:roleselect')
@@ -1086,6 +1091,12 @@ export function registerInteractionHandler(client, commands) {
             { name: 'Các Role sẽ tag', value: 'Không có (chỉ gửi tin nhắn thường)', inline: false }
           ])
           .setFooter({ text: 'Chọn role bên dưới nếu muốn tag, sau đó bấm Xác nhận gửi.' });
+
+        if (image) {
+          embed
+            .setImage(image.url)
+            .addFields({ name: 'Ảnh đính kèm', value: image.name, inline: false });
+        }
           
         const reply = await interaction.reply({
           embeds: [embed],
@@ -1103,7 +1114,8 @@ export function registerInteractionHandler(client, commands) {
           roles: [],
           tagEveryone: false,
           tagHere: false,
-          channelId: interaction.channelId
+          channelId: interaction.channelId,
+          image,
         });
         return;
       }
@@ -1128,6 +1140,7 @@ export function registerInteractionHandler(client, commands) {
           .setMaxLength(3000);
 
         modal.addComponents(new ActionRowBuilder().addComponents(contentInput));
+        if (cacheData.image) setAnnouncementDraftImage(interaction, cacheData.image);
         await interaction.showModal(modal);
         return;
       }
@@ -2347,9 +2360,10 @@ export function registerInteractionHandler(client, commands) {
              channelId: cacheData.channelId,
              content: cacheData.content,
              roleIds: cacheData.roles,
-             tagEveryone: cacheData.tagEveryone,
-             tagHere: cacheData.tagHere,
-           });
+              tagEveryone: cacheData.tagEveryone,
+              tagHere: cacheData.tagHere,
+              image: cacheData.image,
+            });
 
            announcementCache.delete(interaction.message.id);
            const E = createEmojiResolver(interaction.guildId);

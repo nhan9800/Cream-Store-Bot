@@ -1,6 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ButtonBuilder, ButtonStyle, MessageFlags } from 'discord.js';
-import { buildAnnouncementMessageV2, isPriceRelatedAnnouncement, publishAnnouncement } from '../src/services/announcementService.js';
+import {
+  buildAnnouncementMessageV2,
+  isPriceRelatedAnnouncement,
+  normalizeAnnouncementImage,
+  publishAnnouncement,
+} from '../src/services/announcementService.js';
+import { data as announcementCommand } from '../src/commands/thongbao.js';
 import { buildCardPanelPayload } from '../src/services/cardPanelService.js';
 import { buildCreditOfferV2 } from '../src/utils/embeds.js';
 import { normalizeButtonEmoji, withButtonEmoji } from '../src/utils/emojiHelper.js';
@@ -173,6 +179,80 @@ describe('safe custom emoji components', () => {
     const json = payload.components.map((component) => component.toJSON());
     expect(json[1].components).toHaveLength(2);
     expect(json[1].components.every((button) => button.emoji === undefined)).toBe(true);
+  });
+
+  it('accepts an optional image and re-uploads it into the announcement', () => {
+    const command = announcementCommand.toJSON();
+    expect(command.options).toEqual(expect.arrayContaining([
+      expect.objectContaining({ name: 'anh', required: false }),
+    ]));
+
+    const image = {
+      id: '123456789012345680',
+      name: 'sale banner.PNG',
+      contentType: 'image/png',
+      url: 'https://cdn.discordapp.com/attachments/1/2/sale-banner.png',
+      size: 1024,
+    };
+    const payload = buildAnnouncementMessageV2({
+      guildId: GUILD_ID,
+      content: 'Thông báo có ảnh',
+      image,
+    });
+
+    expect(payload.files).toEqual([{
+      attachment: image.url,
+      name: 'sale-banner-12345680.png',
+    }]);
+    expect(JSON.stringify(payload.components.map((component) => component.toJSON())))
+      .toContain('attachment://sale-banner-12345680.png');
+  });
+
+  it('rejects non-image attachments for /thongbao', () => {
+    expect(() => normalizeAnnouncementImage({
+      id: '123456789012345680',
+      name: 'announcement.pdf',
+      contentType: 'application/pdf',
+      url: 'https://cdn.discordapp.com/attachments/1/2/announcement.pdf',
+    })).toThrow('PNG, JPG, WEBP hoặc GIF');
+  });
+
+  it('keeps the uploaded image name stable when publishing /thongbao', async () => {
+    let sentPayload = null;
+    const guild = {
+      id: GUILD_ID,
+      channels: {
+        fetch: async () => ({
+          id: '123456789012345679',
+          isTextBased: () => true,
+          isThread: () => false,
+          send: async (payload) => {
+            sentPayload = payload;
+            return { id: '123456789012345681' };
+          },
+        }),
+      },
+      members: {
+        me: null,
+        fetchMe: async () => null,
+      },
+    };
+
+    await publishAnnouncement({
+      guild,
+      channelId: '123456789012345679',
+      content: 'Lịch hoạt động cuối tuần',
+      image: {
+        id: '123456789012345680',
+        name: 'weekend.png',
+        contentType: 'image/png',
+        url: 'https://cdn.discordapp.com/attachments/1/2/weekend.png',
+      },
+    });
+
+    expect(sentPayload.files[0].name).toBe('weekend-12345680.png');
+    expect(JSON.stringify(sentPayload.components.map((component) => component.toJSON())))
+      .toContain('attachment://weekend-12345680.png');
   });
 
   it('does not report /thongbao success when Discord rejects the message', async () => {
