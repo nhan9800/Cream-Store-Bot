@@ -6,6 +6,7 @@ import { getOrderByCode, markOrderCompleted, saveDelivery } from './orderService
 import { buildDeliveryCredentialEmbeds, buildDeliveryLoginComponents } from '../utils/embeds.js';
 
 const LEASE_MS = 5 * 60_000;
+const MAX_AUTO_DELIVERY_QUANTITY = 50;
 
 function stockName(name) {
   return String(name || '').replace(/<a?:[a-zA-Z0-9_]+:[0-9]+>/g, '')
@@ -37,7 +38,9 @@ function credentialsOrder(order, credentials) {
 // Reserve the entire quantity or nothing. Snapshots stay encrypted across retries.
 function reserveItems(order) {
   const quantity = Number(order.quantity);
-  if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > 10) throw new Error('INVALID_QUANTITY');
+  if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > MAX_AUTO_DELIVERY_QUANTITY) {
+    throw new Error('INVALID_QUANTITY');
+  }
   const existing = deliveryItems(order.order_code);
   if (existing.length) {
     if (existing.length !== quantity) throw new Error('DELIVERY_QUANTITY_CONFLICT');
@@ -66,25 +69,38 @@ function reserveItems(order) {
 export async function deliverPaidOrder(client, orderCode) {
   if (!client?.users) return { delivered: false };
   const lease = randomUUID();
-  const reservation = db.transaction(() => {
-    const order = getOrderByCode(orderCode);
-    if (!eligible(order)) return null;
-    const now = nowIso();
-    const claimed = db.prepare(`UPDATE order_fulfillments
-      SET status = 'SENDING', lease_token = ?, lease_until = ?, attempts = attempts + 1, updated_at = ?
-      WHERE order_code = ? AND status IN ('PENDING', 'FAILED', 'WAITING_STOCK', 'SENDING')
-        AND retry_at <= ? AND (lease_until IS NULL OR lease_until <= ?)`)
-      .run(lease, new Date(Date.now() + LEASE_MS).toISOString(), now, orderCode, now, now);
-    if (!claimed.changes) return null;
-    const items = reserveItems(order);
-    if (!items.length) {
-      db.prepare(`UPDATE order_fulfillments SET status = 'WAITING_STOCK', lease_token = NULL,
-        lease_until = NULL, last_error = 'INSUFFICIENT_STOCK', retry_at = ? WHERE order_code = ?`)
-        .run(new Date(Date.now() + 5 * 60_000).toISOString(), orderCode);
-      return null;
-    }
-    return { order, items };
-  }).immediate();
+  let reservation;
+  try {
+    reservation = db.transaction(() => {
+      const order = getOrderByCode(orderCode);
+      if (!eligible(order)) return null;
+      const now = nowIso();
+      const claimed = db.prepare(`UPDATE order_fulfillments
+        SET status = 'SENDING', lease_token = ?, lease_until = ?, attempts = attempts + 1, updated_at = ?
+        WHERE order_code = ? AND status IN ('PENDING', 'FAILED', 'WAITING_STOCK', 'SENDING')
+          AND retry_at <= ? AND (lease_until IS NULL OR lease_until <= ?)`)
+        .run(lease, new Date(Date.now() + LEASE_MS).toISOString(), now, orderCode, now, now);
+      if (!claimed.changes) return null;
+      const items = reserveItems(order);
+      if (!items.length) {
+        db.prepare(`UPDATE order_fulfillments SET status = 'WAITING_STOCK', lease_token = NULL,
+          lease_until = NULL, last_error = 'INSUFFICIENT_STOCK', retry_at = ? WHERE order_code = ?`)
+          .run(new Date(Date.now() + 5 * 60_000).toISOString(), orderCode);
+        return null;
+      }
+      return { order, items };
+    }).immediate();
+  } catch (error) {
+    const attempts = db.prepare('SELECT attempts FROM order_fulfillments WHERE order_code = ?').get(orderCode)?.attempts || 1;
+    const retryAt = new Date(Date.now() + Math.min(60, 2 ** Math.min(attempts, 6)) * 60_000).toISOString();
+    db.prepare(`UPDATE order_fulfillments SET status = ?, last_error = ?, lease_token = NULL,
+      lease_until = NULL, retry_at = ?, updated_at = ? WHERE order_code = ?`)
+      .run(eligible(getOrderByCode(orderCode)) ? 'FAILED' : 'BLOCKED',
+        String(error.code || error.message || error.name || 'DELIVERY_FAILED').slice(0, 80),
+        retryAt, nowIso(), orderCode);
+    console.error(`[AUTO-DELIVERY] ${orderCode}: reservation pending retry (${error.code || error.message || error.name || 'failed'})`);
+    return { delivered: false };
+  }
   if (!reservation) return { delivered: false };
 
   const renewLease = () => {

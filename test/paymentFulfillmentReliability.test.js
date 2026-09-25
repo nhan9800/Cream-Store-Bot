@@ -8,6 +8,10 @@ const testDatabasePath = vi.hoisted(() => {
   process.env.DATABASE_PATH = relativePath;
   process.env.ENCRYPTION_KEY = 'test-payment-fulfillment-key';
   process.env.BOT_API_KEY = 'test-bot-api-key';
+  process.env.PAYOS_CLIENT_ID = 'test-payos-client';
+  process.env.PAYOS_API_KEY = 'test-payos-api-key';
+  process.env.PAYOS_CHECKSUM_KEY = 'test-payos-checksum-key';
+  process.env.PUBLIC_BASE_URL = 'https://bot.example.com';
   process.env.WEB_CHECKOUT_ENABLED = 'true';
   process.env.GUILD_ID = '987654321098765432';
   return relativePath;
@@ -22,6 +26,7 @@ import {
   recordOrderPayment,
 } from '../src/services/orderService.js';
 import { deliverPaidOrder } from '../src/services/autoDeliveryService.js';
+import { finalizePaidOrder, reconcileRecentPayOSPayments } from '../src/services/paymentService.js';
 import { createTicket } from '../src/services/ticketService.js';
 import { addWalletBalance, getWalletBalance } from '../src/services/walletService.js';
 import { registerBotApiRoutes } from '../src/services/botApiRoutes.js';
@@ -86,6 +91,7 @@ describe('payment and fulfillment reliability', () => {
       DELETE FROM account_stock;
       DELETE FROM checkout_requests;
       DELETE FROM wallet_transactions;
+      DELETE FROM staff_logs;
       DELETE FROM orders;
       DELETE FROM customer_profiles;
       DELETE FROM product_catalog;`);
@@ -147,6 +153,117 @@ describe('payment and fulfillment reliability', () => {
     expect(result.delivered).toBe(true);
     expect(send).toHaveBeenCalledTimes(2);
     expect(getOrderByCode(order.order_code).status).toBe('COMPLETED');
+  });
+
+  it('keeps a paid bulk order processing when more than ten items need manual stock', async () => {
+    const order = createPendingOrder(14);
+    confirmPayment(order, 'payment-bulk-order');
+    const client = {
+      users: { fetch: vi.fn() },
+    };
+
+    await expect(deliverPaidOrder(client, order.order_code)).resolves.toEqual({ delivered: false });
+    expect(getOrderByCode(order.order_code)).toMatchObject({
+      payment_status: 'PAID',
+      status: 'PROCESSING',
+    });
+    expect(db.prepare('SELECT status, last_error FROM order_fulfillments WHERE order_code = ?')
+      .get(order.order_code)).toMatchObject({ status: 'WAITING_STOCK', last_error: 'INSUFFICIENT_STOCK' });
+  });
+
+  it('repairs the Discord confirmation after a paid webhook previously stopped during delivery', async () => {
+    const order = createPendingOrder(14);
+    confirmPayment(order, 'payment-confirmation-repair');
+    const ticketSend = vi.fn().mockResolvedValue({ id: 'payment-confirmation-message' });
+    const dmSend = vi.fn().mockResolvedValue({ id: 'payment-confirmation-dm', channelId: 'dm-channel' });
+    const client = {
+      users: { fetch: vi.fn().mockResolvedValue({ send: dmSend }) },
+      guilds: { fetch: vi.fn() },
+    };
+    const guild = {
+      id: order.guild_id,
+      client,
+      channels: {
+        fetch: vi.fn(async (channelId) => channelId === order.ticket_channel_id
+          ? { isTextBased: () => true, send: ticketSend }
+          : null),
+      },
+      members: { fetch: vi.fn().mockResolvedValue(null) },
+    };
+    client.guilds.fetch.mockResolvedValue(guild);
+
+    const first = await finalizePaidOrder(
+      client,
+      getOrderByCode(order.order_code),
+      { amount: order.total_amount },
+      'payment-confirmation-repair',
+      'CN910000',
+    );
+    const second = await finalizePaidOrder(
+      client,
+      getOrderByCode(order.order_code),
+      { amount: order.total_amount },
+      'payment-confirmation-repair',
+      'CN910000',
+    );
+
+    expect(first.duplicate).toBe(true);
+    expect(first.repairedNotification).toBe(true);
+    expect(second.duplicate).toBe(true);
+    expect(ticketSend).toHaveBeenCalledOnce();
+    expect(dmSend).toHaveBeenCalledOnce();
+    expect(db.prepare(`SELECT action FROM staff_logs
+      WHERE related_order_code = ? ORDER BY id DESC LIMIT 1`).get(order.order_code)?.action)
+      .toBe('PAYMENT_CONFIRMED_RECOVERED');
+  });
+
+  it('reconciles a missed PayOS webhook from the payment request status', async () => {
+    const order = createPendingOrder(14);
+    const ticketSend = vi.fn().mockResolvedValue({ id: 'reconciled-confirmation-message' });
+    const dmSend = vi.fn().mockResolvedValue({ id: 'reconciled-confirmation-dm', channelId: 'dm-channel' });
+    const client = {
+      users: { fetch: vi.fn().mockResolvedValue({ send: dmSend }) },
+      guilds: { fetch: vi.fn() },
+    };
+    const guild = {
+      id: order.guild_id,
+      client,
+      channels: {
+        fetch: vi.fn(async (channelId) => channelId === order.ticket_channel_id
+          ? { isTextBased: () => true, send: ticketSend }
+          : null),
+      },
+      members: { fetch: vi.fn().mockResolvedValue(null) },
+    };
+    client.guilds.fetch.mockResolvedValue(guild);
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        code: '00',
+        data: {
+          id: 'payos-link-id',
+          orderCode: order.payos_order_code,
+          amount: order.total_amount,
+          status: 'PAID',
+          transactions: [{
+            reference: 'payos-reconciled-transaction',
+            amount: order.total_amount,
+            description: order.order_code.replace('_', ''),
+          }],
+        },
+      }),
+    });
+
+    try {
+      const report = await reconcileRecentPayOSPayments(client);
+      expect(report).toMatchObject({ scanned: 1, synced: 1, repairedNotifications: 0, failed: [] });
+      expect(getOrderByCode(order.order_code)).toMatchObject({ payment_status: 'PAID', status: 'PROCESSING' });
+      expect(ticketSend).toHaveBeenCalledOnce();
+      expect(dmSend).toHaveBeenCalledOnce();
+    } finally {
+      fetchSpy.mockRestore();
+    }
   });
 
   it('does not queue or consume stock for a payment received after cancellation', () => {

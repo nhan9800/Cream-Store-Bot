@@ -5,12 +5,15 @@ function upper(value) {
 }
 
 export function normalizeOrderCode(value) {
-  return upper(value).replace(/\s+/g, '').replace(/-/g, '_');
+  return upper(value)
+    .replace(/\s+/g, '')
+    .replace(/-/g, '_')
+    .replace(/^(CN|CR|VB)([0-9]{4,8})$/, '$1_$2');
 }
 
 export function extractOrderCodesFromText(text) {
   const input = upper(text);
-  const matches = input.match(/(?:CN|CR|VB)_[0-9]{4,8}/g) ?? [];
+  const matches = input.match(/(?:CN|CR|VB)[_ -]?[0-9]{4,8}/g) ?? [];
   return [...new Set(matches.map(normalizeOrderCode))];
 }
 

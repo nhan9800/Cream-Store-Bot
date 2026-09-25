@@ -23,6 +23,7 @@ import { runSpotifyFamilyReminders } from './spotifyFamilyReminderService.js';
 import { runYoutubeRenewalReminders } from './youtubeRenewalReminderService.js';
 import { syncYoutubeWarrantyClaimsAcrossGuilds } from './youtubeWarrantyClaimService.js';
 import { processPendingDeliveries } from './autoDeliveryService.js';
+import { reconcileRecentPayOSPayments } from './paymentService.js';
 
 let schedulerHandle = null;
 let backupHandle = null;
@@ -46,6 +47,18 @@ export function startScheduler(client) {
   const intervalMinutes = Number(process.env.DEEP_NOTIFICATION_INTERVAL_MINUTES ?? 5);
 
   const tick = async () => {
+    try {
+      const reconciliation = await reconcileRecentPayOSPayments(client);
+      if (reconciliation.synced || reconciliation.failed.length) {
+        console.log(`[PAYOS-RECONCILIATION] scanned=${reconciliation.scanned} synced=${reconciliation.synced} repairedNotifications=${reconciliation.repairedNotifications} failed=${reconciliation.failed.length}`);
+      }
+      for (const failure of reconciliation.failed) {
+        console.error(`[PAYOS-RECONCILIATION] ${failure.orderCode}: ${failure.error}`);
+      }
+    } catch (error) {
+      console.error('[SCHEDULER] Lỗi đối soát thanh toán PayOS:', error);
+    }
+
     try {
       await processPendingDeliveries(client);
     } catch (error) {
