@@ -14,6 +14,7 @@ const testDatabasePath = vi.hoisted(() => {
 
 import { db } from '../src/database/db.js';
 import { verifyPayOSWebhookSignature } from '../src/services/paymentService.js';
+import { extractOrderCodesFromText, normalizeOrderCode } from '../src/services/paymentOrderMatcher.js';
 
 const payload = {
   amount: 125_000,
@@ -41,6 +42,11 @@ afterAll(() => {
 });
 
 describe('PayOS webhook signature verification', () => {
+  it('normalizes bank descriptions that remove the underscore from an order code', () => {
+    expect(normalizeOrderCode('CN876896')).toBe('CN_876896');
+    expect(extractOrderCodesFromText('[bank] transfer CN876896 complete')).toContain('CN_876896');
+  });
+
   it('accepts a valid HMAC in either hex case', () => {
     const signature = expectedSignature();
     expect(verifyPayOSWebhookSignature(payload, signature)).toBe(true);

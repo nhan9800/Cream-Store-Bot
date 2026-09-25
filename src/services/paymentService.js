@@ -24,8 +24,23 @@ import {
 import { formatCurrency } from '../utils/formatters.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { deliverPaidOrder } from './autoDeliveryService.js';
+import { db } from '../database/db.js';
 
 const PAYOS_API_BASE = 'https://api-merchant.payos.vn';
+const PAYMENT_CONFIRMATION_ACTIONS = [
+  'PAYMENT_CONFIRMED_PENDING_DELIVERY',
+  'PAYMENT_CONFIRMED_RECOVERED',
+  'PAYMENT_RECEIVED_AFTER_CANCEL',
+  'PAYMENT_CONFIRMED_MANUAL',
+  'ORDER_DELIVERED',
+];
+
+function hasPaymentConfirmationLog(orderCode) {
+  const placeholders = PAYMENT_CONFIRMATION_ACTIONS.map(() => '?').join(',');
+  return Boolean(db.prepare(`SELECT 1 FROM staff_logs
+    WHERE related_order_code = ? AND action IN (${placeholders}) LIMIT 1`)
+    .get(orderCode, ...PAYMENT_CONFIRMATION_ACTIONS));
+}
 
 function createHmacHex(secret, data) {
   return crypto.createHmac('sha256', secret).update(data).digest('hex');
@@ -452,8 +467,11 @@ export async function finalizePaidOrder(client, order, paymentData, transactionI
   const autoDelivered = delivery.delivered;
   const finalOrder = delivery.updated || getOrderByCode(order.order_code) || payment.updated;
 
-  // A replay may repair an interrupted payment/delivery, but must not repeat notifications.
-  if (payment.duplicate) return { updated: finalOrder, duplicate: true };
+  // A replay repairs a webhook that committed payment but failed before the
+  // Discord confirmation. The staff log is the durable notification marker.
+  if (payment.duplicate && hasPaymentConfirmationLog(finalOrder.order_code)) {
+    return { updated: finalOrder, duplicate: true };
+  }
 
   const guild = await client.guilds.fetch(finalOrder.guild_id).catch(() => null);
   if (guild) {
@@ -480,19 +498,30 @@ export async function finalizePaidOrder(client, order, paymentData, transactionI
       }
     } else {
       const latePayment = finalOrder.status === 'CANCELLED';
+      const recoveredConfirmation = payment.duplicate && finalOrder.status !== 'CANCELLED';
       await emitStaffLog(client, {
         guildId: finalOrder.guild_id,
         targetId: finalOrder.customer_id,
-        action: latePayment ? 'PAYMENT_RECEIVED_AFTER_CANCEL' : 'PAYMENT_CONFIRMED_PENDING_DELIVERY',
+        action: latePayment
+          ? 'PAYMENT_RECEIVED_AFTER_CANCEL'
+          : recoveredConfirmation
+            ? 'PAYMENT_CONFIRMED_RECOVERED'
+            : 'PAYMENT_CONFIRMED_PENDING_DELIVERY',
         detail: latePayment
           ? `Thanh toán đến sau khi hủy: ${transactionContent}`
-          : `Đã nhận tiền, đang chờ kho hoặc thử lại giao hàng: ${transactionContent}`,
+          : recoveredConfirmation
+            ? `Khôi phục thông báo xác nhận thanh toán sau lỗi xử lý trước đó: ${transactionContent}`
+            : `Đã nhận tiền, đang chờ kho hoặc thử lại giao hàng: ${transactionContent}`,
         relatedOrderCode: finalOrder.order_code,
       });
     }
   }
 
-  return { updated: finalOrder, duplicate: false };
+  return {
+    updated: finalOrder,
+    duplicate: payment.duplicate,
+    repairedNotification: payment.duplicate,
+  };
 }
 
 export async function handlePayOSWebhook({ client, body }) {
@@ -618,15 +647,19 @@ export async function syncPaymentStatusFromPayOS({ client, orderCode = null, pay
   const info = await getPayOSPaymentInfo(order.payment_link_id || order.payos_order_code);
   const state = String(info.status ?? '').toUpperCase();
 
-  if (state === 'PAID' && order.payment_status !== 'PAID') {
+  const needsNotificationRepair = order.payment_status === 'PAID'
+    && !hasPaymentConfirmationLog(order.order_code);
+
+  if (state === 'PAID' && (order.payment_status !== 'PAID' || needsNotificationRepair)) {
+    const transaction = Array.isArray(info.transactions) ? info.transactions[0] : null;
     const result = await finalizePaidOrder(
       client,
       order,
       info,
-      `PAYOS_LOOKUP_${info.id ?? order.payos_order_code}`,
-      order.payment_code ?? order.order_code,
+      transaction?.reference || order.paid_transaction_id || `PAYOS_LOOKUP_${info.id ?? order.payos_order_code}`,
+      transaction?.description || order.paid_transaction_content || order.payment_code || order.order_code,
     );
-    return { order: result.updated, state: 'PAID', synced: true };
+    return { order: result.updated, state: 'PAID', synced: true, repairedNotification: needsNotificationRepair };
   }
 
   if (state === 'CANCELLED' && order.status === 'PENDING_PAYMENT') {
@@ -641,6 +674,45 @@ export async function syncPaymentStatusFromPayOS({ client, orderCode = null, pay
   }
 
   return { order, state, synced: false };
+}
+
+export async function reconcileRecentPayOSPayments(client, { limit = 20, lookbackHours = 24 } = {}) {
+  if (!config.payosClientId || !config.payosApiKey || !config.payosChecksumKey) {
+    return { scanned: 0, synced: 0, repairedNotifications: 0, failed: [] };
+  }
+
+  const safeLimit = Math.min(100, Math.max(1, Number(limit) || 20));
+  const cutoff = new Date(Date.now() - Math.max(1, Number(lookbackHours) || 24) * 60 * 60 * 1000).toISOString();
+  const actionPlaceholders = PAYMENT_CONFIRMATION_ACTIONS.map(() => '?').join(',');
+  const candidates = db.prepare(`SELECT o.* FROM orders o
+    WHERE o.payment_provider = 'PAYOS'
+      AND o.payos_order_code IS NOT NULL
+      AND o.created_at >= ?
+      AND (
+        (o.payment_status != 'PAID' AND o.status = 'PENDING_PAYMENT')
+        OR (
+          o.payment_status = 'PAID'
+          AND NOT EXISTS (
+            SELECT 1 FROM staff_logs l
+            WHERE l.related_order_code = o.order_code
+              AND l.action IN (${actionPlaceholders})
+          )
+        )
+      )
+    ORDER BY o.id ASC
+    LIMIT ?`).all(cutoff, ...PAYMENT_CONFIRMATION_ACTIONS, safeLimit);
+
+  const report = { scanned: candidates.length, synced: 0, repairedNotifications: 0, failed: [] };
+  for (const order of candidates) {
+    try {
+      const result = await syncPaymentStatusFromPayOS({ client, orderCode: order.order_code });
+      if (result.synced) report.synced += 1;
+      if (result.repairedNotification) report.repairedNotifications += 1;
+    } catch (error) {
+      report.failed.push({ orderCode: order.order_code, error: error.message });
+    }
+  }
+  return report;
 }
 
 export async function confirmOrderPaidManually(guild, orderCode, amount = null) {
