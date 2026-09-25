@@ -3,6 +3,8 @@ import {
   ButtonBuilder,
   ButtonStyle,
   ContainerBuilder,
+  MediaGalleryBuilder,
+  MediaGalleryItemBuilder,
   MessageFlags,
   PermissionFlagsBits,
   SeparatorBuilder,
@@ -13,6 +15,71 @@ import { createEmojiResolver, withButtonEmoji } from '../utils/emojiHelper.js';
 import { publishPriceBoard } from './autoSetupPriceBoardService.js';
 
 const SNOWFLAKE_RE = /^\d{17,20}$/;
+const ANNOUNCEMENT_IMAGE_TTL_MS = 10 * 60 * 1000;
+const IMAGE_EXT_RE = /\.(?:png|jpe?g|webp|gif)$/i;
+const ALLOWED_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
+const announcementDraftImages = new Map();
+
+function announcementDraftKey(interaction) {
+  return [interaction?.guildId, interaction?.channelId, interaction?.user?.id].map(String).join(':');
+}
+
+function safeImageName(name, id = Date.now()) {
+  const raw = String(name || 'announcement-image.png').trim();
+  const extension = raw.match(IMAGE_EXT_RE)?.[0]?.toLowerCase() || '.png';
+  const stem = raw.slice(0, raw.length - extension.length)
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-zA-Z0-9._-]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60) || 'announcement-image';
+  return `${stem}-${String(id).slice(-8)}${extension}`;
+}
+
+export function normalizeAnnouncementImage(attachment) {
+  if (!attachment) return null;
+
+  const url = String(attachment.url || '').trim();
+  const contentType = String(attachment.contentType || '').split(';')[0].trim().toLowerCase();
+  const name = String(attachment.name || '').trim();
+  const sourceName = String(attachment.sourceName || name).trim();
+  const supported = contentType ? ALLOWED_IMAGE_TYPES.has(contentType) : IMAGE_EXT_RE.test(sourceName);
+
+  if (!url.startsWith('https://') || !supported) {
+    throw new Error('Ảnh thông báo phải là file PNG, JPG, WEBP hoặc GIF hợp lệ.');
+  }
+
+  return {
+    id: String(attachment.id || Date.now()),
+    url,
+    name: safeImageName(sourceName, attachment.id),
+    sourceName,
+    contentType: contentType || null,
+    size: Number(attachment.size || 0),
+  };
+}
+
+export function setAnnouncementDraftImage(interaction, attachment) {
+  const image = normalizeAnnouncementImage(attachment);
+  const key = announcementDraftKey(interaction);
+  announcementDraftImages.set(key, image);
+  const timer = setTimeout(() => {
+    if (announcementDraftImages.get(key) === image) announcementDraftImages.delete(key);
+  }, ANNOUNCEMENT_IMAGE_TTL_MS);
+  timer.unref?.();
+  return image;
+}
+
+export function clearAnnouncementDraftImage(interaction) {
+  announcementDraftImages.delete(announcementDraftKey(interaction));
+}
+
+export function consumeAnnouncementDraftImage(interaction) {
+  const key = announcementDraftKey(interaction);
+  const image = announcementDraftImages.get(key) || null;
+  announcementDraftImages.delete(key);
+  return image;
+}
 
 export function isPriceRelatedAnnouncement(content) {
   const normalized = String(content || '')
@@ -54,6 +121,7 @@ export function buildAnnouncementMessageV2({
   roleIds = [],
   tagEveryone = false,
   tagHere = false,
+  image = null,
 }) {
   const E = createEmojiResolver(guildId);
   const safeRoleIds = normalizeRoleIds(roleIds);
@@ -65,6 +133,7 @@ export function buildAnnouncementMessageV2({
   const adminEmoji = E('cenar_admin') || E('cenar_staff');
   const header = `${announceEmoji ? `${announceEmoji} ` : ''}THÔNG BÁO TỪ BAN QUẢN TRỊ`;
   const footer = `${adminEmoji ? `${adminEmoji} ` : ''}Trân trọng,\n**Ban Quản Trị Hệ Thống**`;
+  const normalizedImage = normalizeAnnouncementImage(image);
 
   const container = new ContainerBuilder()
     .setAccentColor(0x2b2d31)
@@ -78,8 +147,23 @@ export function buildAnnouncementMessageV2({
     )
     .addTextDisplayComponents(
       new TextDisplayBuilder().setContent(String(content || '').trim()),
-    )
-    .addSeparatorComponents(
+    );
+
+  if (normalizedImage) {
+    container
+      .addSeparatorComponents(
+        new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small),
+      )
+      .addMediaGalleryComponents(
+        new MediaGalleryBuilder().addItems(
+          new MediaGalleryItemBuilder()
+            .setURL(`attachment://${normalizedImage.name}`)
+            .setDescription('Hình ảnh đính kèm thông báo từ Ban Quản Trị.'),
+        ),
+      );
+  }
+
+  container.addSeparatorComponents(
       new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small),
     )
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(footer));
@@ -114,10 +198,14 @@ export function buildAnnouncementMessageV2({
       users: [],
       repliedUser: false,
     },
+    ...(normalizedImage ? {
+      files: [{ attachment: normalizedImage.url, name: normalizedImage.name }],
+    } : {}),
   };
 }
 
 export async function publishAnnouncement({ guild, channelId, ...messageOptions }) {
+  const normalizedImage = normalizeAnnouncementImage(messageOptions.image);
   const channel = await guild.channels.fetch(channelId).catch((error) => {
     throw new Error(`Không thể tải kênh ${channelId}: ${error.message}`, { cause: error });
   });
@@ -138,10 +226,14 @@ export async function publishAnnouncement({ guild, channelId, ...messageOptions 
   if (permissions && !permissions.has(requiredPermission)) {
     throw new Error('Bot không có quyền Gửi Tin Nhắn tại kênh đăng thông báo.');
   }
+  if (normalizedImage && permissions && !permissions.has(PermissionFlagsBits.AttachFiles)) {
+    throw new Error('Bot không có quyền Đính Kèm Tệp tại kênh đăng thông báo.');
+  }
 
   const payload = buildAnnouncementMessageV2({
     guildId: guild.id,
     ...messageOptions,
+    image: normalizedImage,
   });
   const message = await channel.send(payload);
   if (!message?.id) throw new Error('Discord không trả về tin nhắn sau khi gửi.');
