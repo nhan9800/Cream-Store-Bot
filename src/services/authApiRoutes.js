@@ -37,6 +37,9 @@ export function registerAuthRoutes(app) {
     try {
       const { email, password, displayName } = req.body;
       if (!email || !password) return errorResponse(res, 400, 'Thiếu email/password');
+      if (typeof password !== 'string' || password.length < 8 || password.length > 128) {
+        return errorResponse(res, 400, 'Mật khẩu phải từ 8 đến 128 ký tự');
+      }
 
       const emailLower = sanitizeString(email, 200).toLowerCase();
       if (!isValidEmail(emailLower)) return errorResponse(res, 400, 'Email không hợp lệ');
@@ -73,6 +76,10 @@ export function registerAuthRoutes(app) {
 
       const { email, password } = req.body;
       if (!email || !password) return errorResponse(res, 400, 'Thiếu email/password');
+      if (typeof password !== 'string' || password.length > 128) {
+        recordLoginFailure(clientIp);
+        return errorResponse(res, 401, 'Sai tài khoản hoặc mật khẩu');
+      }
 
       const emailLower = sanitizeString(email, 200).toLowerCase();
       const user = db.prepare('SELECT * FROM web_users WHERE email = ?').get(emailLower);
