@@ -12,6 +12,7 @@ import { anonymizeCustomerEmail } from '../utils/productFormatting.js';
 import { config } from '../config.js';
 import { getSubscriptionProgress } from './subscriptionService.js';
 import { getPriceBoardProducts, PRICE_BOARD_VERSION } from './autoSetupPriceBoardService.js';
+import { buildCustomerOrderView } from './orderCustomerView.js';
 import {
   createSpotifyFamily,
   createSpotifyFamilyMember,
@@ -235,27 +236,11 @@ export function registerDashboardRoutes(app) {
       const code = String(req.params.code || '').toUpperCase();
       const order = db.prepare("SELECT * FROM orders WHERE order_code = ?").get(code);
       if (!order) return res.status(404).json({ ok: false, error: 'Không tìm thấy đơn hàng.' });
-
-      const isAuthenticated = Boolean(req.headers['x-bot-api-key'] && req.headers['x-bot-api-key'] === (process.env.ADMIN_TOKEN || process.env.BOT_API_KEY));
-      const safe = { ...order };
-
-      if (!isAuthenticated) {
-        if (safe.credential_password) safe.credential_password = '••••••••••••';
-        if (safe.credential_pin) safe.credential_pin = '••••';
-        if (safe.credential_profile) safe.credential_profile = 'Protected Profile';
-        if (safe.delivery_login_url) safe.delivery_login_url = 'https://cenarstore.xyz';
-        if (safe.claim_notes) safe.claim_notes = 'Tài khoản được bảo mật IDOR.';
-      }
-
-      const deliveredAccount = order.credential_email ? {
-        email: order.credential_email,
-        password: isAuthenticated ? order.credential_password : '••••••••••••',
-        warrantyCode: `BH-${order.order_code}`,
-        activationLink: order.delivery_login_url || null,
-        note: isAuthenticated ? (order.claim_notes || '') : 'Tài khoản được bảo vệ IDOR.'
-      } : null;
-
-      res.json({ ok: true, order: { ...safe, deliveredAccount }, data: { ...safe, deliveredAccount } });
+      // This legacy endpoint is intentionally status-only. Customer delivery
+      // credentials are available exclusively through /api/bot/orders/:code
+      // after the website supplies a verified user identity.
+      const safe = buildCustomerOrderView(order, { includeDelivery: false });
+      res.json({ ok: true, order: safe, data: safe });
     } catch (e) {
       console.error('[PUBLIC API] Error getting order:', e);
       res.status(500).json({ ok: false, error: 'Lỗi truy vấn đơn hàng.' });

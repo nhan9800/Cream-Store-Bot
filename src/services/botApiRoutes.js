@@ -51,6 +51,7 @@ import {
 } from './questService.js';
 import { getPriceBoardProducts, PRICE_BOARD_VERSION } from './autoSetupPriceBoardService.js';
 import { scheduleFeedbackTicketAutoClose } from './feedbackService.js';
+import { buildCustomerOrderView, canRequesterAccessOrder } from './orderCustomerView.js';
 import { readTranscriptArchive } from './transcriptService.js';
 import {
   getPublicYoutubeWarrantyClaim,
@@ -668,13 +669,11 @@ export function registerBotApiRoutes(app) {
         }
         if (!order) return res.status(404).json({ ok: false, error: 'Không tìm thấy đơn' });
 
-        const safe = { ...order };
-
         // Tạo QR on-the-fly cho đơn cũ chưa có payment_qr_code
-        if (!safe.payment_qr_code && safe.status === 'PENDING_PAYMENT' && safe.guild_id) {
+        if (!order.payment_qr_code && order.status === 'PENDING_PAYMENT' && order.guild_id) {
             try {
                 const { getGuildConfig } = await import('./guildConfigService.js');
-                const guildCfg = getGuildConfig(safe.guild_id);
+                const guildCfg = getGuildConfig(order.guild_id);
                 let bankBin = config.vietqrBankBin || '970418';
                 let accountNo = config.vietqrAccountNo || '';
                 let accountName = config.vietqrAccountName || 'CREAM STORE';
@@ -686,16 +685,32 @@ export function registerBotApiRoutes(app) {
                 }
                 
                 if (accountNo) {
-                    const content = safe.payment_code || safe.order_code;
-                    const qrUrl = `https://img.vietqr.io/image/${bankBin}-${accountNo}-compact2.png?amount=${safe.total_amount}&addInfo=${encodeURIComponent(content)}&accountName=${encodeURIComponent(accountName)}`;
-                    safe.payment_qr_code = qrUrl;
+                    const content = order.payment_code || order.order_code;
+                    const qrUrl = `https://img.vietqr.io/image/${bankBin}-${accountNo}-compact2.png?amount=${order.total_amount}&addInfo=${encodeURIComponent(content)}&accountName=${encodeURIComponent(accountName)}`;
+                    order.payment_qr_code = qrUrl;
                     const { savePaymentLinkData } = await import('./orderService.js');
-                    savePaymentLinkData(safe.order_code, { paymentLinkId: null, checkoutUrl: null, qrCode: qrUrl, qrUrl });
+                    savePaymentLinkData(order.order_code, { paymentLinkId: null, checkoutUrl: null, qrCode: qrUrl, qrUrl });
                 }
             } catch (_) {}
         }
 
-        res.json({ ok: true, data: safe });
+        const identity = {
+            userId: String(req.header('x-user-id') || '').trim(),
+            discordId: String(req.header('x-discord-id') || '').trim(),
+            role: String(req.header('x-user-role') || '').trim().toLowerCase(),
+        };
+        const hasIdentity = Boolean(identity.userId || identity.discordId);
+        const canAccess = hasIdentity && canRequesterAccessOrder(order, identity);
+        if (hasIdentity && !canAccess) {
+            return res.status(403).json({ ok: false, error: 'Forbidden' });
+        }
+        return res.json({
+            ok: true,
+            data: buildCustomerOrderView(order, {
+                includeDelivery: canAccess,
+                includeOwnership: canAccess,
+            }),
+        });
     });
 
     // ── CUSTOMER PROFILE — info + spending stats ──────────────
