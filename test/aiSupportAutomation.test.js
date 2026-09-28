@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
+  buildAiOrderConfirmationPayload,
+  buildAiProductSelectionPayload,
   buildWarrantyLookupPayload,
   claimAiResponseSlot,
   classifyCustomerIntent,
   extractOrderCode,
+  evaluateCatalogOrderQuote,
   hasExplicitPurchaseConfirmation,
   matchWarrantyOrders,
   sanitizeCustomerTextForAi,
@@ -23,6 +26,8 @@ describe('AI support automation safety', () => {
     expect(classifyCustomerIntent('Chốt gói Netflix 1 tháng nhé')).toBe('PURCHASE_CONFIRM');
     expect(hasExplicitPurchaseConfirmation('Mình muốn mua Netflix')).toBe(false);
     expect(hasExplicitPurchaseConfirmation('Ok lấy gói này')).toBe(true);
+    expect(classifyCustomerIntent('Lên đơn YouTube 3 tháng cho mình nhé')).toBe('PURCHASE_CONFIRM');
+    expect(classifyCustomerIntent('Cho mình Netflix 1 tháng')).toBe('PURCHASE');
   });
 
   it('extracts only supported Cenar order codes', () => {
@@ -71,6 +76,44 @@ describe('AI support automation safety', () => {
     const emptyJson = JSON.stringify(buildWarrantyLookupPayload({ ticket, guildId: GUILD_ID, orders: [] }));
     expect(emptyJson).toContain('ai:support:escalate:99');
     expect(emptyJson).toContain('không tạo đơn 0đ hay lịch sử giả');
+  });
+
+  it('locks confirmation to the quoted catalog revision and renders clear product choices', () => {
+    const ticket = { id: 88 };
+    const product = {
+      id: 7,
+      name: 'YouTube Premium 3 Tháng',
+      price: 150_000,
+      duration_months: 3,
+      duration_days: null,
+      warranty_policy: 'Full 3 tháng',
+      is_active: 1,
+      updated_at: '2026-09-28T08:00:00.000Z',
+    };
+    const confirmation = JSON.stringify(buildAiOrderConfirmationPayload({
+      guildId: GUILD_ID,
+      ticket,
+      product,
+      quantity: 2,
+    }));
+    const revision = Math.trunc(new Date(product.updated_at).getTime()).toString(36);
+    expect(confirmation).toContain(`ai:support:order_confirm:88:7:2:300000:${revision}`);
+    expect(confirmation).toContain('300.000đ');
+    expect(confirmation).toContain('Full 3 tháng');
+
+    expect(evaluateCatalogOrderQuote(product, 2, 300_000, revision).isCurrent).toBe(true);
+    expect(evaluateCatalogOrderQuote({ ...product, price: 160_000 }, 2, 300_000, revision).isCurrent).toBe(false);
+    expect(evaluateCatalogOrderQuote(product, 2, undefined, undefined).isCurrent).toBe(false);
+
+    const selection = JSON.stringify(buildAiProductSelectionPayload({
+      guildId: GUILD_ID,
+      ticket,
+      products: [product, { ...product, id: 8, name: 'YouTube Premium 6 Tháng' }],
+      quantity: 2,
+    }));
+    expect(selection).toContain('ai:support:order_select:88:2');
+    expect(selection).toContain('YouTube Premium 3 Tháng');
+    expect(selection).toContain('YouTube Premium 6 Tháng');
   });
 
   it('limits proactive public replies to configured channels and meaningful intent', () => {
