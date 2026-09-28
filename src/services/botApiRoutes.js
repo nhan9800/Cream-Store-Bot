@@ -60,6 +60,7 @@ import {
   refreshYoutubeWarrantyClaimNotification,
     submitYoutubeWarrantyGmail,
 } from './youtubeWarrantyClaimService.js';
+import { buildPublicFeedbackView } from './publicFeedbackView.js';
 
 let storeInviteCache = { url: '', expiresAt: 0 };
 const websiteSupportProvisioning = new Map();
@@ -849,7 +850,9 @@ export function registerBotApiRoutes(app) {
                 params.min_stars = minStars;
             }
             if (search) {
-                whereSql += ' AND (content LIKE @search OR order_code LIKE @search OR customer_id LIKE @search OR product_name LIKE @search)';
+                // This route is public. Search only user-facing review fields;
+                // order/customer identifiers must not become an oracle.
+                whereSql += ' AND (content LIKE @search OR product_name LIKE @search)';
                 params.search = `%${search}%`;
             }
 
@@ -914,17 +917,11 @@ export function registerBotApiRoutes(app) {
                 }
 
                 return {
-                    id: fb.id,
-                    guild_id: fb.guild_id,
-                    order_code: fb.order_code,
-                    customer_id: fb.customer_id,
-                    stars: fb.stars,
-                    product_id: fb.product_id,
-                    product_name: fb.product_name,
-                    content: fb.content,
-                    created_at: fb.created_at,
-                    customer_name: displayName,
-                    customer_avatar: avatar
+                    ...buildPublicFeedbackView({
+                        ...fb,
+                        customer_name: displayName,
+                        customer_avatar: avatar,
+                    }),
                 };
             });
 
@@ -1107,7 +1104,8 @@ export function registerBotApiRoutes(app) {
                   AND (product_id = ? OR LOWER(TRIM(product_name)) = LOWER(TRIM(?)))
                 ORDER BY created_at DESC
                 LIMIT ?
-            `).all(product.id, product.name, limit).map((review) => enrichFeedbackAuthor(review, req));
+            `).all(product.id, product.name, limit)
+                .map((review) => buildPublicFeedbackView(enrichFeedbackAuthor(review, req)));
             return res.json({ ok: true, data: reviews });
         } catch (error) {
             console.error('[BOT_API] Product reviews error:', error);
@@ -1160,7 +1158,7 @@ export function registerBotApiRoutes(app) {
             db.prepare('UPDATE orders SET feedback_submitted_at = ?, updated_at = ? WHERE id = ?').run(timestamp, timestamp, order.id);
             scheduleFeedbackTicketAutoClose({ ...order, feedback_submitted_at: timestamp });
             const review = db.prepare('SELECT * FROM feedbacks WHERE id = ?').get(result.lastInsertRowid);
-            return res.status(201).json({ ok: true, data: enrichFeedbackAuthor(review, req) });
+            return res.status(201).json({ ok: true, data: buildPublicFeedbackView(enrichFeedbackAuthor(review, req)) });
         } catch (error) {
             console.error('[BOT_API] Product review submit error:', error);
             return res.status(500).json({ ok: false, error: 'Không thể lưu đánh giá lúc này.' });
