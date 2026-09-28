@@ -101,8 +101,9 @@ export function classifyCustomerIntent(content) {
   const warrantySignal = /bao hanh|mat premium|bi out|out fam|het han som|sai (pass|mat khau)|khong dang nhap|tai khoan (loi|die|hong)|bi khoa/.test(text)
     || (productMentioned && /loi|hong|khong dung duoc|khong vao duoc|mat quyen/.test(text));
   if (warrantySignal) return 'WARRANTY';
-  if (/\b(chot|dat mua|xac nhan mua|ok lay|mua ngay|lay goi)\b/.test(text)) return 'PURCHASE_CONFIRM';
-  if (/\b(muon mua|can mua|mua goi|dat hang)\b/.test(text)) return 'PURCHASE';
+  if (/\b(chot|dat mua|xac nhan mua|ok lay|oke lay|mua ngay|mua luon|lay goi|lay cai|len don|tao don|lam luon|dong y)\b/.test(text)) return 'PURCHASE_CONFIRM';
+  if (/\b(muon mua|can mua|mua goi|dat hang|dat giup|lay giup)\b/.test(text)
+    || (productMentioned && /\bcho minh\b/.test(text) && !/\bcho minh hoi\b/.test(text))) return 'PURCHASE';
   if (/gia bao nhieu|bao nhieu tien|con hang|tu van|goi nao|san pham nao|bang gia/.test(text)
     || (productMentioned && /gia|mua|thang|goi|bao nhieu/.test(text))) return 'PRODUCT_ADVICE';
   if (/shop oi|ho tro|giup|minh hoi|cho hoi|lam sao|the nao|tai sao|khong biet/.test(text) || /\?$/.test(text.trim())) return 'SUPPORT';
@@ -304,7 +305,90 @@ function resolveOrderProduct(guildId, productId) {
   return product;
 }
 
-export async function prepareAiOrderConfirmation(message, { productId, quantity = 1 }) {
+function productDurationLabel(product) {
+  return product.duration_days
+    ? `${product.duration_days} ngày`
+    : `${product.duration_months || 1} tháng`;
+}
+
+function productQuoteRevision(product) {
+  const timestamp = new Date(product.updated_at || product.created_at || 0).getTime();
+  return Number.isFinite(timestamp) && timestamp > 0 ? Math.trunc(timestamp).toString(36) : 'catalog';
+}
+
+export function evaluateCatalogOrderQuote(product, quantity, quotedTotal, quotedRevision) {
+  const safeQuantity = Math.min(10, Math.max(1, Number.parseInt(quantity, 10) || 1));
+  const currentTotal = Math.trunc(Number(product?.price || 0) * safeQuantity);
+  const currentRevision = productQuoteRevision(product || {});
+  return {
+    quantity: safeQuantity,
+    currentTotal,
+    currentRevision,
+    isCurrent: Number.isSafeInteger(Number(quotedTotal))
+      && Number(quotedTotal) === currentTotal
+      && String(quotedRevision || '') === currentRevision,
+  };
+}
+
+export function buildAiOrderConfirmationPayload({ guildId, ticket, product, quantity = 1, notice = null }) {
+  const safeQuantity = Math.min(10, Math.max(1, Number.parseInt(quantity, 10) || 1));
+  const total = Math.trunc(Number(product.price) * safeQuantity);
+  const revision = productQuoteRevision(product);
+  const E = createEmojiResolver(guildId);
+  const confirm = withButtonEmoji(
+    new ButtonBuilder()
+      .setCustomId(`${AI_SUPPORT_PREFIX}order_confirm:${ticket.id}:${product.id}:${safeQuantity}:${total}:${revision}`)
+      .setLabel('Xác Nhận Tạo Đơn & QR')
+      .setStyle(ButtonStyle.Success),
+    E.component('status_check'),
+  );
+  const cancel = withButtonEmoji(
+    new ButtonBuilder()
+      .setCustomId(`${AI_SUPPORT_PREFIX}order_cancel:${ticket.id}`)
+      .setLabel('Chọn Lại Sau')
+      .setStyle(ButtonStyle.Secondary),
+    E.component('status_cross'),
+  );
+  return messagePayload([
+    `## ${E('icon_cart')} MÌNH ĐÃ CHUẨN BỊ ĐƠN CHO BẠN`,
+    notice ? `> ${E('status_warn')} ${notice}` : `> ${E('status_info')} Bạn kiểm tra lại một lượt trước khi mình lên đơn và tạo mã QR nhé.`,
+    '',
+    `${E('order_product')} **Sản phẩm** — ${product.name}`,
+    `${E('icon_duration')} **Thời hạn** — ${productDurationLabel(product)}`,
+    product.warranty_policy ? `${E('warranty_shield')} **Bảo hành** — ${product.warranty_policy}` : null,
+    `${E('icon_clipboard')} **Số lượng** — ${safeQuantity}`,
+    `${E('payment_money')} **Đơn giá** — ${money(product.price)}`,
+    `${E('payment_money')} **Tổng thanh toán** — **${money(total)}**`,
+    '',
+    `${E('status_warn')} Chỉ khi chính bạn bấm nút xanh thì hệ thống mới tạo đơn và gửi QR.`,
+  ], accentFor(notice ? 'warning' : 'info'), [new ActionRowBuilder().addComponents(confirm, cancel)]);
+}
+
+export function buildAiProductSelectionPayload({ guildId, ticket, products = [], quantity = 1 }) {
+  const E = createEmojiResolver(guildId);
+  const safeQuantity = Math.min(10, Math.max(1, Number.parseInt(quantity, 10) || 1));
+  const available = products
+    .filter((product) => product && Number(product.is_active) === 1 && Number(product.price) > 0)
+    .slice(0, 10);
+  if (!available.length) throw new Error('Chưa có gói đang mở bán phù hợp để lựa chọn.');
+  const select = new StringSelectMenuBuilder()
+    .setCustomId(`${AI_SUPPORT_PREFIX}order_select:${ticket.id}:${safeQuantity}`)
+    .setPlaceholder('Chọn đúng gói bạn muốn mua')
+    .setMinValues(1)
+    .setMaxValues(1)
+    .addOptions(available.map((product) => new StringSelectMenuOptionBuilder()
+      .setLabel(short(product.name, 100))
+      .setDescription(short(`${money(product.price)} · ${productDurationLabel(product)}${product.warranty_policy ? ` · ${product.warranty_policy}` : ''}`, 100))
+      .setValue(String(product.id))));
+  return messagePayload([
+    `## ${E('icon_brain')} MÌNH CẦN BẠN CHỌN ĐÚNG GÓI`,
+    `> ${E('status_info')} Mình nhận ra sản phẩm bạn cần, nhưng catalog đang có vài lựa chọn gần giống nhau. Chọn một gói bên dưới để tránh lên nhầm đơn nhé.`,
+    `${E('icon_clipboard')} **Số lượng dự kiến** — ${safeQuantity}`,
+    `${E('status_warn')} Bước này chưa tạo đơn và chưa phát sinh thanh toán.`,
+  ], accentFor('info'), [new ActionRowBuilder().addComponents(select)]);
+}
+
+async function validateMessageCanPrepareOrder(message) {
   const ticket = getTicketByChannelId(message.channel.id);
   if (!ticket || ticket.status !== 'OPEN' || ticket.ticket_type !== 'ORDER') {
     throw new Error('AI chỉ chuẩn bị đơn trong ticket mua hàng đang mở.');
@@ -314,34 +398,32 @@ export async function prepareAiOrderConfirmation(message, { productId, quantity 
   if (existing && !['COMPLETED', 'CANCELLED'].includes(existing.status)) {
     throw new Error(`Ticket đã có đơn ${existing.order_code} đang xử lý.`);
   }
+  return ticket;
+}
 
+export async function sendAiProductSelection(message, { products, quantity = 1 }) {
+  const ticket = await validateMessageCanPrepareOrder(message);
+  const currentProducts = products.map((product) => resolveOrderProduct(message.guildId, product.id));
+  await message.channel.send(buildAiProductSelectionPayload({
+    guildId: message.guildId,
+    ticket,
+    products: currentProducts,
+    quantity,
+  }));
+  return { ticket, products: currentProducts };
+}
+
+export async function prepareAiOrderConfirmation(message, { productId, quantity = 1 }) {
+  const ticket = await validateMessageCanPrepareOrder(message);
   const product = resolveOrderProduct(message.guildId, productId);
   const safeQuantity = Math.min(10, Math.max(1, Number.parseInt(quantity, 10) || 1));
-  const total = Number(product.price) * safeQuantity;
-  const E = createEmojiResolver(message.guildId);
-  const confirm = withButtonEmoji(
-    new ButtonBuilder()
-      .setCustomId(`${AI_SUPPORT_PREFIX}order_confirm:${ticket.id}:${product.id}:${safeQuantity}`)
-      .setLabel('Xác Nhận Tạo Đơn')
-      .setStyle(ButtonStyle.Success),
-    E.component('status_check'),
-  );
-  const cancel = withButtonEmoji(
-    new ButtonBuilder()
-      .setCustomId(`${AI_SUPPORT_PREFIX}order_cancel:${ticket.id}`)
-      .setLabel('Huỷ')
-      .setStyle(ButtonStyle.Secondary),
-    E.component('status_cross'),
-  );
-  await message.channel.send(messagePayload([
-    `## ${E('icon_cart')} XÁC NHẬN ĐƠN DO AI CHUẨN BỊ`,
-    `${E('order_product')} **Sản phẩm** — ${product.name}`,
-    `${E('icon_duration')} **Thời hạn** — ${product.duration_days ? `${product.duration_days} ngày` : `${product.duration_months || 1} tháng`}`,
-    `${E('icon_clipboard')} **Số lượng** — ${safeQuantity}`,
-    `${E('payment_money')} **Tổng thanh toán** — ${money(total)}`,
-    '',
-    `${E('status_warn')} Kiểm tra kỹ rồi bấm xác nhận. Giá và thời hạn được lấy trực tiếp từ catalog; AI không được tự nhập số tiền.`,
-  ], accentFor('warning'), [new ActionRowBuilder().addComponents(confirm, cancel)]));
+  const total = Math.trunc(Number(product.price) * safeQuantity);
+  await message.channel.send(buildAiOrderConfirmationPayload({
+    guildId: message.guildId,
+    ticket,
+    product,
+    quantity: safeQuantity,
+  }));
   return { ticket, product, quantity: safeQuantity, total };
 }
 
@@ -381,14 +463,30 @@ async function createVerifiedOrderFromInteraction(interaction, ticket, product, 
     allowedMentions: { users: [ticket.customer_id] },
   });
 
+  let qrProvider = 'PAYOS';
   try {
     await sendOrRefreshPaymentQr({ guild: interaction.guild, orderCode: order.order_code });
   } catch (payosError) {
+    qrProvider = 'VIETQR';
     await sendVietQRPayment({ guild: interaction.guild, orderCode: order.order_code }).catch(async (vietqrError) => {
+      qrProvider = null;
       const E = createEmojiResolver(interaction.guildId);
       await interaction.channel.send({
         content: `${E('status_warn')} Đơn đã tạo nhưng chưa sinh được QR. Staff đã nhận log để kiểm tra.`,
         allowedMentions: { parse: [] },
+      });
+      await emitAutomationLog(interaction.client, {
+        guildId: interaction.guildId,
+        customerId: ticket.customer_id,
+        action: 'AI_ORDER_QR_FAILED',
+        title: 'ĐƠN AI CHƯA TẠO ĐƯỢC QR',
+        summary: 'Đơn đã được tạo đúng giá catalog nhưng cả PayOS và VietQR đều chưa phản hồi thành công. Staff cần kiểm tra và cấp lại QR.',
+        reference: order.order_code,
+        status: 'danger',
+        fields: [
+          { label: 'PayOS', value: short(payosError.message, 160), emoji: 'status_warn' },
+          { label: 'VietQR', value: short(vietqrError.message, 160), emoji: 'status_warn' },
+        ],
       });
       console.error('[AI ORDER] Không tạo được QR:', payosError.message, vietqrError.message);
     });
@@ -403,7 +501,7 @@ async function createVerifiedOrderFromInteraction(interaction, ticket, product, 
     relatedOrderCode: order.order_code,
     relatedTicketCode: ticket.ticket_code,
   });
-  return order;
+  return { order, qrProvider };
 }
 
 async function validateOwnedTicket(interaction, ticketId) {
@@ -497,25 +595,73 @@ export async function handleAiSupportInteraction(interaction) {
       return true;
     }
 
+    if (action === 'order_select' && interaction.isStringSelectMenu()) {
+      const ticket = await validateOwnedTicket(interaction, parts[1]);
+      if (ticket.ticket_type !== 'ORDER') throw new Error('Đây không phải ticket mua hàng.');
+      const existing = getLatestOrderByTicketChannel(ticket.channel_id);
+      if (existing && !['COMPLETED', 'CANCELLED'].includes(existing.status)) {
+        throw new Error(`Ticket đã có đơn ${existing.order_code} đang xử lý.`);
+      }
+      const product = resolveOrderProduct(interaction.guildId, interaction.values[0]);
+      const quantity = Math.min(10, Math.max(1, Number.parseInt(parts[2], 10) || 1));
+      const confirmation = buildAiOrderConfirmationPayload({
+        guildId: interaction.guildId,
+        ticket,
+        product,
+        quantity,
+      });
+      await interaction.update({
+        components: confirmation.components,
+        allowedMentions: { parse: [] },
+      });
+      return true;
+    }
+
     if (action === 'order_confirm') {
       const ticket = await validateOwnedTicket(interaction, parts[1]);
       if (ticket.ticket_type !== 'ORDER') throw new Error('Đây không phải ticket mua hàng.');
       const product = resolveOrderProduct(interaction.guildId, parts[2]);
       const quantity = Math.min(10, Math.max(1, Number.parseInt(parts[3], 10) || 1));
+      const quote = evaluateCatalogOrderQuote(product, quantity, parts[4], parts[5]);
+      if (!quote.isCurrent) {
+        const refreshed = buildAiOrderConfirmationPayload({
+          guildId: interaction.guildId,
+          ticket,
+          product,
+          quantity: quote.quantity,
+          notice: 'Catalog vừa được cập nhật. Mình đã làm mới thông tin bên dưới; vui lòng kiểm tra lại trước khi xác nhận.',
+        });
+        await interaction.update({
+          components: refreshed.components,
+          allowedMentions: { parse: [] },
+        });
+        await interaction.followUp({
+          content: `${E('status_warn')} Giá hoặc thông tin gói đã thay đổi nên đơn cũ chưa được tạo. Hãy xem báo giá mới rồi bấm xác nhận lại.`,
+          flags: MessageFlags.Ephemeral,
+          allowedMentions: { parse: [] },
+        }).catch(() => null);
+        return true;
+      }
       const lockKey = `${interaction.guildId}:${ticket.id}`;
       if (orderConfirmationLocks.has(lockKey)) throw new Error('Đơn đang được tạo, vui lòng không bấm lại.');
       orderConfirmationLocks.add(lockKey);
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       try {
-        const order = await createVerifiedOrderFromInteraction(interaction, ticket, product, quantity);
-        await interaction.editReply(`${E('status_check')} Đã tạo đơn \`${order.order_code}\` theo đúng giá catalog **${money(order.total_amount)}**.`);
+        const { order, qrProvider } = await createVerifiedOrderFromInteraction(interaction, ticket, product, quantity);
+        const qrLine = qrProvider
+          ? `Mã QR thanh toán ${qrProvider === 'PAYOS' ? 'PayOS' : 'VietQR'} đã được gửi ngay trong ticket.`
+          : 'QR đang chờ staff cấp lại; đơn của bạn vẫn được giữ nguyên.';
+        await interaction.editReply(`${E('status_check')} Đã tạo đơn \`${order.order_code}\` theo đúng giá catalog **${money(order.total_amount)}**. ${qrLine}`);
         await interaction.message.edit({
           components: messagePayload([
             `## ${E('status_check')} ĐƠN ĐÃ ĐƯỢC XÁC NHẬN`,
             `${E('order_id')} Mã đơn — \`${order.order_code}\``,
             `${E('order_product')} ${product.name} · số lượng ${quantity}`,
             `${E('payment_money')} Tổng thanh toán — **${money(order.total_amount)}**`,
-          ], accentFor('success')).components,
+            qrProvider
+              ? `${E('status_check')} QR thanh toán đã được gửi bên dưới.`
+              : `${E('status_warn')} QR chưa tạo được; staff đã nhận cảnh báo để xử lý.`,
+          ], accentFor(qrProvider ? 'success' : 'warning')).components,
           allowedMentions: { parse: [] },
         }).catch(() => null);
       } finally {

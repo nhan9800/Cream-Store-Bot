@@ -8,10 +8,14 @@ import { getTicketByChannelId } from './ticketService.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import {
   classifyCustomerIntent,
-  hasExplicitPurchaseConfirmation,
   prepareAiOrderConfirmation,
+  sendAiProductSelection,
   sanitizeCustomerTextForAi,
 } from './aiSupportAutomationService.js';
+import {
+  isContextualPurchaseConfirmation,
+  resolveCatalogProductsForRequest,
+} from './aiCommerceUnderstandingService.js';
 import { emitAutomationLog } from './automationLogService.js';
 import { PROMOTION_BOARD } from '../campaigns/promotionBoard2026.js';
 
@@ -24,86 +28,57 @@ function cleanAssistantReply(content) {
     .slice(0, 1900);
 }
 
-function normalizeSearchText(value) {
-  return String(value || '')
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .replace(/đ/gi, 'd')
-    .toLowerCase();
-}
-
-const PRODUCT_SEARCH_GROUPS = Object.freeze([
-  ['youtube', ['youtube', 'yt premium']],
-  ['netflix', ['netflix']],
-  ['spotify', ['spotify']],
-  ['discord', ['discord', 'nitro', 'boost server']],
-  ['chatgpt', ['chatgpt', 'chat gpt', 'gpt plus']],
-  ['gemini', ['gemini', 'google one']],
-  ['capcut', ['capcut']],
-  ['canva', ['canva']],
-  ['office', ['office', 'onedrive']],
-  ['claude', ['claude']],
-  ['adobe', ['adobe']],
-  ['gearup', ['gearup', 'booster']],
-]);
-
-function hasCatalogProductSignal(content) {
-  const text = normalizeSearchText(content);
-  return PRODUCT_SEARCH_GROUPS.some(([, aliases]) => aliases.some((alias) => text.includes(alias)));
-}
-
 function productDuration(product) {
   return product.duration_days
     ? `${product.duration_days} ngày`
     : `${product.duration_months || 1} tháng`;
 }
 
-export function findCatalogProductsForMessage(guildId, content, limit = 5) {
-  const text = normalizeSearchText(content);
-  const matchedGroups = PRODUCT_SEARCH_GROUPS
-    .filter(([, aliases]) => aliases.some((alias) => text.includes(alias)))
-    .map(([group]) => group);
-  const products = getActiveProducts(guildId);
-  let matches = matchedGroups.length
-    ? products.filter((product) => {
-      const searchable = normalizeSearchText(`${product.name} ${product.description || ''} ${product.service_type || ''}`);
-      return matchedGroups.some((group) => searchable.includes(group));
-    })
-    : products.filter((product) => Number(product.is_featured) === 1);
-  const monthMatch = text.match(/\b(\d{1,2})\s*(?:thang|month)/);
-  const yearMatch = text.match(/\b(\d{1,2})\s*(?:nam|year)/);
-  const dayMatch = text.match(/\b(\d{1,3})\s*(?:ngay|day)/);
-  const requestedMonths = monthMatch ? Number(monthMatch[1]) : (yearMatch ? Number(yearMatch[1]) * 12 : null);
-  const requestedDays = dayMatch ? Number(dayMatch[1]) : null;
-  if (requestedMonths || requestedDays) {
-    const durationMatches = matches.filter((product) => (
-      (requestedDays && Number(product.duration_days) === requestedDays)
-      || (requestedMonths && !product.duration_days && Number(product.duration_months || 1) === requestedMonths)
-    ));
-    if (durationMatches.length) matches = durationMatches;
-  }
-  return (matches.length ? matches : products).slice(0, Math.max(1, limit));
+export function findCatalogProductsForMessage(guildId, content, limit = 5, contextMessages = []) {
+  return resolveCatalogProductsForRequest(guildId, { content, contextMessages, limit }).products;
 }
 
-async function tryDeterministicOrderPreparation(message, isTicket, isStaff) {
-  if (
-    !isTicket
-    || isStaff
-    || !hasExplicitPurchaseConfirmation(message.content)
-    || !hasCatalogProductSignal(message.content)
-  ) return false;
+async function tryDeterministicCommerceFlow(message, isTicket, isStaff, contextMessages = []) {
+  if (!isTicket || isStaff) return false;
   const ticket = getTicketByChannelId(message.channel.id);
   if (ticket?.ticket_type !== 'ORDER' || ticket.customer_id !== message.author.id) return false;
-  const matches = findCatalogProductsForMessage(message.guildId, message.content, 2);
-  if (matches.length !== 1) return false;
-  await prepareAiOrderConfirmation(message, { productId: matches[0].id, quantity: 1 });
+  const intent = classifyCustomerIntent(message.content);
+  if (!['PURCHASE', 'PURCHASE_CONFIRM'].includes(intent) && !isContextualPurchaseConfirmation(message.content)) {
+    return false;
+  }
+  const resolution = resolveCatalogProductsForRequest(message.guildId, {
+    content: message.content,
+    contextMessages,
+    limit: 10,
+  });
+  if (!resolution.hasProductSignal || !resolution.products.length) return false;
+  if (resolution.confidentProduct) {
+    await prepareAiOrderConfirmation(message, {
+      productId: resolution.confidentProduct.id,
+      quantity: resolution.quantity,
+    });
+    return true;
+  }
+  await sendAiProductSelection(message, {
+    products: resolution.products,
+    quantity: resolution.quantity,
+  });
   return true;
 }
 
-function buildDeterministicFallback(message, isTicket) {
+function buildDeterministicFallback(message, isTicket, contextMessages = []) {
   const intent = classifyCustomerIntent(message.content);
   if (['PRODUCT_ADVICE', 'PURCHASE', 'PURCHASE_CONFIRM'].includes(intent)) {
-    const products = findCatalogProductsForMessage(message.guildId, message.content, 5);
+    const resolution = resolveCatalogProductsForRequest(message.guildId, {
+      content: message.content,
+      contextMessages,
+      limit: 5,
+    });
+    const products = resolution.products.length
+      ? resolution.products
+      : (intent === 'PRODUCT_ADVICE' && !resolution.hasProductSignal
+        ? getActiveProducts(message.guildId).filter((product) => Number(product.is_featured) === 1).slice(0, 5)
+        : []);
     if (!products.length) {
       return 'Mình chưa tìm thấy gói phù hợp trong bảng giá đang mở bán. Bạn hãy cho biết tên sản phẩm và thời hạn mong muốn; staff sẽ kiểm tra tiếp.';
     }
@@ -157,7 +132,7 @@ export async function generateSystemPrompt(guild, isStaff) {
   }
 
   prompt += `\n\n--- QUY TẮC BẮT BUỘC ---
-1. Trả lời ngắn gọn, lịch sự, tự nhiên bằng tiếng Việt; ưu tiên 2–6 câu.
+1. Trả lời tự nhiên bằng tiếng Việt, xưng "mình" và gọi khách là "bạn". Đi thẳng vào điều khách đang cần; ưu tiên 2–6 câu khi đã đủ ý.
 2. Chỉ dùng sản phẩm, giá, thời hạn và bảo hành trong dữ liệu catalog/ghi chú đã duyệt. Không đoán tồn kho hoặc tự làm tròn giá.
 3. Không bao giờ yêu cầu hay lặp lại mật khẩu, OTP, cookie, token, mã 2FA hoặc thông tin thanh toán nhạy cảm.
 4. Không xác nhận đã thanh toán, hứa hoàn tiền, chấp nhận bảo hành, cam kết thời gian xử lý hoặc kết luận lỗi. Các quyết định đó thuộc hệ thống/staff.
@@ -168,7 +143,10 @@ export async function generateSystemPrompt(guild, isStaff) {
 9. Nếu ticket đã có đơn đang xử lý, không đề nghị tạo thêm đơn.
 10. Khi khách báo lỗi/bảo hành mà không nhớ mã đơn, hướng dẫn dùng nút Tra Đơn Bảo Hành; tuyệt đối không tạo đơn bù 0đ hoặc lịch sử giả.
 11. Với trường hợp cần xác minh giao dịch, hoàn tiền, tranh chấp, không tìm thấy đơn hoặc rủi ro tài khoản, gọi escalate_support để staff nhận log.
-12. Nếu không chắc, nói rõ giới hạn và chuyển staff; không bịa câu trả lời.`;
+12. Nhớ mạch hội thoại gần nhất. Khi khách nói "gói này", "lấy nhé" hoặc "lên đơn", nối với sản phẩm và thời hạn khách vừa trao đổi; nếu còn từ hai lựa chọn hợp lý thì hỏi đúng một câu ngắn để phân biệt.
+13. Tư vấn bằng khác biệt cụ thể về thời hạn, cách nhận, điều kiện và bảo hành. Không lặp lời chào, không dùng câu mở đầu rập khuôn, không liệt kê dài khi khách chỉ hỏi một việc.
+14. Thể hiện sự quan tâm qua việc hiểu đúng nhu cầu và giải thích rõ bước tiếp theo; không tự nhận là con người hoặc giả vờ có cảm xúc/trải nghiệm thật.
+15. Nếu không chắc, nói rõ phần cần xác minh và chuyển staff; không bịa câu trả lời.`;
 
   prompt += isStaff
     ? '\n\nNgười nhắn là staff. Hãy hỗ trợ tra cứu/soạn câu trả lời, nhưng vẫn tuân thủ mọi quy tắc an toàn và không tự thực hiện giao dịch.'
@@ -409,21 +387,32 @@ async function escalateToStaff(message, ticket, args) {
 }
 
 export async function processAiMessage(message, isTicket, isStaff = false) {
-  if (!getConfiguredAiProviders().length) {
-    if (await tryDeterministicOrderPreparation(message, isTicket, isStaff)) return true;
-    return safeReply(message, buildDeterministicFallback(message, isTicket));
-  }
   const E = createEmojiResolver(message.guildId);
+  const ticket = isTicket ? getTicketByChannelId(message.channel.id) : null;
+  const fetchedMessages = isTicket
+    ? await message.channel.messages.fetch({ limit: 24 }).catch(() => new Map([[message.id, message]]))
+    : new Map([[message.id, message]]);
+  const chronologicalMessages = [...fetchedMessages.values()].reverse();
+  const customerContextMessages = chronologicalMessages
+    .filter((item) => !item.author.bot && (!ticket || item.author.id === ticket.customer_id))
+    .map((item) => item.content)
+    .filter(Boolean);
+
+  try {
+    if (await tryDeterministicCommerceFlow(message, isTicket, isStaff, customerContextMessages)) return true;
+  } catch (error) {
+    await safeReply(message, `${E('status_warn')} ${error.message}`).catch(() => null);
+    return true;
+  }
+
+  if (!getConfiguredAiProviders().length) {
+    return safeReply(message, buildDeterministicFallback(message, isTicket, customerContextMessages));
+  }
   await message.channel.sendTyping().catch(() => null);
 
   try {
     const systemPrompt = await generateSystemPrompt(message.guild, isStaff);
-    const ticket = isTicket ? getTicketByChannelId(message.channel.id) : null;
-    const fetchedMessages = isTicket
-      ? await message.channel.messages.fetch({ limit: 16 })
-      : new Map([[message.id, message]]);
-    const history = [...fetchedMessages.values()]
-      .reverse()
+    const history = chronologicalMessages
       .filter((item) => !item.author.bot || item.author.id === message.client.user.id)
       .map((item) => ({
         role: item.author.id === message.client.user.id ? 'assistant' : 'user',
@@ -433,7 +422,19 @@ export async function processAiMessage(message, isTicket, isStaff = false) {
       }))
       .filter((item) => item.content.replace(/^\[[^\]]+\]:\s*/, '').trim());
     const tools = [];
-    if (isTicket && !isStaff && ticket?.ticket_type === 'ORDER' && hasExplicitPurchaseConfirmation(message.content)) {
+    const intent = classifyCustomerIntent(message.content);
+    const currentResolution = resolveCatalogProductsForRequest(message.guildId, {
+      content: message.content,
+      contextMessages: customerContextMessages,
+      limit: 10,
+    });
+    if (
+      isTicket
+      && !isStaff
+      && ticket?.ticket_type === 'ORDER'
+      && ['PURCHASE', 'PURCHASE_CONFIRM'].includes(intent)
+      && currentResolution.confidentProduct
+    ) {
       tools.push(prepareOrderToolDeclaration);
     }
     if (isTicket && !isStaff) tools.push(escalateSupportToolDeclaration);
@@ -441,6 +442,9 @@ export async function processAiMessage(message, isTicket, isStaff = false) {
     const result = await requestAiCompletion({ systemPrompt, history, tools });
     if (result.toolCall) {
       if (result.toolCall.name === 'prepare_order') {
+        if (Number(result.toolCall.args?.productId) !== Number(currentResolution.confidentProduct?.id)) {
+          return safeReply(message, 'Mình chưa xác định chắc đúng gói nên chưa tạo bước thanh toán. Bạn cho mình thêm thời hạn hoặc tên đầy đủ của gói nhé.');
+        }
         await prepareAiOrderConfirmation(message, result.toolCall.args);
         return true;
       }
@@ -453,8 +457,8 @@ export async function processAiMessage(message, isTicket, isStaff = false) {
     return result.content ? safeReply(message, result.content) : false;
   } catch (error) {
     console.error('[AI SERVICE] Error processing message:', error);
-    if (await tryDeterministicOrderPreparation(message, isTicket, isStaff).catch(() => false)) return true;
-    const fallback = buildDeterministicFallback(message, isTicket);
+    if (await tryDeterministicCommerceFlow(message, isTicket, isStaff, customerContextMessages).catch(() => false)) return true;
+    const fallback = buildDeterministicFallback(message, isTicket, customerContextMessages);
     await safeReply(message, `${E('status_warn')} ${fallback}`).catch(() => null);
     return true;
   }
