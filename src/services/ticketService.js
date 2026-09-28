@@ -13,6 +13,7 @@ function reopenTicketStmt(){return db.prepare(`UPDATE tickets SET status='OPEN',
 function getTicketByIdStmt(){return db.prepare('SELECT * FROM tickets WHERE id=?');}
 function scheduleAutoCloseStmt(){return db.prepare(`UPDATE tickets SET auto_close_at=?, keep_open_requested=0 WHERE id=?`);}
 function clearAutoCloseStmt(){return db.prepare(`UPDATE tickets SET auto_close_at=NULL, keep_open_requested=1 WHERE id=?`);}
+function unscheduleAutoCloseStmt(){return db.prepare(`UPDATE tickets SET auto_close_at=NULL WHERE id=?`);}
 function dueAutoCloseTicketsStmt(){return db.prepare(`SELECT * FROM tickets WHERE guild_id=? AND status='OPEN' AND auto_close_at IS NOT NULL AND keep_open_requested=0 AND datetime(auto_close_at) <= datetime(?) ORDER BY auto_close_at ASC LIMIT ?`);}
 function updateTicketAiStatusStmt(){return db.prepare(`UPDATE tickets SET ai_status=?, ai_paused_until=? WHERE id=?`);}
 function getTicketByClientRequestIdStmt(){return db.prepare('SELECT * FROM tickets WHERE client_request_id=? LIMIT 1');}
@@ -32,6 +33,17 @@ function getOpenTicketForOrderStmt(){return db.prepare(`
   END, id DESC
   LIMIT 1
 `);}
+function getOrdersLinkedToTicketStmt(){return db.prepare(`
+  SELECT order_code, status, feedback_submitted_at
+  FROM orders
+  WHERE guild_id=@guildId
+    AND (
+      (@ticketId IS NOT NULL AND ticket_id=@ticketId)
+      OR (@channelId != '' AND ticket_channel_id=@channelId)
+      OR (@relatedOrderCode != '' AND order_code=@relatedOrderCode)
+    )
+  ORDER BY id ASC
+`);}
 function getFeedbackedTicketsMissingAutoCloseStmt(){return db.prepare(`
   SELECT t.* FROM tickets t
   WHERE t.guild_id=?
@@ -47,6 +59,20 @@ function getFeedbackedTicketsMissingAutoCloseStmt(){return db.prepare(`
           o.ticket_id=t.id
           OR o.ticket_channel_id=t.channel_id
           OR (t.related_order_code IS NOT NULL AND t.related_order_code=o.order_code)
+        )
+    )
+    AND NOT EXISTS (
+      SELECT 1 FROM orders pending
+      WHERE pending.guild_id=t.guild_id
+        AND (
+          pending.ticket_id=t.id
+          OR pending.ticket_channel_id=t.channel_id
+          OR (t.related_order_code IS NOT NULL AND t.related_order_code=pending.order_code)
+        )
+        AND pending.status NOT IN ('CANCELLED', 'REFUNDED')
+        AND (
+          pending.status!='COMPLETED'
+          OR pending.feedback_submitted_at IS NULL
         )
     )
   ORDER BY t.id ASC
@@ -135,6 +161,7 @@ export function reopenTicket(ticketId){reopenTicketStmt().run(ticketId); return 
 export const getTicketById = (ticketId) => getTicketByIdStmt().get(ticketId) ?? null;
 export function scheduleTicketAutoClose(ticketId, minutes=5){const at=addMinutes(new Date(), minutes).toISOString(); scheduleAutoCloseStmt().run(at, ticketId); return getTicketById(ticketId);}
 export function keepTicketOpen(ticketId){clearAutoCloseStmt().run(ticketId); return getTicketById(ticketId);}
+export function unscheduleTicketAutoClose(ticketId){unscheduleAutoCloseStmt().run(ticketId); return getTicketById(ticketId);}
 export const getDueAutoCloseTickets = (guildId, limit=20) => dueAutoCloseTicketsStmt().all(guildId, nowIso(), limit);
 export function getOpenTicketForOrder(order) {
   if (!order?.guild_id) return null;
@@ -149,7 +176,50 @@ export function getOpenTicketForOrder(order) {
 }
 export function scheduleOrderTicketAutoClose(order, minutes=5) {
   const ticket = getOpenTicketForOrder(order);
-  return ticket ? scheduleTicketAutoClose(ticket.id, minutes) : null;
+  if (!ticket) return null;
+  const state = getFeedbackAutoCloseState(ticket);
+  if (!state.eligible || Number(ticket.keep_open_requested) === 1) {
+    return ticket.auto_close_at ? unscheduleTicketAutoClose(ticket.id) : ticket;
+  }
+  return scheduleTicketAutoClose(ticket.id, minutes);
+}
+export function unscheduleOrderTicketAutoClose(order) {
+  const ticket = getOpenTicketForOrder(order);
+  if (!ticket) return null;
+  return ticket.auto_close_at ? unscheduleTicketAutoClose(ticket.id) : ticket;
+}
+export function getFeedbackAutoCloseState(ticketOrId) {
+  const ticket = typeof ticketOrId === 'object'
+    ? ticketOrId
+    : getTicketById(Number(ticketOrId));
+  if (!ticket) {
+    return { eligible: false, reason: 'ticket_not_found', linkedOrders: [], blockingOrders: [] };
+  }
+  const linkedOrders = getOrdersLinkedToTicketStmt().all({
+    guildId: String(ticket.guild_id),
+    ticketId: Number.isInteger(Number(ticket.id)) && Number(ticket.id) > 0 ? Number(ticket.id) : null,
+    channelId: String(ticket.channel_id || ''),
+    relatedOrderCode: String(ticket.related_order_code || ''),
+  });
+  const relevantOrders = linkedOrders.filter((order) => (
+    !['CANCELLED', 'REFUNDED'].includes(String(order.status || '').toUpperCase())
+  ));
+  const blockingOrders = relevantOrders.filter((order) => (
+    String(order.status || '').toUpperCase() !== 'COMPLETED' || !order.feedback_submitted_at
+  ));
+  const feedbackedOrders = relevantOrders.filter((order) => (
+    String(order.status || '').toUpperCase() === 'COMPLETED' && Boolean(order.feedback_submitted_at)
+  ));
+  return {
+    eligible: feedbackedOrders.length > 0 && blockingOrders.length === 0,
+    reason: blockingOrders.length
+      ? 'linked_orders_pending'
+      : (feedbackedOrders.length ? 'ready' : 'no_feedbacked_order'),
+    linkedOrders,
+    relevantOrders,
+    feedbackedOrders,
+    blockingOrders,
+  };
 }
 export function scheduleMissingFeedbackTicketAutoCloses(guildId, limit=100) {
   const tickets = getFeedbackedTicketsMissingAutoCloseStmt().all(String(guildId), Number(limit));

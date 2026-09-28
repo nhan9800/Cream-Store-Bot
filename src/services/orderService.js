@@ -14,6 +14,7 @@ import {
   markAdminOrderReminderLifecycleChanged,
   scheduleAdminOrderCenterRefresh,
 } from './adminOrderCenterService.js';
+import { unscheduleOrderTicketAutoClose } from './ticketService.js';
 
 function createOrderStmt() {
   return db.prepare(`
@@ -141,6 +142,9 @@ export function createOrder({ guildId, ticketId, ticketChannelId, customerId, pr
   transaction();
   broadcastDashboardEvent('order_update', `Đơn hàng mới: ${finalOrderCode}`);
   const createdOrder = getOrderById(Number(resultId));
+  // A customer can create another order in the same ticket while a previous
+  // feedback close timer is still pending. Keep the shared ticket alive.
+  unscheduleOrderTicketAutoClose(createdOrder);
   scheduleCtvOrderLogSync(createdOrder);
   scheduleAdminOrderCenterRefresh(createdOrder.guild_id);
   return createdOrder;

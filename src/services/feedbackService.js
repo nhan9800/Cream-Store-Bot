@@ -4,10 +4,18 @@ import { syncCustomerStats } from './customerService.js';
 import { buildFeedbackV2 } from '../utils/embeds.js';
 import { isManager } from '../utils/permissions.js';
 import { config } from '../config.js';
-import { scheduleOrderTicketAutoClose } from './ticketService.js';
+import { getFeedbackAutoCloseState, scheduleOrderTicketAutoClose } from './ticketService.js';
 
 export function scheduleFeedbackTicketAutoClose(order) {
-  return scheduleOrderTicketAutoClose(order, config.autoCloseCompletedTicketMinutes);
+  const ticket = scheduleOrderTicketAutoClose(order, config.autoCloseCompletedTicketMinutes);
+  const state = ticket
+    ? getFeedbackAutoCloseState(ticket)
+    : { eligible: false, reason: 'ticket_not_found', blockingOrders: [] };
+  return {
+    ticket,
+    state,
+    scheduled: Boolean(ticket?.auto_close_at && state.eligible && Number(ticket.keep_open_requested) !== 1),
+  };
 }
 
 /** Rebuild the Discord card after an admin edits the published feedback. */
@@ -111,7 +119,8 @@ export async function publishFeedback({ guild, userId, orderCode, stars, content
     feedbackChannelId: feedbackChannel.id,
     feedbackMessageId: feedbackMessage.id,
   });
-  const ticket = scheduleFeedbackTicketAutoClose(updatedOrder);
+  const autoClose = scheduleFeedbackTicketAutoClose(updatedOrder);
+  const ticket = autoClose.ticket;
 
   syncCustomerStats(updatedOrder.guild_id, updatedOrder.customer_id);
 
@@ -124,13 +133,19 @@ export async function publishFeedback({ guild, userId, orderCode, stars, content
     const ticketMessage = onBehalf
       ? `<@${actorId}> (admin) đã ghi nhận feedback cho đơn ${updatedOrder.order_code} thay cho khách <@${userId}>.`
       : `<@${userId}> đã gửi feedback cho đơn ${updatedOrder.order_code}. Cảm ơn bạn nhé!`;
-    await ticketChannel.send(ticketMessage).catch(() => null);
+    const closureMessage = autoClose.scheduled
+      ? ` Ticket sẽ tự đóng sau ${config.autoCloseCompletedTicketMinutes} phút nếu không chọn giữ mở.`
+      : (autoClose.state.blockingOrders?.length
+        ? ` Ticket vẫn mở vì còn ${autoClose.state.blockingOrders.length} đơn khác đang xử lý hoặc chưa hoàn tất feedback.`
+        : ' Ticket tiếp tục mở theo trạng thái hỗ trợ hiện tại.');
+    await ticketChannel.send(`${ticketMessage}${closureMessage}`).catch(() => null);
   }
 
   return {
     order: updatedOrder,
     feedbackChannel,
     ticket,
+    autoClose,
     onBehalf,
     actorId: onBehalf ? actorId : userId,
   };

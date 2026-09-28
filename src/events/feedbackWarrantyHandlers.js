@@ -273,17 +273,23 @@ export async function handleFeedbackModalSubmit(interaction, orderCode, starsRaw
         );
         fbContainer.addTextDisplayComponents(
           new TextDisplayBuilder().setContent(
-            `-# ${E_ch('icon_clock')} Ticket sẽ tự đóng sau **${config.autoCloseCompletedTicketMinutes} phút**. Bấm nút bên dưới nếu muốn giữ ticket mở.`.trim()
+            (result.autoClose?.scheduled
+              ? `-# ${E_ch('icon_clock')} Ticket sẽ tự đóng sau **${config.autoCloseCompletedTicketMinutes} phút**. Bấm nút bên dưới nếu muốn giữ ticket mở.`
+              : `-# ${E_ch('status_info')} Ticket vẫn mở vì còn đơn khác đang xử lý hoặc chưa hoàn tất feedback.`).trim()
           )
         );
-        const keepOpenBtn = new ButtonBuilder()
-          .setCustomId(`ticket:keepopen:${ticket.id}`)
-          .setStyle(ButtonStyle.Secondary)
-          .setLabel('Giữ Ticket Mở');
-        const keepOpenBtnEmoji = E_ch.component('icon_lock');
-        if (keepOpenBtnEmoji) keepOpenBtn.setEmoji(keepOpenBtnEmoji);
+        const components = [fbContainer];
+        if (result.autoClose?.scheduled) {
+          const keepOpenBtn = new ButtonBuilder()
+            .setCustomId(`ticket:keepopen:${ticket.id}`)
+            .setStyle(ButtonStyle.Secondary)
+            .setLabel('Giữ Ticket Mở');
+          const keepOpenBtnEmoji = E_ch.component('icon_lock');
+          if (keepOpenBtnEmoji) keepOpenBtn.setEmoji(keepOpenBtnEmoji);
+          components.push(new ActionRowBuilder().addComponents(keepOpenBtn));
+        }
         await channel.send({
-          components: [fbContainer, new ActionRowBuilder().addComponents(keepOpenBtn)],
+          components,
           flags: MessageFlags.IsComponentsV2,
         }).catch(() => null);
       }
