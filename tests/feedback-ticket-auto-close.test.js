@@ -7,6 +7,7 @@ let tempRoot;
 let db;
 let ticketService;
 let feedbackService;
+let orderService;
 const previousEnv = {
   ENV_FILE: process.env.ENV_FILE,
   DATABASE_PATH: process.env.DATABASE_PATH,
@@ -21,7 +22,15 @@ function createTicket({ code, channelId, orderCode = null, status = 'OPEN', keep
   `).run(code, channelId, orderCode, keepOpen, status, new Date().toISOString()).lastInsertRowid);
 }
 
-function createCompletedOrder({ code, ticketId, channelId, feedbackSubmitted = true, customerId = 'CUSTOMER', guildId = 'FEEDBACK_GUILD' }) {
+function createCompletedOrder({
+  code,
+  ticketId,
+  channelId,
+  feedbackSubmitted = true,
+  customerId = 'CUSTOMER',
+  guildId = 'FEEDBACK_GUILD',
+  status = 'COMPLETED',
+}) {
   const timestamp = new Date().toISOString();
   db.prepare(`
     INSERT INTO orders (
@@ -35,6 +44,9 @@ function createCompletedOrder({ code, ticketId, channelId, feedbackSubmitted = t
       'ORDER_LOG', 'STAFF', ?, ?, ?, ?
     )
   `).run(code, guildId, ticketId, channelId, customerId, timestamp, feedbackSubmitted ? timestamp : null, timestamp, timestamp);
+  if (status !== 'COMPLETED') {
+    db.prepare('UPDATE orders SET status = ?, completed_at = NULL WHERE order_code = ?').run(status, code);
+  }
 }
 
 beforeAll(async () => {
@@ -46,6 +58,7 @@ beforeAll(async () => {
   database.initDatabase();
   ticketService = await import('../src/services/ticketService.js');
   feedbackService = await import('../src/services/feedbackService.js');
+  orderService = await import('../src/services/orderService.js');
 
   db.prepare(`
     INSERT INTO guild_settings (
@@ -151,7 +164,107 @@ describe('feedback ticket auto-close scheduling', () => {
 
     expect(result.ticket.id).toBe(ticketId);
     expect(result.ticket.auto_close_at).toBeTruthy();
+    expect(result.autoClose.scheduled).toBe(true);
     expect(result.order.feedback_submitted_at).toBeTruthy();
+  });
+
+  test('keeps a shared ticket open when another linked order is still processing', async () => {
+    const ticketId = createTicket({ code: 'TKT_MULTI_ACTIVE', channelId: 'multi-active-channel' });
+    createCompletedOrder({
+      code: 'CN_MULTI_DONE',
+      ticketId,
+      channelId: 'multi-active-channel',
+      feedbackSubmitted: false,
+    });
+    createCompletedOrder({
+      code: 'CN_MULTI_PROCESSING',
+      ticketId,
+      channelId: 'multi-active-channel',
+      feedbackSubmitted: false,
+      status: 'PROCESSING',
+    });
+    const { guild, ticketChannelSends } = createGuild({
+      staffMember: managerMember(false),
+      ticketChannelId: 'multi-active-channel',
+    });
+
+    const result = await feedbackService.publishFeedback({
+      guild,
+      userId: 'CUSTOMER',
+      orderCode: 'CN_MULTI_DONE',
+      stars: 5,
+      content: 'Đơn đầu tiên xử lý tốt',
+    });
+
+    expect(result.autoClose.scheduled).toBe(false);
+    expect(result.autoClose.state.reason).toBe('linked_orders_pending');
+    expect(result.autoClose.state.blockingOrders.map((order) => order.order_code))
+      .toContain('CN_MULTI_PROCESSING');
+    expect(ticketService.getTicketById(ticketId).auto_close_at).toBeNull();
+    expect(ticketChannelSends.some((content) => content.includes('Ticket vẫn mở'))).toBe(true);
+  });
+
+  test('waits until every completed order in the ticket has its own feedback', () => {
+    const ticketId = createTicket({ code: 'TKT_MULTI_FEEDBACK', channelId: 'multi-feedback-channel' });
+    createCompletedOrder({
+      code: 'CN_MULTI_REVIEWED',
+      ticketId,
+      channelId: 'multi-feedback-channel',
+      feedbackSubmitted: true,
+    });
+    createCompletedOrder({
+      code: 'CN_MULTI_UNREVIEWED',
+      ticketId,
+      channelId: 'multi-feedback-channel',
+      feedbackSubmitted: false,
+    });
+
+    const firstOrder = db.prepare('SELECT * FROM orders WHERE order_code = ?').get('CN_MULTI_REVIEWED');
+    const blocked = feedbackService.scheduleFeedbackTicketAutoClose(firstOrder);
+    expect(blocked.scheduled).toBe(false);
+    expect(blocked.state.blockingOrders.map((order) => order.order_code))
+      .toContain('CN_MULTI_UNREVIEWED');
+
+    db.prepare('UPDATE orders SET feedback_submitted_at = ? WHERE order_code = ?')
+      .run(new Date().toISOString(), 'CN_MULTI_UNREVIEWED');
+    const ready = feedbackService.scheduleFeedbackTicketAutoClose(firstOrder);
+    expect(ready.scheduled).toBe(true);
+    expect(ready.ticket.auto_close_at).toBeTruthy();
+  });
+
+  test('cancels an existing feedback close timer as soon as a new order is created in the ticket', () => {
+    const ticketId = createTicket({ code: 'TKT_NEW_ORDER', channelId: 'new-order-channel' });
+    createCompletedOrder({
+      code: 'CN_NEW_ORDER_OLD',
+      ticketId,
+      channelId: 'new-order-channel',
+      feedbackSubmitted: true,
+    });
+    const completed = db.prepare('SELECT * FROM orders WHERE order_code = ?').get('CN_NEW_ORDER_OLD');
+    const scheduled = feedbackService.scheduleFeedbackTicketAutoClose(completed);
+    expect(scheduled.scheduled).toBe(true);
+
+    orderService.createOrder({
+      guildId: 'FEEDBACK_GUILD',
+      ticketId,
+      ticketChannelId: 'new-order-channel',
+      customerId: 'CUSTOMER',
+      productName: 'Second Product',
+      serviceType: 'other',
+      quantity: 1,
+      note: 'multi-order regression test',
+      totalAmount: 120000,
+      durationMonths: 1,
+      orderLogChannelId: 'ORDER_LOG',
+      createdById: 'STAFF',
+      orderCode: 'CN_NEW_ORDER_NEXT',
+    });
+
+    const ticket = ticketService.getTicketById(ticketId);
+    expect(ticket.auto_close_at).toBeNull();
+    const state = ticketService.getFeedbackAutoCloseState(ticket);
+    expect(state.eligible).toBe(false);
+    expect(state.blockingOrders.map((order) => order.order_code)).toContain('CN_NEW_ORDER_NEXT');
   });
 
   test('resolves the live open ticket by order code when stored ticket references are stale', () => {
@@ -170,17 +283,29 @@ describe('feedback ticket auto-close scheduling', () => {
   test('backfills feedbacked tickets missing a close schedule and respects Keep Open', () => {
     const repairId = createTicket({ code: 'TKT_REPAIR', channelId: 'repair-channel', orderCode: 'CN_FEEDBACK_2' });
     const keepOpenId = createTicket({ code: 'TKT_KEEP', channelId: 'keep-channel', orderCode: 'CN_FEEDBACK_3', keepOpen: 1 });
+    const activeId = createTicket({ code: 'TKT_ACTIVE', channelId: 'active-channel' });
     createCompletedOrder({ code: 'CN_FEEDBACK_2', ticketId: repairId, channelId: 'repair-channel' });
     createCompletedOrder({ code: 'CN_FEEDBACK_3', ticketId: keepOpenId, channelId: 'keep-channel' });
+    createCompletedOrder({ code: 'CN_ACTIVE_REVIEWED', ticketId: activeId, channelId: 'active-channel' });
+    createCompletedOrder({
+      code: 'CN_ACTIVE_PROCESSING',
+      ticketId: activeId,
+      channelId: 'active-channel',
+      feedbackSubmitted: false,
+      status: 'PROCESSING',
+    });
 
     const repaired = ticketService.scheduleMissingFeedbackTicketAutoCloses('FEEDBACK_GUILD');
     const repairedRow = ticketService.getTicketById(repairId);
     const keptRow = ticketService.getTicketById(keepOpenId);
+    const activeRow = ticketService.getTicketById(activeId);
 
     expect(repaired.map((ticket) => ticket.id)).toContain(repairId);
     expect(repaired.map((ticket) => ticket.id)).not.toContain(keepOpenId);
+    expect(repaired.map((ticket) => ticket.id)).not.toContain(activeId);
     expect(repairedRow.auto_close_at).toBeTruthy();
     expect(keptRow.auto_close_at).toBeNull();
+    expect(activeRow.auto_close_at).toBeNull();
   });
 
   test('admin with manager role can publish feedback on behalf of the customer', async () => {

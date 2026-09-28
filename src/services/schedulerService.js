@@ -5,8 +5,10 @@ import { backupDatabase } from './backupService.js';
 import {
   getDueAutoCloseTickets,
   closeTicket,
+  getFeedbackAutoCloseState,
   scheduleMissingFeedbackTicketAutoCloses,
   scheduleTicketAutoClose,
+  unscheduleTicketAutoClose,
 } from './ticketService.js';
 import { config } from '../config.js';
 import { archiveTicketConversation } from './ticketClosureService.js';
@@ -170,6 +172,12 @@ export function startScheduler(client) {
       const dueTickets = getDueAutoCloseTickets(config.guildId, 20);
       for (const ticket of dueTickets) {
         try {
+          const initialCloseState = getFeedbackAutoCloseState(ticket);
+          if (!initialCloseState.eligible) {
+            unscheduleTicketAutoClose(ticket.id);
+            console.warn(`[SCHEDULER] Giữ ticket ${ticket.ticket_code}: còn ${initialCloseState.blockingOrders.length} đơn đang xử lý hoặc chưa feedback.`);
+            continue;
+          }
           const channel = await client.channels.fetch(ticket.channel_id).catch(() => null);
           if (!channel) {
             const archived = getLatestTicketTranscriptMetadata({ ticketId: ticket.id, ticketCode: ticket.ticket_code });
@@ -192,6 +200,15 @@ export function startScheduler(client) {
           if (!archiveResult.archived) {
             scheduleTicketAutoClose(ticket.id, 1);
             console.error(`[SCHEDULER] Chưa lưu được transcript ${ticket.ticket_code}; giữ kênh và thử lại sau 1 phút.`);
+            continue;
+          }
+
+          // A new order can be created during the close delay or transcript
+          // export. Recheck immediately before touching the Discord channel.
+          const finalCloseState = getFeedbackAutoCloseState(ticket);
+          if (!finalCloseState.eligible) {
+            unscheduleTicketAutoClose(ticket.id);
+            console.warn(`[SCHEDULER] Huỷ đóng ticket ${ticket.ticket_code}: trạng thái đơn đã thay đổi trong lúc chờ.`);
             continue;
           }
 
