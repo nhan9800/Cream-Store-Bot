@@ -1,6 +1,7 @@
 import { db, nowIso } from '../database/db.js';
 import { syncCustomerStats } from './customerService.js';
-import { addOrderDuration } from '../utils/formatters.js';
+import { addOrderDuration, normalizeQueueGroup } from '../utils/formatters.js';
+import { detectServiceType } from './orderService.js';
 
 export function getOrderByCodeRaw(orderCode) {
   return db.prepare('SELECT * FROM orders WHERE order_code = ?').get(orderCode) ?? null;
@@ -15,6 +16,12 @@ export function updateOrderFieldsRaw(orderCode, payload) {
   if (!order) throw new Error('Không tìm thấy đơn hàng.');
 
   const nextProduct = payload.product_name ?? order.product_name;
+  const nextServiceType = payload.product_name === undefined
+    ? order.service_type
+    : detectServiceType(nextProduct);
+  const nextQueueGroup = payload.product_name === undefined
+    ? order.queue_group
+    : (normalizeQueueGroup(nextProduct) || 'mac-dinh');
   const nextQuantity = payload.quantity ?? order.quantity;
   const nextAmount = payload.total_amount ?? order.total_amount;
   const nextMonths = payload.duration_months ?? order.duration_months ?? 1;
@@ -40,6 +47,8 @@ export function updateOrderFieldsRaw(orderCode, payload) {
   db.prepare(`
     UPDATE orders
     SET product_name = ?,
+        service_type = ?,
+        queue_group = ?,
         quantity = ?,
         total_amount = ?,
         duration_months = ?,
@@ -51,6 +60,8 @@ export function updateOrderFieldsRaw(orderCode, payload) {
     WHERE order_code = ?
   `).run(
     nextProduct,
+    nextServiceType,
+    nextQueueGroup,
     nextQuantity,
     nextAmount,
     nextMonths,
