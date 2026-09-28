@@ -1806,19 +1806,94 @@ export const DEFAULT_PRODUCT_CATALOG = [
     },
     {
       product_key: 'adobe-creative-cloud-1-month',
-      name: 'Adobe Creative Cloud All Apps 1 Tháng (Full BH)',
+      name: 'Adobe Creative Cloud 1 Tháng (Không AI Credits · Cấp Acc · Full BH)',
       aliases: [
         'Adobe Creative Cloud 1 Tháng',
+        'Adobe Creative Cloud All Apps 1 Tháng (Full BH)',
         'Adobe Creative Cloud All Apps (1 Tháng - 2 Thiết Bị)',
       ],
-      description: 'Adobe Creative Cloud All Apps trong 1 tháng, bảo hành full trong suốt thời gian sử dụng.',
-      price: 150000,
+      description: 'Cenar cấp sẵn tài khoản Adobe Creative Cloud dùng trong 1 tháng, không kèm AI Credits và bảo hành full trong toàn bộ thời gian sử dụng.',
+      warranty_policy: 'Full 1 tháng',
+      price: 140000,
       duration_months: 1,
       service_type: 'AI',
       emoji: 'brand_adobe',
       original_price: 0,
+      activation_method: 'ACCOUNT',
+      username_required: 0,
+      login_required: 0,
       is_featured: 1,
       virtual_purchase_count: 214,
+    },
+    {
+      product_key: 'adobe-creative-cloud-1-month-1000-ai-credits',
+      name: 'Adobe Creative Cloud 1 Tháng (1.000 AI Credits · Cấp Acc · Full BH)',
+      description: 'Cenar cấp sẵn tài khoản Adobe Creative Cloud dùng trong 1 tháng, kèm 1.000 AI Credits và bảo hành full trong toàn bộ thời gian sử dụng.',
+      warranty_policy: 'Full 1 tháng',
+      price: 170000,
+      duration_months: 1,
+      service_type: 'AI',
+      emoji: 'brand_adobe',
+      original_price: 0,
+      quota_value: 1000,
+      quota_unit: 'AI_CREDITS',
+      activation_method: 'ACCOUNT',
+      username_required: 0,
+      login_required: 0,
+      is_featured: 1,
+      virtual_purchase_count: 0,
+    },
+    {
+      product_key: 'adobe-creative-cloud-12-months-no-ai-credits',
+      name: 'Adobe Creative Cloud 1 Năm (Không AI Credits · Cấp Acc · Full BH)',
+      description: 'Cenar cấp sẵn tài khoản Adobe Creative Cloud dùng trong 1 năm, không kèm AI Credits và bảo hành full trong toàn bộ 12 tháng sử dụng.',
+      warranty_policy: 'Full 12 tháng',
+      price: 950000,
+      duration_months: 12,
+      service_type: 'AI',
+      emoji: 'brand_adobe',
+      original_price: 0,
+      activation_method: 'ACCOUNT',
+      username_required: 0,
+      login_required: 0,
+      is_featured: 1,
+      virtual_purchase_count: 0,
+    },
+    {
+      product_key: 'adobe-creative-cloud-4-months-4000-ai-credits',
+      name: 'Adobe Creative Cloud 4 Tháng (4.000 AI Credits/Tháng · Cấp Acc · Full BH)',
+      description: 'Cenar cấp sẵn tài khoản Adobe Creative Cloud dùng trong 4 tháng, có 4.000 AI Credits được reset mỗi tháng và bảo hành full trong toàn bộ thời gian sử dụng.',
+      warranty_policy: 'Full 4 tháng',
+      price: 1400000,
+      duration_months: 4,
+      service_type: 'AI',
+      emoji: 'brand_adobe',
+      original_price: 0,
+      quota_value: 4000,
+      quota_unit: 'AI_CREDITS_MONTHLY',
+      activation_method: 'ACCOUNT',
+      username_required: 0,
+      login_required: 0,
+      is_featured: 1,
+      virtual_purchase_count: 0,
+    },
+    {
+      product_key: 'adobe-creative-cloud-12-months-4000-ai-credits',
+      name: 'Adobe Creative Cloud 1 Năm (4.000 AI Credits/Tháng · Cấp Acc · Full BH)',
+      description: 'Cenar cấp sẵn tài khoản Adobe Creative Cloud dùng trong 1 năm, có 4.000 AI Credits được reset mỗi tháng và bảo hành full trong toàn bộ 12 tháng sử dụng.',
+      warranty_policy: 'Full 12 tháng',
+      price: 3800000,
+      duration_months: 12,
+      service_type: 'AI',
+      emoji: 'brand_adobe',
+      original_price: 0,
+      quota_value: 4000,
+      quota_unit: 'AI_CREDITS_MONTHLY',
+      activation_method: 'ACCOUNT',
+      username_required: 0,
+      login_required: 0,
+      is_featured: 1,
+      virtual_purchase_count: 0,
     },
     { product_key: 'office-365-onedrive-12-months', name: 'Office 365 & 1 TB OneDrive (12 Tháng)', aliases: ['Office 365 + 1 TB One Driver (12 Tháng)'], description: 'Tài khoản bản quyền Office 365 + 1 TB lưu trữ OneDrive trong 1 năm.', price: 200000, duration_months: 12, service_type: 'AI', emoji: 'brand_office', original_price: 300000 },
     { name: 'CapCut Pro 1 Tháng (2 Thiết Bị - Cấp Acc)', description: 'Sử dụng CapCut Pro trong 1 tháng, cấp tài khoản riêng dùng tối đa 2 thiết bị.', price: 100000, duration_months: 1, service_type: 'AI', emoji: 'brand_capcut', original_price: 0 },
@@ -1907,7 +1982,13 @@ export function seedProductCatalog(dbInstance) {
         )
         OR (
           LOWER(name) LIKE '%adobe%'
-          AND COALESCE(product_key, '') != 'adobe-creative-cloud-1-month'
+          AND COALESCE(product_key, '') NOT IN (
+            'adobe-creative-cloud-1-month',
+            'adobe-creative-cloud-1-month-1000-ai-credits',
+            'adobe-creative-cloud-12-months-no-ai-credits',
+            'adobe-creative-cloud-4-months-4000-ai-credits',
+            'adobe-creative-cloud-12-months-4000-ai-credits'
+          )
         )
         OR (
           LOWER(REPLACE(name, ' ', '')) LIKE '%gemini%'
@@ -2010,7 +2091,7 @@ export function seedProductCatalog(dbInstance) {
       }
     }
 
-    // Danh mục mới chỉ mở bán đúng 4 gói ChatGPT và 1 gói Adobe.
+    // Danh mục mới chỉ mở bán đúng 4 gói ChatGPT và 5 gói Adobe.
     // Các hàng lịch sử vẫn được giữ trong database để bảo toàn đơn cũ, nhưng
     // không còn xuất hiện trên bot, website hoặc bảng giá Discord.
     retireReplacedAiCatalogStmt.run();

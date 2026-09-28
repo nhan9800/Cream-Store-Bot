@@ -295,7 +295,7 @@ describe('Cenar price board V3', () => {
     expect(panels.join('\n')).not.toContain('YouTube Premium · Đổi Family Mỗi Tháng');
   });
 
-  it('keeps only the four new ChatGPT and current Adobe packages across catalog, board and announcement', () => {
+  it('keeps the four ChatGPT packages and publishes the five current Adobe packages everywhere', () => {
     const products = getActiveProducts(GUILD_ID);
     const chatgptProducts = products.filter((product) => /chat\s*gpt/i.test(product.name));
     const adobeProducts = products.filter((product) => /adobe/i.test(product.name));
@@ -315,9 +315,24 @@ describe('Cenar price board V3', () => {
       product.product_key === AI_CREATIVE_PRICING_UPDATE.productKeys.chatgptBusiness
     ))?.price).toBe(450000);
     expect(chatgptProducts.find((product) => product.product_key === AI_CREATIVE_PRICING_UPDATE.productKeys.chatgptDirect)?.price).toBe(530000);
-    expect(adobeProducts).toHaveLength(1);
-    expect(adobeProducts[0].product_key).toBe(AI_CREATIVE_PRICING_UPDATE.productKeys.adobe);
-    expect(adobeProducts[0].price).toBe(150000);
+    expect(adobeProducts).toHaveLength(5);
+    expect(adobeProducts.map((product) => [
+      product.product_key,
+      product.price,
+      product.duration_months,
+    ])).toEqual(expect.arrayContaining([
+      [AI_CREATIVE_PRICING_UPDATE.productKeys.adobeNoCredits1Month, 140000, 1],
+      [AI_CREATIVE_PRICING_UPDATE.productKeys.adobe1000Credits1Month, 170000, 1],
+      [AI_CREATIVE_PRICING_UPDATE.productKeys.adobeNoCredits12Months, 950000, 12],
+      [AI_CREATIVE_PRICING_UPDATE.productKeys.adobe4000Credits4Months, 1400000, 4],
+      [AI_CREATIVE_PRICING_UPDATE.productKeys.adobe4000Credits12Months, 3800000, 12],
+    ]));
+    expect(adobeProducts.every((product) => product.activation_method === 'ACCOUNT')).toBe(true);
+    expect(adobeProducts.every((product) => String(product.warranty_policy).startsWith('Full '))).toBe(true);
+    const adobe4000CreditProducts = adobeProducts.filter((product) => product.quota_value === 4000);
+    expect(adobe4000CreditProducts).toHaveLength(2);
+    expect(adobe4000CreditProducts.every((product) => product.quota_unit === 'AI_CREDITS_MONTHLY')).toBe(true);
+    expect(adobe4000CreditProducts.every((product) => /reset mỗi tháng/i.test(product.description))).toBe(true);
 
     const payloadJson = buildPriceBoardPayloads(GUILD_ID, {}, products).map(serialize).join('\n');
     expect(payloadJson).toContain('ChatGPT Plus & Business');
@@ -327,7 +342,13 @@ describe('Cenar price board V3', () => {
     expect(payloadJson).toContain('530.000');
     expect(payloadJson).toContain('Không bảo hành');
     expect(payloadJson).toContain('1–2 tuần');
-    expect(payloadJson).toContain('150.000');
+    for (const price of ['140.000', '170.000', '950.000', '1.400.000', '3.800.000']) {
+      expect(payloadJson).toContain(price);
+    }
+    expect(payloadJson).toContain('5 lựa chọn');
+    expect(payloadJson).toContain('4.000 AI Credits/Tháng');
+    expect(payloadJson).toContain('reset credits mỗi tháng');
+    expect(payloadJson).toContain('cấp sẵn tài khoản');
     expect(payloadJson).toContain('Full trong suốt thời gian sử dụng');
     expect(payloadJson).not.toContain('Adobe Creative Cloud Trial');
     expect(payloadJson).not.toContain('Adobe Creative Cloud All Apps (2 Tháng');
@@ -341,7 +362,12 @@ describe('Cenar price board V3', () => {
     expect(announcement).toContain('450.000');
     expect(announcement).toContain('530.000');
     expect(announcement).toContain('thử vận may');
-    expect(announcement).toContain('150.000');
+    expect(announcement).toContain('ADOBE CREATIVE CLOUD · 5 LỰA CHỌN');
+    for (const price of ['140.000', '170.000', '950.000', '1.400.000', '3.800.000']) {
+      expect(announcement).toContain(price);
+    }
+    expect(announcement).toContain('Hai gói 4.000 AI Credits được reset mỗi tháng');
+    expect(announcement).toContain('Cenar cấp sẵn tài khoản');
     expect(announcement).toContain(AI_CREATIVE_PRICING_UPDATE.marker);
   });
 
