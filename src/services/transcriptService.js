@@ -1010,17 +1010,45 @@ async function downloadDiscordMirror(row, client, fetchImpl, maxBytes) {
   return buffer;
 }
 
-export async function readTranscriptArchive(accessToken, {
+function getActiveArchiveRow(row) {
+  if (!row || row.status !== 'ACTIVE' || row.revoked_at) return null;
+  if (row.expires_at && Date.parse(row.expires_at) <= Date.now()) return null;
+  return row;
+}
+
+export function getLatestTicketTranscriptMetadata({ ticketId = null, ticketCode = null } = {}) {
+  ensureTranscriptArchiveSchema();
+  const numericTicketId = Number(ticketId);
+  const normalizedCode = String(ticketCode || '').trim().toUpperCase();
+  const row = Number.isSafeInteger(numericTicketId) && numericTicketId > 0
+    ? db.prepare(`SELECT * FROM ticket_transcript_archives
+        WHERE ticket_id = ? AND status = 'ACTIVE' AND revoked_at IS NULL
+        ORDER BY datetime(created_at) DESC, id DESC LIMIT 1`).get(numericTicketId)
+    : normalizedCode
+      ? db.prepare(`SELECT * FROM ticket_transcript_archives
+          WHERE ticket_code = ? AND status = 'ACTIVE' AND revoked_at IS NULL
+          ORDER BY datetime(created_at) DESC, id DESC LIMIT 1`).get(normalizedCode)
+      : null;
+  if (!getActiveArchiveRow(row)) return null;
+  return {
+    id: row.id,
+    archiveCode: row.archive_code,
+    ticketId: row.ticket_id,
+    ticketCode: row.ticket_code,
+    messageCount: row.message_count,
+    partial: Boolean(row.partial),
+    createdAt: row.created_at,
+    expiresAt: row.expires_at,
+    mirrored: Boolean(row.discord_attachment_id),
+  };
+}
+
+async function readTranscriptArchiveRow(row, {
   directory = DEFAULT_ARCHIVE_DIRECTORY,
   client = null,
   fetchImpl = globalThis.fetch,
 } = {}) {
-  const token = String(accessToken || '').trim().toLowerCase();
-  if (!ACCESS_TOKEN_PATTERN.test(token)) return null;
-  ensureTranscriptArchiveSchema();
-  const row = db.prepare('SELECT * FROM ticket_transcript_archives WHERE token_hash = ? LIMIT 1').get(hashTranscriptAccessToken(token));
-  if (!row || row.status !== 'ACTIVE' || row.revoked_at) return null;
-  if (row.expires_at && Date.parse(row.expires_at) <= Date.now()) return null;
+  if (!getActiveArchiveRow(row)) return null;
 
   const maxBytes = Math.max(1_048_576, Number(config.transcriptArchiveMaxBytes) || 26_214_400);
   let compressed = null;
@@ -1067,4 +1095,29 @@ export async function readTranscriptArchive(accessToken, {
       mirrored: Boolean(row.discord_attachment_id),
     },
   };
+}
+
+export async function readTranscriptArchive(accessToken, options = {}) {
+  const token = String(accessToken || '').trim().toLowerCase();
+  if (!ACCESS_TOKEN_PATTERN.test(token)) return null;
+  ensureTranscriptArchiveSchema();
+  const row = db.prepare('SELECT * FROM ticket_transcript_archives WHERE token_hash = ? LIMIT 1')
+    .get(hashTranscriptAccessToken(token));
+  return readTranscriptArchiveRow(row, options);
+}
+
+export async function readLatestTicketTranscript({ ticketId = null, ticketCode = null } = {}, options = {}) {
+  ensureTranscriptArchiveSchema();
+  const numericTicketId = Number(ticketId);
+  const normalizedCode = String(ticketCode || '').trim().toUpperCase();
+  const row = Number.isSafeInteger(numericTicketId) && numericTicketId > 0
+    ? db.prepare(`SELECT * FROM ticket_transcript_archives
+        WHERE ticket_id = ? AND status = 'ACTIVE' AND revoked_at IS NULL
+        ORDER BY datetime(created_at) DESC, id DESC LIMIT 1`).get(numericTicketId)
+    : normalizedCode
+      ? db.prepare(`SELECT * FROM ticket_transcript_archives
+          WHERE ticket_code = ? AND status = 'ACTIVE' AND revoked_at IS NULL
+          ORDER BY datetime(created_at) DESC, id DESC LIMIT 1`).get(normalizedCode)
+      : null;
+  return readTranscriptArchiveRow(row, options);
 }

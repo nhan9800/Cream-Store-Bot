@@ -29,8 +29,8 @@ import { canOpenMultipleOrderTickets, isStaffMember, isManager, assertStaffCapab
 import { emitStaffLog } from '../services/staffLogService.js';
 import { getOrderByCode, getLatestOrderByTicketChannel, cancelOrder, getQueuePosition, setOrderStatus, claimOrder, releaseOrderClaim } from '../services/orderService.js';
 import { closeTicket, createTicket, getOpenTicketByCustomer, getTicketByChannelId, getTicketById, keepTicketOpen } from '../services/ticketService.js';
-import { exportTicketTranscript } from '../services/transcriptService.js';
-import { deliverTranscript, sendOrderCancelledFlow, updateOrderLogMessage } from '../services/notificationService.js';
+import { archiveTicketConversation } from '../services/ticketClosureService.js';
+import { sendOrderCancelledFlow, updateOrderLogMessage } from '../services/notificationService.js';
 import { cancelPayOSPaymentLink } from '../services/paymentService.js';
 import { ensureRateLimit } from '../services/abuseService.js';
 import { sendTicketAiWelcome } from '../services/aiSupportAutomationService.js';
@@ -471,7 +471,8 @@ export async function handleTicketClose(interaction, ticketId) {
       await interaction.update({ content: `${E('icon_clipboard')} Đang đóng kênh ticket tạo tay...`, embeds: [], components: [] }).catch(() => null);
     }
     
-    // Tạo bản ghi đóng trong database để lưu vết và đồng bộ
+    // Tạo bản ghi đóng trong database để transcript luôn gắn với một ticket bền vững.
+    let manualTicket = null;
     try {
       const chanName = interaction.channel.name;
       const ticketCode = `MANUAL_${chanName.replace(/[^0-9]/g, '') || String(Date.now()).slice(-6)}`;
@@ -503,22 +504,32 @@ export async function handleTicketClose(interaction, ticketId) {
       const type = chanName.startsWith('bao-hanh-') ? 'WARRANTY' : 'ORDER';
       const now = nowIso();
       
-      db.prepare(`
+      const inserted = db.prepare(`
         INSERT INTO tickets (ticket_code, guild_id, channel_id, customer_id, opened_by_id, ticket_type, status, created_at, closed_at, closed_by_id)
-        VALUES (?, ?, ?, ?, ?, ?, 'CLOSED', ?, ?, ?)
-      `).run(ticketCode, interaction.guildId, interaction.channelId, customerId, customerId, type, now, now, interaction.user.id);
+        VALUES (?, ?, ?, ?, ?, ?, 'OPEN', ?, NULL, NULL)
+      `).run(ticketCode, interaction.guildId, interaction.channelId, customerId, customerId, type, now);
+      manualTicket = db.prepare('SELECT * FROM tickets WHERE id = ?').get(Number(inserted.lastInsertRowid));
       
       console.log(`[MANUAL TICKET CLOSE] Saved manual ticket ${ticketCode} to DB.`);
     } catch (err) {
       console.error('[MANUAL TICKET CLOSE] Lỗi ghi DB:', err.message);
     }
 
+    const channel = await interaction.guild.channels.fetch(interaction.channelId).catch(() => interaction.channel);
+    const archiveResult = await archiveTicketConversation({
+      guild: interaction.guild,
+      ticket: manualTicket,
+      channel,
+      closedById: interaction.user.id,
+    });
+    if (!archiveResult.archived) {
+      if (channel?.send) await channel.send(`${E('status_warn')} Không thể lưu transcript. Kênh được giữ lại để tránh mất lịch sử.`).catch(() => null);
+      return;
+    }
+    closeTicket(manualTicket.id, interaction.user.id);
     setTimeout(async () => {
-      try {
-        const channel = await interaction.guild.channels.fetch(interaction.channelId).catch(() => null);
-        if (channel) await channel.delete(`Ticket tạo tay đóng bởi ${interaction.user.tag}`).catch(() => null);
-      } catch {}
-    }, 1000);
+      if (channel?.delete) await channel.delete(`Ticket tạo tay đã lưu transcript, đóng bởi ${interaction.user.tag}`).catch(() => null);
+    }, 1500);
     return;
   }
 
@@ -533,12 +544,20 @@ export async function handleTicketClose(interaction, ticketId) {
     if (interaction.isButton()) {
       await interaction.update({ content: `${E('icon_clipboard')} Kênh đang đóng và đồng bộ database...`, embeds: [], components: [] }).catch(() => null);
     }
+    const channel = await interaction.guild.channels.fetch(interaction.channelId).catch(() => interaction.channel);
+    const archiveResult = await archiveTicketConversation({
+      guild: interaction.guild,
+      ticket,
+      channel,
+      closedById: interaction.user.id,
+    });
+    if (!archiveResult.archived) {
+      if (channel?.send) await channel.send(`${E('status_warn')} Không thể lưu transcript. Kênh được giữ lại để tránh mất lịch sử.`).catch(() => null);
+      return;
+    }
     setTimeout(async () => {
-      try {
-        const channel = await interaction.guild.channels.fetch(interaction.channelId).catch(() => null);
-        if (channel) await channel.delete(`Ép đóng ticket lệch sync ${ticket.ticket_code} bởi ${interaction.user.tag}`).catch(() => null);
-      } catch {}
-    }, 1000);
+      if (channel?.delete) await channel.delete(`Ticket ${ticket.ticket_code} đã đồng bộ transcript trước khi xóa`).catch(() => null);
+    }, 1500);
     return;
   }
 
@@ -549,9 +568,6 @@ export async function handleTicketClose(interaction, ticketId) {
   activeTicketCloses.add(lockKey);
 
   try {
-    // Cập nhật trạng thái database ngay lập tức để tránh race condition khi click nhanh
-    closeTicket(ticket.id, interaction.user.id);
-
     const ticketChannel = await interaction.guild.channels
       .fetch(interaction.channelId)
       .catch(() => interaction.channel);
@@ -567,7 +583,11 @@ export async function handleTicketClose(interaction, ticketId) {
         { id: interaction.client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.ManageChannels] },
       ];
       if (ticket.customer_id) {
-        newOverwrites.push({ id: ticket.customer_id, deny: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.AddReactions] });
+        newOverwrites.push({
+          id: ticket.customer_id,
+          allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory],
+          deny: [PermissionFlagsBits.SendMessages, PermissionFlagsBits.AddReactions],
+        });
       }
       if (guildConfig?.manager_role_id) {
         newOverwrites.push({ id: guildConfig.manager_role_id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] });
@@ -590,41 +610,44 @@ export async function handleTicketClose(interaction, ticketId) {
     }
 
     // 2. XUẤT TRANSCRIPT SAU KHI ĐÃ KHÓA KÊNH
-    const transcriptResult = ticketChannel
-      ? await exportTicketTranscript(ticketChannel).catch(() => null)
-      : null;
-
-    // Nếu Admin đóng ticket khi khách chưa thanh toán, đơn liên kết phải đóng
-    // cùng trạng thái CANCELLED ở log và khách nhận được DM rõ lý do.
-    const linkedOrder = getLatestOrderByTicketChannel(ticket.channel_id || interaction.channelId);
-    if (linkedOrder?.status === 'PENDING_PAYMENT' && linkedOrder.payment_status !== 'PAID') {
-      const cancellationReason = 'Ticket đã đóng do quá hạn/chưa hoàn tất thanh toán';
-      await cancelPayOSPaymentLink(linkedOrder, cancellationReason).catch((error) => {
-        console.error(`[TICKET_CLOSE] Không thể hủy link PayOS ${linkedOrder.order_code}:`, error.message);
-      });
-      const cancelledOrder = cancelOrder(linkedOrder.order_code, cancellationReason);
-      if (cancelledOrder) {
-        await updateOrderLogMessage(interaction.guild, cancelledOrder).catch(() => null);
-        await sendOrderCancelledFlow({
-          guild: interaction.guild,
-          order: cancelledOrder,
-          reason: cancellationReason,
-        }).catch(() => null);
-      }
-    }
-
-    await emitStaffLog(interaction.client, {
-      guildId: interaction.guildId, actorId: interaction.user.id, targetId: ticket.customer_id, action: 'TICKET_CLOSE',
-      detail: `Đóng ticket ${ticket.ticket_type}`, relatedTicketCode: ticket.ticket_code, relatedOrderCode: ticket.related_order_code ?? null,
+    const archiveResult = await archiveTicketConversation({
+      guild: interaction.guild,
+      ticket,
+      channel: ticketChannel,
+      closedById: interaction.user.id,
     });
+    const transcriptResult = archiveResult.transcriptResult || archiveResult.transcript || null;
+    if (archiveResult.archived) closeTicket(ticket.id, interaction.user.id);
 
-    if (ticket.ticket_type === 'WARRANTY' && ticket.related_order_code) {
-      const order = setOrderStatus(ticket.related_order_code, 'COMPLETED');
-      if (order) await updateOrderLogMessage(interaction.guild, order);
-    }
+    if (archiveResult.archived) {
+      // Nếu Admin đóng ticket khi khách chưa thanh toán, đơn liên kết phải đóng
+      // cùng trạng thái CANCELLED ở log và khách nhận được DM rõ lý do.
+      const linkedOrder = getLatestOrderByTicketChannel(ticket.channel_id || interaction.channelId);
+      if (linkedOrder?.status === 'PENDING_PAYMENT' && linkedOrder.payment_status !== 'PAID') {
+        const cancellationReason = 'Ticket đã đóng do quá hạn/chưa hoàn tất thanh toán';
+        await cancelPayOSPaymentLink(linkedOrder, cancellationReason).catch((error) => {
+          console.error(`[TICKET_CLOSE] Không thể hủy link PayOS ${linkedOrder.order_code}:`, error.message);
+        });
+        const cancelledOrder = cancelOrder(linkedOrder.order_code, cancellationReason);
+        if (cancelledOrder) {
+          await updateOrderLogMessage(interaction.guild, cancelledOrder).catch(() => null);
+          await sendOrderCancelledFlow({
+            guild: interaction.guild,
+            order: cancelledOrder,
+            reason: cancellationReason,
+          }).catch(() => null);
+        }
+      }
 
-    if (transcriptResult) {
-      await deliverTranscript({ guild: interaction.guild, ticket, transcriptResult, closedById: interaction.user.id });
+      await emitStaffLog(interaction.client, {
+        guildId: interaction.guildId, actorId: interaction.user.id, targetId: ticket.customer_id, action: 'TICKET_CLOSE',
+        detail: `Đóng ticket ${ticket.ticket_type}`, relatedTicketCode: ticket.ticket_code, relatedOrderCode: ticket.related_order_code ?? null,
+      });
+
+      if (ticket.ticket_type === 'WARRANTY' && ticket.related_order_code) {
+        const order = setOrderStatus(ticket.related_order_code, 'COMPLETED');
+        if (order) await updateOrderLogMessage(interaction.guild, order);
+      }
     }
 
     const closeContainer = new ContainerBuilder().setAccentColor(0xED4245);
@@ -632,8 +655,10 @@ export async function handleTicketClose(interaction, ticketId) {
       new TextDisplayBuilder().setContent([
         `## ${E('icon_lock')} Ticket Đã Đóng`.trim(),
         `> ${E('ticket_user')} **Đóng bởi:** <@${interaction.user.id}>`,
-        `> ${E('icon_clock')} Channel sẽ **tự xóa sau 1.5 giây**.`,
-        transcriptResult
+        archiveResult.archived
+          ? `> ${E('icon_clock')} Channel sẽ **tự xóa sau 1.5 giây**.`
+          : `> ${E('status_warn')} Channel được **giữ lại** vì chưa lưu được transcript.`,
+        archiveResult.archived
           ? (transcriptResult.partial
               ? `> ${E('status_warn')} Transcript xuất **một phần** (tải tin nhắn bị gián đoạn) nhưng vẫn đã gửi cho khách.`
               : `> ${E('icon_clipboard')} Transcript đã được lưu và gửi cho khách.`)
@@ -655,12 +680,14 @@ export async function handleTicketClose(interaction, ticketId) {
       }).catch(() => null);
     }
 
-    setTimeout(async () => {
-      try {
-        const channel = await interaction.guild.channels.fetch(interaction.channelId).catch(() => null);
-        if (channel) await channel.delete(`Ticket ${ticket.ticket_code} đóng bởi ${interaction.user.tag}`).catch(() => null);
-      } catch {}
-    }, 1500);
+    if (archiveResult.archived) {
+      setTimeout(async () => {
+        try {
+          const channel = await interaction.guild.channels.fetch(interaction.channelId).catch(() => null);
+          if (channel) await channel.delete(`Ticket ${ticket.ticket_code} đã lưu transcript, đóng bởi ${interaction.user.tag}`).catch(() => null);
+        } catch {}
+      }, 1500);
+    }
 
   } catch (error) {
     console.error('[TICKET_CLOSE] Lỗi khi đóng ticket:', error);

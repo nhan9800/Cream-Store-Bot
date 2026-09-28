@@ -36,6 +36,7 @@ import {
 } from './cardSwapService.js';
 import {
     parseWebsiteRelay,
+    presentArchivedSupportMessages,
     presentSupportMessage,
     SUPPORT_TEAM_NAME,
     websiteRelayPrefix,
@@ -52,7 +53,7 @@ import {
 import { getPriceBoardProducts, PRICE_BOARD_VERSION } from './autoSetupPriceBoardService.js';
 import { scheduleFeedbackTicketAutoClose } from './feedbackService.js';
 import { buildCustomerOrderView, canRequesterAccessOrder } from './orderCustomerView.js';
-import { readTranscriptArchive } from './transcriptService.js';
+import { readLatestTicketTranscript, readTranscriptArchive } from './transcriptService.js';
 import {
   getPublicYoutubeWarrantyClaim,
   getYoutubeWarrantySyncState,
@@ -66,6 +67,42 @@ const WEBSITE_SUPPORT_LEASE_MS = 30_000;
 
 function isDiscordChannelId(value) {
     return /^\d{15,22}$/.test(String(value || ''));
+}
+
+function transcriptSummary(archive) {
+    if (!archive?.archive) return { available: false };
+    return {
+        available: true,
+        archiveCode: archive.archive.code,
+        createdAt: archive.archive.createdAt,
+        expiresAt: archive.archive.expiresAt,
+        messageCount: Number(archive.archive.messageCount ?? archive.messages?.length) || 0,
+        partial: Boolean(archive.archive.partial),
+    };
+}
+
+function archivedChatPayload(archive, { customerId, audienceRole, status = 'CLOSED' } = {}) {
+    return {
+        ok: true,
+        messages: presentArchivedSupportMessages(archive?.messages, { customerId, audienceRole }),
+        status,
+        transcript: transcriptSummary(archive),
+    };
+}
+
+async function loadArchivedTicketChat(ticket, { client = null, audienceRole = '' } = {}) {
+    if (!ticket?.id) return null;
+    try {
+        const archive = await readLatestTicketTranscript({ ticketId: ticket.id, ticketCode: ticket.ticket_code }, { client });
+        return archive ? archivedChatPayload(archive, {
+            customerId: ticket.customer_id,
+            audienceRole,
+            status: ticket.status || 'CLOSED',
+        }) : null;
+    } catch (error) {
+        console.warn(`[TRANSCRIPT_CHAT] Không thể đọc transcript ${ticket.ticket_code}:`, error.message);
+        return null;
+    }
 }
 
 function websiteSupportLeaseStartedAt(value) {
@@ -1720,6 +1757,7 @@ export function registerBotApiRoutes(app) {
                         method: 'GET',
                         headers: {
                             'X-Bot-Api-Key': req.header('X-Bot-Api-Key') || '',
+                            'x-user-id': req.header('x-user-id') || '',
                             'x-discord-id': req.header('x-discord-id') || '',
                             'x-user-role': req.header('x-user-role') || ''
                         }
@@ -1732,33 +1770,73 @@ export function registerBotApiRoutes(app) {
                 }
             }
 
-            const channelId = order.ticket_channel_id;
-            if (!channelId || channelId === 'web' || channelId.startsWith('web-')) {
-                return res.json({ ok: true, messages: [] });
+            const ticket = db.prepare(`SELECT * FROM tickets
+                WHERE id = ? OR related_order_code = ?
+                ORDER BY CASE WHEN id = ? THEN 0 ELSE 1 END, id DESC LIMIT 1`)
+                .get(order.ticket_id, order.order_code, order.ticket_id);
+            const audienceRole = String(req.header('x-user-role') || '').toLowerCase();
+            const client = req.app.locals.discordClient;
+            const archived = async () => loadArchivedTicketChat(ticket, { client, audienceRole });
+            if (ticket?.status === 'CLOSED') {
+                const history = await archived();
+                if (history) return res.json(history);
             }
 
-            const client = req.app.locals.discordClient;
+            const channelId = order.ticket_channel_id;
+            if (!channelId || channelId === 'web' || channelId.startsWith('web-')) {
+                const history = await archived();
+                return res.json(history || {
+                    ok: true,
+                    messages: [],
+                    status: ticket?.status || 'OPEN',
+                    transcript: { available: false },
+                });
+            }
+
             if (!client) {
-                return res.json({ ok: true, messages: [] });
+                const history = await archived();
+                return res.json(history || {
+                    ok: true,
+                    messages: [],
+                    status: ticket?.status || 'OPEN',
+                    transcript: { available: false },
+                });
             }
 
             const guildId = order.guild_id || config.guildId;
             const guild = await client.guilds.fetch(guildId).catch(() => null);
             if (!guild) {
-                return res.json({ ok: true, messages: [] });
+                const history = await archived();
+                return res.json(history || {
+                    ok: true,
+                    messages: [],
+                    status: ticket?.status || 'OPEN',
+                    transcript: { available: false },
+                });
             }
 
             const channel = await guild.channels.fetch(channelId).catch(() => null);
             if (!channel || !channel.isTextBased()) {
-                return res.json({ ok: true, messages: [] });
+                const history = await archived();
+                return res.json(history || {
+                    ok: true,
+                    messages: [],
+                    status: ticket?.status || 'OPEN',
+                    transcript: { available: false },
+                });
             }
 
             const messages = await channel.messages.fetch({ limit: 50 }).catch(() => []);
             if (!messages || messages.size === 0) {
-                return res.json({ ok: true, messages: [] });
+                const history = await archived();
+                return res.json(history || {
+                    ok: true,
+                    messages: [],
+                    status: ticket?.status || 'OPEN',
+                    transcript: { available: false },
+                });
             }
 
-            const audienceRole = String(req.header('x-user-role') || '').toLowerCase();
             const formatted = Array.from(messages.values()).map(m => {
                 let authorType = 'staff';
                 let content = m.content || '';
@@ -1798,7 +1876,12 @@ export function registerBotApiRoutes(app) {
                 }, audienceRole);
             }).reverse().filter(msg => msg.content || msg.authorType === 'system');
 
-            res.json({ ok: true, messages: formatted });
+            res.json({
+                ok: true,
+                messages: formatted,
+                status: ticket?.status || 'OPEN',
+                transcript: { available: false },
+            });
         } catch (e) {
             console.error('[CHAT GET API ERROR]', e);
             res.status(500).json({ ok: false, error: 'Lỗi máy chủ nội bộ.' });
@@ -1831,6 +1914,7 @@ export function registerBotApiRoutes(app) {
                         headers: {
                             'Content-Type': 'application/json',
                             'X-Bot-Api-Key': req.header('X-Bot-Api-Key') || '',
+                            'x-user-id': req.header('x-user-id') || '',
                             'x-discord-id': req.header('x-discord-id') || '',
                             'x-user-role': req.header('x-user-role') || ''
                         },
@@ -1842,6 +1926,14 @@ export function registerBotApiRoutes(app) {
                     console.error('[POST CHAT PROXY ERROR]', proxyError);
                     return res.status(502).json({ ok: false, error: 'Failed to proxy request to target bot' });
                 }
+            }
+
+            const ticket = db.prepare(`SELECT status FROM tickets
+                WHERE id = ? OR related_order_code = ?
+                ORDER BY CASE WHEN id = ? THEN 0 ELSE 1 END, id DESC LIMIT 1`)
+                .get(order.ticket_id, order.order_code, order.ticket_id);
+            if (ticket?.status === 'CLOSED') {
+                return res.status(409).json({ ok: false, code: 'TICKET_CLOSED', error: 'Phiên hỗ trợ của đơn này đã đóng và chỉ còn ở chế độ xem transcript.' });
             }
 
             let channelId = order.ticket_channel_id;
@@ -2110,32 +2202,42 @@ export function registerBotApiRoutes(app) {
 
             const ticketStatus = ticket.status; // OPEN, CLOSED, etc.
             const channelId = ticket.channel_id;
+            const audienceRole = String(req.header('x-user-role') || '').toLowerCase();
+            const client = req.app.locals.discordClient;
+            const archived = async () => loadArchivedTicketChat(ticket, { client, audienceRole });
+            if (ticketStatus === 'CLOSED') {
+                const history = await archived();
+                if (history) return res.json(history);
+            }
             if (!channelId || channelId === 'web' || channelId.startsWith('live-')) {
-                return res.json({ ok: true, messages: [], status: ticketStatus });
+                const history = await archived();
+                return res.json(history || { ok: true, messages: [], status: ticketStatus, transcript: { available: false } });
             }
 
-            const client = req.app.locals.discordClient;
             if (!client) {
-                return res.json({ ok: true, messages: [], status: ticketStatus });
+                const history = await archived();
+                return res.json(history || { ok: true, messages: [], status: ticketStatus, transcript: { available: false } });
             }
 
             const guildId = ticket.guild_id || config.guildId;
             const guild = await client.guilds.fetch(guildId).catch(() => null);
             if (!guild) {
-                return res.json({ ok: true, messages: [], status: ticketStatus });
+                const history = await archived();
+                return res.json(history || { ok: true, messages: [], status: ticketStatus, transcript: { available: false } });
             }
 
             const channel = await guild.channels.fetch(channelId).catch(() => null);
             if (!channel || !channel.isTextBased()) {
-                return res.json({ ok: true, messages: [], status: ticketStatus });
+                const history = await archived();
+                return res.json(history || { ok: true, messages: [], status: ticketStatus, transcript: { available: false } });
             }
 
             const messages = await channel.messages.fetch({ limit: 50 }).catch(() => []);
             if (!messages || messages.size === 0) {
-                return res.json({ ok: true, messages: [], status: ticketStatus });
+                const history = await archived();
+                return res.json(history || { ok: true, messages: [], status: ticketStatus, transcript: { available: false } });
             }
 
-            const audienceRole = String(req.header('x-user-role') || '').toLowerCase();
             const formatted = Array.from(messages.values()).map(m => {
                 let authorType = 'staff';
                 let content = m.content || '';
@@ -2175,7 +2277,7 @@ export function registerBotApiRoutes(app) {
                 }, audienceRole);
             }).reverse().filter(msg => msg.content && msg.content.trim());
 
-            res.json({ ok: true, messages: formatted, status: ticketStatus });
+            res.json({ ok: true, messages: formatted, status: ticketStatus, transcript: { available: false } });
         } catch (e) {
             console.error('[TICKET CHAT GET API ERROR]', e);
             res.status(500).json({ ok: false, error: 'Lỗi máy chủ nội bộ.' });

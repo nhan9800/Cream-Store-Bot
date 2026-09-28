@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   CUSTOMER_WEB_PREFIX,
   parseWebsiteRelay,
+  presentArchivedSupportMessages,
   presentSupportMessage,
   SUPPORT_TEAM_NAME,
   SUPPORT_TEAM_PREFIX,
@@ -36,5 +37,36 @@ describe('support public identity', () => {
       authorAvatar: null,
     });
     expect(presentSupportMessage(message, 'admin')).toBe(message);
+  });
+
+  it('replays archived website relays without exposing individual staff identity', () => {
+    const messages = presentArchivedSupportMessages([
+      {
+        id: '1',
+        createdAt: '2026-09-28T02:30:00.000Z',
+        content: `${CUSTOMER_WEB_PREFIX}: Em cần kiểm tra đơn`,
+        author: { id: 'bot', username: 'Cenar Store', bot: true },
+        attachments: [],
+        embeds: [],
+      },
+      {
+        id: '2',
+        createdAt: '2026-09-28T02:31:00.000Z',
+        content: '**[Staff Nhân từ Web]**: Bên mình đang kiểm tra',
+        author: { id: 'bot', username: 'Cenar Store', bot: true },
+        attachments: [{ name: 'bien-nhan.png' }],
+        embeds: [],
+      },
+    ], { customerId: 'customer', audienceRole: 'member' });
+
+    expect(messages).toEqual([
+      expect.objectContaining({ authorType: 'customer', authorName: 'Khách hàng', content: 'Em cần kiểm tra đơn' }),
+      expect.objectContaining({
+        authorType: 'staff',
+        authorName: SUPPORT_TEAM_NAME,
+        authorAvatar: null,
+        content: 'Bên mình đang kiểm tra\nTệp đính kèm: bien-nhan.png',
+      }),
+    ]);
   });
 });
