@@ -45,9 +45,9 @@ import {
 } from '../services/orderService.js';
 import { publishFeedback } from '../services/feedbackService.js';
 import { cancelPayOSPaymentLink, confirmOrderPaidManually, sendOrRefreshPaymentQr } from '../services/paymentService.js';
-import { deliverTranscript, sendCompletedFlow, updateOrderLogMessage } from '../services/notificationService.js';
+import { sendCompletedFlow, updateOrderLogMessage } from '../services/notificationService.js';
 import { closeTicket, closeTicketIfOpen, createTicket, getOpenTicketByCustomer, getTicketByChannelId, getTicketById } from '../services/ticketService.js';
-import { exportTicketTranscript } from '../services/transcriptService.js';
+import { archiveTicketConversation } from '../services/ticketClosureService.js';
 import {
   openWarrantyTicket,
   buildWarrantyCustomerConfirmV2,
@@ -216,17 +216,18 @@ const commandsDirectory = path.resolve(__dirname, '..', 'commands');
 async function closeApprovedWarrantyCase({ interaction, ticket, orderCode, ticketChannel = null }) {
   const channel = ticketChannel
     ?? await interaction.guild.channels.fetch(ticket.channel_id).catch(() => null);
-  let transcriptResult = null;
-  const closeResult = closeTicketIfOpen(ticket.id, interaction.user.id);
+  const archiveResult = await archiveTicketConversation({
+    guild: interaction.guild,
+    ticket,
+    channel,
+    closedById: interaction.user.id,
+  });
+  const transcriptResult = archiveResult.transcriptResult || archiveResult.transcript || null;
+  const closeResult = archiveResult.archived
+    ? closeTicketIfOpen(ticket.id, interaction.user.id)
+    : { closed: false, ticket: getTicketById(ticket.id) };
 
   if (closeResult.closed) {
-    transcriptResult = channel?.isTextBased()
-      ? await exportTicketTranscript(channel).catch((error) => {
-          console.error('[WARRANTY-CLOSE] Transcript error:', error.message);
-          return null;
-        })
-      : null;
-
     await emitStaffLog(interaction.client, {
       guildId: interaction.guildId,
       actorId: interaction.user.id,
@@ -237,14 +238,6 @@ async function closeApprovedWarrantyCase({ interaction, ticket, orderCode, ticke
       relatedOrderCode: orderCode,
     }).catch(() => null);
 
-    if (transcriptResult) {
-      await deliverTranscript({
-        guild: interaction.guild,
-        ticket,
-        transcriptResult,
-        closedById: interaction.user.id,
-      }).catch(() => null);
-    }
   }
 
   if (channel?.isTextBased()) {
@@ -257,9 +250,13 @@ async function closeApprovedWarrantyCase({ interaction, ticket, orderCode, ticke
     if (typeof channel.setName === 'function' && !channel.name?.startsWith('closed-')) {
       await channel.setName(`closed-${channel.name}`.slice(0, 95), `Warranty ${orderCode} completed`).catch(() => null);
     }
-    setTimeout(() => {
-      channel.delete(`Warranty ${orderCode} approved and completed`).catch(() => null);
-    }, 5000);
+    if (archiveResult.archived) {
+      setTimeout(() => {
+        channel.delete(`Warranty ${orderCode} archived and completed`).catch(() => null);
+      }, 5000);
+    } else {
+      await channel.send('Không thể lưu transcript. Kênh được giữ lại để tránh mất lịch sử bảo hành.').catch(() => null);
+    }
   }
 
   return { ticket: getTicketById(ticket.id), transcriptResult };
@@ -947,12 +944,22 @@ export function registerInteractionHandler(client, commands) {
           if (order) {
             const ticket = getTicketByChannelId(interaction.channelId);
             if (ticket && ticket.status !== 'CLOSED') {
-              closeTicket(ticket.id, interaction.client.user.id);
               const E_cc = createEmojiResolver(interaction.guildId);
-              await interaction.channel.send(`${E_cc('status_cross')} Khách hàng đã hủy đơn. Channel sẽ đóng trong giây lát...`);
-              setTimeout(() => {
-                interaction.channel.delete('Customer cancelled order').catch(() => null);
-              }, 5000);
+              const archiveResult = await archiveTicketConversation({
+                guild: interaction.guild,
+                ticket,
+                channel: interaction.channel,
+                closedById: interaction.client.user.id,
+              });
+              if (archiveResult.archived) {
+                closeTicket(ticket.id, interaction.client.user.id);
+                await interaction.channel.send(`${E_cc('status_cross')} Khách hàng đã hủy đơn. Transcript đã lưu, kênh sẽ đóng trong giây lát...`);
+                setTimeout(() => {
+                  interaction.channel.delete('Customer cancelled order after transcript archive').catch(() => null);
+                }, 5000);
+              } else {
+                await interaction.channel.send(`${E_cc('status_warn')} Đơn đã hủy nhưng kênh được giữ lại vì transcript chưa lưu được.`);
+              }
             }
           }
           const E_cc2 = createEmojiResolver(interaction.guildId);
@@ -1928,9 +1935,6 @@ export function registerInteractionHandler(client, commands) {
             try {
               const thread = await interaction.guild.channels.fetch(ticket.channel_id).catch(() => null);
               if (thread) {
-                // Đóng ticket trong DB
-                closeTicket(ticket.id, interaction.client.user.id);
-
                 const closeEmbed = new EmbedBuilder()
                   .setColor(0xED4245)
                   .setTitle(`<a:tick_red51:1384069065626222632> **LUỒNG KHÁNG CÁO ĐÃ ĐÓNG**`)
@@ -1947,17 +1951,24 @@ export function registerInteractionHandler(client, commands) {
                 await thread.send({ embeds: [closeEmbed] }).catch(() => null);
 
                 // Xuất transcript
-                const transcriptResult = await exportTicketTranscript(thread).catch(() => null);
-                if (transcriptResult) {
-                  await deliverTranscript({ guild: interaction.guild, ticket, transcriptResult, closedById: interaction.client.user.id });
-                }
+                const archiveResult = await archiveTicketConversation({
+                  guild: interaction.guild,
+                  ticket,
+                  channel: thread,
+                  closedById: interaction.client.user.id,
+                });
 
                 // Xóa thread hoặc lưu trữ
-                setTimeout(async () => {
-                  await thread.delete('Tự động xóa sau 1 phút duyệt thành công').catch(async () => {
-                    await thread.setArchived(true, 'Tự động lưu trữ sau 1 phút duyệt thành công').catch(() => null);
-                  });
-                }, 2000);
+                if (archiveResult.archived) {
+                  closeTicket(ticket.id, interaction.client.user.id);
+                  setTimeout(async () => {
+                    await thread.delete('Tự động xóa sau khi đã lưu transcript kháng cáo').catch(async () => {
+                      await thread.setArchived(true, 'Tự động lưu trữ sau khi đã lưu transcript').catch(() => null);
+                    });
+                  }, 2000);
+                } else {
+                  await thread.send('Không thể lưu transcript. Luồng được giữ lại để tránh mất lịch sử.').catch(() => null);
+                }
               }
             } catch (e) {
               console.error('[AUTO-CLOSE-APPEAL] Lỗi tự động đóng:', e.message);

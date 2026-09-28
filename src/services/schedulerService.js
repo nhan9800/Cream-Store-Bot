@@ -9,8 +9,9 @@ import {
   scheduleTicketAutoClose,
 } from './ticketService.js';
 import { config } from '../config.js';
-import { exportTicketTranscript } from './transcriptService.js';
-import { deliverTranscript, updateOrderLogMessage } from './notificationService.js';
+import { archiveTicketConversation } from './ticketClosureService.js';
+import { getLatestTicketTranscriptMetadata } from './transcriptService.js';
+import { updateOrderLogMessage } from './notificationService.js';
 import { emitStaffLog } from './staffLogService.js';
 import { setOrderStatus } from './orderService.js';
 import { runAutoVinhDanh } from './vinhDanhService.js';
@@ -171,12 +172,28 @@ export function startScheduler(client) {
         try {
           const channel = await client.channels.fetch(ticket.channel_id).catch(() => null);
           if (!channel) {
-            closeTicket(ticket.id, client.user.id);
+            const archived = getLatestTicketTranscriptMetadata({ ticketId: ticket.id, ticketCode: ticket.ticket_code });
+            if (archived) {
+              closeTicket(ticket.id, client.user.id);
+            } else {
+              scheduleTicketAutoClose(ticket.id, 1);
+              console.error(`[SCHEDULER] Không thể đóng ${ticket.ticket_code}: kênh và transcript đều không khả dụng.`);
+            }
             continue;
           }
           
           const guild = channel.guild;
-          const transcriptResult = await exportTicketTranscript(channel).catch(() => null);
+          const archiveResult = await archiveTicketConversation({
+            guild,
+            ticket,
+            channel,
+            closedById: client.user.id,
+          });
+          if (!archiveResult.archived) {
+            scheduleTicketAutoClose(ticket.id, 1);
+            console.error(`[SCHEDULER] Chưa lưu được transcript ${ticket.ticket_code}; giữ kênh và thử lại sau 1 phút.`);
+            continue;
+          }
 
           let channelClosed = false;
           try {
@@ -211,15 +228,6 @@ export function startScheduler(client) {
           if (ticket.ticket_type === 'WARRANTY' && ticket.related_order_code) {
             const order = setOrderStatus(ticket.related_order_code, 'COMPLETED');
             if (order) await updateOrderLogMessage(guild, order);
-          }
-
-          if (transcriptResult) {
-            await deliverTranscript({
-              guild,
-              ticket,
-              transcriptResult,
-              closedById: client.user.id,
-            });
           }
 
         } catch (e) {

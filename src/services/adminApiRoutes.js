@@ -17,6 +17,9 @@ import { transitionOrderStatus } from './orderStateMachine.js';
 import { hydrateOrderDiscordCustomer, OrderLinkError, resolveOrderLink } from './orderLinkService.js';
 import { encrypt, decrypt } from '../utils/crypto.js';
 import { sendCompletedFlow, updateOrderLogMessage } from './notificationService.js';
+import { getLatestTicketTranscriptMetadata } from './transcriptService.js';
+import { archiveTicketConversation } from './ticketClosureService.js';
+import { recordStaffLog } from './staffLogService.js';
 import { syncPublishedFeedbackMessage } from './feedbackService.js';
 import { config } from '../config.js';
 import {
@@ -1043,6 +1046,11 @@ const fetchWithTimeout = (promise, ms) => {
         LIMIT 150
       `).all();
       const client = req.app.locals.discordClient;
+      const latestTranscript = db.prepare(`SELECT archive_code, message_count, partial, created_at, expires_at
+        FROM ticket_transcript_archives
+        WHERE ticket_id = ? AND status = 'ACTIVE' AND revoked_at IS NULL
+          AND (expires_at IS NULL OR datetime(expires_at) > datetime('now'))
+        ORDER BY datetime(created_at) DESC, id DESC LIMIT 1`);
 
       const mapped = await Promise.all(tickets.map(async (t) => {
         let name = t.opened_by_id || 'Khách vãng lai';
@@ -1084,6 +1092,7 @@ const fetchWithTimeout = (promise, ms) => {
           || (t.channel_id?.startsWith('web-') || t.channel_id?.startsWith('live-')
             ? (t.ticket_type === 'ORDER' ? 'WEBSITE_ORDER' : 'WEBSITE_AI')
             : (['ORDER', 'WARRANTY'].includes(t.ticket_type) ? 'DISCORD_ORDER' : 'DISCORD_SUPPORT'));
+        const transcript = latestTranscript.get(t.id) || null;
 
         return {
           ...t,
@@ -1092,6 +1101,14 @@ const fetchWithTimeout = (promise, ms) => {
           support_source: supportSource,
           channel_connected: /^\d{15,22}$/.test(String(t.channel_id || '')),
           last_activity_at: t.last_activity_at || t.created_at,
+          transcript_available: Boolean(transcript),
+          transcript: transcript ? {
+            archive_code: transcript.archive_code,
+            message_count: Number(transcript.message_count) || 0,
+            partial: Boolean(transcript.partial),
+            created_at: transcript.created_at,
+            expires_at: transcript.expires_at,
+          } : null,
         };
       }));
 
@@ -1108,27 +1125,76 @@ const fetchWithTimeout = (promise, ms) => {
       const code = String(req.params.code || '').toUpperCase();
       const ticket = db.prepare('SELECT * FROM tickets WHERE ticket_code = ?').get(code);
       if (!ticket) return res.status(404).json({ ok: false, error: 'Không tìm thấy ticket' });
+      const actorId = req.header('x-user-id');
 
-      // Cập nhật database
-      db.prepare("UPDATE tickets SET status = 'CLOSED', closed_at = CURRENT_TIMESTAMP, closed_by_id = ? WHERE ticket_code = ?")
-        .run(req.header('x-user-id'), code);
-
-      // Thử đóng kênh Discord nếu có
       const client = req.app.locals.discordClient;
+      let guild = null;
+      let channel = null;
       if (client && /^\d{15,22}$/.test(String(ticket.channel_id || ''))) {
-        const guild = await client.guilds.fetch(ticket.guild_id).catch(() => null);
+        guild = await client.guilds.fetch(ticket.guild_id).catch(() => null);
         if (guild) {
-          const channel = await guild.channels.fetch(ticket.channel_id).catch(() => null);
+          channel = await guild.channels.fetch(ticket.channel_id).catch(() => null);
           if (channel) {
-            await channel.send('**[Hệ thống]**: Ticket đã được đóng từ Web Admin Panel. Kênh chat Discord này sẽ bị xóa sau 5 giây.').catch(() => null);
-            setTimeout(async () => {
-              await channel.delete('Closed from Web Admin Panel').catch(() => null);
-            }, 5000);
+            const existingArchive = getLatestTicketTranscriptMetadata({ ticketId: ticket.id, ticketCode: ticket.ticket_code });
+            if (!existingArchive) {
+              if (/^\d{15,22}$/.test(String(ticket.customer_id || '')) && channel.permissionOverwrites?.edit) {
+                await channel.permissionOverwrites.edit(ticket.customer_id, {
+                  SendMessages: false,
+                  AddReactions: false,
+                }).catch(() => null);
+              }
+              if (channel.name && !channel.name.startsWith('closed-') && typeof channel.setName === 'function') {
+                await channel.setName(`closed-${channel.name}`.slice(0, 95)).catch(() => null);
+              }
+              await channel.send('**[Cenar Care]** Phiên hỗ trợ đã đóng từ website. Hệ thống đang lưu transcript trước khi xóa kênh.').catch(() => null);
+            }
           }
         }
       }
 
-      res.json({ ok: true, message: 'Đã đóng ticket thành công!' });
+      const archiveResult = await archiveTicketConversation({
+        guild,
+        ticket: { ...ticket, status: 'CLOSED', closed_by_id: actorId },
+        channel,
+        closedById: actorId,
+      });
+      if (!archiveResult.archived) {
+        return res.status(503).json({
+          ok: false,
+          code: 'TRANSCRIPT_ARCHIVE_REQUIRED',
+          error: 'Ticket đã được khóa nhưng chưa xóa vì transcript chưa lưu được. Hãy thử đóng lại sau.',
+        });
+      }
+
+      db.prepare(`UPDATE tickets SET status = 'CLOSED', closed_at = COALESCE(closed_at, CURRENT_TIMESTAMP),
+        closed_by_id = COALESCE(closed_by_id, ?) WHERE ticket_code = ?`).run(actorId, code);
+
+      if (channel?.delete) {
+        setTimeout(async () => {
+          await channel.delete(`Ticket ${ticket.ticket_code} đã lưu transcript và đóng từ Web Admin`).catch(() => null);
+        }, 5_000);
+      }
+
+      try {
+        recordStaffLog({
+          guildId: ticket.guild_id || 'WEB',
+          actorId,
+          targetId: ticket.customer_id,
+          action: 'WEB_TICKET_CLOSE',
+          detail: `Closed ${ticket.ticket_code} after transcript archive`,
+          relatedOrderCode: ticket.related_order_code || null,
+          relatedTicketCode: ticket.ticket_code,
+        });
+      } catch (auditError) {
+        console.warn(`[ADMIN] Không thể ghi audit đóng ticket ${ticket.ticket_code}:`, auditError.message);
+      }
+
+      res.json({
+        ok: true,
+        message: 'Đã đóng ticket và lưu transcript thành công!',
+        transcript: archiveResult.transcript,
+        transcript_reused: archiveResult.reused,
+      });
     } catch (e) {
       console.error('[ADMIN]', e); res.status(500).json({ ok: false, error: 'Lỗi máy chủ nội bộ.' });
     }

@@ -8,10 +8,13 @@ import { db } from '../src/database/db.js';
 import {
   cleanupExpiredTranscripts,
   exportTicketTranscript,
+  getLatestTicketTranscriptMetadata,
   hashTranscriptAccessToken,
   migrateLegacyTranscriptsToGzip,
+  readLatestTicketTranscript,
   readTranscriptArchive,
 } from '../src/services/transcriptService.js';
+import { archiveTicketConversation } from '../src/services/ticketClosureService.js';
 
 describe('YouTube warranty dates', () => {
   test('derives purchase and expiry from order metadata instead of N/A', () => {
@@ -42,6 +45,92 @@ describe('YouTube warranty dates', () => {
 });
 
 describe('compact transcript storage', () => {
+  test('archives a persisted ticket once and can replay it after the Discord channel is gone', async () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cenar-ticket-close-'));
+    const suffix = `${Date.now()}${Math.floor(Math.random() * 10_000)}`;
+    const ticketCode = `TKT_TEST_${suffix}`;
+    const channelId = `88${suffix}`;
+    let ticketId = null;
+    try {
+      const ticketInsert = db.prepare(`INSERT INTO tickets (
+        ticket_code, guild_id, channel_id, customer_id, opened_by_id, ticket_type,
+        support_source, status, created_at
+      ) VALUES (?, ?, ?, ?, ?, 'SUPPORT', 'WEBSITE_AI', 'CLOSED', CURRENT_TIMESTAMP)`).run(
+        ticketCode,
+        '100000000000000001',
+        channelId,
+        '200000000000000002',
+        '200000000000000002',
+      );
+      ticketId = Number(ticketInsert.lastInsertRowid);
+      const ticket = db.prepare('SELECT * FROM tickets WHERE id = ?').get(ticketId);
+      const message = {
+        id: '300000000000000003',
+        type: 0,
+        createdTimestamp: Date.now(),
+        content: '**[Khách từ Web]**: Tôi cần hỗ trợ đơn hàng',
+        author: {
+          id: '400000000000000004',
+          username: 'Cenar Store',
+          globalName: 'Cenar Store',
+          bot: true,
+          displayAvatarURL: () => null,
+        },
+        member: null,
+        attachments: new Map(),
+        embeds: [],
+        components: [],
+        stickers: new Map(),
+        reactions: { cache: new Map() },
+        mentions: { users: new Map(), roles: new Map(), channels: new Map() },
+      };
+      const channel = {
+        id: channelId,
+        name: 'ticket-test',
+        guild: { id: ticket.guild_id, name: 'Cenar Store', iconURL: () => null },
+        messages: { fetch: async () => new Map([[message.id, message]]) },
+      };
+      const deliver = vi.fn(async () => ({ delivered: true }));
+
+      const first = await archiveTicketConversation({
+        guild: channel.guild,
+        ticket,
+        channel,
+        closedById: '500000000000000005',
+        exportOptions: { directory: tempRoot },
+        deliver,
+      });
+      expect(first.archived).toBe(true);
+      expect(first.reused).toBe(false);
+      expect(first.transcript.messageCount).toBe(1);
+      expect(deliver).toHaveBeenCalledTimes(1);
+
+      const second = await archiveTicketConversation({
+        guild: channel.guild,
+        ticket,
+        channel: null,
+        closedById: '500000000000000005',
+        exportOptions: { directory: tempRoot },
+        deliver,
+      });
+      expect(second).toMatchObject({ archived: true, reused: true });
+      expect(deliver).toHaveBeenCalledTimes(1);
+
+      const metadata = getLatestTicketTranscriptMetadata({ ticketId, ticketCode });
+      expect(metadata).toMatchObject({ ticketId, ticketCode, messageCount: 1 });
+      const replay = await readLatestTicketTranscript({ ticketId, ticketCode }, { directory: tempRoot });
+      expect(replay.messages).toHaveLength(1);
+      expect(replay.messages[0].content).toContain('Tôi cần hỗ trợ đơn hàng');
+      expect(db.prepare('SELECT COUNT(*) AS count FROM ticket_transcript_archives WHERE ticket_id = ?').get(ticketId).count).toBe(1);
+    } finally {
+      if (ticketId) {
+        db.prepare('DELETE FROM ticket_transcript_archives WHERE ticket_id = ?').run(ticketId);
+        db.prepare('DELETE FROM tickets WHERE id = ?').run(ticketId);
+      }
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
+  });
+
   test('exports a compressed archive with a hashed 192-bit access token', async () => {
     const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'cenar-transcript-'));
     let archiveId = null;

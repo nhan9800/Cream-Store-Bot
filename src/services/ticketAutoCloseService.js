@@ -3,8 +3,8 @@ import { cancelOrder } from './orderService.js';
 import { closeTicket, getTicketById } from './ticketService.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { emitStaffLog } from './staffLogService.js';
-import { exportTicketTranscript } from './transcriptService.js';
-import { deliverTranscript, sendOrderCancelledFlow, updateOrderLogMessage } from './notificationService.js';
+import { archiveTicketConversation } from './ticketClosureService.js';
+import { sendOrderCancelledFlow, updateOrderLogMessage } from './notificationService.js';
 import {
   ContainerBuilder,
   TextDisplayBuilder,
@@ -170,7 +170,16 @@ export async function processPendingPaymentTickets(client) {
           try {
             const ticket = findOrderTicket(order);
             if (ticket) {
-              const transcriptResult = await exportTicketTranscript(channel).catch(() => null);
+              const archiveResult = await archiveTicketConversation({
+                guild: channel.guild,
+                ticket,
+                channel,
+                closedById: client.user.id,
+              });
+              if (!archiveResult.archived) {
+                console.error(`[AUTO CLOSE] Giữ kênh ${ticket.ticket_code} vì transcript chưa lưu được.`);
+                return;
+              }
               closeTicket(ticket.id, client.user.id);
 
               await emitStaffLog(client, {
@@ -183,15 +192,7 @@ export async function processPendingPaymentTickets(client) {
                 relatedOrderCode: order.order_code,
               });
 
-              if (transcriptResult) {
-                await deliverTranscript({
-                  guild: channel.guild,
-                  ticket,
-                  transcriptResult,
-                  closedById: client.user.id,
-                });
-              }
-            }
+            } else return;
             await channel.delete('Auto-close ticket do thanh toán bị hủy/hết hạn').catch(() => null);
           } catch (err) {
             console.error('[AUTO CLOSE TICKET ERR CANCELLED]', err);
@@ -267,7 +268,16 @@ export async function processPendingPaymentTickets(client) {
               try {
                 const ticket = findOrderTicket(order);
                 if (ticket) {
-                  const transcriptResult = await exportTicketTranscript(channel).catch(() => null);
+                  const archiveResult = await archiveTicketConversation({
+                    guild: channel.guild,
+                    ticket,
+                    channel,
+                    closedById: client.user.id,
+                  });
+                  if (!archiveResult.archived) {
+                    console.error(`[AUTO CLOSE] Giữ kênh ${ticket.ticket_code} vì transcript chưa lưu được.`);
+                    return;
+                  }
                   closeTicket(ticket.id, client.user.id);
 
                   await emitStaffLog(client, {
@@ -280,15 +290,7 @@ export async function processPendingPaymentTickets(client) {
                     relatedOrderCode: order.order_code,
                   });
 
-                  if (transcriptResult) {
-                    await deliverTranscript({
-                      guild: channel.guild,
-                      ticket,
-                      transcriptResult,
-                      closedById: client.user.id,
-                    });
-                  }
-                }
+                } else return;
                 await channel.delete('Auto-close ticket do quá thời hạn thanh toán').catch(() => null);
               } catch (err) {
                 console.error('[AUTO CLOSE TICKET ERR]', err);
@@ -364,7 +366,16 @@ export async function processPendingPaymentTickets(client) {
               try {
                 const ticket = findOrderTicket(order);
                 if (ticket) {
-                  const transcriptResult = await exportTicketTranscript(channel).catch(() => null);
+                  const archiveResult = await archiveTicketConversation({
+                    guild: channel.guild,
+                    ticket,
+                    channel,
+                    closedById: client.user.id,
+                  });
+                  if (!archiveResult.archived) {
+                    console.error(`[AUTO CLOSE] Giữ kênh ${ticket.ticket_code} vì transcript chưa lưu được.`);
+                    return;
+                  }
                   closeTicket(ticket.id, client.user.id);
 
                   await emitStaffLog(client, {
@@ -377,15 +388,7 @@ export async function processPendingPaymentTickets(client) {
                     relatedOrderCode: order.order_code,
                   });
 
-                  if (transcriptResult) {
-                    await deliverTranscript({
-                      guild: channel.guild,
-                      ticket,
-                      transcriptResult,
-                      closedById: client.user.id,
-                    });
-                  }
-                }
+                } else return;
                 await channel.delete('Auto-close ticket lần 2 do quá thời hạn thanh toán').catch(() => null);
               } catch (err) {
                 console.error('[AUTO CLOSE TICKET ERR 2]', err);
@@ -478,7 +481,16 @@ export async function processCompletedFeedbackTickets(client) {
             try {
               const ticket = db.prepare('SELECT * FROM tickets WHERE channel_id = ?').get(order.ticket_channel_id);
               if (ticket) {
-                const transcriptResult = await exportTicketTranscript(channel).catch(() => null);
+                const archiveResult = await archiveTicketConversation({
+                  guild: channel.guild,
+                  ticket,
+                  channel,
+                  closedById: client.user.id,
+                });
+                if (!archiveResult.archived) {
+                  console.error(`[AUTO CLOSE] Giữ kênh ${ticket.ticket_code} vì transcript chưa lưu được.`);
+                  return;
+                }
                 closeTicket(ticket.id, client.user.id);
 
                 await emitStaffLog(client, {
@@ -491,15 +503,7 @@ export async function processCompletedFeedbackTickets(client) {
                   relatedOrderCode: order.order_code,
                 });
 
-                if (transcriptResult) {
-                  await deliverTranscript({
-                    guild: channel.guild,
-                    ticket,
-                    transcriptResult,
-                    closedById: client.user.id,
-                  });
-                }
-              }
+              } else return;
               await channel.delete('Quá 48h không feedback').catch(() => null);
             } catch (err) {
               console.error('[AUTO_CLOSE_FEEDBACK_ERR]', err);
