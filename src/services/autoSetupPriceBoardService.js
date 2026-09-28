@@ -20,7 +20,7 @@ import { isInternationalGuild } from '../utils/locale.js';
 import { formatInternationalPrice, translateCatalogGroup, translateProductName } from '../utils/internationalCatalog.js';
 import { getNitroTrialEligibility, isNitroTrialProduct } from '../constants/nitroTrial.js';
 
-export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.18';
+export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.19';
 const PRIMARY_GUILD_ID = '1282637033340403754';
 const PRIMARY_PRICE_CHANNEL_ID = '1514606995842273280';
 const OFFICIAL_SPOTIFY_PRODUCT_KEYS = new Set([
@@ -72,7 +72,7 @@ export const PRICE_GROUPS = [
   },
   {
     key: 'adobe', titleSlot: 'brand_adobe', title: 'Adobe Creative Cloud', accent: 0xFF0000,
-    note: 'Chỉ mở bán Adobe Creative Cloud All Apps 1 tháng, bảo hành full trong thời gian sử dụng.',
+    note: 'Tất cả gói đều được cấp sẵn tài khoản và bảo hành full theo thời hạn. Hai gói 4.000 AI Credits được reset credits mỗi tháng.',
     match: (p) => p.service_type === 'AI' && /adobe/i.test(p.name),
   },
   {
@@ -193,6 +193,10 @@ const FULL_WARRANTY_PRODUCT_KEYS = new Set([
   'gemini-pro-google-one-5tb-12-months-full-warranty',
   'gemini-pro-google-one-5tb-18-months-full-warranty',
   'adobe-creative-cloud-1-month',
+  'adobe-creative-cloud-1-month-1000-ai-credits',
+  'adobe-creative-cloud-12-months-no-ai-credits',
+  'adobe-creative-cloud-4-months-4000-ai-credits',
+  'adobe-creative-cloud-12-months-4000-ai-credits',
   'youtube-premium-continuous-1-month',
   'youtube-premium-continuous-3-months',
   'youtube-premium-continuous-6-months',
