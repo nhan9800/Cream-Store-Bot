@@ -34,6 +34,7 @@ function getOrderByPayOSCodeStmt(){return db.prepare('SELECT * FROM orders WHERE
 function getOrderByPaymentCodeStmt(){return db.prepare('SELECT * FROM orders WHERE payment_code=? OR order_code=? LIMIT 1');}
 function getLatestOrderByTicketChannelStmt(){return db.prepare('SELECT * FROM orders WHERE ticket_channel_id=? ORDER BY id DESC LIMIT 1');}
 function updateOrderLogStmt(){return db.prepare('UPDATE orders SET order_log_message_id=?, updated_at=? WHERE order_code=?');}
+function saveCompletionMessageStmt(){return db.prepare(`UPDATE orders SET completion_channel_id=?, completion_message_id=?, completion_staff_id=?, completion_support_id=?, updated_at=? WHERE order_code=?`);}
 function attachPaymentMessageStmt(){return db.prepare('UPDATE orders SET payment_message_id=?, updated_at=? WHERE order_code=?');}
 function savePaymentLinkStmt(){return db.prepare('UPDATE orders SET payment_link_id=?, payment_checkout_url=?, payment_qr_code=?, payment_qr_url=?, payment_qr_text=?, payment_expired_at=?, updated_at=? WHERE order_code=?');}
 function resetPaymentLinkStmt(){return db.prepare('UPDATE orders SET payment_link_id=NULL, payment_checkout_url=NULL, payment_qr_code=NULL, payment_qr_url=NULL, payment_qr_text=NULL, payment_expired_at=NULL, payment_message_id=NULL, payos_order_code=?, updated_at=? WHERE order_code=?');}
@@ -157,6 +158,7 @@ export const getOrderById = (orderId) => getOrderByIdStmt().get(orderId) ?? null
 export const getLatestOrderByTicketChannel = (ticketChannelId) => getLatestOrderByTicketChannelStmt().get(ticketChannelId) ?? null;
 
 export function saveOrderLogMessage(orderCode, messageId){updateOrderLogStmt().run(messageId, nowIso(), orderCode); return getOrderByCode(orderCode);}
+export function saveCompletionMessageReference(orderCode,{channelId,messageId,staffId,supportId}){saveCompletionMessageStmt().run(channelId ?? null,messageId ?? null,staffId ?? null,supportId ?? staffId ?? null,nowIso(),orderCode); return getOrderByCode(orderCode);}
 export function savePaymentMessage(orderCode, messageId){attachPaymentMessageStmt().run(messageId ?? null, nowIso(), orderCode); return getOrderByCode(orderCode);}
 export function savePaymentLinkData(orderCode,{paymentLinkId,checkoutUrl,qrCode,qrUrl=null,qrText=null,expiredAt=null}){savePaymentLinkStmt().run(paymentLinkId ?? null, checkoutUrl ?? null, qrCode ?? null, qrUrl ?? null, qrText ?? null, expiredAt ?? null, nowIso(), orderCode); return getOrderByCode(orderCode);}
 

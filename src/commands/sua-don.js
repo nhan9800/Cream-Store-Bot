@@ -1,12 +1,15 @@
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { PermissionFlagsBits, SlashCommandBuilder } from 'discord.js';
-import { buildOrderLogContent } from '../utils/formatters.js';
 import {
   getOrderByCodeRaw,
   updateOrderFieldsRaw,
   insertStaffLogRaw,
 } from '../services/v11DbHelpers.js';
-import { getGuildConfig } from '../services/guildConfigService.js';
+import {
+  refreshCompletedTicketMessage,
+  updateOrderLogMessage,
+} from '../services/notificationService.js';
+import { scheduleAdminOrderCenterRefresh } from '../services/adminOrderCenterService.js';
 
 export const data = new SlashCommandBuilder()
   .setName('sua-don')
@@ -78,20 +81,20 @@ export async function execute(interaction) {
     }
 
     const after = updateOrderFieldsRaw(orderCode, payload);
-
+    const syncIssues = [];
     try {
-      const guildConfig = getGuildConfig(interaction.guildId);
-      const channelId = after.order_log_channel_id || guildConfig?.order_log_channel_id;
-      if (channelId && after.order_log_message_id) {
-        const ch = await interaction.guild.channels.fetch(channelId).catch(() => null);
-        if (ch?.isTextBased?.()) {
-          const msg = await ch.messages.fetch(after.order_log_message_id).catch(() => null);
-          if (msg) {
-            await msg.edit({ content: buildOrderLogContent(after) }).catch(() => null);
-          }
-        }
-      }
-    } catch {}
+      await updateOrderLogMessage(interaction.guild, after);
+    } catch (error) {
+      console.error(`[ORDER/EDIT] Không thể đồng bộ log đơn ${orderCode}:`, error);
+      syncIssues.push('log đơn');
+    }
+
+    const completionSync = await refreshCompletedTicketMessage({
+      guild: interaction.guild,
+      order: after,
+    });
+    if (completionSync.status === 'error') syncIssues.push('thẻ hoàn thành');
+    scheduleAdminOrderCenterRefresh(after.guild_id, 250);
 
     insertStaffLogRaw({
       guildId: interaction.guildId,
@@ -122,7 +125,15 @@ export async function execute(interaction) {
       : Number(after.duration_months) === 0 && !Number(after.duration_days)
         ? '\n♾️ Thời hạn mới: **Vĩnh viễn**'
         : '';
-    await interaction.editReply(`${E('status_check')} Đã cập nhật đơn \`${after.order_code}\`.${expiryText}`);
+    const completionText = completionSync.synced
+      ? '\n🔄 Đã đồng bộ **thẻ hoàn thành/feedback** trong ticket.'
+      : ['missing', 'channel_missing', 'missing_staff'].includes(completionSync.status)
+        ? '\n⚠️ Dữ liệu đã lưu nhưng không tìm thấy thẻ hoàn thành cũ để sửa.'
+        : '';
+    const issueText = syncIssues.length
+      ? `\n⚠️ Chưa đồng bộ được: **${syncIssues.join(', ')}**. Dữ liệu đơn vẫn đã được lưu.`
+      : '';
+    await interaction.editReply(`${E('status_check')} Đã cập nhật đơn \`${after.order_code}\`.${expiryText}${completionText}${issueText}`);
   } catch (error) {
     console.error('[ORDER/EDIT] Lỗi:', error);
     await interaction.editReply(`${E('status_cross')} Không thể sửa đơn: ${error.message ?? 'Lỗi không xác định'}`);

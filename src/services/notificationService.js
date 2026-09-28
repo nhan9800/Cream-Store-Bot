@@ -20,6 +20,133 @@ import {
 import { formatCurrency, buildOrderLogContent } from '../utils/formatters.js';
 import { recordTranscriptDiscordMirror } from './transcriptService.js';
 import { syncCtvOrderLog } from './ctvOrderLogService.js';
+import { saveCompletionMessageReference } from './orderService.js';
+
+const COMPLETION_MESSAGE_SCAN_LIMIT = 500;
+
+function buildCompletedTicketPayload(guildId, order, staffId, supportId) {
+  const guildConfig = getGuildConfig(guildId);
+  const { container, flags } = buildOrderCompletedV2(order, staffId, supportId);
+  return {
+    components: [
+      container,
+      ...buildQuickFeedbackComponents(order.order_code),
+      ...buildWarrantyActionComponents(order.order_code),
+      ...buildFeedbackLinkComponents(guildId, guildConfig?.feedback_channel_id),
+    ],
+    flags,
+    allowedMentions: { users: [order.customer_id] },
+  };
+}
+
+function isCompletionMessageForOrder(message, orderCode, botUserId = null) {
+  if (!message) return false;
+  if (botUserId && message.author?.id && message.author.id !== botUserId) return false;
+  const components = (message.components || []).map((component) => component?.toJSON?.() || component);
+  const serialized = JSON.stringify(components);
+  return serialized.includes(`feedback:quick:${orderCode}:`)
+    || serialized.includes(`ticket:warranty:${orderCode}`);
+}
+
+async function findCompletionMessage(channel, orderCode, botUserId) {
+  if (!channel?.isTextBased?.() || !channel.messages?.fetch) return null;
+  let before;
+  let scanned = 0;
+  while (scanned < COMPLETION_MESSAGE_SCAN_LIMIT) {
+    const page = await channel.messages.fetch({
+      limit: Math.min(100, COMPLETION_MESSAGE_SCAN_LIMIT - scanned),
+      ...(before ? { before } : {}),
+    }).catch(() => null);
+    if (!page?.size) return null;
+    const messages = [...page.values()];
+    const match = messages.find((message) => isCompletionMessageForOrder(message, orderCode, botUserId));
+    if (match) return match;
+    scanned += messages.length;
+    before = messages.at(-1)?.id;
+    if (messages.length < 100 || !before) return null;
+  }
+  return null;
+}
+
+async function resolveCompletionMessage(guild, order) {
+  const channelIds = [...new Set([
+    order.completion_channel_id,
+    order.ticket_channel_id,
+  ].filter(Boolean).map(String))];
+  const botUserId = guild.client?.user?.id || null;
+  for (const channelId of channelIds) {
+    const channel = await guild.channels.fetch(channelId).catch(() => null);
+    if (!channel?.isTextBased?.()) continue;
+    if (order.completion_message_id && channelId === String(order.completion_channel_id || order.ticket_channel_id)) {
+      const stored = await channel.messages.fetch(order.completion_message_id).catch(() => null);
+      if (isCompletionMessageForOrder(stored, order.order_code, botUserId)) {
+        return { channel, message: stored, source: 'stored' };
+      }
+    }
+    const discovered = await findCompletionMessage(channel, order.order_code, botUserId);
+    if (discovered) return { channel, message: discovered, source: 'discovered' };
+    if (channelId === String(order.ticket_channel_id)) return { channel, message: null, source: 'missing' };
+  }
+  return { channel: null, message: null, source: 'channel_missing' };
+}
+
+function completionActors(order, staffId = null, supportId = null) {
+  const resolvedStaffId = staffId
+    || order.completion_staff_id
+    || order.delivered_by_id
+    || order.completed_by_id
+    || order.created_by_id;
+  const resolvedSupportId = supportId
+    || order.completion_support_id
+    || order.delivered_by_id
+    || order.completed_by_id
+    || resolvedStaffId;
+  return { staffId: resolvedStaffId, supportId: resolvedSupportId };
+}
+
+async function syncCompletedTicketMessage({ guild, order, staffId = null, supportId = null, createIfMissing = false }) {
+  const actors = completionActors(order, staffId, supportId);
+  if (!actors.staffId) return { synced: false, status: 'missing_staff' };
+  const resolved = await resolveCompletionMessage(guild, order);
+  const payload = buildCompletedTicketPayload(guild.id, order, actors.staffId, actors.supportId);
+  let message = resolved.message;
+  let status = resolved.source;
+
+  if (message) {
+    await message.edit(payload);
+    status = resolved.source === 'stored' ? 'updated' : 'discovered_and_updated';
+  } else if (createIfMissing && resolved.channel) {
+    message = await resolved.channel.send(payload);
+    status = 'created';
+  } else {
+    return { synced: false, status: resolved.source };
+  }
+
+  saveCompletionMessageReference(order.order_code, {
+    channelId: resolved.channel.id,
+    messageId: message.id,
+    staffId: actors.staffId,
+    supportId: actors.supportId,
+  });
+  return {
+    synced: true,
+    status,
+    channelId: resolved.channel.id,
+    messageId: message.id,
+  };
+}
+
+export async function refreshCompletedTicketMessage({ guild, order }) {
+  if (!order?.completed_at && !['COMPLETED', 'WARRANTY_OPEN'].includes(String(order?.status || ''))) {
+    return { synced: false, status: 'not_completed' };
+  }
+  try {
+    return await syncCompletedTicketMessage({ guild, order, createIfMissing: false });
+  } catch (error) {
+    console.error(`[ORDER-COMPLETION-SYNC] Không thể cập nhật ${order?.order_code}:`, error);
+    return { synced: false, status: 'error', error: error.message };
+  }
+}
 
 export async function updateOrderLogMessage(guild, order) {
   await syncCtvOrderLog(order, guild?.client).catch((error) => {
@@ -66,38 +193,19 @@ export async function sendPaymentConfirmedFlow({ guild, order, amount, transacti
 }
 
 export async function sendCompletedTicketFlow({ guild, order, actorId, supportId }) {
-  const guildConfig = getGuildConfig(guild.id);
-  const ticketChannel = await guild.channels.fetch(order.ticket_channel_id).catch((err) => {
-    console.error(`[sendCompletedTicketFlow] Fetch ticket channel ${order.ticket_channel_id} failed:`, err.message);
-    return null;
-  });
-
-  if (!ticketChannel?.isTextBased()) {
-    console.warn(`[sendCompletedTicketFlow] Ticket channel ${order.ticket_channel_id} not found or not text-based.`);
-    return { posted: false };
-  }
-
   try {
-    const { container, flags } = buildOrderCompletedV2(order, actorId, supportId);
-    const quickFb = buildQuickFeedbackComponents(order.order_code);
-    const warranty = buildWarrantyActionComponents(order.order_code);
-    const links = buildFeedbackLinkComponents(guild.id, guildConfig?.feedback_channel_id);
-
-    await ticketChannel.send({
-      components: [
-        container,
-        ...quickFb,
-        ...warranty,
-        ...links,
-      ],
-      flags,
-      allowedMentions: { users: [order.customer_id] },
+    const result = await syncCompletedTicketMessage({
+      guild,
+      order,
+      staffId: actorId,
+      supportId,
+      createIfMissing: true,
     });
+    return { posted: result.synced, ...result };
   } catch (err) {
     console.error('[sendCompletedTicketFlow] Error sending completion V2 flow:', err);
+    return { posted: false, synced: false, status: 'error', error: err.message };
   }
-
-  return { posted: true };
 }
 
 export async function sendCompletedFlow({ guild, order, actorId, supportId }) {
