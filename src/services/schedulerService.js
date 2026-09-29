@@ -27,6 +27,8 @@ import { runYoutubeRenewalReminders } from './youtubeRenewalReminderService.js';
 import { syncYoutubeWarrantyClaimsAcrossGuilds } from './youtubeWarrantyClaimService.js';
 import { processPendingDeliveries } from './autoDeliveryService.js';
 import { reconcileRecentPayOSPayments } from './paymentService.js';
+import { dailySaleDateKey, publishDailyFlashSale } from '../campaigns/dailyColorSale2026.js';
+import { STORE_ONE_GUILD_ID } from '../utils/locale.js';
 
 let schedulerHandle = null;
 let backupHandle = null;
@@ -34,6 +36,7 @@ let bootstrapped = false;
 let lastVinhDanhRun = 0;
 let lastDiscountBoardRun = 0;
 let lastYoutubeWarrantySync = 0;
+let lastDailyFlashSaleDate = null;
 
 async function autoBackupDatabase() {
   try {
@@ -115,6 +118,21 @@ export function startScheduler(client) {
       await processAdminOrderAgingReminders(client);
     } catch (error) {
       console.error('[SCHEDULER] Lỗi nhắc đơn tồn 7/14 ngày cho admin:', error);
+    }
+
+    if (String(config.guildId) === STORE_ONE_GUILD_ID) {
+      const promotionDate = dailySaleDateKey(new Date());
+      if (promotionDate !== lastDailyFlashSaleDate) {
+        try {
+          const result = await publishDailyFlashSale(client);
+          if (result.status === 'posted' || result.status === 'already_posted') {
+            lastDailyFlashSaleDate = promotionDate;
+            console.log(`[DAILY-FLASH-SALE] status=${result.status} date=${result.dateKey} message=${result.messageId}`);
+          }
+        } catch (error) {
+          console.error('[SCHEDULER] Lỗi đăng Flash Sale hằng ngày:', error);
+        }
+      }
     }
 
     try {

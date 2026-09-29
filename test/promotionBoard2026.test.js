@@ -7,9 +7,9 @@ import {
 } from '../src/campaigns/promotionBoard2026.js';
 
 describe('Cenar promotion channel policy', () => {
-  it('marks the PUBG trend sale as active', () => {
+  it('marks the weekly-story daily Flash Sale as active', () => {
     expect(PROMOTION_BOARD.status).toBe('ACTIVE');
-    expect(PROMOTION_BOARD.campaign).toBe('CENAR-PUBG-TREND-SALE-2026');
+    expect(PROMOTION_BOARD.campaign).toBe('CENAR-STORY-FLASH-SALE-V1');
     expect(PROMOTION_BOARD.channelId).toBe('1515008584549797979');
   });
 
