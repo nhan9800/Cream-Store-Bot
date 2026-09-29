@@ -25,20 +25,19 @@ describe('Daily Color sale campaign', () => {
   it('keeps the supplied prices and products', () => {
     const content = Object.values(buildDailyColorSaleSections({ E: emojiResolver, customEmojis })).join('\n');
     for (const price of [
-      '85.000đ', '99.000đ', '115.000đ', '210.000đ', '310.000đ', '450.000đ',
-      '550.000đ', '800.000đ', '55.000đ', '90.000đ', '110.000đ', '260.000đ',
-      '119.000đ', '150.000đ', '180.000đ', '390.000đ', '1.900.000đ',
-      '295.000đ', '280.000đ', '65.000đ', '185.000đ', '530.000đ',
+      '85.000đ', '99.000đ', '120.000đ', '250.000đ', '350.000đ', '450.000đ',
+      '680.000đ', '830.000đ', '65.000đ', '110.000đ', '280.000đ', '75.000đ',
+      '190.000đ', '200.000đ', '130.000đ', '390.000đ', '79.000đ', '150.000đ',
+      '55.000đ', '290.000đ', '180.000đ', '58.000đ', '185.000đ', '295.000đ', '530.000đ',
     ]) expect(content).toContain(price);
 
     for (const product of [
-      'NITRO BOOST LOGIN', 'BOOST SERVER', 'GEMINI PRO',
+      'NITRO BOOST LOGIN', 'BOOST SERVER', 'NETFLIX PREMIUM', 'GEMINI PRO',
       'OFFICE 365', 'CHATGPT PLUS', 'CAPCUT PRO', 'SPOTIFY PREMIUM', 'YOUTUBE PREMIUM',
     ]) expect(content).toContain(product);
-    const { boost } = buildDailyColorSaleSections({ E: emojiResolver, customEmojis });
-    expect(boost).not.toContain('90.000đ');
-    expect(boost).not.toContain('230.000đ');
-    expect(content).not.toContain('NETFLIX');
+    expect(content).toContain('Mail bất tử');
+    expect(content).toContain('Có thể thêm tối đa **05 thành viên**');
+    expect(content).toContain('BH 60 phút');
     expect(content).not.toContain('CANVA PRO');
   });
 
@@ -63,9 +62,9 @@ describe('Daily Color sale campaign', () => {
     expect(finalPanel.components.at(-1).components).toHaveLength(3);
   });
 
-  it('rotates the daily color theme using Vietnam time', () => {
-    expect(dailySaleTheme(new Date('2026-09-12T05:00:00.000Z')).name).toBe('Vàng Cuối Tuần');
-    expect(dailySaleTheme(new Date('2026-09-14T05:00:00.000Z')).name).toBe('Mint Tươi Mới');
+  it('changes the branded theme monthly using Vietnam time', () => {
+    expect(dailySaleTheme(new Date('2026-09-29T05:00:00.000Z')).name).toBe('Thành Phố Lên Đèn');
+    expect(dailySaleTheme(new Date('2026-10-01T05:00:00.000Z')).name).toBe('Đêm Hội Sắc Màu');
   });
 
   it('cleans event-only emoji names and preserves the current Daily Color set', () => {
