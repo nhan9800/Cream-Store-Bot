@@ -32,6 +32,7 @@ import { STORE_ONE_GUILD_ID } from '../utils/locale.js';
 
 let schedulerHandle = null;
 let backupHandle = null;
+let dailyPromotionHandle = null;
 let bootstrapped = false;
 let lastVinhDanhRun = 0;
 let lastDiscountBoardRun = 0;
@@ -118,21 +119,6 @@ export function startScheduler(client) {
       await processAdminOrderAgingReminders(client);
     } catch (error) {
       console.error('[SCHEDULER] Lỗi nhắc đơn tồn 7/14 ngày cho admin:', error);
-    }
-
-    if (String(config.guildId) === STORE_ONE_GUILD_ID) {
-      const promotionDate = dailySaleDateKey(new Date());
-      if (promotionDate !== lastDailyFlashSaleDate) {
-        try {
-          const result = await publishDailyFlashSale(client);
-          if (result.status === 'posted' || result.status === 'already_posted') {
-            lastDailyFlashSaleDate = promotionDate;
-            console.log(`[DAILY-FLASH-SALE] status=${result.status} date=${result.dateKey} message=${result.messageId}`);
-          }
-        } catch (error) {
-          console.error('[SCHEDULER] Lỗi đăng Flash Sale hằng ngày:', error);
-        }
-      }
     }
 
     try {
@@ -283,6 +269,26 @@ export function startScheduler(client) {
   }
 
   const intervalMs = Math.max(1, intervalMinutes) * 60 * 1000;
+
+  async function runDailyPromotionLoop() {
+    if (!dailyPromotionHandle) return;
+    try {
+      const promotionDate = dailySaleDateKey(new Date());
+      if (promotionDate !== lastDailyFlashSaleDate) {
+        const result = await publishDailyFlashSale(client);
+        if (result.status === 'posted' || result.status === 'already_posted') {
+          lastDailyFlashSaleDate = promotionDate;
+          console.log(`[DAILY-FLASH-SALE] status=${result.status} date=${result.dateKey} message=${result.messageId}`);
+        }
+      }
+    } catch (error) {
+      console.error('[DAILY-FLASH-SALE] Lỗi đăng bài hằng ngày; sẽ thử lại sau 1 phút:', error);
+    } finally {
+      if (dailyPromotionHandle) {
+        dailyPromotionHandle = setTimeout(runDailyPromotionLoop, 60 * 1000);
+      }
+    }
+  }
   
   async function runSchedulerLoop() {
     if (!schedulerHandle) return; // Stopped
@@ -308,6 +314,12 @@ export function startScheduler(client) {
     autoBackupDatabase();
   }, 12 * 60 * 60 * 1000);
 
+  // Chạy độc lập với vòng bảo trì chính để một tác vụ mạng chậm không làm lỡ
+  // bài Flash Sale 09:00. Khóa ngày và marker Discord vẫn ngăn đăng trùng.
+  if (String(config.guildId) === STORE_ONE_GUILD_ID && !dailyPromotionHandle) {
+    dailyPromotionHandle = setTimeout(runDailyPromotionLoop, 8000);
+  }
+
   console.log(`[V11.5] Scheduler chạy mỗi ${Math.max(1, intervalMinutes)} phút. Auto-backup giữ tối thiểu 3 điểm phục hồi và chụp recovery snapshot trước khi sao lưu.`);
   console.log(`[V11.5] Cenar Store Bot — Scheduler & Backup Service started.`);
 }
@@ -321,5 +333,10 @@ export function stopScheduler() {
   if (backupHandle) {
     clearInterval(backupHandle);
     backupHandle = null;
+  }
+
+  if (dailyPromotionHandle) {
+    clearTimeout(dailyPromotionHandle);
+    dailyPromotionHandle = null;
   }
 }
