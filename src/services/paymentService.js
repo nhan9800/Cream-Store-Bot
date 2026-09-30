@@ -15,7 +15,7 @@ import {
 } from './orderService.js';
 import { findOrderByIncomingPaymentCode, syncPaymentCodeIfPossible } from './paymentOrderMatcher.js';
 import { getTopupByPayOSCode, finalizeTopup } from './walletService.js';
-import { applyCustomerRoles } from './roleService.js';
+import { syncCustomerRolesNow } from './customerRoleSyncService.js';
 import { emitStaffLog } from './staffLogService.js';
 import { sendPaymentConfirmedFlow, updateOrderLogMessage } from './notificationService.js';
 import {
@@ -463,6 +463,10 @@ export async function finalizePaidOrder(client, order, paymentData, transactionI
     content: transactionContent,
     rawPayload: paymentData,
   });
+  // Role recovery is independent of delivery/DM logs and duplicate webhooks.
+  await syncCustomerRolesNow(client, payment.updated.guild_id, payment.updated.customer_id).catch((error) => {
+    console.error('[CUSTOMER-ROLES] Payment role sync deferred:', error.code || error.name);
+  });
   const delivery = await deliverPaidOrder(client, order.order_code);
   const autoDelivered = delivery.delivered;
   const finalOrder = delivery.updated || getOrderByCode(order.order_code) || payment.updated;
@@ -483,7 +487,6 @@ export async function finalizePaidOrder(client, order, paymentData, transactionI
         amount: finalOrder.amount_paid,
         transactionContent,
       });
-      await applyCustomerRoles(guild, finalOrder.customer_id);
     }
 
     if (autoDelivered) {
@@ -730,6 +733,9 @@ export async function confirmOrderPaidManually(guild, orderCode, amount = null) 
     content: 'Manual confirmation',
     rawPayload: { source: 'discord_command' },
   });
+  await syncCustomerRolesNow(guild.client, payment.updated.guild_id, payment.updated.customer_id).catch((error) => {
+    console.error('[CUSTOMER-ROLES] Manual payment role sync deferred:', error.code || error.name);
+  });
   const delivery = await deliverPaidOrder(guild.client, order.order_code);
   const updated = delivery.updated || payment.updated;
 
@@ -740,7 +746,6 @@ export async function confirmOrderPaidManually(guild, orderCode, amount = null) 
     amount: updated.amount_paid,
     transactionContent: 'Manual confirmation',
   });
-  await applyCustomerRoles(guild, updated.customer_id);
   await emitStaffLog(guild.client, { guildId: updated.guild_id, action: 'PAYMENT_CONFIRMED_MANUAL', relatedOrderCode: updated.order_code, detail: 'Xác nhận tay QR/thanh toán' });
 
   return updated;

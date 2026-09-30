@@ -27,12 +27,14 @@ import { runYoutubeRenewalReminders } from './youtubeRenewalReminderService.js';
 import { syncYoutubeWarrantyClaimsAcrossGuilds } from './youtubeWarrantyClaimService.js';
 import { processPendingDeliveries } from './autoDeliveryService.js';
 import { reconcileRecentPayOSPayments } from './paymentService.js';
+import { processPendingCustomerRoles } from './customerRoleSyncService.js';
 import { dailySaleDateKey, publishDailyFlashSale } from '../campaigns/dailyColorSale2026.js';
 import { STORE_ONE_GUILD_ID } from '../utils/locale.js';
 
 let schedulerHandle = null;
 let backupHandle = null;
 let dailyPromotionHandle = null;
+let customerRoleHandle = null;
 let bootstrapped = false;
 let lastVinhDanhRun = 0;
 let lastDiscountBoardRun = 0;
@@ -309,6 +311,19 @@ export function startScheduler(client) {
   clearTimeout(schedulerHandle);
   schedulerHandle = true; // Use boolean flag or actual handle to track status
 
+  async function runCustomerRoleLoop() {
+    if (!customerRoleHandle) return;
+    try {
+      const result = await processPendingCustomerRoles(client);
+      if (result.scanned) console.log(`[CUSTOMER-ROLE-SYNC] scanned=${result.scanned} synced=${result.synced} pending=${result.pending}`);
+    } catch (error) {
+      console.error('[CUSTOMER-ROLE-SYNC] Retry deferred:', error.code || error.name);
+    } finally {
+      if (customerRoleHandle) customerRoleHandle = setTimeout(runCustomerRoleLoop, 60_000);
+    }
+  }
+  customerRoleHandle = setTimeout(runCustomerRoleLoop, 10_000);
+
   // Chạy file backup mỗi 12 tiếng một lần
   backupHandle = setInterval(() => {
     autoBackupDatabase();
@@ -325,6 +340,8 @@ export function startScheduler(client) {
 }
 
 export function stopScheduler() {
+  if (customerRoleHandle) clearTimeout(customerRoleHandle);
+  customerRoleHandle = null;
   if (schedulerHandle && typeof schedulerHandle !== 'boolean') {
     clearTimeout(schedulerHandle);
   }

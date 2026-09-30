@@ -9,6 +9,7 @@ import { config } from '../config.js';
 import { handleMemberAdd } from '../services/inviteTrackerService.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { brandForGuild, isInternationalGuild } from '../utils/locale.js';
+import { queueCustomerRoleSync, syncCustomerRolesNow } from '../services/customerRoleSyncService.js';
 
 export const name = Events.GuildMemberAdd;
 export const once = false;
@@ -70,6 +71,14 @@ export function buildWelcomeChatV2({
 }
 
 export async function execute(member) {
+  // A website buyer can pay before joining Discord, or return after leaving.
+  // Restore earned roles even if welcome/invite tracking later fails.
+  try {
+    queueCustomerRoleSync(member.guild.id, member.id);
+    await syncCustomerRolesNow(member.client || member.guild.client, member.guild.id, member.id);
+  } catch (error) {
+    console.error('[CUSTOMER-ROLES] Member join sync deferred:', error.code || error.name);
+  }
   try {
     const guild       = member.guild;
     const user        = member.user;
