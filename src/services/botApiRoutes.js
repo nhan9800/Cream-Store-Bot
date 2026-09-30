@@ -18,6 +18,7 @@ import { getAiKnowledge } from './aiKnowledgeService.js';
 import { applyCors } from '../utils/cors.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { safeEqual } from '../utils/crypto.js';
+import { getAccountSecurity, verifyAdminStepUp } from './accountSecurityService.js';
 import { runtimeCommitSha } from '../utils/revision.js';
 import { discordCollectibleUrl, getDiscordCollectibleShopPrice } from './discordCollectiblePricing.js';
 import { getCustomerDiscordRoleSnapshot, getCustomerMembershipProgress } from './roleService.js';
@@ -52,7 +53,7 @@ import {
 } from './questService.js';
 import { getPriceBoardProducts, PRICE_BOARD_VERSION } from './autoSetupPriceBoardService.js';
 import { scheduleFeedbackTicketAutoClose } from './feedbackService.js';
-import { buildCustomerOrderView, canRequesterAccessOrder } from './orderCustomerView.js';
+import { buildCustomerOrderView } from './orderCustomerView.js';
 import { readLatestTicketTranscript, readTranscriptArchive } from './transcriptService.js';
 import {
   getPublicYoutubeWarrantyClaim,
@@ -328,10 +329,17 @@ function canAccessCustomerResource(req, customerId) {
         const current = userId
             ? db.prepare('SELECT role FROM web_users WHERE id = ? LIMIT 1').get(userId)
             : null;
-        if (current?.role === 'admin' || current?.role === 'staff') return true;
+        if (current?.role === 'admin' || current?.role === 'staff') {
+            const security = getAccountSecurity(userId);
+            const version = String(req.header('x-session-version') || '0');
+            if (/^\d{1,10}$/.test(version) && Number(version) === security.session_version
+                && (!security.mfa_secret || verifyAdminStepUp(req.header('x-admin-step-up'), userId))) return true;
+        }
     }
     const discordId = String(req.header('x-discord-id') || '').trim();
-    return Boolean(discordId && customerId && discordId === String(customerId));
+    const userId = String(req.header('x-user-id') || '').trim();
+    const user = userId ? db.prepare('SELECT discord_id FROM web_users WHERE id = ?').get(userId) : null;
+    return Boolean(user?.discord_id && discordId === user.discord_id && customerId && discordId === String(customerId));
 }
 
 function presentCardTopupOrder(order) {
@@ -738,7 +746,9 @@ export function registerBotApiRoutes(app) {
             role: String(req.header('x-user-role') || '').trim().toLowerCase(),
         };
         const hasIdentity = Boolean(identity.userId || identity.discordId);
-        const canAccess = hasIdentity && canRequesterAccessOrder(order, identity);
+        const creator = identity.userId && db.prepare('SELECT id FROM web_users WHERE id = ?').get(identity.userId);
+        const canAccess = hasIdentity && (canAccessCustomerResource(req, order.customer_id)
+            || Boolean(creator && creator.id === order.created_by_id));
         if (hasIdentity && !canAccess) {
             return res.status(403).json({ ok: false, error: 'Forbidden' });
         }
@@ -1009,6 +1019,7 @@ export function registerBotApiRoutes(app) {
             if (!/^\d{15,22}$/.test(discordId)) {
                 return res.status(401).json({ ok: false, error: 'Vui lòng đăng nhập và liên kết Discord.' });
             }
+            if (!canAccessCustomerResource(req, discordId)) return res.status(403).json({ ok: false, error: 'Danh tính Discord không còn khớp tài khoản.' });
             return res.json({ ok: true, data: listCustomerQuestRequests(discordId) });
         } catch (error) {
             console.error('[QUEST-SERVICE] List customer requests failed:', error);
@@ -1022,6 +1033,7 @@ export function registerBotApiRoutes(app) {
             if (!/^\d{15,22}$/.test(discordId)) {
                 return res.status(401).json({ ok: false, error: 'Vui lòng đăng nhập và liên kết Discord.' });
             }
+            if (!canAccessCustomerResource(req, discordId)) return res.status(403).json({ ok: false, error: 'Danh tính Discord không còn khớp tài khoản.' });
             const request = getQuestRequest(req.params.id, { customerDiscordId: discordId });
             if (!request) return res.status(404).json({ ok: false, error: 'Không tìm thấy yêu cầu Quest.' });
             return res.json({ ok: true, data: request });
@@ -1118,6 +1130,10 @@ export function registerBotApiRoutes(app) {
             const customerId = String(req.header('x-discord-id') || '').trim();
             if (!/^\d{15,22}$/.test(customerId)) {
                 return res.status(401).json({ ok: false, error: 'Vui lòng đăng nhập và liên kết Discord để đánh giá.' });
+            }
+            const webUserId = String(req.header('x-user-id') || '').trim();
+            if (!db.prepare('SELECT 1 FROM web_users WHERE id = ? AND discord_id = ?').get(webUserId, customerId)) {
+                return res.status(403).json({ ok: false, error: 'Danh tính Discord không còn khớp tài khoản.' });
             }
             const product = findPublicProduct(req.params.slugOrId);
             if (!product) return res.status(404).json({ ok: false, error: 'Sản phẩm không tồn tại' });

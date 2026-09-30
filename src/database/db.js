@@ -783,6 +783,29 @@ export function initDatabase() {
       FOREIGN KEY (user_id) REFERENCES web_users(id)
     );
 
+    CREATE TABLE IF NOT EXISTS web_account_security (
+      user_id TEXT PRIMARY KEY REFERENCES web_users(id) ON DELETE CASCADE,
+      session_version INTEGER NOT NULL DEFAULT 0,
+      email_verified_at TEXT,
+      mfa_secret TEXT,
+      mfa_pending_secret TEXT,
+      mfa_pending_until INTEGER,
+      mfa_last_counter INTEGER NOT NULL DEFAULT -1,
+      recovery_hashes TEXT NOT NULL DEFAULT '[]'
+    );
+
+    CREATE TABLE IF NOT EXISTS web_account_tokens (
+      token_hash TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES web_users(id) ON DELETE CASCADE,
+      kind TEXT NOT NULL CHECK(kind IN ('verify', 'reset')),
+      email TEXT NOT NULL,
+      session_version INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_web_account_tokens_user ON web_account_tokens(user_id, kind);
+    CREATE INDEX IF NOT EXISTS idx_web_account_tokens_expiry ON web_account_tokens(expires_at);
+
     CREATE TABLE IF NOT EXISTS system_settings (
       key TEXT PRIMARY KEY,
       value TEXT,

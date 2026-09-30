@@ -22,6 +22,7 @@ import { archiveTicketConversation } from './ticketClosureService.js';
 import { recordStaffLog } from './staffLogService.js';
 import { syncPublishedFeedbackMessage } from './feedbackService.js';
 import { config } from '../config.js';
+import { getAccountSecurity, verifyAdminStepUp, revokeAccountSessions } from './accountSecurityService.js';
 import {
   createSpotifyFamily,
   createSpotifyFamilyMember,
@@ -109,6 +110,15 @@ export function registerAdminRoutes(app) {
 
     if (!user || (user.role !== 'admin' && user.role !== 'staff')) {
       return res.status(403).json({ ok: false, error: 'Forbidden. Cần quyền Admin hoặc Staff.' });
+    }
+
+    const security = getAccountSecurity(user.id);
+    const sessionVersion = req.header('x-session-version') ?? '0';
+    if (String(security.session_version) !== String(sessionVersion)) {
+      return errorResponse(res, 401, 'Phiên đăng nhập đã bị thu hồi.');
+    }
+    if (security.mfa_secret && !verifyAdminStepUp(req.header('x-admin-step-up'), user.id)) {
+      return res.status(403).json({ ok: false, code: 'MFA_REQUIRED', error: 'Xác minh Authenticator để sử dụng Admin.' });
     }
 
     req.adminRole = user.role; // 'admin' or 'staff'
@@ -607,6 +617,7 @@ export function registerAdminRoutes(app) {
 
       const userId = sanitizeString(req.params.id, 100);
       db.prepare('UPDATE web_users SET role = ? WHERE id = ?').run(role, userId);
+      if (db.prepare('SELECT 1 FROM web_users WHERE id = ?').get(userId)) revokeAccountSessions(userId);
       
       // Audit log
       try {
@@ -708,6 +719,7 @@ export function registerAdminRoutes(app) {
       if (updates.length === 0) return errorResponse(res, 400, 'Không có thay đổi nào.');
       params.push(userId);
       db.prepare(`UPDATE web_users SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+      if (role !== undefined) revokeAccountSessions(userId);
       return successResponse(res, null, 'Đã cập nhật thông tin người dùng');
     } catch (e) {
       return errorResponse(res, 500, e.message);
@@ -721,6 +733,7 @@ export function registerAdminRoutes(app) {
       }
       const { email, password, displayName, role = 'member' } = req.body;
       if (!email || !password) return errorResponse(res, 400, 'Thiếu email/password');
+      if (typeof password !== 'string' || password.length < 8 || password.length > 128) return errorResponse(res, 400, 'Mật khẩu phải từ 8 đến 128 ký tự.');
 
       const emailLower = sanitizeString(email, 200).toLowerCase();
       

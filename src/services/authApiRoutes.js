@@ -3,21 +3,21 @@ import { db } from '../database/db.js';
 import { authLimiter, checkLoginLock, recordLoginFailure, clearLoginAttempts } from './rateLimitMiddleware.js';
 import { sanitizeString, isValidEmail, errorResponse, successResponse } from '../utils/inputValidator.js';
 import { safeEqual } from '../utils/crypto.js';
+import {
+  hashAccountPassword, verifyAccountPassword, presentWebUser, getAccountSecurity,
+  revokeAccountSessions, issueAccountEmailToken, consumeAccountEmailToken,
+  prepareAccountMfa, confirmAccountMfa, verifyAccountMfa, disableAccountMfa, issueAdminStepUp,
+} from './accountSecurityService.js';
+import { createRateLimiter } from './rateLimitMiddleware.js';
 
 // Utils hash password
-function hashPassword(password) {
-  const salt = crypto.randomBytes(16).toString('hex');
-  const hash = crypto.scryptSync(password, salt, 64).toString('hex');
-  return `${salt}:${hash}`;
-}
+const hashPassword = hashAccountPassword;
 
-function verifyPassword(password, storedHash) {
-  if (!storedHash) return false;
-  const [salt, key] = storedHash.split(':');
-  if (!salt || !key) return false;
-  const hash = crypto.scryptSync(password, salt, 64).toString('hex');
-  return safeEqual(key, hash);
-}
+const verifyPassword = verifyAccountPassword;
+const securityLimiter = createRateLimiter({
+  name: 'account-security', max: 10, windowMs: 5 * 60_000,
+  keyGenerator: (req) => crypto.createHash('sha256').update(String(req.header('x-user-id') || req.body?.email || req.ip || '').toLowerCase().slice(0, 254)).digest('hex'),
+});
 
 export function registerAuthRoutes(app) {
   // Middleware xác thực API key (dùng lại hoặc định nghĩa riêng)
@@ -66,7 +66,7 @@ export function registerAuthRoutes(app) {
 
   app.post('/api/bot/auth/login', requireApiKey, authLimiter, (req, res) => {
     try {
-      const clientIp = req.ip || req.connection?.remoteAddress || 'unknown';
+      const clientIp = `${req.ip || 'unknown'}:${crypto.createHash('sha256').update(String(req.body?.email || '').trim().toLowerCase().slice(0, 254)).digest('hex')}`;
       
       // Check if IP is locked
       const lockStatus = checkLoginLock(clientIp);
@@ -94,10 +94,16 @@ export function registerAuthRoutes(app) {
         return errorResponse(res, 401, 'Sai tài khoản hoặc mật khẩu');
       }
 
+      if (getAccountSecurity(user.id).mfa_secret && !verifyAccountMfa(user.id, req.body?.mfaCode)) {
+        recordLoginFailure(clientIp);
+        return errorResponse(res, 401, 'Cần mã Authenticator hoặc mã khôi phục hợp lệ.');
+      }
+
       // Success → clear login attempts
       clearLoginAttempts(clientIp);
 
-      const { password_hash, ...safeUser } = user;
+      const safeUser = presentWebUser(user);
+      if (safeUser.mfa_enabled && ['admin', 'staff'].includes(user.role)) safeUser.admin_step_up = issueAdminStepUp(user.id);
       return successResponse(res, safeUser);
     } catch (e) {
       console.error('[AUTH API] Lỗi login:', e);
@@ -107,8 +113,9 @@ export function registerAuthRoutes(app) {
 
   app.post('/api/bot/auth/upsert-oauth', requireApiKey, (req, res) => {
     try {
-      const { userId, provider, email, displayName, discordId, discordUsername, discordAvatar, googleId, googleEmail } = req.body;
-      if (!provider) return res.status(400).json({ ok: false, error: 'Thiếu provider' });
+      const { userId, provider, email, displayName, discordId, discordUsername, discordAvatar, googleId, googleEmail, emailVerified } = req.body;
+      if (!['discord', 'google'].includes(provider)) return res.status(400).json({ ok: false, error: 'Provider không hợp lệ' });
+      if (userId && String(req.header('x-user-id') || '') !== String(userId)) return errorResponse(res, 403, 'Không thể liên kết tài khoản này.');
 
       let user = null;
 
@@ -125,7 +132,9 @@ export function registerAuthRoutes(app) {
       }
 
       if (!user && email) {
-        user = db.prepare('SELECT * FROM web_users WHERE email = ?').get(email.toLowerCase());
+        const existing = db.prepare('SELECT * FROM web_users WHERE email = ?').get(email.toLowerCase());
+        if (existing && emailVerified !== true) return errorResponse(res, 403, 'Nhà cung cấp cần xác minh email trước khi liên kết.');
+        user = existing;
       }
 
       // Xử lý xung đột tài khoản liên kết Discord
@@ -134,14 +143,7 @@ export function registerAuthRoutes(app) {
           .get(discordId, user.id);
         
         if (conflictingUser) {
-          if (!conflictingUser.google_id) {
-            // Xóa tài khoản chỉ có Discord để giải phóng discordId
-            db.prepare('DELETE FROM web_users WHERE id = ?').run(conflictingUser.id);
-          } else {
-            // Gỡ liên kết khỏi tài khoản Google cũ để tránh lỗi UNIQUE
-            db.prepare('UPDATE web_users SET discord_id = NULL, discord_username = NULL, discord_avatar = NULL, updated_at = ? WHERE id = ?')
-              .run(new Date().toISOString(), conflictingUser.id);
-          }
+          return errorResponse(res, 409, 'Discord đã liên kết với tài khoản khác. Liên hệ Cenar Care để hợp nhất an toàn.');
         }
       }
 
@@ -189,8 +191,11 @@ export function registerAuthRoutes(app) {
         user = db.prepare('SELECT * FROM web_users WHERE id = ?').get(id);
       }
 
-      const { password_hash, ...safeUser } = user;
-      res.json({ ok: true, data: safeUser });
+      getAccountSecurity(user.id);
+      if (emailVerified === true && String(email || '').toLowerCase() === user.email.toLowerCase()) {
+        db.prepare('UPDATE web_account_security SET email_verified_at = ? WHERE user_id = ?').run(new Date().toISOString(), user.id);
+      }
+      res.json({ ok: true, data: presentWebUser(user) });
     } catch (e) {
       console.error('[AUTH API] Lỗi upsert oauth:', e);
       res.status(500).json({ ok: false, error: 'Lỗi server' });
@@ -214,11 +219,71 @@ export function registerAuthRoutes(app) {
       const user = db.prepare('SELECT * FROM web_users WHERE id = ? OR discord_id = ?').get(requestedId, requestedId);
       if (!user) return res.status(404).json({ ok: false, error: 'Không tìm thấy user' });
       
-      const { password_hash, ...safeUser } = user;
-      res.json({ ok: true, data: safeUser });
+      res.set('Cache-Control', 'no-store');
+      res.json({ ok: true, data: presentWebUser(user) });
     } catch (e) {
       console.error('[AUTH API] Lỗi get user:', e);
       res.status(500).json({ ok: false, error: 'Lỗi server' });
+    }
+  });
+
+  function requireCurrentAccount(req, res, next) {
+    const userId = String(req.header('x-user-id') || '').trim();
+    const user = db.prepare('SELECT * FROM web_users WHERE id = ?').get(userId);
+    const security = user ? getAccountSecurity(userId) : null;
+    const rawVersion = String(req.header('x-session-version') || '');
+    if (!security || !/^\d{1,10}$/.test(rawVersion) || Number(rawVersion) !== security.session_version) {
+      return errorResponse(res, 401, 'Phiên đăng nhập đã hết hiệu lực. Vui lòng đăng nhập lại.');
+    }
+    req.accountUser = user;
+    req.accountSecurity = security;
+    res.set('Cache-Control', 'no-store');
+    next();
+  }
+  function canManageSecurity(req) {
+    const user = req.accountUser;
+    if (user.password_hash) return verifyPassword(req.body?.password, user.password_hash);
+    const authTime = Number(req.header('x-auth-time'));
+    return Number.isFinite(authTime) && authTime > Date.now() - 15 * 60_000 && authTime <= Date.now();
+  }
+
+  app.get('/api/bot/auth/security', requireApiKey, requireCurrentAccount, (req, res) => {
+    res.json({ ok: true, data: presentWebUser(req.accountUser) });
+  });
+  app.post('/api/bot/auth/email-token', requireApiKey, securityLimiter, (req, res) => {
+    const kind = req.body?.kind;
+    if (!['verify', 'reset'].includes(kind) || typeof req.body?.email !== 'string' || !isValidEmail(req.body.email)) return errorResponse(res, 400, 'Yêu cầu không hợp lệ.');
+    const delivery = issueAccountEmailToken(req.body.email, kind);
+    res.set('Cache-Control', 'no-store');
+    return res.json({ ok: true, delivery });
+  });
+  app.post('/api/bot/auth/email-consume', requireApiKey, securityLimiter, (req, res) => {
+    if (!consumeAccountEmailToken(req.body?.token, req.body?.kind, req.body?.password)) return errorResponse(res, 400, 'Liên kết đã hết hạn hoặc đã được sử dụng.');
+    return res.json({ ok: true });
+  });
+  app.post('/api/bot/auth/security/:action', requireApiKey, securityLimiter, requireCurrentAccount, (req, res) => {
+    try {
+      const { action } = req.params;
+      const userId = req.accountUser.id;
+      const code = String(req.body?.mfaCode || '').trim();
+      if (action === 'step-up') {
+        if (!verifyAccountMfa(userId, code)) return errorResponse(res, 401, 'Mã Authenticator không hợp lệ hoặc đã dùng.');
+        return res.json({ ok: true, proof: issueAdminStepUp(userId) });
+      }
+      if (!['revoke', 'mfa-setup', 'mfa-confirm', 'mfa-disable'].includes(action)) return errorResponse(res, 404, 'Không tìm thấy thao tác.');
+      if (!canManageSecurity(req)) return errorResponse(res, 401, 'Xác minh lại mật khẩu; với Google/Discord, vui lòng đăng nhập lại trong 15 phút.');
+      if (action === 'mfa-confirm') {
+        const recoveryCodes = confirmAccountMfa(userId, code);
+        if (!recoveryCodes) return errorResponse(res, 400, 'Mã không hợp lệ hoặc thiết lập đã hết hạn.');
+        return res.json({ ok: true, recoveryCodes, signInAgain: true });
+      }
+      if (req.accountSecurity.mfa_secret && !verifyAccountMfa(userId, code)) return errorResponse(res, 401, 'Cần mã Authenticator hoặc mã khôi phục.');
+      if (action === 'mfa-setup') return res.json({ ok: true, data: prepareAccountMfa(userId) });
+      if (action === 'mfa-disable') disableAccountMfa(userId);
+      else revokeAccountSessions(userId);
+      return res.json({ ok: true, signInAgain: true });
+    } catch {
+      return errorResponse(res, 400, 'Không thể cập nhật bảo mật tài khoản.');
     }
   });
 }
