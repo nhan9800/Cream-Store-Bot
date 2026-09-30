@@ -45,6 +45,10 @@ export function createRateLimiter(opts = {}) {
 
     let entry = store.get(key);
     if (!entry || now > entry.resetAt) {
+      if (store.size >= 10_000) {
+        for (const [entryKey, value] of store) if (value.resetAt <= now) store.delete(entryKey);
+        if (store.size >= 10_000) store.delete(store.keys().next().value);
+      }
       entry = { count: 0, resetAt: now + windowMs };
       store.set(key, entry);
     }
@@ -106,6 +110,7 @@ export const authLimiter = createRateLimiter({
   windowMs: 5 * 60 * 1000,
   max: 10,
   message: 'Quá nhiều lần đăng nhập, vui lòng thử lại sau 5 phút.',
+  keyGenerator: (req) => String(req.body?.email || '').trim().toLowerCase().slice(0, 254) || req.ip || 'unknown',
 });
 
 /** Webhook API: 500 requests per 15 minutes (high throughput) */
@@ -152,15 +157,21 @@ export function checkLoginLock(ip) {
 }
 
 export function recordLoginFailure(ip) {
+  const now = Date.now();
   let entry = loginAttempts.get(ip);
-  if (!entry) {
-    entry = { failures: 0, lockedUntil: null };
+  if (!entry || entry.expiresAt <= now) {
+    if (loginAttempts.size >= 10_000) {
+      for (const [key, value] of loginAttempts) if (value.expiresAt <= now) loginAttempts.delete(key);
+      if (loginAttempts.size >= 10_000) loginAttempts.delete(loginAttempts.keys().next().value);
+    }
+    entry = { failures: 0, lockedUntil: null, expiresAt: now + LOCK_DURATION_MS };
     loginAttempts.set(ip, entry);
   }
   entry.failures++;
   if (entry.failures >= MAX_LOGIN_FAILURES) {
-    entry.lockedUntil = Date.now() + LOCK_DURATION_MS;
-    console.warn(`[SECURITY] IP ${ip} locked for ${LOCK_DURATION_MS / 60000} minutes after ${entry.failures} failed login attempts`);
+    entry.lockedUntil = now + LOCK_DURATION_MS;
+    entry.expiresAt = entry.lockedUntil;
+    console.warn('[SECURITY] Login temporarily locked after repeated failed attempts');
   }
   return entry;
 }
