@@ -23,6 +23,7 @@ import { runtimeCommitSha } from '../utils/revision.js';
 import { discordCollectibleUrl, getDiscordCollectibleShopPrice } from './discordCollectiblePricing.js';
 import { getCustomerDiscordRoleSnapshot, getCustomerMembershipProgress } from './roleService.js';
 import { getCustomerActivitySummary, getCustomerRecentActivities } from './customerActivityService.js';
+import { getCustomerRoleSyncState } from './customerRoleSyncService.js';
 import { getDiscordNitroEligibility } from '../utils/discordNitro.js';
 import { isInternationalGuild } from '../utils/locale.js';
 import { internationalizeProduct } from '../utils/internationalCatalog.js';
@@ -476,6 +477,7 @@ export function registerBotApiRoutes(app) {
             commitSha: runtimeCommitSha,
             discordReady,
             youtubeWarrantySync: getYoutubeWarrantySyncState(),
+            customerRoleSync: getCustomerRoleSyncState(),
             uptime: Math.floor(process.uptime()),
             timestamp: Date.now(),
         });
@@ -1625,6 +1627,12 @@ export function registerBotApiRoutes(app) {
             // Response đã về tới khách; phần Discord dưới đây là hậu xử lý.
             // Nếu Discord API tạm chậm/lỗi, thanh toán và đơn vẫn giữ nguyên,
             // không còn làm trình duyệt báo thất bại sau khi đã trừ ví.
+            if (currentOrder.payment_status === 'PAID') {
+                const { syncCustomerRolesNow } = await import('./customerRoleSyncService.js');
+                await syncCustomerRolesNow(req.app.locals.discordClient, guildId, customerId).catch((error) => {
+                    console.error('[WEB ORDER] Customer role sync deferred:', error.code || error.name);
+                });
+            }
             if (!reusedRequest) try {
                 const client = req.app.locals.discordClient;
                 if (client) {

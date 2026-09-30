@@ -1,8 +1,9 @@
 import { getGuildConfig } from './guildConfigService.js';
 import { config } from '../config.js';
-import { getCustomerProfile } from './customerService.js';
 import { getCustomerFlag } from './blacklistService.js';
-import { getCustomerActivitySummary, listActivityCustomers } from './customerActivityService.js';
+import { getCustomerActivitySummary, getCustomerPurchaseSummary } from './customerActivityService.js';
+import { backfillCustomerRoleSync, processPendingCustomerRoles, queueCustomerRoleSync } from './customerRoleSyncService.js';
+import { STORE_ONE_GUILD_ID } from '../utils/locale.js';
 
 const VIP_TIERS = [
   { id: '1282637775291551776', name: 'Ruby Client', minSpent: 8000000 },
@@ -105,18 +106,41 @@ export function getCustomerMembershipProgress(profile = {}) {
   };
 }
 
-export async function applyCustomerRoles(guild, customerId) {
-  const guildConfig = getGuildConfig(guild.id);
-  if (!guildConfig) return { applied: [] };
+export function resolveCustomerRoleTiers(guild, guildConfig = {}) {
+  const roles = guild.roles?.cache;
+  const patronId = guildConfig.customer_role_id
+    || (guild.id === STORE_ONE_GUILD_ID ? VIP_TIERS.at(-1).id : null)
+    || roles?.find?.((role) => !role.managed && /^(?:Cenar Patron|(?:🛒\s*[｜|]\s*)?Active Customer)$/i.test(role.name))?.id;
+  // Role IDs belong to their guild. Configured IDs take precedence; other
+  // fixed tiers are used only when present in this guild's role cache.
+  const tiers = VIP_TIERS.filter((tier) => tier.minSpent > 0).map((tier) => ({
+    ...tier,
+    id: tier.minSpent === 1_000_000 && guildConfig.vip_role_id ? guildConfig.vip_role_id : tier.id,
+  })).filter((tier) => roles?.has(tier.id) || tier.id === guildConfig.vip_role_id);
+  if (patronId) tiers.push({ ...VIP_TIERS.at(-1), id: patronId });
+  return tiers;
+}
 
-  const member = await guild.members.fetch(customerId).catch(() => null);
-  if (!member) return { applied: [] };
+export async function applyCustomerRoles(guild, customerId, { retryOnFailure = true } = {}) {
+  const fail = (error) => {
+    if (retryOnFailure) queueCustomerRoleSync(guild.id, customerId, { preservePending: true });
+    return { synced: false, applied: [], removed: [], error };
+  };
+  const guildConfig = getGuildConfig(guild.id) || {};
+  let member;
+  try {
+    // Force a REST refresh so repeated payment/rejoin events see actual roles.
+    member = await guild.members.fetch({ user: customerId, force: true });
+  } catch (error) {
+    return fail(Number(error.code) === 10007 ? 'MEMBER_NOT_FOUND' : String(error.code || 'MEMBER_FETCH_FAILED'));
+  }
+  if (!member) return fail('MEMBER_NOT_FOUND');
 
-  const profile = getCustomerProfile(guild.id, customerId);
+  const purchases = getCustomerPurchaseSummary(guild.id, customerId);
   const activity = getCustomerActivitySummary(guild.id, customerId);
   const flags = getCustomerFlag(guild.id, customerId);
-  const completed = Number(profile?.total_completed_orders ?? 0);
-  const spent = Number(profile?.total_spent ?? 0) + activity.serviceSpent;
+  const completed = purchases.completed;
+  const spent = purchases.spent + activity.serviceSpent;
 
   const isBlacklist = Number(flags?.is_blacklisted ?? 0) === 1;
 
@@ -124,40 +148,52 @@ export async function applyCustomerRoles(guild, customerId) {
   
   if (guildConfig.blacklist_role_id && isBlacklist) shouldHave.add(guildConfig.blacklist_role_id);
 
-  const newlyAssignedRoles = [];
+  const tiers = resolveCustomerRoleTiers(guild, guildConfig);
+  if ((purchases.paidOrders > 0 || activity.activityCount > 0) && !tiers.some((tier) => tier.requireActivity)) {
+    return fail('CUSTOMER_ROLE_NOT_CONFIGURED');
+  }
 
   // Evaluate VIP Tiers (Additive stacking)
-  for (const tier of VIP_TIERS) {
+  for (const tier of tiers) {
     let qualified = false;
     if (tier.minSpent > 0 && spent >= tier.minSpent) {
         qualified = true;
-    } else if (tier.requireActivity && (completed > 0 || activity.activityCount > 0 || spent > 0)) {
+    } else if (tier.requireActivity && (purchases.paidOrders > 0 || activity.activityCount > 0)) {
         qualified = true;
     }
 
     if (qualified) {
         shouldHave.add(tier.id);
-        if (!member.roles.cache.has(tier.id)) {
-            newlyAssignedRoles.push(tier);
-        }
     }
   }
 
   // Quản lý Role (Blacklist + VIP)
   const managed = [
     guildConfig.blacklist_role_id,
-    ...VIP_TIERS.map(t => t.id)
+    ...tiers.map(t => t.id)
   ].filter(Boolean);
 
   const toAdd = managed.filter((roleId) => shouldHave.has(roleId) && !member.roles.cache.has(roleId));
   const toRemove = managed.filter((roleId) => !shouldHave.has(roleId) && member.roles.cache.has(roleId));
 
-  for (const roleId of toAdd) {
-    await member.roles.add(roleId).catch(() => null);
+  const applied = [];
+  const removed = [];
+  const failed = [];
+  for (const [action, roleIds, successes] of [['add', toAdd, applied], ['remove', toRemove, removed]]) {
+    for (const roleId of roleIds) {
+      try {
+        await member.roles[action](roleId, 'Cenar: synchronize confirmed customer purchases');
+        successes.push(roleId);
+      } catch (error) {
+        failed.push({ roleId, action, error: String(error.code || 'ROLE_UPDATE_FAILED') });
+      }
+    }
   }
-  for (const roleId of toRemove) {
-    await member.roles.remove(roleId).catch(() => null);
+  if (failed.length) {
+    console.warn(`[CUSTOMER-ROLES] guild=${guild.id} failed=${failed.length} code=${failed[0].error}`);
+    if (retryOnFailure) queueCustomerRoleSync(guild.id, customerId, { preservePending: true });
   }
+  const newlyAssignedRoles = tiers.filter((tier) => applied.includes(tier.id));
 
   // Trigger Notification to Customer
   if (newlyAssignedRoles.length > 0 && !isBlacklist) {
@@ -184,22 +220,11 @@ export async function applyCustomerRoles(guild, customerId) {
       }
   }
 
-  return { applied: toAdd, removed: toRemove, completed, spent, activity };
+  return { synced: failed.length === 0, applied, removed, failed, completed, spent, activity };
 }
 
 export async function syncCustomerActivityRoles(client) {
-  const rows = listActivityCustomers();
-  const result = { scanned: rows.length, synced: 0, skipped: 0 };
-  for (const row of rows) {
-    const guild = client.guilds.cache.get(row.guild_id)
-      || await client.guilds.fetch(row.guild_id).catch(() => null);
-    if (!guild) {
-      result.skipped++;
-      continue;
-    }
-    const applied = await applyCustomerRoles(guild, row.customer_id).catch(() => null);
-    if (applied) result.synced++;
-    else result.skipped++;
-  }
-  return result;
+  const backfill = backfillCustomerRoleSync();
+  const result = await processPendingCustomerRoles(client, { limit: 100 });
+  return { scanned: backfill.scanned, queued: backfill.queued, synced: result.synced, skipped: result.pending };
 }

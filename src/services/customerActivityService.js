@@ -9,6 +9,16 @@ function whereGuild(guildId) {
   return guildId ? 'AND guild_id = @guildId' : '';
 }
 
+// Role eligibility uses confirmed purchases, never an unpaid checkout total.
+export function getCustomerPurchaseSummary(guildId, customerId) {
+  const row = db.prepare(`SELECT COUNT(*) AS paidOrders, COALESCE(SUM(total_amount), 0) AS spent,
+    SUM(CASE WHEN status = 'COMPLETED' THEN 1 ELSE 0 END) AS completed
+    FROM orders WHERE guild_id = ? AND customer_id = ? AND payment_status = 'PAID'
+      AND status NOT IN ('CANCELLED', 'REFUNDED') AND total_amount > 0 AND amount_paid >= total_amount`)
+    .get(guildId, customerId);
+  return { paidOrders: number(row?.paidOrders), spent: number(row?.spent), completed: number(row?.completed) };
+}
+
 /**
  * Tổng hợp các dịch vụ tự động đã dùng ngoài bảng orders.
  * - OTP được tính là hoạt động sau khi nhà cung cấp cấp số thành công.

@@ -881,6 +881,39 @@ export function initDatabase() {
       updated_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_fulfillment_retry ON order_fulfillments(status, retry_at);
+    CREATE TABLE IF NOT EXISTS customer_role_sync_jobs (
+      guild_id TEXT NOT NULL,
+      customer_id TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'PENDING',
+      revision INTEGER NOT NULL DEFAULT 1,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      retry_at TEXT NOT NULL,
+      last_error TEXT,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (guild_id, customer_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_customer_role_retry ON customer_role_sync_jobs(status, retry_at);
+    -- Commit the role job with every payment, including wallet/API/legacy paths.
+    -- A later refund/cancellation also recomputes roles from current purchases.
+    CREATE TRIGGER IF NOT EXISTS queue_paid_customer_roles_insert AFTER INSERT ON orders
+    WHEN NEW.payment_status = 'PAID'
+    BEGIN
+      INSERT INTO customer_role_sync_jobs (guild_id, customer_id, retry_at, updated_at)
+      VALUES (NEW.guild_id, NEW.customer_id, NEW.updated_at, NEW.updated_at)
+      ON CONFLICT(guild_id, customer_id) DO UPDATE SET status = 'PENDING',
+        revision = revision + 1, attempts = 0, retry_at = excluded.retry_at, updated_at = excluded.updated_at;
+    END;
+    CREATE TRIGGER IF NOT EXISTS queue_paid_customer_roles_update
+    AFTER UPDATE OF payment_status, status, amount_paid, total_amount ON orders
+    WHEN (OLD.payment_status = 'PAID' OR NEW.payment_status = 'PAID')
+      AND (OLD.payment_status IS NOT NEW.payment_status OR OLD.status IS NOT NEW.status
+        OR OLD.amount_paid IS NOT NEW.amount_paid OR OLD.total_amount IS NOT NEW.total_amount)
+    BEGIN
+      INSERT INTO customer_role_sync_jobs (guild_id, customer_id, retry_at, updated_at)
+      VALUES (NEW.guild_id, NEW.customer_id, NEW.updated_at, NEW.updated_at)
+      ON CONFLICT(guild_id, customer_id) DO UPDATE SET status = 'PENDING',
+        revision = revision + 1, attempts = 0, retry_at = excluded.retry_at, updated_at = excluded.updated_at;
+    END;
     CREATE TABLE IF NOT EXISTS order_delivery_items (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       order_code TEXT NOT NULL REFERENCES orders(order_code) ON DELETE CASCADE,
