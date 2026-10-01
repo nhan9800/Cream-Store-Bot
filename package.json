@@ -49,7 +49,7 @@
     "@google/genai": "1.52.0",
     "@snazzah/davey": "0.1.12",
     "@tesseract.js-data/eng": "1.0.0",
-    "better-sqlite3": "12.11.1",
+    "better-sqlite3": "13.0.3",
     "discord-player": "^7.2.0",
     "discord-player-youtubedlp": "1.2.2",
     "discord.js": "14.27.0",
