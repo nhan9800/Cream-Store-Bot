@@ -1,10 +1,25 @@
-import { describe, expect, it } from 'vitest';
-import { MessageFlags } from 'discord.js';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { Collection, MessageFlags } from 'discord.js';
+import { CORE_UI_EMOJI_ASSETS } from '../src/config/coreEmojiPack2026.js';
 import { buildWelcomeChatV2 } from '../src/events/guildMemberAdd.js';
 import { buildPaymentReminderV2 } from '../src/services/ticketAutoCloseService.js';
 
 const NATIVE_EMOJI = /[\u{1F000}-\u{1FAFF}\u2600-\u27BF]/u;
 const RAW_EMOJI_NAME = /(^|[^<a]):[a-zA-Z0-9_]+:/;
+const previousDiscordClient = global.discordClient;
+
+beforeAll(() => {
+  const guildId = '1070676180103086132';
+  const applicationEmojis = new Collection(CORE_UI_EMOJI_ASSETS.map((asset, index) => {
+    const id = String(1558300000000000000n + BigInt(index));
+    return [id, { id, name: asset.name, animated: false, available: true }];
+  }));
+  global.discordClient = {
+    guilds: { cache: new Collection([[guildId, { id: guildId, emojis: { cache: new Collection() } }]]) },
+    application: { emojis: { cache: applicationEmojis } },
+  };
+});
+afterAll(() => { global.discordClient = previousDiscordClient; });
 
 function textContent(payload) {
   return payload.components

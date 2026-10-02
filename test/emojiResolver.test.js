@@ -1,9 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 
-vi.mock('../src/services/emojiService.js', () => ({
-  getEmojiMap: vi.fn(() => ({
-    icon_star: '<a:server_star:123456789012345678>',
-  })),
+vi.mock('../src/services/emojiService.js', async (importOriginal) => ({
+  ...(await importOriginal()),
+  getEmoji: vi.fn((_guildId, slot) => slot === 'icon_star' ? '<a:server_star:123456789012345678>' : ''),
 }));
 
 const { createEmojiResolver } = await import('../src/utils/emojiHelper.js');

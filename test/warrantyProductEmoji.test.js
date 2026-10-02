@@ -9,7 +9,7 @@ afterEach(() => {
 });
 
 describe('warranty product emoji rendering', () => {
-  it('converts a legacy Spotify token into the active custom emoji', () => {
+  it('rejects an unverified fallback for a legacy Spotify token', () => {
     const unrelated = { id: '1999999999999999999', name: 'unrelated', animated: false };
     global.discordClient = {
       guilds: {
@@ -24,7 +24,7 @@ describe('warranty product emoji rendering', () => {
       (slot) => slot === 'brand_spotify' ? '<:cenar_spotify:1459181297288220704>' : '',
     );
 
-    expect(display).toBe('<:cenar_spotify:1459181297288220704> spo12m');
+    expect(display).toBe('spo12m');
   });
 
   it('removes a deleted unknown token instead of exposing broken emoji text', () => {

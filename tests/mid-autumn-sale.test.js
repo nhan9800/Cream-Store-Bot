@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { MessageFlags } from 'discord.js';
 import {
   MID_AUTUMN_SALE,
@@ -7,18 +7,38 @@ import {
   buildMidAutumnSaleSections,
   isStaleCampaignEmojiName,
 } from '../src/campaigns/midAutumnSale2026.js';
+import { EMOJI_SLOTS } from '../src/services/emojiService.js';
+import { createEmojiResolver } from '../src/utils/emojiHelper.js';
 
 const NATIVE_EMOJI = /[\u{1F000}-\u{1FAFF}\u2600-\u27BF]/u;
 
-function emojiResolver(slot) {
-  return `<:cenar_${slot}:1535618654358736926>`;
-}
-emojiResolver.component = (slot) => ({ id: '1535618654358736926', name: `cenar_${slot}` });
+const emojiResolver = createEmojiResolver(MID_AUTUMN_SALE.guildId);
 
 const customEmojis = Object.freeze({
   cenar_moonfest_rabbit: { text: '<:cenar_moonfest_rabbit:100000000000000001>', component: { id: '100000000000000001', name: 'cenar_moonfest_rabbit' } },
   cenar_moonfest_cake: { text: '<:cenar_moonfest_cake:100000000000000002>', component: { id: '100000000000000002', name: 'cenar_moonfest_cake' } },
   cenar_moonfest_lantern: { text: '<:cenar_moonfest_lantern:100000000000000003>', component: { id: '100000000000000003', name: 'cenar_moonfest_lantern' } },
+});
+const emojiInventory = new Map([
+  ...Object.keys(EMOJI_SLOTS).map((name, index) => {
+    const id = String(100000000000001000n + BigInt(index));
+    return [id, { id, name, animated: false, available: true }];
+  }),
+  ...Object.values(customEmojis).map(({ component }) => [component.id, { ...component, animated: false, available: true }]),
+]);
+let previousDiscordClient;
+let hadDiscordClient;
+beforeEach(() => {
+  hadDiscordClient = Object.hasOwn(global, 'discordClient');
+  previousDiscordClient = global.discordClient;
+  global.discordClient = {
+    guilds: { cache: new Map([[MID_AUTUMN_SALE.guildId, { emojis: { cache: new Map() } }]]) },
+    application: { emojis: { cache: emojiInventory } },
+  };
+});
+afterEach(() => {
+  if (hadDiscordClient) global.discordClient = previousDiscordClient;
+  else delete global.discordClient;
 });
 
 describe('Mid-Autumn 2026 sale campaign', () => {
@@ -79,6 +99,7 @@ describe('Mid-Autumn 2026 sale campaign', () => {
     const actionRow = finalPanel.components.at(-1);
     expect(actionRow.components).toHaveLength(3);
     expect(actionRow.components.every((button) => button.emoji?.id)).toBe(true);
+    expect(actionRow.components.every((button) => emojiInventory.has(button.emoji.id))).toBe(true);
   });
 
   it('sends one explicit notification with both everyone and the largest member role', () => {

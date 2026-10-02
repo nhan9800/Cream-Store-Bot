@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { ButtonStyle, MessageFlags } from 'discord.js';
+import { ButtonStyle, Collection, MessageFlags } from 'discord.js';
+import { CORE_UI_EMOJI_ASSETS } from '../src/config/coreEmojiPack2026.js';
 import { db, initDatabase } from '../src/database/db.js';
 import {
   addCtvApplication,
@@ -15,6 +16,7 @@ import {
 
 const GUILD_ID = `test_ctv_campaign_${Date.now()}`;
 const DEFAULT_EMOJI = /[\u{1F000}-\u{1FAFF}\u2600-\u27BF]/u;
+const previousDiscordClient = global.discordClient;
 
 function allDisplayText(payload) {
   return payload.components
@@ -27,10 +29,21 @@ function allDisplayText(payload) {
 describe('CTV recruitment slots', () => {
   beforeAll(() => {
     initDatabase();
+    const applicationEmojis = new Collection(CORE_UI_EMOJI_ASSETS.map((asset, index) => {
+      const id = String(1558100000000000000n + BigInt(index));
+      return [id, { id, name: asset.name, animated: false, available: true }];
+    }));
+    global.discordClient = {
+      guilds: { cache: new Collection([GUILD_ID, '1282637033340403754'].map((id) => [
+        id, { id, emojis: { cache: new Collection() } },
+      ])) },
+      application: { emojis: { cache: applicationEmojis } },
+    };
     startCtvRecruitmentCampaign(GUILD_ID, 3);
   });
 
   afterAll(() => {
+    global.discordClient = previousDiscordClient;
     db.prepare('DELETE FROM ctv_applications WHERE guild_id = ?').run(GUILD_ID);
     db.prepare('DELETE FROM customer_profiles WHERE guild_id = ?').run(GUILD_ID);
     db.prepare('DELETE FROM ctv_settings WHERE guild_id = ?').run(GUILD_ID);

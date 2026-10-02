@@ -32,6 +32,11 @@ describe('safe custom emoji components', () => {
   });
 
   it('normalizes a valid custom emoji and keeps it on the button', () => {
+    const live = { id: '1535910626088583190', name: 'cenar_loading', animated: true };
+    global.discordClient = {
+      guilds: { cache: new Map() },
+      application: { emojis: { cache: new Map([[live.id, live]]) } },
+    };
     const button = withButtonEmoji(
       new ButtonBuilder().setCustomId('safe:valid').setLabel('Valid').setStyle(ButtonStyle.Primary),
       '<a:cenar_loading:1535910626088583190>',

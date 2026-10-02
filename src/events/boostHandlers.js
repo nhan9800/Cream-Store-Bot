@@ -168,8 +168,7 @@ export async function handleBoostCheck(interaction) {
   const E = createEmojiResolver(interaction.guildId);
   const {
     getBoostOrdersByCustomer,
-    buildBoostOrderDetailEmbed,
-    buildBoostOrderActionRows,
+    buildBoostOrderDetailPayload,
     buildBoostLiveStatusPayload,
     ensureBoostAccessKey,
   } = await import('../services/boostServerService.js');
@@ -218,15 +217,10 @@ export async function handleBoostCheck(interaction) {
     await safeReply(interaction, { ...payload, flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral });
     return;
   }
-  const embed = buildBoostOrderDetailEmbed(order);
-  const rows = buildBoostOrderActionRows(order, false);
-
-  await safeReply(interaction, {
-    content: orders.length > 1 ? `${E('status_info')} Bạn có **${orders.length}** đơn. Hiển thị đơn mới nhất:` : null,
-    embeds: [embed],
-    components: rows,
-    ephemeral: true,
+  const payload = buildBoostOrderDetailPayload(order, false, {
+    extraText: orders.length > 1 ? `${E('status_info')} Bạn có **${orders.length}** đơn. Đang hiển thị đơn mới nhất.` : null,
   });
+  await safeReply(interaction, { ...payload, flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral });
 }
 
 async function resolveBoostStaff(interaction, guildId = interaction.guildId) {
@@ -292,12 +286,12 @@ export async function handleBoostLiveRefresh(interaction, code) {
     ? ensureBoostAccessKey(order.order_code).accessKey
     : null;
   const payload = buildBoostLiveStatusPayload(order, order.guild_id, { isStaff, accessKey });
-  if (interaction.message && interaction.isButton()) await interaction.update(payload);
+  if (interaction.message && interaction.isButton()) await interaction.update({ ...payload, content: null, embeds: [] });
   else await safeReply(interaction, { ...payload, flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral });
 }
 
 export async function handleBoostPaymentButton(interaction, code) {
-  const { getBoostOrderByCode, createBoostPaymentPayload, sendBoostPaymentDM } = await import('../services/boostServerService.js');
+  const { getBoostOrderByCode, createBoostPaymentPayload, sendBoostPaymentDM, isBoostPaymentClosed } = await import('../services/boostServerService.js');
   const order = getBoostOrderByCode(code);
   const E = createEmojiResolver(order?.guild_id ?? interaction.guildId);
   if (!order || order.guild_id !== interaction.guildId) {
@@ -309,8 +303,12 @@ export async function handleBoostPaymentButton(interaction, code) {
     await safeReply(interaction, { content: `${E('status_cross')} Bạn không có quyền thanh toán đơn này.`, ephemeral: true });
     return;
   }
+  if (isBoostPaymentClosed(order)) {
+    await safeReply(interaction, { content: `${E('status_info')} Đơn đã huỷ hoặc hoàn tiền. Không thể tạo thanh toán cho đơn này.`, ephemeral: true });
+    return;
+  }
   if (order.payment_status === 'PAID') {
-    await safeReply(interaction, { content: `${E('payment_success')} Đơn này đã được PayOS xác nhận thanh toán.`, ephemeral: true });
+    await safeReply(interaction, { content: `${E('payment_success')} Đơn đã thanh toán. Không cần tạo QR mới.`, ephemeral: true });
     return;
   }
 
@@ -563,23 +561,11 @@ export async function handleBoostCancelModal(interaction, code) {
   try {
     const customer = await interaction.client.users.fetch(order.customer_id);
     const cancelledByStaff = isStaff && order.customer_id !== interaction.user.id;
-    const { ContainerBuilder, TextDisplayBuilder, MessageFlags: MF } = await import('discord.js');
-
-    const dmLines = [
-      `## <a:tick_red51:1384069065626222632> Đơn Boost Đã Bị Huỷ`,
-      ``,
-      `<:cr_shop:1392749981332541501> **Mã đơn:** \`${code}\``,
-      `<:cr_carttt:1348626032747614268> **Gói:** ${order.package}`,
-      `<:muiten:1481124261501337601> **Lý do:** ${reason}`,
-      cancelledByStaff
-        ? `<:verifybadge:1481127479702847646> **Huỷ bởi:** Admin/Staff`
-        : `<:verifybadge:1481127479702847646> **Huỷ bởi:** Bạn`,
-      ``,
-      `-# <:cr_tim:1366636325352116225> Liên hệ shop nếu cần hỗ trợ thêm — Cenar Store`,
-    ].join('\n');
-
-    const dmContainer = new ContainerBuilder().setAccentColor(0xED4245);
-    dmContainer.addTextDisplayComponents(new TextDisplayBuilder().setContent(dmLines));
+    const { buildBoostOrderDetailPayload } = await import('../services/boostServerService.js');
+    const dmPayload = buildBoostOrderDetailPayload(updated, false, {
+      heading: 'ĐƠN BOOST ĐÃ HUỶ', includeActions: false,
+      extraText: `${E('cenar_verified')} **Huỷ bởi:** ${cancelledByStaff ? 'Admin/Staff' : 'Bạn'}\nLiên hệ shop nếu cần hỗ trợ thêm.`,
+    });
 
     // Thanh đánh giá chỉ dùng custom emoji của guild.
       const feedbackRow = new ActionRowBuilder().addComponents(
@@ -593,8 +579,7 @@ export async function handleBoostCancelModal(interaction, code) {
       );
 
       await customer.send({
-        components: [dmContainer, feedbackRow],
-        flags: MF.IsComponentsV2,
+        ...dmPayload, components: [...dmPayload.components, feedbackRow],
       }).catch(() => null);
   } catch {}
 
@@ -602,7 +587,7 @@ export async function handleBoostCancelModal(interaction, code) {
   refreshBoostPanel(interaction.client, interaction.guildId).catch(() => null);
 
   await interaction.editReply(
-    `<a:tickgreen:1384069022831874169> Đã huỷ đơn \`${code}\`.\n> <:muiten:1481124261501337601> **Lý do:** ${reason}`
+    `${E('status_check')} Đã huỷ đơn \`${code}\`.\n> ${E('status_info')} **Lý do:** ${reason}`
   );
 }
 
@@ -639,41 +624,18 @@ export async function handleBoostCompleteButton(interaction, code) {
   // DM khách thông báo hoàn thành — Components V2 + emoji custom
   try {
     const customer = await interaction.client.users.fetch(order.customer_id);
-    const { ContainerBuilder, TextDisplayBuilder, MediaGalleryBuilder, MediaGalleryItemBuilder, MessageFlags: MF } = await import('discord.js');
-
-    const dmLines = [
-      `## <:cr_green:1366636327415713832> Đơn Boost Đã Hoàn Thành! <a:starxoay:1481141954346483845>`,
-      ``,
-      `> <a:tickgreen:1384069022831874169> Đơn boost \`${code}\` đã được **hoàn thành** thành công!`,
-      ``,
-      `> <:cr_carttt:1348626032747614268> **Gói:** ${order.package}`,
-      `> <:cr_muahang:1348622828152426528> **Server:** ${order.server_name ?? order.server_id}`,
-      `> <:cr_shop:1392749981332541501> **Mã đơn:** \`${code}\``,
-      ``,
-      `<:muiten:1481124261501337601> Nếu cần bảo hành, liên hệ shop ngay nhé!`,
-      ``,
-      `-# <:cr_tim:1366636325352116225> Cenar Store — Cảm ơn bạn đã tin tưởng <:purple_heart_glow:1327541911749263360>`,
-    ].join('\n');
-
-    const dmContainer = new ContainerBuilder().setAccentColor(0x57F287);
-    dmContainer.addTextDisplayComponents(new TextDisplayBuilder().setContent(dmLines));
-    dmContainer.addMediaGalleryComponents(
-      new MediaGalleryBuilder().addItems(
-        new MediaGalleryItemBuilder().setURL('https://i.pinimg.com/originals/68/ae/bf/68aebf3739f455687a90e871bdc04a98.gif')
-      )
-    );
-
-    await customer.send({
-      components: [dmContainer],
-      flags: MF.IsComponentsV2,
-    }).catch(() => null);
+    const { buildBoostOrderDetailPayload } = await import('../services/boostServerService.js');
+    await customer.send(buildBoostOrderDetailPayload(updated, false, {
+      heading: 'CHU KỲ BOOST ĐÃ HOÀN THÀNH', includeActions: false,
+      extraText: 'Cảm ơn bạn đã sử dụng dịch vụ Cenar Store. Liên hệ shop nếu cần hỗ trợ.',
+    })).catch(() => null);
   } catch {}
 
   await sendBoostLog(interaction.client, interaction.guildId, updated, 'Đơn hoàn thành', interaction.user.id).catch(() => null);
   refreshBoostPanel(interaction.client, interaction.guildId).catch(() => null);
 
   await interaction.editReply(
-    `<:cr_green:1366636327415713832> Đã đánh dấu đơn \`${code}\` là **hoàn thành** và gửi DM cho khách.`
+    `${E('order_complete')} Đã đánh dấu đơn \`${code}\` là **hoàn thành** và gửi DM cho khách.`
   );
 }
 
@@ -761,47 +723,19 @@ export async function handleBoostActivateModal(interaction, code) {
   // DM khách — Components V2 + emoji custom
   try {
     const customer = await interaction.client.users.fetch(order.customer_id);
-    const expiryStr = expiresAt
-      ? `<t:${Math.floor(new Date(expiresAt).getTime() / 1000)}:F>`
-      : 'Theo gói đã đặt';
-
-    const { ContainerBuilder, TextDisplayBuilder, MediaGalleryBuilder, MediaGalleryItemBuilder, MessageFlags: MF } = await import('discord.js');
-
-    const dmLines = [
-      `## <a:tsm_fire:1327553120842158111> Server Của Bạn Đã Được BOOST! <a:tsm_fire:1327553120842158111>`,
-      ``,
-      `> <a:tickgreen:1384069022831874169> **Cenar Store** đã boost thành công server của bạn!`,
-      ``,
-      `> <:cr_carttt:1348626032747614268> **Gói:** ${order.package}`,
-      `> <:cr_muahang:1348622828152426528> **Server:** ${order.server_name ?? order.server_id}`,
-      `> <a:Dotyellow:1481134440725090315> **Hết hạn:** ${expiryStr}`,
-      `> <:cr_shop:1392749981332541501> **Mã đơn:** \`${order.order_code}\``,
-      ``,
-      `<:muiten:1481124261501337601> Nếu cần bảo hành, liên hệ shop ngay nhé!`,
-      ``,
-      `-# <:cr_tim:1366636325352116225> Cenar Store — Cảm ơn bạn đã tin tưởng <:purple_heart_glow:1327541911749263360>`,
-    ].join('\n');
-
-    const dmContainer = new ContainerBuilder().setAccentColor(0x57F287);
-    dmContainer.addTextDisplayComponents(new TextDisplayBuilder().setContent(dmLines));
-    dmContainer.addMediaGalleryComponents(
-      new MediaGalleryBuilder().addItems(
-        new MediaGalleryItemBuilder().setURL('https://i.pinimg.com/originals/68/ae/bf/68aebf3739f455687a90e871bdc04a98.gif')
-      )
-    );
-
-    await customer.send({
-      components: [dmContainer],
-      flags: MF.IsComponentsV2,
-    }).catch(() => null);
+    const { buildBoostOrderDetailPayload } = await import('../services/boostServerService.js');
+    await customer.send(buildBoostOrderDetailPayload(updated, false, {
+      heading: 'BOOST ĐÃ ĐƯỢC KÍCH HOẠT', includeActions: false,
+      extraText: 'Bạn có thể xem thời hạn và gửi yêu cầu bảo hành từ panel Boost.',
+    })).catch(() => null);
   } catch {}
 
   await sendBoostLog(interaction.client, interaction.guildId, updated, 'Đã boost — Kích hoạt ACTIVE', interaction.user.id).catch(() => null);
   refreshBoostPanel(interaction.client, interaction.guildId).catch(() => null);
 
   await interaction.editReply(
-    `<a:tickgreen:1384069022831874169> Đã kích hoạt đơn \`${code}\` → **ACTIVE** và DM thông báo cho khách!` +
-    (expiresAt ? `\n> <a:Dotyellow:1481134440725090315> Hết hạn: **${expiresRaw}**` : '')
+    `${E('status_check')} Đã kích hoạt đơn \`${code}\` → **ACTIVE** và DM thông báo cho khách!` +
+    (expiresAt ? `\n> ${E('icon_expire')} Hết hạn: **${expiresRaw}**` : '')
   );
 }
 

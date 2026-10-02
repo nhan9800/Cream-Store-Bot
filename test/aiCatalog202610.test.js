@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
+import { Collection } from 'discord.js';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 const testDatabasePath = vi.hoisted(() => {
@@ -14,8 +15,18 @@ const testDatabasePath = vi.hoisted(() => {
 import { db, initDatabase, seedProductCatalog } from '../src/database/db.js';
 import { getActiveProducts } from '../src/services/productCatalogService.js';
 import { buildPriceBoardPayloads, groupPriceProducts, PRICE_BOARD_VERSION } from '../src/services/autoSetupPriceBoardService.js';
+import { CORE_UI_EMOJI_ASSETS } from '../src/config/coreEmojiPack2026.js';
 
 const GUILD_ID = '1282637033340403754';
+const previousClient = global.discordClient;
+const liveNames = [...CORE_UI_EMOJI_ASSETS.map((asset) => asset.name),
+  'cenar_spotify', 'cenar_chatgpt', 'cenar_nitro', 'cenar_boost', 'cenar_gemini',
+  'cenar_claude', 'cenar_adobe', 'cenar_capcut', 'cenar_office', 'cenar_youtube',
+  'cenar_netflix', 'cenar_gearup', 'cenar_locket', 'cenar_discord'];
+const liveInventory = new Collection(liveNames.map((name, index) => {
+  const id = String(1550000000000000300n + BigInt(index));
+  return [id, { id, name, animated: false }];
+}));
 const REQUESTED_PRICES = new Map([
   ['chatgpt-plus-own-account-1-month-package-warranty', 485000],
   ['chatgpt-plus-direct-payment-1-month-full-warranty', 500000],
@@ -29,8 +40,17 @@ const REQUESTED_PRICES = new Map([
   ['claude-pro-x5-account-1-month-full-warranty', 2500000],
 ]);
 
-beforeAll(() => initDatabase());
+beforeAll(() => {
+  initDatabase();
+  global.discordClient = {
+    guilds: { cache: new Collection([GUILD_ID, '1070676180103086132'].map((id) => (
+      [id, { id, emojis: { cache: liveInventory } }]
+    ))) },
+    application: { emojis: { cache: liveInventory } },
+  };
+});
 afterAll(() => {
+  global.discordClient = previousClient;
   db.close();
   for (const suffix of ['', '-shm', '-wal']) {
     fs.rmSync(`${path.resolve(process.cwd(), testDatabasePath)}${suffix}`, { force: true });
@@ -144,6 +164,7 @@ describe('October 2026 AI catalog additions', () => {
       expect(components.reduce((sum, component) => sum + (component.content?.length || 0), 0)).toBeLessThanOrEqual(3800);
       for (const selector of components.filter((component) => component.type === 3)) {
         expect(selector.options.length).toBeLessThanOrEqual(25);
+        expect(selector.options.every((option) => liveInventory.has(option.emoji?.id))).toBe(true);
       }
     }
   });

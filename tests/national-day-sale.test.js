@@ -1,22 +1,42 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { MessageFlags } from 'discord.js';
 import {
   NATIONAL_DAY_SALE,
   buildNationalDaySaleMessages,
   buildNationalDaySaleSections,
 } from '../src/campaigns/nationalDaySale2026.js';
+import { EMOJI_SLOTS } from '../src/services/emojiService.js';
+import { createEmojiResolver } from '../src/utils/emojiHelper.js';
 
 const NATIVE_EMOJI = /[\u{1F000}-\u{1FAFF}\u2600-\u27BF]/u;
 
-function emojiResolver(slot) {
-  return `<:cenar_${slot}:1535618654358736926>`;
-}
-emojiResolver.component = (slot) => ({ id: '1535618654358736926', name: `cenar_${slot}` });
+const emojiResolver = createEmojiResolver(NATIONAL_DAY_SALE.guildId);
 
 const customEmojis = Object.freeze({
   cenar_29_badge: { text: '<:cenar_29_badge:100000000000000001>', component: { id: '100000000000000001', name: 'cenar_29_badge' } },
   cenar_29_firework: { text: '<:cenar_29_firework:100000000000000002>', component: { id: '100000000000000002', name: 'cenar_29_firework' } },
   cenar_29_sale: { text: '<:cenar_29_sale:100000000000000003>', component: { id: '100000000000000003', name: 'cenar_29_sale' } },
+});
+const emojiInventory = new Map([
+  ...Object.keys(EMOJI_SLOTS).map((name, index) => {
+    const id = String(100000000000001000n + BigInt(index));
+    return [id, { id, name, animated: false, available: true }];
+  }),
+  ...Object.values(customEmojis).map(({ component }) => [component.id, { ...component, animated: false, available: true }]),
+]);
+let previousDiscordClient;
+let hadDiscordClient;
+beforeEach(() => {
+  hadDiscordClient = Object.hasOwn(global, 'discordClient');
+  previousDiscordClient = global.discordClient;
+  global.discordClient = {
+    guilds: { cache: new Map([[NATIONAL_DAY_SALE.guildId, { emojis: { cache: new Map() } }]]) },
+    application: { emojis: { cache: emojiInventory } },
+  };
+});
+afterEach(() => {
+  if (hadDiscordClient) global.discordClient = previousDiscordClient;
+  else delete global.discordClient;
 });
 
 describe('National Day 2/9 sale campaign', () => {
@@ -76,6 +96,7 @@ describe('National Day 2/9 sale campaign', () => {
     const actionRow = last.components.at(-1);
     expect(actionRow.components).toHaveLength(3);
     expect(actionRow.components.every((button) => button.emoji?.id)).toBe(true);
+    expect(actionRow.components.every((button) => emojiInventory.has(button.emoji.id))).toBe(true);
     expect(JSON.stringify(actionRow)).toContain(NATIONAL_DAY_SALE.storeUrl);
     expect(JSON.stringify(actionRow)).toContain(NATIONAL_DAY_SALE.supportChannelId);
     expect(JSON.stringify(actionRow)).toContain(NATIONAL_DAY_SALE.priceChannelId);

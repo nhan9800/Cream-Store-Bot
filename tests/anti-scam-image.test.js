@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'vitest';
+import { afterEach, beforeEach, describe, expect, test } from 'vitest';
 import { MessageFlags } from 'discord.js';
 import {
   classifyScamOcrText,
@@ -12,8 +12,27 @@ import {
   buildScamRecoveryDmV2,
 } from '../src/services/scamProtectionService.js';
 import { STORE_ONE_GUILD_ID } from '../src/utils/locale.js';
+import { EMOJI_SLOTS } from '../src/services/emojiService.js';
 
 const NATIVE_EMOJI = /[\u{1F000}-\u{1FAFF}\u2600-\u27BF]/u;
+const emojiInventory = new Map(Object.keys(EMOJI_SLOTS).map((name, index) => {
+  const id = String(100000000000001000n + BigInt(index));
+  return [id, { id, name, animated: false, available: true }];
+}));
+let previousDiscordClient;
+let hadDiscordClient;
+beforeEach(() => {
+  hadDiscordClient = Object.hasOwn(global, 'discordClient');
+  previousDiscordClient = global.discordClient;
+  global.discordClient = {
+    guilds: { cache: new Map([[STORE_ONE_GUILD_ID, { emojis: { cache: new Map() } }]]) },
+    application: { emojis: { cache: emojiInventory } },
+  };
+});
+afterEach(() => {
+  if (hadDiscordClient) global.discordClient = previousDiscordClient;
+  else delete global.discordClient;
+});
 
 describe('Store 1 scam image protection', () => {
   test('accepts Discord CDN images and rejects arbitrary remote URLs', () => {
@@ -89,5 +108,6 @@ describe('Store 1 scam image protection', () => {
     const buttons = recovery.components[1].toJSON().components;
     expect(buttons).toHaveLength(3);
     expect(buttons.every((button) => button.style === 5 && button.emoji?.id)).toBe(true);
+    expect(buttons.every((button) => emojiInventory.has(button.emoji.id))).toBe(true);
   });
 });

@@ -1,6 +1,30 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { data, buildYoutubeWarrantyAdminPayload } from '../src/commands/ytbaohanh.js';
+import { EMOJI_SLOTS } from '../src/services/emojiService.js';
+import { createEmojiResolver } from '../src/utils/emojiHelper.js';
 import fs from 'node:fs';
+
+const emojiInventory = new Map([
+  ...Object.keys(EMOJI_SLOTS).filter((name) => name !== 'brand_youtube').map((name, index) => {
+    const id = String(100000000000001000n + BigInt(index));
+    return [id, { id, name, animated: false, available: true }];
+  }),
+  ['1543842435707310151', { id: '1543842435707310151', name: 'cenar_yt_logo', animated: false, available: true }],
+]);
+let previousDiscordClient;
+let hadDiscordClient;
+beforeEach(() => {
+  hadDiscordClient = Object.hasOwn(global, 'discordClient');
+  previousDiscordClient = global.discordClient;
+  global.discordClient = {
+    guilds: { cache: new Map([['TEST_GUILD', { emojis: { cache: emojiInventory } }]]) },
+    application: { emojis: { cache: new Map() } },
+  };
+});
+afterEach(() => {
+  if (hadDiscordClient) global.discordClient = previousDiscordClient;
+  else delete global.discordClient;
+});
 
 describe('YouTube warranty admin command', () => {
   it('publishes a staff-only inbox command', () => {
@@ -57,10 +81,9 @@ describe('YouTube warranty admin command', () => {
 
   it('prefers and auto-syncs the refreshed YouTube logo emoji', () => {
     const emojiService = fs.readFileSync(new URL('../src/services/emojiService.js', import.meta.url), 'utf8');
-    const emojiHelper = fs.readFileSync(new URL('../src/utils/emojiHelper.js', import.meta.url), 'utf8');
     const bootstrap = fs.readFileSync(new URL('../src/bootstrap.js', import.meta.url), 'utf8');
     expect(emojiService).toContain("brand_youtube: ['cenar_yt_logo', 'yt_logo'");
-    expect(emojiHelper).toContain('<:cenar_yt_logo:1543842435707310151>');
+    expect(createEmojiResolver('TEST_GUILD')('brand_youtube')).toBe('<:cenar_yt_logo:1543842435707310151>');
     expect(fs.readFileSync(new URL('../src/services/youtubeWarrantyClaimService.js', import.meta.url), 'utf8'))
       .toContain('YOUTUBE_BRAND_EMOJI');
     expect(fs.readFileSync(new URL('../src/services/youtubeWarrantyClaimService.js', import.meta.url), 'utf8'))

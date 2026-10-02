@@ -1,5 +1,7 @@
-import { describe, expect, it } from 'vitest';
-import { MessageFlags } from 'discord.js';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { Collection, MessageFlags } from 'discord.js';
+import { CORE_UI_EMOJI_ASSETS } from '../src/config/coreEmojiPack2026.js';
+import { createEmojiResolver } from '../src/utils/emojiHelper.js';
 import {
   YOUTUBE_STABILITY_TRANSITION,
   buildYoutubeStabilityTransitionMessage,
@@ -8,10 +10,20 @@ import {
 
 const NATIVE_EMOJI = /[\u{1F000}-\u{1FAFF}\u2600-\u27BF]/u;
 
-function emojiResolver(slot) {
-  return `<:cenar_${slot}:1535618654358736926>`;
-}
-emojiResolver.component = (slot) => ({ id: '1535618654358736926', name: `cenar_${slot}` });
+const previousClient = global.discordClient;
+const liveInventory = new Collection(CORE_UI_EMOJI_ASSETS.map((asset, index) => {
+  const id = String(1550000000000000700n + BigInt(index));
+  return [id, { id, name: asset.name, animated: false }];
+}));
+const emojiResolver = createEmojiResolver(YOUTUBE_STABILITY_TRANSITION.guildId);
+beforeAll(() => {
+  global.discordClient = {
+    guilds: { cache: new Collection([[YOUTUBE_STABILITY_TRANSITION.guildId,
+      { id: YOUTUBE_STABILITY_TRANSITION.guildId, emojis: { cache: new Collection() } }]]) },
+    application: { emojis: { cache: liveInventory } },
+  };
+});
+afterAll(() => { global.discordClient = previousClient; });
 
 describe('YouTube stability transition announcement', () => {
   it('states the affected orders and both customer-resolution branches', () => {
@@ -65,5 +77,6 @@ describe('YouTube stability transition announcement', () => {
     const buttons = payload.components.at(-1).toJSON().components;
     expect(buttons).toHaveLength(3);
     expect(buttons.every((button) => button.emoji?.id)).toBe(true);
+    expect(buttons.every((button) => liveInventory.has(button.emoji.id))).toBe(true);
   });
 });
