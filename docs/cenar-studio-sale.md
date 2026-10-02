@@ -1,30 +1,29 @@
-# Cenar Studio · Bàn Làm Việc Có Gu
+# Cenar Atelier · Trạm Thu Dịu
 
-Current content revision: `CENAR-SALE-REVISION:AI-WORKBENCH-20261002`.
+Current revision: `CENAR-SALE-REVISION:AUTUMN-ATELIER-20261002`.
 
-## Published presentation
+## Presentation and prices
 
-- Four Components V2 messages: connection, AI, creative/storage tools, entertainment. Existing part IDs are updated; the fourth part is added silently during migration.
-- October uses mint, coral, lilac and warm gold. Other months retain their own themes.
-- Ten new AI offers replace the old ChatGPT promotional rows. Other supplied sale prices remain unchanged; ordinary catalog and promotional prices remain separate.
-- All ten AI offers last one month. KBH means no warranty, BHF/FBH means full warranty. Package warranty and account warranty are described separately. Unspecified Pro 200/500 warranty and the 120k account tier must be confirmed in the ticket.
-- No invented original price, discount percentage, stock countdown, expiry date or provider usage entitlement is shown.
-- The existing three custom campaign emojis are synchronized automatically; the existing custom brand emojis are reused.
+- Original seasonal collection for Cenar: copper accents, a cream/deep teal banner and four new custom campaign emojis. It does not copy another brand's artwork or text.
+- Contextual design read: editorial seasonal collection. Dials: variance 6, motion 0 (Discord static messages), density 5. Audit found reused decorations, missing old ChatGPT sale rows and incomplete product coverage. New art and complete prices address those findings without changing website navigation or checkout.
+- `src/campaigns/promotionCatalog202610.js` is a data-only manifest: 29 original owner-supplied sale rows, 10 new AI rows and 44 remaining catalog rows, covering 77 active catalog keys. Sale-only variants stay separate when their account/duration/warranty was not specified.
+- Eight current sections are generated from the manifest. Long sections split by complete row and keep source labels. Each payload reserves room below Discord's 4,000 text characters and 40 component limit for the durable cutover marker.
+- `SALE` means the owner provided that program price. `CATALOG` means current catalog price with no separate program price. Neither implies a fabricated discount. Program prices are selected and confirmed through tickets; website checkout uses its displayed price.
+- The ten new AI tiers preserve account form and warranty scope. Pro 200/500 warranties and the 120k account tier require confirmation. Claude x5 is one month; BHF/FBH means full warranty. Pro 100/200/500 and x5 are shop tier names, not provider quota or account quantity guarantees.
+- Recovered 130k/390k/79k/150k/250k promotional ChatGPT offers remain separate from new tiers. JSON offers without a supplied duration require confirmation. Claude API is 85k for the first day plus 5k each additional day; source-code repair is from 500k, not a fixed quote.
+- Artwork lives in `assets/campaigns/`. The October 2026 banner is attached only that calendar month. Later refreshes remove the old attachment and use their native monthly title/palette. New raster art has not been prepared for every month.
 
-## Story and restart behavior
+## Cutover, story and restart behavior
 
-- One original story runs Monday through Sunday, with seven distinct chapters. The story stays consistent across a month boundary.
-- The independent scheduler checks every minute and posts one daily chapter from 09:00 Asia/Ho_Chi_Minh. New posts mention only the configured member role.
-- Startup refreshes the four-part price board. A daily post already published for today with an older content revision is edited in place without mentions. Restart/retry then recognizes the current revision and sends no duplicate daily post.
-- If duplicates already exist for today, keep a post with the current revision first, then the smallest stable message ID. Delete only other bot-authored messages with that exact date marker after the canonical post is current or its edit succeeds. A failed duplicate deletion rejects the run so the scheduler retries next minute instead of marking the date complete. Discord's already-deleted message response is accepted.
-- The logical board marker remains `CENAR-STORY-FLASH-SALE-V1-PART-1` through `-PART-4`; content revision is separate so existing message IDs survive changes.
-- Daily markers remain `CENAR-DAILY-FLASH-SALE:YYYY-MM-DD`, alongside `STORY-WEEK:YYYY-MM-DD` and the content revision.
-- Member messages and unrelated bot messages are preserved. Only recognized duplicate/retired board messages and daily posts older than 45 days are cleaned up.
+- Both publishers await `rebuildPromotionCampaign()` for the current revision. `preparePromotionRebuild()` validates local assets, syncs new emojis without retiring old ones, and provides silent board/daily payloads and the public manifest.
+- The durable service archives recognized historic sale messages, publishes the complete new board and today's chapter, then cleans recognized old bot sale posts. It never calls the legacy commerce sale reset or removes unrelated announcements/member messages. Partial failure retries the same job.
+- Once `DONE`, restart does not repeat historic cutover. Normal startup refreshes existing board IDs; the independent timer checks for one chapter from 09:00 Asia/Ho_Chi_Minh.
+- Three original seven-chapter arcs feature a friend-group postcard, a rainy-day reading corner and an autumn journal. Each Monday-Sunday week shares one premise, including across month boundaries.
+- Old-revision daily posts are edited silently. Same-date bot duplicates are removed only after the canonical post is current or its edit succeeds. Failed deletion rejects the attempt for retry; Discord's already-deleted response is accepted.
+- Compatibility marker remains `CENAR-STORY-FLASH-SALE-V1-PART-N`; the parser accepts multiple digits. Daily markers remain `CENAR-DAILY-FLASH-SALE:YYYY-MM-DD` and `STORY-WEEK:YYYY-MM-DD`.
 
 ## Verification
 
-`npm test -- test/dailyColorSale2026.test.js test/promotionBoard2026.test.js --hookTimeout=30000`
+`npm test -- test/dailyColorSale2026.test.js test/promotionBoard2026.test.js test/promotionCatalog202610.test.js test/promotionRebuildService.test.js --hookTimeout=30000`
 
-Focused checks cover exact prices/warranty distinctions, four-part message budgets, week/month continuity, duplicate prevention, silent revision, interrupted-edit retry, existing current/old duplicates and duplicate deletion recovery.
-
-After deployment, verify exactly one current board part for each number 1–4, one current-date daily post with the new revision, all three campaign emojis, and the actual public AI prices. A healthy process alone does not prove Discord publication succeeded.
+Verify restored/new prices, source labels, full manifest coverage, warranty/account terms, API daily pricing, safe message budgets, banner/emoji use, cutover barrier/recovery, weekly continuity and silent idempotency. After deployment inspect real Discord and the durable job: complete current parts, one current daily chapter, all four new emojis, the uploaded banner, archived historic evidence and zero remaining recognized old sale posts. Process health alone is insufficient publication evidence.

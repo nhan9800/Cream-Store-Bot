@@ -1,7 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
 import { Collection, MessageFlags } from 'discord.js';
+import { rebuildPromotionCampaign } from '../src/services/promotionRebuildService.js';
 import {
   DAILY_COLOR_SALE,
+  DAILY_COLOR_SALE_EMOJIS,
+  preparePromotionRebuild,
+  dailyColorSalePart,
   buildDailyColorSaleSections,
   buildDailyColorSaleMessages,
   buildDailyFlashSaleMessage,
@@ -16,12 +20,14 @@ import {
   weeklySaleStory,
 } from '../src/campaigns/dailyColorSale2026.js';
 
+vi.mock('../src/services/promotionRebuildService.js', () => ({ rebuildPromotionCampaign: vi.fn(async () => ({ status: 'DONE' })) }));
+
 const EMOJI_ID = '1539999999999999999';
-const customEmojis = Object.fromEntries(['tag', 'leaf', 'gift'].map((name) => [
-  `cenar_daily_${name}`,
+const customEmojis = Object.fromEntries(['ticket', 'cup', 'spark', 'leaves'].map((name) => [
+  `cenar_autumn_202610_${name}`,
   {
-    text: `<:cenar_daily_${name}:${EMOJI_ID}>`,
-    component: { id: EMOJI_ID, name: `cenar_daily_${name}`, animated: false },
+    text: `<:cenar_autumn_202610_${name}:${EMOJI_ID}>`,
+    component: { id: EMOJI_ID, name: `cenar_autumn_202610_${name}`, animated: false },
   },
 ]));
 
@@ -65,8 +71,8 @@ function campaignClient(messages = []) {
       return sent;
     },
   };
-  const emojis = new Collection(['tag', 'leaf', 'gift'].map((name) => [name, {
-    id: EMOJI_ID, name: `cenar_daily_${name}`, animated: false,
+  const emojis = new Collection(['ticket', 'cup', 'spark', 'leaves'].map((name) => [name, {
+    id: EMOJI_ID, name: `cenar_autumn_202610_${name}`, animated: false,
   }]));
   const guild = {
     id: DAILY_COLOR_SALE.guildId,
@@ -82,57 +88,50 @@ function campaignClient(messages = []) {
 }
 
 describe('Cenar daily Flash Sale story campaign', () => {
-  it('renders every supplied price and product condition exactly', () => {
-    const sections = buildDailyColorSaleSections({
-      E: emojiResolver,
-      customEmojis,
-      now: new Date('2026-09-29T02:00:00.000Z'),
-    });
-    const payload = Object.values(sections).join('\n');
-
-    expect(payload).toContain('02 tháng · có liền` — **99.000đ**');
-    expect(payload).toContain('02 tháng · có liền · Mail bất tử` — **120.000đ**');
-    expect(payload).toContain('04 tháng · có liền` — **250.000đ**');
-    expect(payload).toContain('12 tháng · có liền · gia hạn tự động` — **680.000đ**');
-    expect(payload).toContain('Trial Boost** · `03 tháng` — **65.000đ**');
-    expect(payload).toContain('BOOST SERVER · NÂNG CẤP MÁY CHỦ');
-    expect(payload).toContain('`03 tháng` — **280.000đ**');
-    expect(payload).toContain('NETFLIX PREMIUM · 4K PRIVATE');
-    expect(payload).toContain('Có thể thêm tối đa **05 thành viên**');
-    expect(payload).toContain('`18 tháng` — **190.000đ**');
-    expect(payload).toContain('OFFICE 365 + ONEDRIVE 1 TB');
-    expect(payload).toContain('CAPCUT PRO');
-    expect(payload).toContain('`06 tháng` — **290.000đ**');
-    expect(payload).toContain('SPOTIFY PREMIUM');
-    expect(payload).toContain('`03 tháng` — **110.000đ**');
-    expect(payload).toContain('YOUTUBE PREMIUM · DÒNG ỔN ĐỊNH');
-    expect(payload).toContain('`01 tháng` — **58.000đ**');
-    expect(payload).toContain('CÒN NHIỀU SẢN PHẨM KHÁC GIÁ RẤT ƯU ĐÃI');
+  it('restores old sale rows alongside new AI tiers and the full catalog', () => {
+    const sections = buildDailyColorSaleSections({ E: emojiResolver, customEmojis, now: new Date('2026-10-02T02:00:00Z') });
+    const text = Object.values(sections).join('\n');
+    expect(text).toContain('**99.000đ**');
+    expect(text).toContain('Mail bất tử');
+    expect(text).toContain('**680.000đ**');
+    expect(text).toContain('Trial Boost');
+    expect(text).toContain('**65.000đ**');
+    expect(text).toContain('MoMo Pay');
+    expect(text).toContain('**130.000đ**');
+    expect(text).toContain('**390.000đ**');
+    expect(text).toContain('**79.000đ/slot**');
+    expect(text).toContain('**150.000đ/slot**');
+    expect(text).toContain('**250.000đ**');
+    expect(text).toContain('60 phút');
+    expect(text).toContain('Adobe');
+    expect(text).toContain('Locket');
+    expect(text).toContain('GearUP');
+    expect(text).toContain('Bot Custom');
+    expect(text).toContain('Claude API');
+    expect(text).toContain('**85.000đ / ngày đầu**');
+    expect(text).toContain('thêm 5.000đ mỗi ngày tiếp theo');
+    expect(text).toContain('**Từ 500.000đ**');
+    expect(text).toContain('Giá khuyến mãi shop đã công bố');
+    expect(text).toContain('Giá niêm yết hiện hành');
+    expect(text).not.toMatch(/\dđgói|\dđslot|\/slot\/slot|giảm \d+%|chỉ còn \d+|hết hôm nay/i);
   });
 
-  it('replaces the promotional AI offers with all ten new exact prices and warranty distinctions', () => {
-    const sections = buildDailyColorSaleSections({ E: emojiResolver, customEmojis });
-    const payload = Object.values(sections).join('\n');
-    expect(sections.chatgptOwn).toContain('Plus · bảo hành gói` — **485.000đ** · Không bảo hành tài khoản');
-    expect(sections.chatgptOwn).toContain('Plus · bảo hành full` — **500.000đ**');
-    expect(sections.chatgptOwn).toContain('Pro 100 · bảo hành gói` — **2.650.000đ**');
-    expect(sections.chatgptOwn).toContain('Pro 200` — **4.800.000đ**');
-    expect(sections.chatgptOwn).toContain('Pro 500` — **12.700.000đ**');
-    expect(sections.chatgptOwn).toContain('Pro 200 và Pro 500: xác nhận chính sách bảo hành');
-    expect(sections.chatgptSuppliedClaude).toContain('Pro 100 · KBH` — **1.900.000đ** · Không bảo hành');
-    expect(sections.chatgptSuppliedClaude).toContain('Pro 100 · BHF` — **2.300.000đ** · Bảo hành full');
-    expect(sections.chatgptSuppliedClaude).toContain('Cấp acc · bảo hành 02 ngày` — **120.000đ**');
-    expect(sections.chatgptSuppliedClaude).toContain('CLAUDE PRO x5');
-    expect(sections.chatgptSuppliedClaude).toContain('01 tháng · KBH` — **1.900.000đ**');
-    expect(sections.chatgptSuppliedClaude).toContain('01 tháng · BHF` — **2.500.000đ**');
-    expect(payload).toContain('đều có thời hạn **01 tháng**');
-    expect(payload).not.toMatch(/MOMO PAY|130\.000đ|390\.000đ|ghép Team|file JSON|tỷ lệ lỗi/);
-    expect(payload).not.toMatch(/giảm \d+%|chỉ còn \d+|hết hôm nay/i);
+  it('keeps all ten new AI prices, account forms and separate warranty terms', () => {
+    const text = Object.values(buildDailyColorSaleSections({ E: emojiResolver, customEmojis })).join('\n');
+    for (const price of ['485.000đ', '500.000đ', '2.650.000đ', '4.800.000đ', '12.700.000đ', '1.900.000đ', '2.300.000đ', '120.000đ', '2.500.000đ']) {
+      expect(text).toContain(`**${price}**`);
+    }
+    expect(text).toContain('Không BH acc');
+    expect(text).toContain('BH 2 ngày');
+    expect(text).toContain('Claude Pro x5');
+    expect(text).toContain('Xác nhận phạm vi bảo hành');
+    expect(text).toContain('Loại Plus/Pro chưa được xác nhận');
+    expect(text).toContain('không cam kết');
   });
 
-  it('keeps four readable board parts within Discord message budgets and only mentions on part one', () => {
+  it('renders complete rows across bounded dynamic board parts and uses the new artwork', () => {
     const payloads = buildDailyColorSaleMessages({ E: emojiResolver, customEmojis, now: new Date('2026-10-02T02:00:00Z') });
-    expect(payloads).toHaveLength(4);
+    expect(payloads.length).toBeGreaterThanOrEqual(8);
     for (const [index, payload] of payloads.entries()) {
       const json = payload.components.map((component) => component.toJSON());
       function flatten(components) { return components.flatMap((item) => [item, ...flatten(item.components || [])]); }
@@ -141,10 +140,51 @@ describe('Cenar daily Flash Sale story campaign', () => {
       expect(payload.flags).toBe(MessageFlags.IsComponentsV2);
       expect(text).toContain(`${DAILY_COLOR_SALE.marker}-PART-${index + 1}`);
       expect(text).toContain(DAILY_COLOR_SALE.revision);
-      expect(text.length).toBeLessThanOrEqual(4000);
-      expect(components.length).toBeLessThanOrEqual(40);
+      expect(text.length).toBeLessThanOrEqual(3500);
+      expect(components.length).toBeLessThanOrEqual(38);
       if (index) expect(payload.allowedMentions).toMatchObject({ parse: [], roles: [] });
+      else {
+        expect(payload.files[0].name).toBe('cenar-autumn-atelier-202610.png');
+        expect(json[0].components.some((component) => component.type === 12)).toBe(true);
+      }
+      expect(JSON.stringify(payload)).not.toMatch(/cenar_daily_|CENAR STUDIO/);
     }
+    expect(dailyColorSalePart({ author: { id: 'bot' }, text: `${DAILY_COLOR_SALE.marker}-PART-12` }, 'bot')).toBe(12);
+  });
+
+  it('prepares all assets and silent payloads before the cutover', async () => {
+    const state = campaignClient();
+    const guild = [...state.client.guilds.cache.values()][0];
+    const prepared = await preparePromotionRebuild(guild, { now: new Date('2026-10-02T02:00:00Z') });
+    expect(prepared.saleData.rows).toHaveLength(83);
+    expect(prepared.emojiNames).toEqual(DAILY_COLOR_SALE_EMOJIS.map((asset) => asset.name));
+    expect(prepared.boardPayloads[0].files).toHaveLength(1);
+    for (const payload of [...prepared.boardPayloads, prepared.buildDailyPayload('1531111111111111111')]) {
+      expect(payload.allowedMentions).toMatchObject({ parse: [], roles: [], users: [] });
+    }
+  });
+
+  it('waits for the durable rebuild before the regular publisher can edit or send', async () => {
+    const now = new Date('2026-10-02T02:00:00Z');
+    const state = campaignClient();
+    let finish;
+    vi.mocked(rebuildPromotionCampaign).mockImplementationOnce(() => new Promise((resolve) => { finish = resolve; }));
+    const pending = publishDailyColorSale(state.client, { now, tagEveryone: false, tagMember: false });
+    await Promise.resolve();
+    expect(state.edits).toEqual([]);
+    expect(state.sends).toEqual([]);
+    finish({ status: 'DONE' });
+    await pending;
+    expect(state.sends).toHaveLength(buildDailyColorSaleMessages({ now }).length);
+  });
+
+  it('removes October artwork on later monthly revisions instead of mislabeling the banner', () => {
+    const payloads = buildDailyColorSaleMessages({ customEmojis, now: new Date('2026-11-02T02:00:00Z') });
+    expect(payloads[0].files).toBeUndefined();
+    expect(payloads[0].attachments).toEqual([]);
+    expect(JSON.stringify(payloads[0])).not.toContain('attachment://cenar-autumn');
+    expect(JSON.stringify(payloads)).toContain('Gom Điều Hay');
+    expect(JSON.stringify(payloads)).not.toContain('Trạm Thu Dịu');
   });
 
   it('keeps one story Monday-Sunday while advancing one chapter per day', () => {
@@ -247,14 +287,14 @@ describe('Cenar daily Flash Sale story campaign', () => {
     ]);
     const result = await publishDailyFlashSale(state.client, { now });
     expect(result).toMatchObject({ status: 'already_posted', action: 'updated', messageId: dailyId });
-    expect(state.sends).toHaveLength(1); // Only the new fourth board part.
+    expect(state.sends).toHaveLength(buildDailyColorSaleMessages({ now }).length - 3); // Only missing board parts.
     expect(state.edits).toHaveLength(4); // Three existing board parts and today's post.
     expect(state.deletions).toEqual([]);
     for (const edit of state.edits) expect(edit.payload.allowedMentions).toMatchObject({ parse: [], roles: [] });
     expect(JSON.stringify(state.history.get(dailyId).payload)).toContain(DAILY_COLOR_SALE.revision);
     const again = await publishDailyFlashSale(state.client, { now });
     expect(again).toMatchObject({ status: 'already_posted', action: 'current', messageId: dailyId });
-    expect(state.sends).toHaveLength(1);
+    expect(state.sends).toHaveLength(buildDailyColorSaleMessages({ now }).length - 3);
     expect(state.edits).toHaveLength(4);
   });
 
@@ -267,7 +307,7 @@ describe('Cenar daily Flash Sale story campaign', () => {
     await expect(publishDailyFlashSale(state.client, { now })).rejects.toThrow('temporarily unavailable');
     const retried = await publishDailyFlashSale(state.client, { now });
     expect(retried).toMatchObject({ status: 'already_posted', action: 'updated', messageId: dailyId });
-    expect(state.sends).toHaveLength(4); // Board only; no second daily message on retry.
+    expect(state.sends).toHaveLength(buildDailyColorSaleMessages({ now }).length); // Board only; no extra daily post.
   });
 
   it('keeps the current revision and removes only same-day bot duplicates', async () => {
@@ -319,7 +359,7 @@ describe('Cenar daily Flash Sale story campaign', () => {
     const result = await publishDailyFlashSale(state.client, { now });
     expect(result).toMatchObject({ action: 'updated', messageId: olderId, removedDuplicates: 1 });
     expect(state.deletions).toEqual([newerId]);
-    expect(state.sends).toHaveLength(4); // New board parts only, even after edit retry.
+    expect(state.sends).toHaveLength(buildDailyColorSaleMessages({ now }).length); // Board only, even after edit retry.
   });
 
   it('does not report a duplicate-cleanup failure as complete and retries without posting or pinging', async () => {
@@ -353,9 +393,10 @@ describe('Cenar daily Flash Sale story campaign', () => {
     expect(state.sends).toEqual([]);
   });
 
-  it('retires old PUBG artwork while preserving the current daily emoji set', () => {
+  it('retires old campaign artwork while preserving the new autumn collection', () => {
     expect(isStaleDailyCampaignEmojiName('cenar_pubg_cow')).toBe(true);
-    expect(isStaleDailyCampaignEmojiName('cenar_daily_tag')).toBe(false);
+    expect(isStaleDailyCampaignEmojiName('cenar_daily_tag')).toBe(true);
+    expect(isStaleDailyCampaignEmojiName('cenar_autumn_202610_ticket')).toBe(false);
     expect(isStaleDailyCampaignEmojiName('cenar_daily_retired')).toBe(true);
   });
 });
