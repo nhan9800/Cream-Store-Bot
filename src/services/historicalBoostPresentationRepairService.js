@@ -5,7 +5,8 @@ import { getCanonicalEmojiSlot, resolveVerifiedCustomEmoji, sanitizeCustomEmojiT
 import { buildHistoricalBoostLogPayload } from './boostPresentationService.js';
 import { PermissionFlagsBits } from 'discord.js';
 
-export const HISTORICAL_BOOST_PRESENTATION_REPAIR_VERSION = 'BOOST-LOG-UI-20261002-V1';
+export const HISTORICAL_BOOST_PRESENTATION_REPAIR_VERSION = 'BOOST-LOG-UI-20261002-V2';
+const PRIOR_REPAIR_VERSION = 'BOOST-LOG-UI-20261002-V1';
 const STORE_ONE_LOG_CHANNEL_ID = '1524232964928438455';
 const controllers = new Map();
 
@@ -34,6 +35,19 @@ function plain(value) {
 function labelKey(value) {
   return plain(value).normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .replace(/đ/gi, 'd').toLowerCase().replace(/[^a-z0-9]+/g, '');
+}
+
+function serverIdentityFromDedicatedField(value) {
+  const text = plain(value);
+  const ids = new Set(text.match(/\b\d{17,20}\b/g) || []);
+  if (ids.size > 1) return { reason: 'SERVER_ID_AMBIGUOUS' };
+  if (!ids.size) return { reason: 'SERVER_ID_MISSING' };
+  const explicit = text.match(/\bID:\s*`?(\d{17,20})`?/i)?.[1];
+  // Some original bot logs contain a lone `server_id` without an ID: label.
+  // Accept that exact historical shape only within the dedicated Server field.
+  const inlineIds = new Set([...text.matchAll(/`(\d{17,20})`/g)].map((match) => match[1]));
+  const id = explicit || (inlineIds.size === 1 ? [...inlineIds][0] : null);
+  return id === [...ids][0] ? { id } : { reason: 'SERVER_ID_MISSING' };
 }
 
 const json = (value) => value?.toJSON ? value.toJSON() : JSON.parse(JSON.stringify(value));
@@ -76,31 +90,50 @@ function channelIdFor(guildId, configProvider) {
     || (String(guildId) === STORE_ONE_GUILD_ID ? STORE_ONE_LOG_CHANNEL_ID : null);
 }
 
-function findTrustedLog(message, { guildId, botId, database }) {
-  if (String(message.author?.id || '') !== String(botId || '') || !botId) return null;
-  const embeds = messageEmbeds(message);
-  const logs = embeds.map((embed, index) => ({ embed, index }))
-    .filter(({ embed }) => /\[BOOST LOG\]/.test(plain(embed.title)));
-  if (logs.length !== 1) return null;
-  const { embed, index } = logs[0];
-  const fields = embed.fields || [];
-  const codes = new Set(JSON.stringify(embed).match(/\bBST_\d{6}\b/g) || []);
-  if (codes.size !== 1) return null;
-  const codeField = fields.find((field) => labelKey(field.name) === 'madon');
-  const code = [...codes][0];
-  if (!codeField || !String(codeField.value).includes(code)) return null;
+function inspectStoredIdentity(database, code, guildId, diagnose = false) {
   const order = database.prepare(`
     SELECT order_code, guild_id, customer_id, server_id FROM boost_server_orders
     WHERE order_code = ? AND guild_id = ?
   `).get(code, guildId);
-  if (!order || String(order.guild_id) !== String(guildId)) return null;
+  if (order && String(order.guild_id) === String(guildId)) return { order };
+  // This extra lookup is read-only diagnostic evidence, never permission to
+  // repair a message against another guild's record.
+  const elsewhere = diagnose && database.prepare('SELECT 1 FROM boost_server_orders WHERE order_code = ?').get(code);
+  return { reason: elsewhere || order ? 'ORDER_GUILD_MISMATCH' : 'NO_DB_ORDER' };
+}
+
+function inspectLegacyBoostLog(message, { guildId, botId, database }, diagnose = false) {
+  if (String(message.author?.id || '') !== String(botId || '') || !botId) return { reason: 'BOT_AUTHOR_MISMATCH' };
+  const embeds = messageEmbeds(message);
+  const logs = embeds.map((embed, index) => ({ embed, index }))
+    .filter(({ embed }) => /\[BOOST LOG\]/.test(plain(embed.title)));
+  if (logs.length !== 1) return { reason: logs.length ? 'MULTIPLE_BOOST_EMBEDS' : 'BOOST_EMBED_MISSING' };
+  const { embed, index } = logs[0];
+  const fields = embed.fields || [];
+  const codes = new Set(JSON.stringify(embed).match(/\bBST_\d{6}\b/g) || []);
+  if (codes.size !== 1) return { reason: codes.size ? 'AMBIGUOUS_ORDER_CODE' : 'ORDER_CODE_MISSING' };
+  const codeField = fields.find((field) => labelKey(field.name) === 'madon');
+  const code = [...codes][0];
+  if (!codeField) return { reason: 'ORDER_FIELD_MISSING' };
+  if (!String(codeField.value).includes(code)) return { reason: 'ORDER_FIELD_MISMATCH' };
+  const identity = inspectStoredIdentity(database, code, guildId, diagnose);
+  if (!identity.order) return identity;
+  const { order } = identity;
   const customer = fields.find((field) => labelKey(field.name) === 'khach');
+  if (!customer) return { reason: 'CUSTOMER_FIELD_MISSING' };
   const customers = [...String(customer?.value || '').matchAll(/<@!?(\d{17,20})>/g)].map((match) => match[1]);
-  if (customers.length !== 1 || customers[0] !== String(order.customer_id)) return null;
+  if (customers.length !== 1) return { reason: customers.length ? 'CUSTOMER_ID_AMBIGUOUS' : 'CUSTOMER_ID_MISSING' };
+  if (customers[0] !== String(order.customer_id)) return { reason: 'CUSTOMER_MISMATCH' };
   const server = fields.find((field) => labelKey(field.name) === 'server');
-  const serverId = String(server?.value || '').match(/\bID:\s*`?(\d{17,20})`?/i)?.[1];
-  if (serverId !== String(order.server_id)) return null;
-  return { embeds, embedIndex: index, embed, code };
+  if (!server) return { reason: 'SERVER_FIELD_MISSING' };
+  const serverIdentity = serverIdentityFromDedicatedField(server.value);
+  if (!serverIdentity.id) return serverIdentity;
+  if (serverIdentity.id !== String(order.server_id)) return { reason: 'SERVER_MISMATCH' };
+  return { trustedLog: { embeds, embedIndex: index, embed, code } };
+}
+
+function findTrustedLog(message, context) {
+  return inspectLegacyBoostLog(message, context).trustedLog || null;
 }
 
 function presentationText(message) {
@@ -118,27 +151,51 @@ function presentationText(message) {
   return texts.filter(Boolean).join('\n');
 }
 
+function v2IdentitySections(components) {
+  const textDisplays = [];
+  const visit = (item) => {
+    if (item.type === 10 && typeof item.content === 'string') textDisplays.push(plain(item.content));
+    (item.components || []).forEach(visit);
+  };
+  components.forEach(visit);
+  const servers = [];
+  const customers = [];
+  for (const text of textDisplays) {
+    const firstLine = text.split('\n')[0].replace(/[*`#]/g, '').trim();
+    const heading = labelKey(firstLine);
+    if (['server', 'maychunhanboost'].includes(heading)) servers.push(text.split('\n').slice(1).join('\n'));
+    if (['khach', 'khachhang'].includes(heading)) customers.push(text.split('\n').slice(1).join('\n'));
+    else if (/^Khách(?:\s+hàng)?\s*:/i.test(firstLine)) customers.push(firstLine.replace(/^Khách(?:\s+hàng)?\s*:/i, ''));
+  }
+  return { servers, customers };
+}
+
 function auditTrustedBoostLog(message, context, body) {
-  const classic = findTrustedLog(message, context);
-  if (classic) return { code: classic.code, nativeV2: false };
-  if (String(message.author?.id || '') !== String(context.botId || '') || !context.botId) return null;
+  const classic = inspectLegacyBoostLog(message, context, true);
+  if (classic.trustedLog) return { code: classic.trustedLog.code, nativeV2: false };
+  if (String(message.author?.id || '') !== String(context.botId || '') || !context.botId) return { reason: 'BOT_AUTHOR_MISMATCH' };
   const components = messageComponents(message);
   const isV2 = Boolean(Number(message.flags?.bitfield || message.flags || 0) & 32768)
     || components.some((component) => component.type === 17);
-  if (!isV2 || !/\[BOOST LOG\]/.test(plain(body))) return null;
+  if (!isV2) return { reason: classic.reason };
+  if (!/\[BOOST LOG\]/.test(plain(body))) return { reason: 'BOOST_HEADER_MISSING' };
   const codes = new Set(body.match(/\bBST_\d{6}\b/g) || []);
-  if (codes.size !== 1) return null;
+  if (codes.size !== 1) return { reason: codes.size ? 'AMBIGUOUS_ORDER_CODE' : 'ORDER_CODE_MISSING' };
   const code = [...codes][0];
   const readable = plain(body).replace(/[*`#]/g, '');
-  if (!new RegExp(`Mã\\s*đơn\\s*:?\\s*${code}`, 'i').test(readable)) return null;
-  const order = context.database.prepare(`
-    SELECT order_code, guild_id, customer_id, server_id FROM boost_server_orders
-    WHERE order_code = ? AND guild_id = ?
-  `).get(code, context.guildId);
-  if (!order) return null;
-  const customer = readable.match(/Khách(?:\s+hàng)?\s*:?\s*<@!?(\d{17,20})>/i)?.[1];
-  const server = readable.match(/\bID:\s*(\d{17,20})/i)?.[1];
-  if (customer !== String(order.customer_id) || server !== String(order.server_id)) return null;
+  if (!new RegExp(`Mã\\s*đơn\\s*:?\\s*${code}`, 'i').test(readable)) return { reason: 'ORDER_FIELD_MISSING' };
+  const identity = inspectStoredIdentity(context.database, code, context.guildId, true);
+  if (!identity.order) return identity;
+  const { order } = identity;
+  const sections = v2IdentitySections(components);
+  if (sections.customers.length !== 1) return { reason: sections.customers.length ? 'CUSTOMER_ID_AMBIGUOUS' : 'CUSTOMER_FIELD_MISSING' };
+  const customers = [...sections.customers[0].matchAll(/<@!?(\d{17,20})>/g)].map((match) => match[1]);
+  if (customers.length !== 1) return { reason: customers.length ? 'CUSTOMER_ID_AMBIGUOUS' : 'CUSTOMER_ID_MISSING' };
+  if (customers[0] !== String(order.customer_id)) return { reason: 'CUSTOMER_MISMATCH' };
+  if (sections.servers.length !== 1) return { reason: sections.servers.length ? 'SERVER_ID_AMBIGUOUS' : 'SERVER_FIELD_MISSING' };
+  const serverIdentity = serverIdentityFromDedicatedField(sections.servers[0]);
+  if (!serverIdentity.id) return serverIdentity;
+  if (serverIdentity.id !== String(order.server_id)) return { reason: 'SERVER_MISMATCH' };
   return { code, nativeV2: true };
 }
 
@@ -180,6 +237,7 @@ export async function auditHistoricalBoostPresentation(client, {
     status: 'INCOMPLETE', historyComplete: false, scannedMessages: 0,
     matchedLogMessages: 0, nativeV2Logs: 0, legacyEmbedLogs: 0,
     staleEmojiReferences: 0, malformedOrUnknownSkipped: 0, journalConfirmedRepairs: 0,
+    unmatchedReasons: {}, unmatchedStaleEmojiReferencesByReason: {},
     limitReached: false, failures: 0,
     focusOrder: focus ? { matchedMessages: 0, nativeV2Logs: 0, legacyEmbedLogs: 0, repairedMessages: 0, staleEmojiReferences: 0 } : null,
   };
@@ -214,16 +272,18 @@ export async function auditHistoricalBoostPresentation(client, {
           const stale = countStalePresentationEmoji(message, String(guildId), client, verifyEmoji, canonicalSlot);
           report.staleEmojiReferences += stale;
           const matched = auditTrustedBoostLog(message, context, body);
-          if (!matched) {
+          if (matched.reason) {
             report.malformedOrUnknownSkipped += 1;
+            report.unmatchedReasons[matched.reason] = (report.unmatchedReasons[matched.reason] || 0) + 1;
+            report.unmatchedStaleEmojiReferencesByReason[matched.reason] = (report.unmatchedStaleEmojiReferencesByReason[matched.reason] || 0) + stale;
             continue;
           }
           report.matchedLogMessages += 1;
           report[matched.nativeV2 ? 'nativeV2Logs' : 'legacyEmbedLogs'] += 1;
           const repaired = hasJournal && dbInstance.prepare(`
             SELECT 1 FROM boost_log_presentation_repair_messages
-            WHERE guild_id = ? AND channel_id = ? AND revision = ? AND message_id = ? AND state = 'DONE'
-          `).get(String(guildId), String(channelId), HISTORICAL_BOOST_PRESENTATION_REPAIR_VERSION, String(message.id));
+            WHERE guild_id = ? AND channel_id = ? AND revision IN (?, ?) AND message_id = ? AND state = 'DONE'
+          `).get(String(guildId), String(channelId), HISTORICAL_BOOST_PRESENTATION_REPAIR_VERSION, PRIOR_REPAIR_VERSION, String(message.id));
           if (repaired) report.journalConfirmedRepairs += 1;
           if (focus && matched.code === focus) {
             report.focusOrder.matchedMessages += 1;
@@ -233,6 +293,7 @@ export async function auditHistoricalBoostPresentation(client, {
           }
         } catch {
           report.malformedOrUnknownSkipped += 1;
+          report.unmatchedReasons.UNSUPPORTED_SHAPE = (report.unmatchedReasons.UNSUPPORTED_SHAPE || 0) + 1;
         }
       }
       report.scannedMessages += page.length;

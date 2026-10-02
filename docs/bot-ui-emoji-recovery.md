@@ -36,6 +36,12 @@ field values, actor, footer, timestamp and action IDs are retained. Current
 database order status is never substituted for an earlier event. Complex legacy
 cards retain their layout and receive conservative emoji correction only.
 
+Legacy Server fields may contain one inline-code server ID without an `ID:`
+label. That exact format is accepted only within the dedicated Server field,
+with a unique identifier matching the same database order. V2 audit reads the
+dedicated server/customer sections and rejects ambiguous or mismatched IDs.
+Repair revision V2 rescans missed legacy cards while preserving the V1 journal.
+
 Additive tables `boost_log_presentation_repairs` and
 `boost_log_presentation_repair_messages` retain cursors and retry state across
 restarts. The scan is bounded at 20,000 messages; reaching that limit or failing
@@ -47,6 +53,7 @@ The protected `GET /api/bot/catalog-publication-status` includes `botUi.icons`,
 `botUi.refresh`, `botUi.historicalBoost` and a read-only full-history
 `botUi.historicalBoostAudit`. These contain aggregate counts and safe error codes,
 not private log text or customer/server identities.
+Unmatched reason histograms contain fixed safe codes and counts only.
 
 Successful evidence requires all 57 icons available, interface refresh ready,
 repair `DONE`, an actual complete Discord history scan and zero stale emoji
