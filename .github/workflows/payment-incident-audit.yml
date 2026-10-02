@@ -1,0 +1,35 @@
+name: Read-only payment incident audit
+
+on:
+  workflow_dispatch:
+    inputs:
+      order_code:
+        description: Order code to inspect (no payment or order mutations)
+        required: true
+        type: string
+      public_key:
+        description: Base64 DER RSA public key for encrypting the diagnostic result
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: 22.12.0
+      - name: Read minimal payment evidence without personal data
+        env:
+          AUDIT_ORDER_CODE: ${{ inputs.order_code }}
+          AUDIT_PUBLIC_KEY: ${{ inputs.public_key }}
+          BOT_API_URL: ${{ secrets.BOT_API_URL }}
+          BOT_API_KEY: ${{ secrets.BOT_API_KEY }}
+        run: node scripts/payment-incident-audit.js

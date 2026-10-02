@@ -12,6 +12,7 @@ import {
   savePaymentMessage,
   setOrderStatus,
   resetPaymentLinkForRegen,
+  OrderPaymentError,
 } from './orderService.js';
 import { findOrderByIncomingPaymentCode, syncPaymentCodeIfPossible } from './paymentOrderMatcher.js';
 import { getTopupByPayOSCode, finalizeTopup } from './walletService.js';
@@ -459,7 +460,7 @@ export async function finalizePaidOrder(client, order, paymentData, transactionI
     orderCode: order.order_code,
     provider,
     transactionId,
-    amount: paymentData.amount ?? order.total_amount,
+    amount: paymentData.amount,
     content: transactionContent,
     rawPayload: paymentData,
   });
@@ -649,6 +650,10 @@ export async function syncPaymentStatusFromPayOS({ client, orderCode = null, pay
 
   const info = await getPayOSPaymentInfo(order.payment_link_id || order.payos_order_code);
   const state = String(info.status ?? '').toUpperCase();
+  if (Number(info.orderCode) !== Number(order.payos_order_code)
+    || (order.payment_link_id && String(info.id || '') !== String(order.payment_link_id))) {
+    throw new OrderPaymentError('PAYMENT_IDENTITY_MISMATCH', 'Thông tin PayOS không khớp đơn cần đối soát.');
+  }
 
   const needsNotificationRepair = order.payment_status === 'PAID'
     && !hasPaymentConfirmationLog(order.order_code);
@@ -658,7 +663,7 @@ export async function syncPaymentStatusFromPayOS({ client, orderCode = null, pay
     const result = await finalizePaidOrder(
       client,
       order,
-      info,
+      { ...info, invoiceAmount: info.amount, amount: getPayOSReceivedAmount(info) },
       transaction?.reference || order.paid_transaction_id || `PAYOS_LOOKUP_${info.id ?? order.payos_order_code}`,
       transaction?.description || order.paid_transaction_content || order.payment_code || order.order_code,
     );
@@ -677,6 +682,24 @@ export async function syncPaymentStatusFromPayOS({ client, orderCode = null, pay
   }
 
   return { order, state, synced: false };
+}
+
+// GET amount is the invoice value, never proof of a bank receipt.
+// Older responses can be checked against unique transaction receipts instead.
+export function getPayOSReceivedAmount(info) {
+  if (info?.amountPaid !== undefined && info?.amountPaid !== null) return info.amountPaid;
+  if (!Array.isArray(info?.transactions) || !info.transactions.length) return null;
+  const seen = new Set();
+  let amount = 0;
+  for (const transaction of info.transactions) {
+    const value = Number(transaction?.amount);
+    const reference = String(transaction?.reference || '').trim();
+    if (!reference || !Number.isSafeInteger(value) || value <= 0) return null;
+    if (seen.has(reference)) continue;
+    seen.add(reference);
+    amount += value;
+  }
+  return Number.isSafeInteger(amount) ? amount : null;
 }
 
 export async function reconcileRecentPayOSPayments(client, { limit = 20, lookbackHours = 24 } = {}) {
