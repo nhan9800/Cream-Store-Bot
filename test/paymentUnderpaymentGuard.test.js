@@ -14,7 +14,8 @@ const databasePath = vi.hoisted(() => {
 
 import { db, initDatabase } from '../src/database/db.js';
 import { createTicket } from '../src/services/ticketService.js';
-import { createOrder, getOrderByCode, markOrderPaid, recordOrderPayment } from '../src/services/orderService.js';
+import { createOrder, getOrderByCode, markOrderPaid, payOrderWithWallet, recordOrderPayment } from '../src/services/orderService.js';
+import { addWalletBalance } from '../src/services/walletService.js';
 import { finalizePaidOrder, getPayOSReceivedAmount, syncPaymentStatusFromPayOS } from '../src/services/paymentService.js';
 import { auditOrderPayment } from '../src/services/paymentIncidentAuditService.js';
 import { registerBotApiRoutes } from '../src/services/botApiRoutes.js';
@@ -53,7 +54,7 @@ describe('real receipt required before confirming an order', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     db.exec(`DELETE FROM order_delivery_items; DELETE FROM order_fulfillments;
-      DELETE FROM payment_events; DELETE FROM staff_logs; DELETE FROM orders;
+      DELETE FROM payment_events; DELETE FROM staff_logs; DELETE FROM wallet_transactions; DELETE FROM wallet_topup_orders; DELETE FROM orders;
       DELETE FROM customer_role_sync_jobs; DELETE FROM customer_profiles; DELETE FROM product_catalog;`);
   });
   afterAll(() => {
@@ -186,5 +187,25 @@ describe('real receipt required before confirming an order', () => {
       expect(response.headers.get('cache-control')).toBe('no-store');
       expect(await response.json()).toMatchObject({ ok: true, data: { order: { totalAmount: 150_000 } } });
     } finally { await new Promise((resolve) => server.close(resolve)); }
+  });
+
+  it('distinguishes a full wallet debit from a smaller bank topup and the preceding balance', async () => {
+    const order = pendingOrder();
+    addWalletBalance(order.guild_id, order.customer_id, 60_000, 'TOPUP', 'private historical note', 'earlier-credit');
+    db.prepare(`INSERT INTO wallet_topup_orders (topup_code, guild_id, customer_id, amount, payos_order_code, status, created_at)
+      VALUES ('private-topup-code', ?, ?, 90000, 999123, 'PAID', CURRENT_TIMESTAMP)`).run(order.guild_id, order.customer_id);
+    addWalletBalance(order.guild_id, order.customer_id, 90_000, 'TOPUP', 'private recent note', 'private-topup-code');
+    payOrderWithWallet({ orderCode: order.order_code, guildId: order.guild_id, customerId: order.customer_id, amount: 150_000 });
+    mockPayOS({ payos_order_code: 999123 }, { amount: 90_000, amountPaid: 90_000 });
+    const result = await auditOrderPayment(order.order_code);
+    expect(result).toMatchObject({ wallet: { debitFound: true, debitCount: 1, deductedAmount: 150_000,
+      ledgerBalanceBefore: 150_000, ledgerBalanceAfter: 0, storedBalance: 0, ledgerMatchesStoredBalance: true,
+      topups: expect.arrayContaining([expect.objectContaining({ creditedAmount: 90_000, declaredAmount: 90_000,
+        providerReceipt: expect.objectContaining({ identityMatches: true, receivedAmount: 90_000 }) })]) },
+      findings: { walletDebitMatchesTotal: true } });
+    const serialized = JSON.stringify(result);
+    for (const value of [order.customer_id, 'private-topup-code', 'private historical note', 'private recent note']) {
+      expect(serialized).not.toContain(value);
+    }
   });
 });
