@@ -67,6 +67,16 @@ describe('read-only public catalog publication evidence', () => {
       expect(response.status).toBe(503);
       expect(response.headers.get('cache-control')).toBe('no-store');
       expect(await response.json()).toEqual({ ok: false, error: 'PUBLICATION_STATUS_UNAVAILABLE' });
+      const catalogResponse = await fetch(url.replace('/catalog-publication-status', '/products'), {
+        headers: { 'x-bot-api-key': process.env.BOT_API_KEY },
+      });
+      expect(catalogResponse.status).toBe(200);
+      const catalog = (await catalogResponse.json()).data;
+      expect(catalog.find((product) => product.product_key === 'chatgpt-plus-own-account-1-month-package-warranty'))
+        .toMatchObject({ price: 485000, activation_method: 'OWN_ACCOUNT',
+          warranty_policy: 'Bảo hành gói 1 tháng · không bảo hành tài khoản' });
+      expect(catalog.find((product) => product.product_key === 'claude-pro-x5-account-1-month-full-warranty'))
+        .toMatchObject({ price: 2500000, activation_method: 'ACCOUNT', warranty_policy: 'Full 1 tháng (BHF)' });
     } finally { await new Promise((resolve) => server.close(resolve)); }
   });
 });
