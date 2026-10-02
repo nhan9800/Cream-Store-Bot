@@ -386,7 +386,9 @@ export const PUBLIC_PRODUCT_COLUMNS = `
       SELECT COUNT(*)
       FROM account_stock stock
       WHERE stock.status = 'AVAILABLE'
-        AND (LOWER(stock.service_type) = LOWER(pc.name) OR LOWER(stock.service_type) = LOWER(pc.service_type))
+        AND UPPER(COALESCE(pc.activation_method, '')) != 'OWN_ACCOUNT'
+        AND (LOWER(stock.service_type) = LOWER(pc.name)
+          OR (UPPER(pc.service_type) != 'AI' AND LOWER(stock.service_type) = LOWER(pc.service_type)))
     ) AS stock_count,
     COALESCE((
       SELECT SUM(COALESCE(o.quantity, 1))

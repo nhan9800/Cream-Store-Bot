@@ -72,6 +72,11 @@ describe('read-only public catalog publication evidence', () => {
       expect(response.status).toBe(503);
       expect(response.headers.get('cache-control')).toBe('no-store');
       expect(await response.json()).toEqual({ ok: false, error: 'PUBLICATION_STATUS_UNAVAILABLE' });
+      db.prepare("INSERT INTO account_stock (service_type, credentials, status, created_at) VALUES (?, ?, 'AVAILABLE', ?)")
+        .run('AI', 'private-generic-stock', new Date().toISOString());
+      const claudeName = 'Claude Pro x5 1 Tháng (Cấp Tài Khoản · Full BH)';
+      db.prepare("INSERT INTO account_stock (service_type, credentials, status, created_at) VALUES (?, ?, 'AVAILABLE', ?)")
+        .run(claudeName, 'private-exact-stock', new Date().toISOString());
       const catalogResponse = await fetch(url.replace('/catalog-publication-status', '/products'), {
         headers: { 'x-bot-api-key': process.env.BOT_API_KEY },
       });
@@ -79,9 +84,12 @@ describe('read-only public catalog publication evidence', () => {
       const catalog = (await catalogResponse.json()).data;
       expect(catalog.find((product) => product.product_key === 'chatgpt-plus-own-account-1-month-package-warranty'))
         .toMatchObject({ price: 485000, activation_method: 'OWN_ACCOUNT',
-          warranty_policy: 'Bảo hành gói 1 tháng · không bảo hành tài khoản' });
+          warranty_policy: 'Bảo hành gói 1 tháng · không bảo hành tài khoản', stock_count: 0 });
       expect(catalog.find((product) => product.product_key === 'claude-pro-x5-account-1-month-full-warranty'))
-        .toMatchObject({ price: 2500000, activation_method: 'ACCOUNT', warranty_policy: 'Full 1 tháng (BHF)' });
+        .toMatchObject({ price: 2500000, activation_method: 'ACCOUNT', warranty_policy: 'Full 1 tháng (BHF)', stock_count: 1 });
+      expect(catalog.find((product) => product.product_key === 'claude-pro-x5-account-1-month-no-warranty'))
+        .toMatchObject({ stock_count: 0 });
+      expect(JSON.stringify(catalog)).not.toContain('private-');
     } finally { await new Promise((resolve) => server.close(resolve)); }
   });
 });
