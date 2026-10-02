@@ -46,8 +46,10 @@ export async function getCatalogPublicationStatus(client, { date = new Date() } 
   if (!client?.isReady?.()) throw new Error('DISCORD_NOT_READY');
   const guild = await client.guilds.fetch(config.guildId);
   const priceChannel = await priceBoardInternals.findPriceChannel(guild, getGuildConfig(guild.id));
-  const priceBoard = await inspectBoard(priceChannel, client.user.id,
-    (message) => JSON.stringify(message.toJSON()).includes(PRICE_BOARD_VERSION));
+  const priceBoard = await inspectBoard(priceChannel, client.user.id, (message) => {
+    const text = publicText(message);
+    return text.includes(PRICE_BOARD_VERSION) && /chat\s*gpt|claude/i.test(text);
+  });
   const data = {
     version: PRICE_BOARD_VERSION,
     catalog: getPriceBoardProducts(getActiveProducts(guild.id))
