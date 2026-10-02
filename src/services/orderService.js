@@ -277,13 +277,14 @@ export function markOrderPaid(orderCode,{amountPaid,transactionId,transactionCon
   const order=getOrderByCode(orderCode);
   if(!order) return null;
 
+  const amount = validateOrderPaymentAmount(order, amountPaid);
+
   // Nếu đơn đã bị CANCELLED, vẫn ghi nhận thanh toán nhưng GIỮ status='CANCELLED'
   // (admin sẽ phải refund thủ công hoặc xóa giao dịch)
   if (order.status === 'CANCELLED') {
     console.warn(`[ORDER] markOrderPaid: đơn ${orderCode} đã bị CANCELLED nhưng nhận tiền — giữ status, cần refund.`);
   }
 
-  const amount=Math.max(ensureAmountValue(amountPaid), ensureAmountValue(order.total_amount));
   const paidAt=nowIso();
   markOrderPaidStmt().run(amount,paidAt,transactionId ?? null,transactionContent ?? null, paidAt, paidAt, orderCode);
   const updated=getOrderByCode(orderCode);
@@ -311,6 +312,8 @@ export function recordOrderPayment({ orderCode, provider, transactionId, amount,
   return db.transaction(() => {
     const order = getOrderByCode(orderCode);
     if (!order) throw new Error('Không tìm thấy đơn hàng.');
+    // Validate even on a replay, before creating financial/delivery side effects.
+    validateOrderPaymentAmount(order, amount);
     const event = recordPaymentEvent({ orderCode, provider, transactionId, amount, content, rawPayload });
     if (event.event && event.event.order_code !== orderCode) {
       throw new Error('Giao dịch thanh toán đã thuộc một đơn hàng khác.');
@@ -323,6 +326,26 @@ export function recordOrderPayment({ orderCode, provider, transactionId, amount,
     queueOrderDelivery(orderCode);
     return { updated, duplicate };
   }).immediate();
+}
+
+export class OrderPaymentError extends Error {
+  constructor(code, message) {
+    super(message);
+    this.name = 'OrderPaymentError';
+    this.code = code;
+  }
+}
+
+export function validateOrderPaymentAmount(order, value) {
+  const amount = typeof value === 'number' || (typeof value === 'string' && value.trim()) ? Number(value) : NaN;
+  const expected = Number(order?.total_amount);
+  if (!Number.isSafeInteger(amount) || amount <= 0 || !Number.isSafeInteger(expected) || expected <= 0) {
+    throw new OrderPaymentError('INVALID_PAYMENT_AMOUNT', 'Số tiền thực nhận không hợp lệ; chưa xác nhận thanh toán.');
+  }
+  if (amount < expected) {
+    throw new OrderPaymentError('INSUFFICIENT_PAYMENT', 'Số tiền thực nhận chưa đủ tổng đơn; chưa xác nhận thanh toán.');
+  }
+  return amount;
 }
 
 export class WalletPaymentError extends Error {

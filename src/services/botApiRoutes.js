@@ -486,6 +486,20 @@ export function registerBotApiRoutes(app) {
     // Tất cả route /api/bot/* require API key
     app.use('/api/bot', corsHandler, requireApiKey);
 
+    app.get('/api/bot/payment-audit/:code', async (req, res) => {
+        const code = String(req.params.code || '').trim().toUpperCase();
+        if (!/^CN_[A-Z0-9_-]{4,40}$/.test(code)) return res.status(400).json({ ok: false, error: 'INVALID_ORDER_CODE' });
+        try {
+            const { auditOrderPayment } = await import('./paymentIncidentAuditService.js');
+            const data = await auditOrderPayment(code);
+            if (!data) return res.status(404).json({ ok: false, error: 'ORDER_NOT_FOUND' });
+            res.set('Cache-Control', 'no-store');
+            return res.json({ ok: true, data });
+        } catch {
+            return res.status(503).json({ ok: false, error: 'AUDIT_UNAVAILABLE' });
+        }
+    });
+
     // ── PRIVATE TRANSCRIPT ARCHIVE ──────────────────────────────
     // This endpoint is server-to-server. The browser only holds the random
     // capability token; BOT_API_KEY remains inside the website runtime.
