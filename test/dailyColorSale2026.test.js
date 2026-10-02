@@ -46,7 +46,7 @@ function campaignClient(messages = []) {
         edits.push({ id, payload: next });
         return result;
       }),
-      delete: async () => { history.delete(id); deletions.push(id); },
+      delete: vi.fn(async () => { history.delete(id); deletions.push(id); }),
     };
     return result;
   }
@@ -268,6 +268,89 @@ describe('Cenar daily Flash Sale story campaign', () => {
     const retried = await publishDailyFlashSale(state.client, { now });
     expect(retried).toMatchObject({ status: 'already_posted', action: 'updated', messageId: dailyId });
     expect(state.sends).toHaveLength(4); // Board only; no second daily message on retry.
+  });
+
+  it('keeps the current revision and removes only same-day bot duplicates', async () => {
+    const now = new Date('2026-10-02T02:00:00Z');
+    const oldId = '1532222222222222221';
+    const currentId = '1532222222222222222';
+    const memberId = '1533333333333333333';
+    const yesterdayId = '1534444444444444444';
+    const unrelatedId = '1535555555555555555';
+    const state = campaignClient([
+      { id: oldId, author: { id: 'bot' }, payload: { marker: dailyFlashSaleMarker(now) } },
+      { id: currentId, author: { id: 'bot' }, payload: { marker: dailyFlashSaleMarker(now), revision: DAILY_COLOR_SALE.revision } },
+      { id: memberId, author: { id: 'member' }, payload: { marker: dailyFlashSaleMarker(now) } },
+      { id: yesterdayId, author: { id: 'bot' }, payload: { marker: dailyFlashSaleMarker(new Date('2026-10-01T02:00:00Z')) } },
+      { id: unrelatedId, author: { id: 'bot' }, payload: { text: 'Unrelated bot announcement' } },
+    ]);
+    const result = await publishDailyFlashSale(state.client, { now });
+    expect(result).toMatchObject({ status: 'already_posted', action: 'deduplicated', messageId: currentId, removedDuplicates: 1 });
+    expect(state.deletions).toEqual([oldId]);
+    expect([...state.history.keys()]).toEqual([currentId, memberId, yesterdayId, unrelatedId]);
+    expect(state.sends).toEqual([]);
+    expect(state.edits).toEqual([]);
+    expect(await publishDailyFlashSale(state.client, { now })).toMatchObject({ action: 'current', removedDuplicates: 0, messageId: currentId });
+  });
+
+  it('chooses a stable canonical ID when multiple current-revision posts exist', async () => {
+    const now = new Date('2026-10-02T02:00:00Z');
+    const newerId = '1532222222222222222';
+    const olderId = '1532222222222222221';
+    const state = campaignClient([newerId, olderId].map((id) => ({
+      id, author: { id: 'bot' }, payload: { marker: dailyFlashSaleMarker(now), revision: DAILY_COLOR_SALE.revision },
+    })));
+    const result = await publishDailyFlashSale(state.client, { now });
+    expect(result).toMatchObject({ messageId: olderId, removedDuplicates: 1 });
+    expect(state.deletions).toEqual([newerId]);
+    expect(state.sends).toEqual([]);
+  });
+
+  it('leaves old duplicates intact until the canonical revision edit succeeds', async () => {
+    const now = new Date('2026-10-02T02:00:00Z');
+    const newerId = '1532222222222222222';
+    const olderId = '1532222222222222221';
+    const state = campaignClient([newerId, olderId].map((id) => ({
+      id, author: { id: 'bot' }, payload: { marker: dailyFlashSaleMarker(now) },
+    })));
+    state.history.get(olderId).edit.mockRejectedValueOnce(new Error('Edit unavailable'));
+    await expect(publishDailyFlashSale(state.client, { now })).rejects.toThrow('Edit unavailable');
+    expect(state.deletions).toEqual([]);
+    const result = await publishDailyFlashSale(state.client, { now });
+    expect(result).toMatchObject({ action: 'updated', messageId: olderId, removedDuplicates: 1 });
+    expect(state.deletions).toEqual([newerId]);
+    expect(state.sends).toHaveLength(4); // New board parts only, even after edit retry.
+  });
+
+  it('does not report a duplicate-cleanup failure as complete and retries without posting or pinging', async () => {
+    const now = new Date('2026-10-02T02:00:00Z');
+    const currentId = '1532222222222222222';
+    const duplicateId = '1532222222222222221';
+    const state = campaignClient([
+      { id: currentId, author: { id: 'bot' }, payload: { marker: dailyFlashSaleMarker(now), revision: DAILY_COLOR_SALE.revision } },
+      { id: duplicateId, author: { id: 'bot' }, payload: { marker: dailyFlashSaleMarker(now) } },
+    ]);
+    state.history.get(duplicateId).delete.mockRejectedValueOnce(new Error('Missing permission'));
+    await expect(publishDailyFlashSale(state.client, { now })).rejects.toMatchObject({ code: 'DAILY_DUPLICATE_CLEANUP_FAILED' });
+    expect(state.history.has(duplicateId)).toBe(true);
+    expect(await publishDailyFlashSale(state.client, { now })).toMatchObject({ messageId: currentId, removedDuplicates: 1 });
+    expect(state.deletions).toEqual([duplicateId]);
+    expect(state.sends).toEqual([]);
+    expect(state.edits).toEqual([]);
+  });
+
+  it('accepts an already deleted duplicate without retrying or losing the canonical post', async () => {
+    const now = new Date('2026-10-02T02:00:00Z');
+    const currentId = '1532222222222222222';
+    const duplicateId = '1532222222222222221';
+    const state = campaignClient([
+      { id: currentId, author: { id: 'bot' }, payload: { marker: dailyFlashSaleMarker(now), revision: DAILY_COLOR_SALE.revision } },
+      { id: duplicateId, author: { id: 'bot' }, payload: { marker: dailyFlashSaleMarker(now) } },
+    ]);
+    state.history.get(duplicateId).delete.mockRejectedValueOnce({ code: 10008 });
+    expect(await publishDailyFlashSale(state.client, { now })).toMatchObject({ status: 'already_posted', messageId: currentId, removedDuplicates: 1 });
+    expect(state.history.has(currentId)).toBe(true);
+    expect(state.sends).toEqual([]);
   });
 
   it('retires old PUBG artwork while preserving the current daily emoji set', () => {

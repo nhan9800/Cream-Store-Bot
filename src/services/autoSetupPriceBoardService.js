@@ -21,6 +21,10 @@ import { formatInternationalPrice, translateCatalogGroup, translateProductName, 
 import { getNitroTrialEligibility, isNitroTrialProduct } from '../constants/nitroTrial.js';
 
 export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.20';
+const publicationStates = new Map();
+export function getPriceBoardPublicationState(guildId) {
+  return publicationStates.get(String(guildId)) || { status: 'not_started' };
+}
 const PRIMARY_GUILD_ID = '1282637033340403754';
 const PRIMARY_PRICE_CHANNEL_ID = '1514606995842273280';
 const OFFICIAL_SPOTIFY_PRODUCT_KEYS = new Set([
@@ -532,11 +536,18 @@ export async function autoSetupPriceBoard(client, { force = false, targetGuildId
   const results = [];
   for (const guild of client.guilds.cache.values()) {
     if (targetGuildId && guild.id !== targetGuildId) continue;
+    publicationStates.set(guild.id, { status: 'in_progress', version: PRICE_BOARD_VERSION, startedAt: new Date().toISOString() });
     try {
       const result = await publishPriceBoard(guild, { force });
+      publicationStates.set(guild.id, { status: result.status, version: PRICE_BOARD_VERSION, finishedAt: new Date().toISOString() });
       results.push(result);
       console.log('[PRICE BOARD]', JSON.stringify(result));
     } catch (error) {
+      const code = String(error.code || 'PUBLISH_FAILED');
+      publicationStates.set(guild.id, {
+        status: 'failed', version: PRICE_BOARD_VERSION, finishedAt: new Date().toISOString(),
+        errorCode: /^[A-Z0-9_]{1,60}$/.test(code) ? code : 'PUBLISH_FAILED',
+      });
       console.error(`[PRICE BOARD] Lỗi guild ${guild.id}:`, error);
       results.push({ guildId: guild.id, status: 'error', error: error.message });
     }

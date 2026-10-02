@@ -1,7 +1,7 @@
 import { getActiveProducts } from './productCatalogService.js';
 import { getGuildConfig } from './guildConfigService.js';
 import { config } from '../config.js';
-import { getPriceBoardProducts, PRICE_BOARD_VERSION, priceBoardInternals } from './autoSetupPriceBoardService.js';
+import { getPriceBoardProducts, PRICE_BOARD_VERSION, priceBoardInternals, getPriceBoardPublicationState } from './autoSetupPriceBoardService.js';
 import {
   DAILY_COLOR_SALE, DAILY_COLOR_SALE_EMOJIS, dailyColorSalePart,
   dailyFlashSaleDateFromMessage, dailySaleDateKey,
@@ -52,6 +52,7 @@ export async function getCatalogPublicationStatus(client, { date = new Date() } 
       || (JSON.stringify(message.toJSON()).includes('product:select') && /chat\s*gpt|claude/i.test(text));
   });
   priceBoard.currentVersionPresent = priceBoard.messages.some((message) => message.text.includes(PRICE_BOARD_VERSION));
+  priceBoard.publication = getPriceBoardPublicationState(guild.id);
   const data = {
     version: PRICE_BOARD_VERSION,
     catalog: getPriceBoardProducts(getActiveProducts(guild.id))

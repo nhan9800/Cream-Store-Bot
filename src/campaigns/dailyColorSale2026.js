@@ -435,6 +435,44 @@ export function dailyFlashSaleDateFromMessage(message, botId = null) {
   return match?.[1] || null;
 }
 
+function chooseDailyFlashSaleMessage(messages, dateKey, botId) {
+  return messages
+    .filter((message) => dailyFlashSaleDateFromMessage(message, botId) === dateKey)
+    .sort((left, right) => {
+      const leftCurrent = serializedMessage(left).includes(DAILY_COLOR_SALE.revision);
+      const rightCurrent = serializedMessage(right).includes(DAILY_COLOR_SALE.revision);
+      if (leftCurrent !== rightCurrent) return leftCurrent ? -1 : 1;
+      // Discord snowflakes are integers stored as strings. Prefer the older
+      // ID among equally current candidates to keep the canonical link stable.
+      const leftId = String(left.id || '');
+      const rightId = String(right.id || '');
+      return leftId.length - rightId.length || leftId.localeCompare(rightId);
+    })[0] || null;
+}
+
+async function removeDuplicateDailyFlashSaleMessages(messages, canonical, dateKey, botId) {
+  let removed = 0;
+  for (const message of messages) {
+    if (String(message.id) === String(canonical.id)
+      || dailyFlashSaleDateFromMessage(message, botId) !== dateKey) continue;
+    try {
+      await message.delete();
+      removed += 1;
+    } catch (error) {
+      if (Number(error?.code) === 10008) { // Already removed on Discord.
+        removed += 1;
+        continue;
+      }
+      // Reject instead of reporting the day complete, so the minute scheduler
+      // retries cleanup while preserving the successfully published chapter.
+      const cleanupError = new Error('Chưa xoá được bài Flash Sale trùng hôm nay; sẽ thử lại sau.');
+      cleanupError.code = 'DAILY_DUPLICATE_CLEANUP_FAILED';
+      throw cleanupError;
+    }
+  }
+  return removed;
+}
+
 function retiredPromotionBoardMessage(message, botId = null) {
   if (!message || (botId && message.author?.id !== botId)) return false;
   const serialized = serializedMessage(message);
@@ -666,13 +704,15 @@ async function publishDailyFlashSaleInternal(client, {
   }
 
   const dateKey = dailySaleDateKey(now);
-  let recentMessages = await fetchAllMessages(channel, 500);
-  const existing = recentMessages.find((message) =>
-    dailyFlashSaleDateFromMessage(message, client.user.id) === dateKey);
+  let recentMessages = await fetchAllMessages(channel);
+  const existing = chooseDailyFlashSaleMessage(recentMessages, dateKey, client.user.id);
   if (existing && serializedMessage(existing).includes(DAILY_COLOR_SALE.revision)) {
+    const removedDuplicates = await removeDuplicateDailyFlashSaleMessages(recentMessages, existing, dateKey, client.user.id);
     return {
       status: 'already_posted',
-      action: 'current',
+      action: removedDuplicates ? 'deduplicated' : 'current',
+      revision: DAILY_COLOR_SALE.revision,
+      removedDuplicates,
       dateKey,
       messageId: existing.id,
       url: `https://discord.com/channels/${guild.id}/${channel.id}/${existing.id}`,
@@ -688,7 +728,7 @@ async function publishDailyFlashSaleInternal(client, {
   });
   const boardMessage = { id: board.messages[0].messageId };
   const emojiResult = { emojis: board.emojis };
-  recentMessages = await fetchAllMessages(channel, 500);
+  recentMessages = await fetchAllMessages(channel);
 
   const payload = buildDailyFlashSaleMessage({
     guildId: guild.id,
@@ -700,6 +740,7 @@ async function publishDailyFlashSaleInternal(client, {
     now,
   });
   const message = existing ? await existing.edit(payload) : await channel.send(payload);
+  const removedDuplicates = await removeDuplicateDailyFlashSaleMessages(recentMessages, message, dateKey, client.user.id);
 
   const todaySerial = Date.parse(`${dateKey}T00:00:00Z`);
   const retentionMs = DAILY_COLOR_SALE.retentionDays * 86_400_000;
@@ -715,6 +756,7 @@ async function publishDailyFlashSaleInternal(client, {
     status: existing ? 'already_posted' : 'posted',
     action: existing ? 'updated' : 'created',
     revision: DAILY_COLOR_SALE.revision,
+    removedDuplicates,
     dateKey,
     weekKey: weeklySaleStory(now).weekKey,
     messageId: message.id,
