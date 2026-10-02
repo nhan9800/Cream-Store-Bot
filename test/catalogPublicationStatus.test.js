@@ -36,6 +36,10 @@ describe('read-only public catalog publication evidence', () => {
   it('returns only catalog terms and marked bot boards, excluding unrelated messages', async () => {
     const boards = [
       message('1', 'bot', `${PRICE_BOARD_VERSION} ChatGPT Plus 485.000đ`),
+      { ...message('5', 'bot', 'ChatGPT Pro 100 1.900.000đ'), toJSON: () => ({
+        components: [{ components: [{ content: 'ChatGPT Pro 100 1.900.000đ' }] },
+          { components: [{ custom_id: 'product:select' }] }],
+      }) },
       message('2', 'customer', `${PRICE_BOARD_VERSION} private-customer-content`),
       message('3', 'bot', 'private-unrelated-content'),
     ];
@@ -49,7 +53,8 @@ describe('read-only public catalog publication evidence', () => {
       guilds: { fetch: vi.fn().mockResolvedValue(guild) } }, { date: new Date('2026-10-02T10:00:00Z') });
     expect(result.catalog[0]).toEqual({ key: 'test-chatgpt', name: 'ChatGPT Plus', price: 485000,
       warranty: 'BH gói', activation: 'OWN_ACCOUNT' });
-    expect(result.priceBoard.messages.map((item) => item.id)).toEqual(['1']);
+    expect(result.priceBoard.messages.map((item) => item.id)).toEqual(['1', '5']);
+    expect(result.priceBoard.currentVersionPresent).toBe(true);
     expect(result.promotion.messages.map((item) => item.id)).toEqual(['4']);
     expect(JSON.stringify(result)).not.toMatch(/private-customer|private-unrelated|never-return/);
   });

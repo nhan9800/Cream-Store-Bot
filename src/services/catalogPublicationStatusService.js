@@ -48,8 +48,10 @@ export async function getCatalogPublicationStatus(client, { date = new Date() } 
   const priceChannel = await priceBoardInternals.findPriceChannel(guild, getGuildConfig(guild.id));
   const priceBoard = await inspectBoard(priceChannel, client.user.id, (message) => {
     const text = publicText(message);
-    return text.includes(PRICE_BOARD_VERSION) && /chat\s*gpt|claude/i.test(text);
+    return text.includes(PRICE_BOARD_VERSION)
+      || (JSON.stringify(message.toJSON()).includes('product:select') && /chat\s*gpt|claude/i.test(text));
   });
+  priceBoard.currentVersionPresent = priceBoard.messages.some((message) => message.text.includes(PRICE_BOARD_VERSION));
   const data = {
     version: PRICE_BOARD_VERSION,
     catalog: getPriceBoardProducts(getActiveProducts(guild.id))
