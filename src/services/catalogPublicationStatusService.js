@@ -8,6 +8,9 @@ import {
 } from '../campaigns/dailyColorSale2026.js';
 import { getPromotionRebuildStatus, isPromotionSaleMessage, promotionRebuildInternals } from './promotionRebuildService.js';
 import { PROMOTION_CATALOG_ROWS, PROMOTION_CATALOG_VERSION } from '../campaigns/promotionCatalog202610.js';
+import { getCoreEmojiPackStatus } from './coreEmojiPackService.js';
+import { getBotInterfaceRefreshStatus } from './botInterfaceRefreshService.js';
+import { getHistoricalBoostPresentationRepairStatus, auditHistoricalBoostPresentation } from './historicalBoostPresentationRepairService.js';
 
 function publicText(message) {
   const json = message.toJSON();
@@ -22,6 +25,16 @@ function publicText(message) {
     for (const field of embed.fields || []) parts.push(field.name || '', field.value || '');
   }
   return parts.filter(Boolean).join('\n');
+}
+
+function publicGalleryMedia(message) {
+  const media=[];
+  const visit=component=>{
+    for (const item of component.items || []) if (item.media?.url) media.push({url:item.media.url,proxyUrl:item.media.proxy_url,width:item.media.width,height:item.media.height});
+    for (const child of component.components || []) visit(child);
+  };
+  for (const component of message.toJSON().components || []) visit(component);
+  return media;
 }
 
 async function inspectBoard(channel, botId, select) {
@@ -64,6 +77,12 @@ export async function getCatalogPublicationStatus(client, { date = new Date() } 
         warranty: product.warranty_policy, activation: product.activation_method,
       })),
     priceBoard,
+    botUi: {
+      icons:getCoreEmojiPackStatus(client),
+      refresh:getBotInterfaceRefreshStatus(client),
+      historicalBoost:getHistoricalBoostPresentationRepairStatus({guildId:guild.id}),
+      historicalBoostAudit:await auditHistoricalBoostPresentation(client,{guildId:guild.id}),
+    },
   };
   if (guild.id === DAILY_COLOR_SALE.guildId) {
     const channel = await guild.channels.fetch(DAILY_COLOR_SALE.promotionChannelId);
@@ -86,6 +105,7 @@ export async function getCatalogPublicationStatus(client, { date = new Date() } 
       })),
       messages: saleMessages.map((message) => ({
         id: message.id, url: message.url, text: publicText(message),
+        media:publicGalleryMedia(message),
         attachments: [...(message.attachments?.values?.() || [])].map((attachment) => ({
           name: attachment.name, url: attachment.url, size: attachment.size,
         })),

@@ -1,10 +1,29 @@
-import { describe, expect, it } from 'vitest';
-import { MessageFlags } from 'discord.js';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { Collection, MessageFlags } from 'discord.js';
+import { CORE_UI_EMOJI_ASSETS } from '../src/config/coreEmojiPack2026.js';
 import {
   TERMS_BOARD,
   buildTermsBoardPayload,
   isTermsBoardMessage,
 } from '../src/campaigns/termsBoard2026.js';
+
+const previousDiscordClient = global.discordClient;
+
+beforeAll(() => {
+  const applicationEmojis = new Collection(CORE_UI_EMOJI_ASSETS.map((asset, index) => {
+    const id = String(1558200000000000000n + BigInt(index));
+    return [id, { id, name: asset.name, animated: false, available: true }];
+  }));
+  const guildEmojis = new Collection(['cenar_price_nitro', 'cenar_yt_logo'].map((name, index) => {
+    const id = String(1558200000000001000n + BigInt(index));
+    return [id, { id, name, animated: false, available: true }];
+  }));
+  global.discordClient = {
+    guilds: { cache: new Collection([[TERMS_BOARD.guildId, { id: TERMS_BOARD.guildId, emojis: { cache: guildEmojis } }]]) },
+    application: { emojis: { cache: applicationEmojis } },
+  };
+});
+afterAll(() => { global.discordClient = previousDiscordClient; });
 
 function serialize(payload) {
   return JSON.stringify({
@@ -44,7 +63,7 @@ describe('Cenar terms board 2026', () => {
     expect(json).toContain('tài khoản chưa được bảo mật');
     expect(json).toContain('cenar_price_nitro');
     expect(json).toContain('cenar_yt_logo');
-    expect(json).toContain('cenar_warranty_shield');
+    expect(json).toContain('cenar_ui26_shield');
 
     const contents = [];
     const collect = (value) => {

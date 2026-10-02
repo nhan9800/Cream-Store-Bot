@@ -1,5 +1,6 @@
-import { describe, expect, test } from 'vitest';
-import { MessageFlags } from 'discord.js';
+import { afterAll, beforeAll, describe, expect, test } from 'vitest';
+import { Collection, MessageFlags } from 'discord.js';
+import { CORE_UI_EMOJI_ASSETS } from '../src/config/coreEmojiPack2026.js';
 import {
   buildWarrantyApprovedCustomerV2,
   buildWarrantyReviewedStateV2,
@@ -9,6 +10,18 @@ import { STORE_ONE_GUILD_ID } from '../src/utils/locale.js';
 import { canTransition } from '../src/services/orderStateMachine.js';
 
 const NATIVE_EMOJI = /[\u{1F000}-\u{1FAFF}\u2600-\u27BF]/u;
+const previousClient = global.discordClient;
+const liveInventory = new Collection(CORE_UI_EMOJI_ASSETS.map((asset, index) => {
+  const id = String(1550000000000000500n + BigInt(index));
+  return [id, { id, name: asset.name, animated: false }];
+}));
+beforeAll(() => {
+  global.discordClient = {
+    guilds: { cache: new Collection([[STORE_ONE_GUILD_ID, { id: STORE_ONE_GUILD_ID, emojis: { cache: new Collection() } }]]) },
+    application: { emojis: { cache: liveInventory } },
+  };
+});
+afterAll(() => { global.discordClient = previousClient; });
 const order = {
   order_code: 'CN_266378',
   customer_id: '123456789012345678',
@@ -41,6 +54,7 @@ describe('Warranty review controls', () => {
     expect(payload.flags & MessageFlags.IsComponentsV2).toBeTruthy();
     expect(buttons.map((button) => button.custom_id)).toEqual(['ytb:approve:42', 'ytb:reject:42']);
     expect(buttons.every((button) => button.emoji?.id)).toBe(true);
+    expect(buttons.every((button) => liveInventory.has(button.emoji.id))).toBe(true);
   });
 
   test('builds a custom-emoji-only customer success notification with generic next steps', () => {

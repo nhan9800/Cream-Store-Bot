@@ -6,6 +6,12 @@ const fixtures = vi.hoisted(() => ({
   revision: 'CENAR-SALE-REVISION:AUTUMN-ATELIER-20261002',
   emojiNames: ['cenar_autumn_202610_ticket', 'cenar_autumn_202610_cup', 'cenar_autumn_202610_spark', 'cenar_autumn_202610_leaves'],
 }));
+vi.mock('../src/services/coreEmojiPackService.js',()=>({getCoreEmojiPackStatus:()=>({status:'ready',expected:57,available:57})}));
+vi.mock('../src/services/botInterfaceRefreshService.js',()=>({getBotInterfaceRefreshStatus:()=>({status:'ready'})}));
+vi.mock('../src/services/historicalBoostPresentationRepairService.js',()=>({
+  getHistoricalBoostPresentationRepairStatus:()=>({status:'DONE',updated:2}),
+  auditHistoricalBoostPresentation:async()=>({historyComplete:true,staleEmojiReferences:0}),
+}));
 vi.mock('../src/config.js', () => ({ config: { guildId: fixtures.guildId } }));
 vi.mock('../src/services/productCatalogService.js', () => ({ getActiveProducts: () => [
   { product_key: 'chatgpt-own-plus', name: 'ChatGPT Plus', price: 485000, warranty_policy: 'BH gói', activation_method: 'OWN_ACCOUNT', credentials: 'private-product-stock' },
@@ -73,6 +79,27 @@ function clientFor(promotionChannel) {
 }
 
 describe('production public promotion evidence', () => {
+  it('projects public gallery banner media even when Discord has no top-level attachments', async () => {
+    const media = { url: 'https://cdn.discordapp.com/attachments/public/banner.png',
+      proxy_url: 'https://media.discordapp.net/attachments/public/banner.png', width: 1600, height: 600,
+      attachment_id: 'private-gallery-extra' };
+    const item = message('1550000000000000012', '', 'bot', {
+      attachments: new Collection(),
+      toJSON: () => ({ components: [{ type: 17, components: [
+        { type: 10, content: `CENAR-STORY-FLASH-SALE-V1-PART-1 ${fixtures.revision}` },
+        { type: 12, items: [{ media }] },
+      ] }] }),
+    });
+    const result = await getCatalogPublicationStatus(clientFor(channel([item])));
+    expect(result.promotion.messages[0].attachments).toEqual([]);
+    expect(result.promotion.messages[0].media).toEqual([{ url: media.url, proxyUrl: media.proxy_url,
+      width: 1600, height: 600 }]);
+    expect(result.botUi).toMatchObject({ icons: { status: 'ready', available: 57 },
+      refresh: { status: 'ready' }, historicalBoost: { status: 'DONE', updated: 2 },
+      historicalBoostAudit: { historyComplete: true, staleEmojiReferences: 0 } });
+    expect(JSON.stringify(result)).not.toContain('private-gallery-extra');
+  });
+
   it('reports current and obsolete sales accurately during a partial cutover and exposes only public terms, artwork and aggregate job status', async () => {
     const banner = { name: 'cenar-autumn-atelier-202610.png', url: 'https://cdn.discordapp.com/attachments/public/new-banner.png', size: 1000, private_owner: 'private-attachment-owner' };
     const promotionChannel = channel([

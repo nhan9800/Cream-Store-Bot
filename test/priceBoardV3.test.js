@@ -1,5 +1,6 @@
-import { beforeAll, describe, expect, it } from 'vitest';
-import { MessageFlags } from 'discord.js';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { Collection, MessageFlags } from 'discord.js';
+import { CORE_UI_EMOJI_ASSETS } from '../src/config/coreEmojiPack2026.js';
 import { DEFAULT_PRODUCT_CATALOG, initDatabase } from '../src/database/db.js';
 import { getActiveProducts } from '../src/services/productCatalogService.js';
 import {
@@ -17,10 +18,26 @@ import {
 const GUILD_ID = '1282637033340403754';
 const NATIVE_EMOJI = /[\u{1F000}-\u{1FAFF}\u2600-\u27BF]/u;
 const RAW_EMOJI_NAME = /(^|[^<a]):[a-zA-Z0-9_]+:/;
+const previousClient = global.discordClient;
+const liveNames = [...CORE_UI_EMOJI_ASSETS.map((asset) => asset.name),
+  'cenar_spotify', 'cenar_price_chatgpt', 'cenar_price_nitro', 'cenar_boost',
+  'cenar_gemini', 'cenar_claude', 'cenar_adobe', 'cenar_capcut', 'cenar_office',
+  'cenar_youtube', 'cenar_netflix', 'cenar_gearup', 'cenar_locket', 'cenar_discord'];
+const liveInventory = new Collection(liveNames.map((name, index) => {
+  const id = String(1550000000000000200n + BigInt(index));
+  return [id, { id, name, animated: false }];
+}));
 
 beforeAll(() => {
   initDatabase();
+  // Discord inventory is part of the publication contract: arbitrary static
+  // snowflakes are not a valid source of artwork after deletion or renaming.
+  global.discordClient = {
+    guilds: { cache: new Collection([[GUILD_ID, { id: GUILD_ID, emojis: { cache: liveInventory } }]]) },
+    application: { emojis: { cache: liveInventory } },
+  };
 });
+afterAll(() => { global.discordClient = previousClient; });
 
 function serialize(payload) {
   return JSON.stringify({
@@ -128,6 +145,7 @@ describe('Cenar price board V3', () => {
     expect(allJson).toContain(PRICE_BOARD_VERSION);
     expect(allJson).toContain('cenar_price_chatgpt');
     expect(allJson).toContain('cenar_price_nitro');
+    expect(allJson).toContain('cenar_ui26_');
     expect(allJson).not.toMatch(NATIVE_EMOJI);
     const visibleText = payloads
       .map(collectTextContent)
@@ -144,6 +162,7 @@ describe('Cenar price board V3', () => {
       expect(row.components[0].type).toBe(3);
       expect(row.components[0].options.length).toBeGreaterThan(0);
       expect(row.components[0].options.every((option) => option.emoji?.id)).toBe(true);
+      expect(row.components[0].options.every((option) => liveInventory.has(option.emoji.id))).toBe(true);
     }
   });
 

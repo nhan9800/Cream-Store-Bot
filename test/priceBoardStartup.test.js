@@ -8,6 +8,9 @@ const state = vi.hoisted(() => ({
   cleanup: vi.fn(),
   otp: vi.fn(),
   destroy: vi.fn(),
+  icons: vi.fn(),
+  iconStatus: vi.fn(),
+  refreshInterfaces: vi.fn(),
 }));
 
 vi.mock('discord.js', () => ({
@@ -45,6 +48,10 @@ vi.mock('../src/services/autoSetupDiscountBoardService.js', () => ({ autoSetupDi
 vi.mock('../src/utils/internationalCommands.js', () => ({ localizeCommandsForInternationalStore: (commands) => commands }));
 vi.mock('../src/services/musicPlayerService.js', () => ({ initializeMusicPlayer: async () => undefined }));
 vi.mock('../src/services/autoSetupPriceBoardService.js', () => ({ autoSetupPriceBoard: state.publish }));
+vi.mock('../src/services/coreEmojiPackService.js', () => ({
+  startCoreEmojiMaintenance: state.icons, getCoreEmojiPackStatus: state.iconStatus,
+}));
+vi.mock('../src/services/botInterfaceRefreshService.js', () => ({ refreshBotInterfaces: state.refreshInterfaces }));
 vi.mock('../src/services/internationalStoreSetupService.js', () => ({ setupInternationalStores: async () => undefined }));
 vi.mock('../src/services/roleService.js', () => ({ syncCustomerActivityRoles: async () => ({}) }));
 vi.mock('../src/services/emojiService.js', () => ({ autoSyncGuildEmojis: () => ({}) }));
@@ -62,6 +69,7 @@ vi.mock('../src/events/guildMemberAdd.js', () => ({ name: 'guildMemberAdd', exec
 vi.mock('../src/events/guildMemberRemove.js', () => ({ name: 'guildMemberRemove', execute: vi.fn() }));
 
 import { buildClient } from '../src/bootstrap.js';
+const previousClient = global.discordClient;
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -69,6 +77,8 @@ beforeEach(() => {
   state.webhook.mockResolvedValue(undefined);
   state.cleanup.mockImplementation(() => new Promise(() => {}));
   state.publish.mockImplementation(() => new Promise(() => {}));
+  state.icons.mockResolvedValue({ status: 'ready' });
+  state.iconStatus.mockReturnValue({ status: 'ready', available: 57, created: 0 });
   vi.stubEnv('ENV_FILE', '.env.test-startup-not-present');
 });
 afterEach(() => {
@@ -76,6 +86,7 @@ afterEach(() => {
   vi.useRealTimers();
   vi.restoreAllMocks();
   vi.unstubAllEnvs();
+  global.discordClient = previousClient;
 });
 
 describe('independent price-board publication at startup', () => {
@@ -89,6 +100,9 @@ describe('independent price-board publication at startup', () => {
     expect(state.scheduler).toHaveBeenCalledWith(client);
     expect(state.otp).toHaveBeenCalledWith(client);
     expect(state.cleanup).toHaveBeenCalledTimes(1);
+    expect(state.icons).toHaveBeenCalledWith(client, {
+      guildId: '1070676180103086132', afterSync: state.refreshInterfaces,
+    });
     expect(finished).toBe(false);
   });
 
@@ -110,6 +124,38 @@ describe('independent price-board publication at startup', () => {
     const client = await buildClient();
     await state.handlers.get('clientReady')(client);
     await vi.waitFor(() => expect(state.publish).toHaveBeenCalledTimes(1));
+    expect(state.iconStatus).toHaveBeenCalledWith(client);
+  });
+
+  it.each(['retry_required', 'in_progress'])('does not run the extra publication when the completed core pass reports %s', async (status) => {
+    state.cleanup.mockResolvedValue({});
+    state.iconStatus.mockReturnValue({ status, available: 0, created: 0 });
+    const client = await buildClient();
+    await state.handlers.get('clientReady')(client);
+    await vi.waitFor(() => expect(state.iconStatus).toHaveBeenCalledWith(client));
+    expect(state.publish).not.toHaveBeenCalled();
+    expect(state.scheduler).toHaveBeenCalledWith(client);
+    expect(state.otp).toHaveBeenCalledWith(client);
+  });
+
+  it('keeps commerce and the ready handler running while icons are pending, then publishes only after verified readiness', async () => {
+    let resolveIcons;
+    state.icons.mockImplementation(() => new Promise((resolve) => { resolveIcons = resolve; }));
+    state.iconStatus.mockReturnValue({ status: 'in_progress', available: 0, created: 0 });
+    state.cleanup.mockResolvedValue({});
+    state.publish.mockResolvedValue([]);
+    const client = await buildClient();
+    await state.handlers.get('clientReady')(client);
+    expect(state.icons).toHaveBeenCalledTimes(1);
+    expect(state.scheduler).toHaveBeenCalledWith(client);
+    expect(state.otp).toHaveBeenCalledWith(client);
+    expect(state.webhook).toHaveBeenCalledWith(client);
+    expect(state.publish).not.toHaveBeenCalled();
+    expect(state.iconStatus).not.toHaveBeenCalled();
+    state.iconStatus.mockReturnValue({ status: 'ready', available: 57, created: 0 });
+    resolveIcons({ status: 'ready' });
+    await vi.waitFor(() => expect(state.publish).toHaveBeenCalledTimes(1));
+    expect(state.iconStatus).toHaveBeenCalledWith(client);
   });
 
   it('does not publish from a duplicate process that fails to acquire the HTTP port', async () => {
@@ -121,5 +167,6 @@ describe('independent price-board publication at startup', () => {
     expect(state.destroy).toHaveBeenCalledTimes(1);
     expect(state.publish).not.toHaveBeenCalled();
     expect(state.scheduler).not.toHaveBeenCalled();
+    expect(state.icons).not.toHaveBeenCalled();
   });
 });

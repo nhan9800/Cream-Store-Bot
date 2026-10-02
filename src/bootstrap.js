@@ -30,6 +30,9 @@ import { autoSetupDiscountBoard } from './services/autoSetupDiscountBoardService
 import { isInternationalGuild, STORE_ONE_GUILD_ID } from './utils/locale.js';
 import { localizeCommandsForInternationalStore } from './utils/internationalCommands.js';
 import { initializeMusicPlayer } from './services/musicPlayerService.js';
+import { installDiscordEmojiBoundary } from './utils/discordEmojiBoundary.js';
+import { startCoreEmojiMaintenance, getCoreEmojiPackStatus } from './services/coreEmojiPackService.js';
+import { refreshBotInterfaces } from './services/botInterfaceRefreshService.js';
 
 export async function buildClient() {
   initDatabase();
@@ -69,6 +72,7 @@ export async function buildClient() {
   const commands = await loadCommands();
   const client = new Client(getClientOptions());
   global.discordClient = client;
+  installDiscordEmojiBoundary(client);
 
   // Music is intentionally isolated: extractor/FFmpeg failure must never stop
   // commerce, wallet, ticket or warranty services from starting.
@@ -100,11 +104,19 @@ export async function buildClient() {
     startScheduler(readyClient);
     startOtpAutoCheck(readyClient);
 
+    // Restore the owned application icon set independently of slow optional
+    // setup. Partial uploads/Discord failures retry; commerce stays available.
+    const iconSetup=startCoreEmojiMaintenance(readyClient,{guildId:config.guildId,afterSync:refreshBotInterfaces});
+
     // Start publication as soon as this process owns the HTTP port. It must
     // not wait for optional marketing, admin or warranty Discord operations,
     // and a slow/failing publication must not block commerce startup either.
     void import('./services/autoSetupPriceBoardService.js')
-      .then(({ autoSetupPriceBoard }) => autoSetupPriceBoard(readyClient))
+      .then(async ({ autoSetupPriceBoard }) => {
+        await iconSetup;
+        if (getCoreEmojiPackStatus(readyClient).status!=='ready') return;
+        return autoSetupPriceBoard(readyClient,{targetGuildId:config.guildId});
+      })
       .catch((error) => {
         const code = String(error?.code || error?.status || error?.name || 'PUBLICATION_FAILED')
           .replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 40);

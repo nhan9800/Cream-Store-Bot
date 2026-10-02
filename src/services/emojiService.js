@@ -7,6 +7,7 @@
  */
 
 import { db, nowIso } from '../database/db.js';
+import { CORE_UI_EMOJI_SLOTS } from '../config/coreEmojiPack2026.js';
 
 // ═══════════════════════════════════════════════
 // Định nghĩa các SLOT emoji và fallback mặc định
@@ -333,95 +334,171 @@ export const SLOT_ALIASES = {
   guide_card: ['yt_card', 'cenar_yt_card', 'creditcard']
 };
 
+// Semantic aliases replace historical UI artwork without depending on an
+// emoji snowflake from an old deployment. Product brand logos remain brands.
+export const LEGACY_EMOJI_SLOTS = Object.freeze({
+  cenar_verified: 'status_check', cenar_support: 'panel_support',
+  cenar_staff: 'ticket_staff', cenar_admin: 'admin_order_center',
+  cenar_wallet: 'icon_wallet', cenar_partner: 'panel_partnership',
+  cenar_partner_ok: 'status_check', cenar_ctv: 'ctv_crystal',
+  cenar_cooldown: 'status_loading', cenar_announce: 'icon_announce', cenar_price: 'icon_price',
+  cr_shop: 'icon_store', shop: 'icon_store', verifybadge: 'verify_shield',
+  cr_muahang: 'panel_order', muahang: 'panel_order', cr_carttt: 'icon_cart',
+  cr_pay: 'payment_money', cr_cardd: 'payment_payos', cr_vcb: 'payment_vietqr',
+  cr_tim: 'icon_heart', cr_green: 'icon_green', chamxanh: 'icon_green',
+  cr_voucher: 'icon_ticket', muiten: 'icon_next', '69_arrow': 'icon_next', arrow2: 'icon_next',
+  money: 'payment_money', tsm_fire: 'icon_fire', purple_heart_glow: 'icon_heart_purple',
+  tickgreen: 'status_check', tick_red51: 'status_cross', dotyellow: 'status_warn',
+  redload: 'status_loading', starxoay: 'icon_sparkle', diamond: 'icon_gem',
+  gold: 'icon_gold', sliver: 'icon_silver', bronze: 'icon_bronze',
+  gift: 'icon_gift', user: 'ticket_user', time: 'icon_clock', crown: 'icon_crown', warn: 'status_warn',
+  cenar_sale_gift: 'icon_gift', cenar_34562snoopypencil: 'icon_edit',
+  chatgopete: 'brand_chatgpt', cr_chatgpt: 'brand_chatgpt',
+  cr_adobe: 'brand_adobe', discord_nitro: 'brand_nitro',
+});
+
+function normalizedEmojiName(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+export function getCanonicalEmojiSlot(value) {
+  const name = normalizedEmojiName(value);
+  if (EMOJI_SLOTS[name]) return name;
+  if (LEGACY_EMOJI_SLOTS[name]) return LEGACY_EMOJI_SLOTS[name];
+  const unprefixed = name.replace(/^cenar_/, '');
+  if (EMOJI_SLOTS[unprefixed]) return unprefixed;
+  if (LEGACY_EMOJI_SLOTS[unprefixed]) return LEGACY_EMOJI_SLOTS[unprefixed];
+  return Object.entries(SLOT_ALIASES).find(([slot, aliases]) => (
+    slot === name || aliases.some((alias) => [name, unprefixed].includes(normalizedEmojiName(alias)))
+  ))?.[0] || null;
+}
+
+function emojiSources(guildId, client, allowAnyGuild = false) {
+  const sources = [];
+  const guild = guildId ? client?.guilds?.cache?.get?.(String(guildId)) : null;
+  if (guild?.emojis?.cache) sources.push(guild.emojis.cache);
+  if (allowAnyGuild && !guildId) {
+    for (const knownGuild of client?.guilds?.cache?.values?.() || []) {
+      if (knownGuild.emojis?.cache) sources.push(knownGuild.emojis.cache);
+    }
+  }
+  if (client?.application?.emojis?.cache) sources.push(client.application.emojis.cache);
+  return sources;
+}
+
+function asLiveMention(emoji) {
+  if (!emoji || emoji.available === false || !/^\d{15,22}$/.test(String(emoji.id || ''))
+    || !/^[a-zA-Z0-9_]{1,32}$/.test(String(emoji.name || ''))) return '';
+  return `<${emoji.animated ? 'a' : ''}:${emoji.name}:${emoji.id}>`;
+}
+
+/** Only current target-guild or application inventory can verify a mention. */
+export function resolveVerifiedCustomEmoji(guildId, value, {
+  client = global.discordClient, allowAnyGuild = false,
+} = {}) {
+  const sources = emojiSources(guildId, client, allowAnyGuild);
+  const raw = typeof value === 'string' ? value.trim() : '';
+  const parsed = parseDiscordEmoji(raw);
+  const id = parsed?.id || (typeof value === 'object' && value ? String(value.id || '') : /^\d{15,22}$/.test(raw) ? raw : '');
+  if (id) {
+    for (const source of sources) {
+      const resolved = asLiveMention(source.get?.(id));
+      if (resolved) return resolved;
+    }
+    return '';
+  }
+  const name = raw.match(/^:([a-zA-Z0-9_]+):$/)?.[1] || raw;
+  if (!/^[a-zA-Z0-9_]{1,32}$/.test(name)) return '';
+  for (const source of sources) {
+    for (const emoji of source.values?.() || []) {
+      if (normalizedEmojiName(emoji.name) === normalizedEmojiName(name)) {
+        const resolved = asLiveMention(emoji);
+        if (resolved) return resolved;
+      }
+    }
+  }
+  return '';
+}
+
+function clientForGuild(guild) {
+  const client = guild.client || global.discordClient;
+  if (client?.guilds?.cache?.has?.(guild.id)) return client;
+  return { guilds: { cache: new Map([[guild.id, guild]]) }, application: client?.application };
+}
+
+function slotNameCandidates(slot) {
+  const names = [slot, ...(SLOT_ALIASES[slot] || []),
+    ...Object.keys(LEGACY_EMOJI_SLOTS).filter((name) => LEGACY_EMOJI_SLOTS[name] === slot)];
+  return [...new Set(names.flatMap((name) => [name, name.startsWith('cenar_') ? name : `cenar_${name}`]))];
+}
+
+function verifiedSlot(guildId, slot, configured, client = global.discordClient) {
+  const refreshed = resolveVerifiedCustomEmoji(guildId, CORE_UI_EMOJI_SLOTS[slot], { client });
+  if (refreshed) return refreshed;
+  const current = resolveVerifiedCustomEmoji(guildId, configured, { client });
+  if (current) return current;
+  for (const name of slotNameCandidates(slot)) {
+    const resolved = resolveVerifiedCustomEmoji(guildId, name, { client });
+    if (resolved) return resolved;
+  }
+  return '';
+}
+
+function saveEmojiMap(guildId, mapping) {
+  const values = { custom_emojis: JSON.stringify(mapping), now: nowIso(), guild_id: guildId };
+  const result = db.prepare(`UPDATE guild_settings SET custom_emojis = @custom_emojis,
+    updated_at = @now WHERE guild_id = @guild_id`).run(values);
+  if (!result.changes) {
+    db.prepare(`INSERT INTO guild_settings (guild_id, custom_emojis, updated_at, ticket_category_id, order_log_channel_id, feedback_channel_id)
+      VALUES (@guild_id, @custom_emojis, @now, '', '', '')`).run(values);
+  }
+  refreshCache(guildId);
+}
+
+/** Batch bind newly uploaded, verified artwork without modifying commerce. */
+export function applyVerifiedEmojiMappings(guild, mappings) {
+  if (!guild?.id) throw new Error('EMOJI_GUILD_REQUIRED');
+  const current = loadFromDb(guild.id);
+  const client = clientForGuild(guild);
+  const verified = {};
+  for (const [key, candidate] of Object.entries(mappings || {})) {
+    const slot = getCanonicalEmojiSlot(key);
+    if (!slot || !EMOJI_SLOTS[slot]) throw new Error(`UNKNOWN_EMOJI_SLOT:${key}`);
+    const value = resolveVerifiedCustomEmoji(guild.id, candidate, { client });
+    if (!value) throw new Error(`EMOJI_NOT_VERIFIED:${slot}`);
+    verified[slot] = value;
+  }
+  const updatedSlots = Object.keys(verified).filter((slot) => current[slot] !== verified[slot]);
+  if (updatedSlots.length) saveEmojiMap(guild.id, { ...current, ...verified });
+  return { syncedCount: updatedSlots.length, updatedSlots };
+}
+
 /**
  * Tự động đồng bộ các emoji từ server Discord vào các slot cấu hình
  * @param {import('discord.js').Guild} guild
  * @returns {{ syncedCount: number, updatedSlots: string[] }}
  */
-export function autoSyncGuildEmojis(guild) {
+export function autoSyncGuildEmojis(guild, { pruneStale = false } = {}) {
   if (!guild) return { syncedCount: 0, updatedSlots: [] };
-  
+
   const current = loadFromDb(guild.id);
-  let changed = false;
+  const client = clientForGuild(guild);
   const updatedSlots = [];
-
-  const guildEmojisMap = new Map();
-  guild.emojis.cache.forEach(emoji => {
-    guildEmojisMap.set(emoji.name.toLowerCase(), emoji);
-  });
-
-  for (const [slot, meta] of Object.entries(EMOJI_SLOTS)) {
-    const rawNames = [slot, ...(SLOT_ALIASES[slot] || [])];
-    const potentialNames = [...new Set(rawNames.flatMap((name) => [
-      name,
-      name.startsWith('cenar_') ? name : `cenar_${name}`,
-    ]))];
-    let matchedEmoji = null;
-    for (const name of potentialNames) {
-      const cleanName = name.toLowerCase();
-      if (guildEmojisMap.has(cleanName)) {
-        matchedEmoji = guildEmojisMap.get(cleanName);
-        break;
-      }
-    }
-
-    if (matchedEmoji) {
-      const emojiString = matchedEmoji.animated 
-        ? `<a:${matchedEmoji.name}:${matchedEmoji.id}>` 
-        : `<:${matchedEmoji.name}:${matchedEmoji.id}>`;
-      
-      const currentVal = current[slot];
-      let shouldUpdate = false;
-
-      if (!currentVal) {
-        shouldUpdate = true;
-      } else {
-        const parsed = parseDiscordEmoji(currentVal);
-        if (parsed && parsed.id) {
-          if (!guild.emojis.cache.has(parsed.id)) {
-            shouldUpdate = true;
-          } else {
-            const oldEmoji = guild.emojis.cache.get(parsed.id);
-            const isMatchingAlias = potentialNames.map(n => n.toLowerCase()).includes(oldEmoji.name.toLowerCase());
-            if (
-              oldEmoji.name !== parsed.name
-              || (isMatchingAlias && oldEmoji.id !== matchedEmoji.id)
-            ) {
-              shouldUpdate = true;
-            }
-          }
-        } else {
-          shouldUpdate = true;
-        }
-      }
-
-      if (shouldUpdate) {
-        current[slot] = emojiString;
-        changed = true;
-        updatedSlots.push(slot);
-      }
+  const removedSlots = [];
+  for (const slot of Object.keys(EMOJI_SLOTS)) {
+    const live = verifiedSlot(guild.id, slot, current[slot], client);
+    if (live && live !== current[slot]) {
+      current[slot] = live;
+      updatedSlots.push(slot);
+    } else if (!live && current[slot] && pruneStale) {
+      delete current[slot];
+      removedSlots.push(slot);
     }
   }
-
-  if (changed) {
-    const now = nowIso();
-    const result = db.prepare(`
-      UPDATE guild_settings
-      SET custom_emojis = @custom_emojis, updated_at = @now
-      WHERE guild_id = @guild_id
-    `).run({ custom_emojis: JSON.stringify(current), now, guild_id: guild.id });
-
-    if (result.changes === 0) {
-      db.prepare(`
-        INSERT INTO guild_settings (guild_id, custom_emojis, updated_at, ticket_category_id, order_log_channel_id, feedback_channel_id)
-        VALUES (@guild_id, @custom_emojis, @now, '', '', '')
-      `).run({ guild_id: guild.id, custom_emojis: JSON.stringify(current), now });
-    }
-
-    refreshCache(guild.id);
-  }
-
-  return { syncedCount: updatedSlots.length, updatedSlots };
+  // Pruning requires a successful inventory fetch. A temporary Discord fetch
+  // failure must not erase an admin's mapping.
+  if (updatedSlots.length || removedSlots.length) saveEmojiMap(guild.id, current);
+  return { syncedCount: updatedSlots.length, updatedSlots, removedSlots };
 }
 
 // ═══════════════════════════════════════════════
@@ -433,7 +510,8 @@ function loadFromDb(guildId) {
   try {
     const row = db.prepare(`SELECT custom_emojis FROM guild_settings WHERE guild_id = ?`).get(guildId);
     if (row?.custom_emojis) {
-      return JSON.parse(row.custom_emojis);
+      const parsed = JSON.parse(row.custom_emojis);
+      return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? parsed : {};
     }
   } catch {}
   return {};
@@ -456,8 +534,9 @@ function refreshCache(guildId) {
  */
 export function getEmoji(guildId, slot) {
   if (!emojiCache.has(guildId)) refreshCache(guildId);
-  const value = emojiCache.get(guildId)?.[slot] || '';
-  return parseDiscordEmoji(value)?.formatted || '';
+  const canonical = getCanonicalEmojiSlot(slot);
+  if (!canonical) return resolveVerifiedCustomEmoji(guildId, slot);
+  return verifiedSlot(guildId, canonical, emojiCache.get(guildId)?.[canonical] || '');
 }
 
 /**
@@ -469,7 +548,7 @@ export function getEmojiMap(guildId) {
   const custom = emojiCache.get(guildId) || {};
   const result = {};
   for (const slot of Object.keys(EMOJI_SLOTS)) {
-    result[slot] = custom[slot] || '';
+    result[slot] = verifiedSlot(guildId, slot, custom[slot] || '');
   }
   return result;
 }
@@ -490,7 +569,9 @@ export function setEmoji(guildId, slot, emojiString) {
     if (!parseDiscordEmoji(emojiString)) {
       throw new Error('Chỉ được dùng emoji custom dạng <:ten:id> hoặc <a:ten:id>.');
     }
-    current[slot] = emojiString;
+    const verified = resolveVerifiedCustomEmoji(guildId, emojiString);
+    if (!verified) throw new Error('Emoji không tồn tại trong bộ emoji hiện tại của server hoặc bot.');
+    current[slot] = verified;
   }
 
   const now = nowIso();
@@ -528,7 +609,8 @@ export function resetAllEmojis(guildId) {
  * Trả về { name, id, animated, formatted } hoặc null
  */
 export function parseDiscordEmoji(str) {
-  const match = str?.trim().match(/^<(a?):([a-zA-Z0-9_]+):(\d+)>$/);
+  if (typeof str !== 'string') return null;
+  const match = str.trim().match(/^<(a?):([a-zA-Z0-9_]{1,32}):(\d{15,22})>$/);
   if (!match) return null;
   return {
     animated: match[1] === 'a',
@@ -536,23 +618,6 @@ export function parseDiscordEmoji(str) {
     id: match[3],
     formatted: str.trim(),
   };
-}
-
-/**
- * Check if a string looks like a valid standard Unicode emoji.
- * Rejects plain ASCII text, empty strings, and overly long strings.
- * Discord API only accepts real emoji characters as component emoji names.
- */
-function isValidUnicodeEmoji(str) {
-  if (!str || typeof str !== 'string') return false;
-  // Emoji codepoints are very short (1-8 chars accounting for ZWJ sequences)
-  if (str.length > 14) return false;
-  // If the string is only ASCII letters, digits, underscores, or spaces → NOT an emoji
-  if (/^[a-zA-Z0-9_\s.,!?:;'"()\-]+$/.test(str)) return false;
-  // Must contain at least one character outside basic ASCII (emoji live in higher Unicode planes)
-  // eslint-disable-next-line no-control-regex
-  if (/^[\x00-\x7F]+$/.test(str)) return false;
-  return true;
 }
 
 /**
@@ -565,31 +630,9 @@ function isValidUnicodeEmoji(str) {
  */
 export function resolveSelectMenuEmoji(guildId, emojiStr, fallback = null) {
   try {
-    if (!emojiStr) {
-      return fallback ? resolveSelectMenuEmoji(guildId, fallback, null) : null;
-    }
-
-    // If emojiStr is a slot key, resolve it first
-    let resolvedEmoji = emojiStr;
-    if (EMOJI_SLOTS[emojiStr]) {
-      resolvedEmoji = getEmoji(guildId, emojiStr);
-    }
-
-    const parsed = parseDiscordEmoji(resolvedEmoji);
-    if (parsed) {
-      // If the custom emoji ID is not in the bot's cache, it's invalid/deleted/external.
-      // We must reject it and resolve the fallback to prevent COMPONENT_INVALID_EMOJI API crash.
-      if (global.discordClient && !global.discordClient.emojis.cache.has(parsed.id)) {
-        return fallback ? resolveSelectMenuEmoji(guildId, fallback, null) : null;
-      }
-      return {
-        id: parsed.id,
-        name: parsed.name,
-        animated: parsed.animated,
-      };
-    }
-    // Native Unicode emoji are intentionally disabled by the Cenar UI policy.
-    return fallback ? resolveSelectMenuEmoji(guildId, fallback, null) : null;
+    const parsed = parseDiscordEmoji(resolveLiveCustomEmoji(emojiStr, guildId)
+      || resolveLiveCustomEmoji(fallback, guildId));
+    return parsed ? { id: parsed.id, name: parsed.name, animated: parsed.animated } : null;
   } catch {
     // Any unexpected error → gracefully return null instead of crashing
     return null;
@@ -603,51 +646,50 @@ export function resolveSelectMenuEmoji(guildId, emojiStr, fallback = null) {
  * @returns {string}
  */
 export function resolveProductEmoji(guildId, emojiStr) {
-  if (!emojiStr) return '';
+  return resolveLiveCustomEmoji(emojiStr, guildId);
+}
 
-  const raw = String(emojiStr).trim();
+/** Prefer a current semantic binding, then an actually live old/renamed ID. */
+export function resolveLiveCustomEmoji(candidate, guildId) {
+  if (!candidate) return '';
+  const raw = typeof candidate === 'string' ? candidate.trim() : '';
   const parsed = parseDiscordEmoji(raw);
-  const legacyName = raw.match(/^:([a-zA-Z0-9_]+):$/)?.[1];
-  const lookupName = (parsed?.name || legacyName || raw).toLowerCase();
-  const slot = EMOJI_SLOTS[raw]
-    ? raw
-    : Object.entries(SLOT_ALIASES).find(([slotName, aliases]) => (
-      slotName.toLowerCase() === lookupName
-      || aliases.some((alias) => alias.toLowerCase() === lookupName)
-    ))?.[0];
-
-  const guildCache = global.discordClient?.guilds?.cache.get(guildId)?.emojis?.cache;
-  const globalCache = global.discordClient?.emojis?.cache;
-  const cache = guildCache?.size ? guildCache : globalCache;
-  const formatCached = (emoji) => emoji
-    ? (emoji.animated ? `<a:${emoji.name}:${emoji.id}>` : `<:${emoji.name}:${emoji.id}>`)
-    : '';
-
-  // A full Discord mention is safe only while its ID still exists. If an emoji
-  // was renamed, rebuild the mention with the live name from cache.
-  if (parsed) {
-    const cachedById = cache?.get(parsed.id);
-    if (cachedById) return formatCached(cachedById);
-    if (!cache?.size) return parsed.formatted;
-  }
-
+  const name = parsed?.name || (typeof candidate === 'object' ? candidate.name : raw.match(/^:([a-zA-Z0-9_]+):$/)?.[1] || raw);
+  const slot = getCanonicalEmojiSlot(name);
   if (slot) {
-    const configured = getEmoji(guildId, slot);
-    const configuredParsed = parseDiscordEmoji(configured);
-    if (configuredParsed) {
-      const cachedConfigured = cache?.get(configuredParsed.id);
-      if (cachedConfigured) return formatCached(cachedConfigured);
-      if (!cache?.size) return configuredParsed.formatted;
+    const contexts = guildId ? [guildId] : [...(global.discordClient?.guilds?.cache?.keys?.() || [])];
+    for (const context of contexts) {
+      const current = getEmoji(context, slot);
+      if (current) return current;
     }
   }
+  const direct = resolveVerifiedCustomEmoji(guildId, candidate, { allowAnyGuild: !guildId });
+  if (direct) return direct;
+  // A deleted catalog token may have been renamed by the old normalizer while
+  // retaining a recognizable name. Name recovery also requires live inventory.
+  if (typeof name === 'string' && !parsed && !name.startsWith('cenar_')) {
+    return resolveVerifiedCustomEmoji(guildId, `cenar_${name}`, { allowAnyGuild: !guildId });
+  }
+  return '';
+}
 
-  // Legacy catalog values such as :spotify2: may refer to an emoji that was
-  // later normalized to cenar_spotify2. Resolve either live name when present.
-  const cachedByName = cache?.find?.((emoji) => {
-    const name = String(emoji.name || '').toLowerCase();
-    return name === lookupName || name === `cenar_${lookupName}`;
+export function sanitizeCustomEmojiText(guildId, text, { legacySlots = {} } = {}) {
+  const replaceTokens = (part) => part.replace(/<a?:[a-zA-Z0-9_]+:\d+>|:[a-zA-Z0-9_]+:/g, (token) => {
+    const parsed = parseDiscordEmoji(token);
+    const name = parsed?.name || token.match(/^:([a-zA-Z0-9_]+):$/)?.[1];
+    const explicitSlot = legacySlots[parsed?.id] || legacySlots[name] || legacySlots[normalizedEmojiName(name)];
+    if (!token.startsWith('<') && !explicitSlot && !getCanonicalEmojiSlot(name)) return token;
+    return explicitSlot ? getEmoji(guildId, explicitSlot) : resolveLiveCustomEmoji(token, guildId);
   });
-  return formatCached(cachedByName);
+  // Delivered credentials, examples, timestamps and links are literal data.
+  // Only presentation outside protected spans is normalized; unknown colon
+  // sequences (20:30:15, IPv6 or a password) are not assumed to be emoji.
+  return String(text ?? '').split(/(```[\s\S]*?(?:```|$)|`[^`\n]*`|\|\|[\s\S]*?(?:\|\||$)|https?:\/\/[^\s<>]+)/g)
+    .map((part) => /^(?:`|\|\||https?:\/\/)/.test(part) ? part : replaceTokens(part)).join('');
+}
+
+export function resolveEmojiText(text, guildId) {
+  return sanitizeCustomEmojiText(guildId, text);
 }
 
 /**
@@ -674,7 +716,7 @@ export function formatProductDisplayName(guildId, productName, fallbackResolver 
       || aliases.some((alias) => alias.toLowerCase() === lookupName)
     ))?.[0];
     return resolveProductEmoji(guildId, token)
-      || (slot && typeof fallbackResolver === 'function' ? fallbackResolver(slot) : '')
+      || (slot && typeof fallbackResolver === 'function' ? resolveLiveCustomEmoji(fallbackResolver(slot), guildId) : '')
       || '';
   };
 

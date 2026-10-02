@@ -1,5 +1,6 @@
-import { describe, expect, test } from 'vitest';
-import { MessageFlags } from 'discord.js';
+import { afterAll, beforeAll, describe, expect, test } from 'vitest';
+import { Collection, MessageFlags } from 'discord.js';
+import { CORE_UI_EMOJI_ASSETS } from '../src/config/coreEmojiPack2026.js';
 import {
   buildAdminRenewalReminderV2,
   resolveAdminReminderStage,
@@ -9,6 +10,18 @@ import { STORE_ONE_GUILD_ID } from '../src/utils/locale.js';
 
 const NATIVE_EMOJI = /[\u{1F000}-\u{1FAFF}\u2600-\u27BF]/u;
 const NOW = new Date('2026-08-12T06:00:00.000Z');
+const previousClient = global.discordClient;
+const liveInventory = new Collection(CORE_UI_EMOJI_ASSETS.map((asset, index) => {
+  const id = String(1550000000000000400n + BigInt(index));
+  return [id, { id, name: asset.name, animated: false }];
+}));
+beforeAll(() => {
+  global.discordClient = {
+    guilds: { cache: new Collection([[STORE_ONE_GUILD_ID, { id: STORE_ONE_GUILD_ID, emojis: { cache: new Collection() } }]]) },
+    application: { emojis: { cache: liveInventory } },
+  };
+});
+afterAll(() => { global.discordClient = previousClient; });
 
 function subscription(overrides = {}) {
   return {
@@ -93,6 +106,7 @@ describe('Store 1 admin renewal reminder', () => {
       'https://cenarstore.xyz/admin/subscriptions',
     ]);
     expect(buttons.every((button) => button.emoji?.id)).toBe(true);
+    expect(buttons.every((button) => liveInventory.has(button.emoji.id))).toBe(true);
     expect(payload.allowedMentions).toEqual({
       parse: [],
       roles: ['1282638119497109524'],
