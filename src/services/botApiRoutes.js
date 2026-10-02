@@ -381,12 +381,14 @@ function safeQuery(fn) {
 export const PUBLIC_PRODUCT_COLUMNS = `
     pc.id, pc.guild_id, pc.name, pc.description, pc.price, pc.duration_months,
     pc.service_type, pc.emoji, pc.is_active, pc.sort_order, pc.original_price,
-    pc.product_key, pc.is_featured, pc.image_url, pc.warranty_policy,
+    pc.product_key, pc.is_featured, pc.image_url, pc.warranty_policy, pc.activation_method,
     (
       SELECT COUNT(*)
       FROM account_stock stock
       WHERE stock.status = 'AVAILABLE'
-        AND (LOWER(stock.service_type) = LOWER(pc.name) OR LOWER(stock.service_type) = LOWER(pc.service_type))
+        AND UPPER(COALESCE(pc.activation_method, '')) != 'OWN_ACCOUNT'
+        AND (LOWER(stock.service_type) = LOWER(pc.name)
+          OR (UPPER(pc.service_type) != 'AI' AND LOWER(stock.service_type) = LOWER(pc.service_type)))
     ) AS stock_count,
     COALESCE((
       SELECT SUM(COALESCE(o.quantity, 1))
@@ -485,6 +487,17 @@ export function registerBotApiRoutes(app) {
 
     // Tất cả route /api/bot/* require API key
     app.use('/api/bot', corsHandler, requireApiKey);
+
+    app.get('/api/bot/catalog-publication-status', async (req, res) => {
+        res.set('Cache-Control', 'no-store');
+        try {
+            const { getCatalogPublicationStatus } = await import('./catalogPublicationStatusService.js');
+            const data = await getCatalogPublicationStatus(req.app.locals.discordClient);
+            return res.json({ ok: true, data });
+        } catch {
+            return res.status(503).json({ ok: false, error: 'PUBLICATION_STATUS_UNAVAILABLE' });
+        }
+    });
 
     app.get('/api/bot/payment-audit/:code', async (req, res) => {
         const code = String(req.params.code || '').trim().toUpperCase();

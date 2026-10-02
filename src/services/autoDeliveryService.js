@@ -21,6 +21,42 @@ function deliveryItems(orderCode) {
   return db.prepare('SELECT * FROM order_delivery_items WHERE order_code = ? ORDER BY id').all(orderCode);
 }
 
+function deliveryRouting(order) {
+  const product = db.prepare(`SELECT activation_method, service_type FROM product_catalog
+    WHERE guild_id IN ('WEB', ?) AND LOWER(TRIM(name)) = LOWER(TRIM(?))
+    ORDER BY CASE WHEN guild_id = 'WEB' THEN 0 ELSE 1 END, id LIMIT 1`)
+    .get(order.guild_id, order.product_name);
+  const ai = String(product?.service_type || '').toLowerCase() === 'ai'
+    || String(order.service_type || '').toLowerCase() === 'ai'
+    || /chat\s*gpt|claude|gemini|adobe|capcut|office/i.test(stockName(order.product_name));
+  const canonicalName = stockName(order.product_name).normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd');
+  return {
+    ai,
+    manual: String(product?.activation_method || '').toUpperCase() === 'OWN_ACCOUNT'
+      || (ai && /\bchinh\s+chu\b/.test(canonicalName)),
+  };
+}
+
+function manualFulfillmentError(code) {
+  const error = new Error(code);
+  error.code = code;
+  error.manualFulfillment = true;
+  return error;
+}
+
+function validateReservedAiSkus(order, routing) {
+  if (!routing.ai) return;
+  const exactName = stockName(order.product_name);
+  const reserved = db.prepare(`SELECT stock.service_type FROM order_delivery_items item
+    LEFT JOIN account_stock stock ON stock.id = item.stock_id WHERE item.order_code = ?`)
+    .all(order.order_code);
+  if (reserved.some((item) => stockName(item.service_type) !== exactName)) {
+    // Keep old reservations for staff review; never recycle already sold goods.
+    throw manualFulfillmentError('DELIVERY_SKU_REVIEW_REQUIRED');
+  }
+}
+
 function credentialsOrder(order, credentials) {
   const plaintext = decrypt(credentials);
   if (isEncrypted(plaintext)) throw new Error('STOCK_CREDENTIALS_DECRYPT_FAILED');
@@ -36,7 +72,7 @@ function credentialsOrder(order, credentials) {
 }
 
 // Reserve the entire quantity or nothing. Snapshots stay encrypted across retries.
-function reserveItems(order) {
+function reserveItems(order, routing) {
   const quantity = Number(order.quantity);
   if (!Number.isSafeInteger(quantity) || quantity < 1 || quantity > MAX_AUTO_DELIVERY_QUANTITY) {
     throw new Error('INVALID_QUANTITY');
@@ -44,12 +80,13 @@ function reserveItems(order) {
   const existing = deliveryItems(order.order_code);
   if (existing.length) {
     if (existing.length !== quantity) throw new Error('DELIVERY_QUANTITY_CONFLICT');
+    validateReservedAiSkus(order, routing);
     return existing;
   }
   const exactName = stockName(order.product_name);
   const exactCount = Number(db.prepare(`SELECT COUNT(*) AS total FROM account_stock
     WHERE status = 'AVAILABLE' AND LOWER(service_type) = ?`).get(exactName)?.total || 0);
-  const type = exactCount >= quantity ? exactName : String(order.service_type || '').toLowerCase();
+  const type = routing.ai || exactCount >= quantity ? exactName : String(order.service_type || '').toLowerCase();
   const stock = db.prepare(`SELECT * FROM account_stock WHERE status = 'AVAILABLE'
     AND LOWER(service_type) = ? ORDER BY id LIMIT ?`).all(type, quantity);
   if (stock.length !== quantity) return [];
@@ -75,13 +112,20 @@ export async function deliverPaidOrder(client, orderCode) {
       const order = getOrderByCode(orderCode);
       if (!eligible(order)) return null;
       const now = nowIso();
+      const routing = deliveryRouting(order);
+      if (routing.manual) {
+        db.prepare(`UPDATE order_fulfillments SET status = 'BLOCKED',
+          last_error = 'MANUAL_FULFILLMENT_REQUIRED', lease_token = NULL,
+          lease_until = NULL, updated_at = ? WHERE order_code = ?`).run(now, orderCode);
+        return null;
+      }
       const claimed = db.prepare(`UPDATE order_fulfillments
         SET status = 'SENDING', lease_token = ?, lease_until = ?, attempts = attempts + 1, updated_at = ?
         WHERE order_code = ? AND status IN ('PENDING', 'FAILED', 'WAITING_STOCK', 'SENDING')
           AND retry_at <= ? AND (lease_until IS NULL OR lease_until <= ?)`)
         .run(lease, new Date(Date.now() + LEASE_MS).toISOString(), now, orderCode, now, now);
       if (!claimed.changes) return null;
-      const items = reserveItems(order);
+      const items = reserveItems(order, routing);
       if (!items.length) {
         db.prepare(`UPDATE order_fulfillments SET status = 'WAITING_STOCK', lease_token = NULL,
           lease_until = NULL, last_error = 'INSUFFICIENT_STOCK', retry_at = ? WHERE order_code = ?`)
@@ -95,7 +139,7 @@ export async function deliverPaidOrder(client, orderCode) {
     const retryAt = new Date(Date.now() + Math.min(60, 2 ** Math.min(attempts, 6)) * 60_000).toISOString();
     db.prepare(`UPDATE order_fulfillments SET status = ?, last_error = ?, lease_token = NULL,
       lease_until = NULL, retry_at = ?, updated_at = ? WHERE order_code = ?`)
-      .run(eligible(getOrderByCode(orderCode)) ? 'FAILED' : 'BLOCKED',
+      .run(!error.manualFulfillment && eligible(getOrderByCode(orderCode)) ? 'FAILED' : 'BLOCKED',
         String(error.code || error.message || error.name || 'DELIVERY_FAILED').slice(0, 80),
         retryAt, nowIso(), orderCode);
     console.error(`[AUTO-DELIVERY] ${orderCode}: reservation pending retry (${error.code || error.message || error.name || 'failed'})`);
@@ -106,6 +150,9 @@ export async function deliverPaidOrder(client, orderCode) {
   const renewLease = () => {
     const order = getOrderByCode(orderCode);
     if (!eligible(order)) throw new Error('ORDER_NOT_DELIVERABLE');
+    const routing = deliveryRouting(order);
+    if (routing.manual) throw manualFulfillmentError('MANUAL_FULFILLMENT_REQUIRED');
+    validateReservedAiSkus(order, routing);
     const result = db.prepare(`UPDATE order_fulfillments SET lease_until = ?, updated_at = ?
       WHERE order_code = ? AND lease_token = ? AND status = 'SENDING'`)
       .run(new Date(Date.now() + LEASE_MS).toISOString(), nowIso(), orderCode, lease);
@@ -152,7 +199,7 @@ export async function deliverPaidOrder(client, orderCode) {
     const retryAt = new Date(Date.now() + Math.min(60, 2 ** Math.min(attempts, 6)) * 60_000).toISOString();
     db.prepare(`UPDATE order_fulfillments SET status = ?, last_error = ?, lease_token = NULL,
       lease_until = NULL, retry_at = ?, updated_at = ? WHERE order_code = ? AND lease_token = ?`)
-      .run(eligible(getOrderByCode(orderCode)) ? 'FAILED' : 'BLOCKED',
+      .run(!error.manualFulfillment && eligible(getOrderByCode(orderCode)) ? 'FAILED' : 'BLOCKED',
         String(error.code || error.name || 'DELIVERY_FAILED').slice(0, 80), retryAt, nowIso(), orderCode, lease);
     console.error(`[AUTO-DELIVERY] ${orderCode}: delivery pending retry (${error.code || error.name || 'failed'})`);
     return { delivered: false };

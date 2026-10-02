@@ -135,7 +135,8 @@ describe('Cenar price board V3', () => {
       .replace(/<a?:[A-Za-z0-9_]+:\d+>/g, '');
     expect(visibleText).not.toMatch(RAW_EMOJI_NAME);
     expect(allJson).toContain('https://cenarstore.xyz');
-    expect(allJson).toContain('PUBG Trend Sale đang diễn ra');
+    expect(allJson).toContain('Cenar Studio');
+    expect(allJson).not.toContain('PUBG Trend Sale');
     expect(allJson).toContain('<#1515008584549797979>');
 
     for (const payload of payloads.slice(1)) {
@@ -264,7 +265,7 @@ describe('Cenar price board V3', () => {
     expect(panel).toContain('120.000');
     expect(panel).toContain('3 Tháng');
     expect(panel).toContain('320.000');
-    expect(panel).toContain('PUBG Trend Sale có giá ticket 3 tháng 280.000đ');
+    expect(panel).toContain('Cenar Studio có giá ticket 3 tháng 280.000đ');
     expect(panel).not.toContain('Level 2');
   });
 
@@ -295,12 +296,12 @@ describe('Cenar price board V3', () => {
     expect(panels.join('\n')).not.toContain('YouTube Premium · Đổi Family Mỗi Tháng');
   });
 
-  it('keeps the four ChatGPT packages and publishes the five current Adobe packages everywhere', () => {
+  it('preserves the original ChatGPT packages alongside additions and publishes the five current Adobe packages everywhere', () => {
     const products = getActiveProducts(GUILD_ID);
     const chatgptProducts = products.filter((product) => /chat\s*gpt/i.test(product.name));
     const adobeProducts = products.filter((product) => /adobe/i.test(product.name));
 
-    expect(chatgptProducts).toHaveLength(4);
+    expect(chatgptProducts).toHaveLength(11);
     expect(chatgptProducts.map((product) => product.product_key)).toEqual(expect.arrayContaining([
       AI_CREATIVE_PRICING_UPDATE.productKeys.chatgptNoWarranty,
       AI_CREATIVE_PRICING_UPDATE.productKeys.chatgptAccount,
@@ -314,7 +315,7 @@ describe('Cenar price board V3', () => {
     expect(chatgptProducts.find((product) => (
       product.product_key === AI_CREATIVE_PRICING_UPDATE.productKeys.chatgptBusiness
     ))?.price).toBe(450000);
-    expect(chatgptProducts.find((product) => product.product_key === AI_CREATIVE_PRICING_UPDATE.productKeys.chatgptDirect)?.price).toBe(530000);
+    expect(chatgptProducts.find((product) => product.product_key === AI_CREATIVE_PRICING_UPDATE.productKeys.chatgptDirect)?.price).toBe(500000);
     expect(adobeProducts).toHaveLength(5);
     expect(adobeProducts.map((product) => [
       product.product_key,
@@ -335,7 +336,7 @@ describe('Cenar price board V3', () => {
     expect(adobe4000CreditProducts.every((product) => /reset mỗi tháng/i.test(product.description))).toBe(true);
 
     const payloadJson = buildPriceBoardPayloads(GUILD_ID, {}, products).map(serialize).join('\n');
-    expect(payloadJson).toContain('ChatGPT Plus & Business');
+    expect(payloadJson).toContain('ChatGPT Plus, Pro & Business');
     expect(payloadJson).toContain('180.000');
     expect(payloadJson).toContain('350.000');
     expect(payloadJson).toContain('450.000');
@@ -360,7 +361,7 @@ describe('Cenar price board V3', () => {
     expect(announcement).toContain('180.000');
     expect(announcement).toContain('350.000');
     expect(announcement).toContain('450.000');
-    expect(announcement).toContain('530.000');
+    expect(announcement).toContain('500.000');
     expect(announcement).toContain('thử vận may');
     expect(announcement).toContain('ADOBE CREATIVE CLOUD · 5 LỰA CHỌN');
     for (const price of ['140.000', '170.000', '950.000', '1.400.000', '3.800.000']) {

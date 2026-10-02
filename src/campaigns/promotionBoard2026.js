@@ -1,10 +1,13 @@
 import { db, nowIso } from '../database/db.js';
+import { DAILY_COLOR_SALE } from './dailyColorSale2026.js';
 
 export const PROMOTION_BOARD = Object.freeze({
   guildId: '1282637033340403754',
   channelId: '1515008584549797979',
   status: 'ACTIVE',
-  campaign: 'CENAR-STORY-FLASH-SALE-V1',
+  campaign: DAILY_COLOR_SALE.marker,
+  revision: DAILY_COLOR_SALE.revision,
+  name: DAILY_COLOR_SALE.campaignName,
 });
 
 async function fetchAllMessages(channel, limit = 5000) {

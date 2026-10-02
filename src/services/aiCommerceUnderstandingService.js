@@ -47,7 +47,9 @@ function productMatchesGroup(product, group) {
 }
 
 function extractExplicitRequestedQuantity(content) {
-  const text = normalizeCommerceText(content);
+  // Pro x5 is a catalog package name, not an instruction to buy five copies.
+  // Explicit quantities elsewhere in the request still remain available.
+  const text = normalizeCommerceText(content).replace(/\bpro\s+x\s*5\b/g, 'pro');
   const patterns = [
     /\bso luong\s*(\d{1,2})\b/,
     /\b(?:x|sl)\s*(\d{1,2})\b/,
@@ -65,7 +67,9 @@ export function extractRequestedQuantity(content) {
 }
 
 export function extractRequestedDuration(content) {
-  const text = normalizeCommerceText(content);
+  // Warranty periods are independent of the subscription duration.
+  const text = normalizeCommerceText(content)
+    .replace(/\b(?:bh|bao hanh)\s+(?:trong\s+)?\d{1,3}\s*(?:ngay|day|days)\b/g, ' ');
   const day = text.match(/\b(\d{1,3})\s*(?:ngay|day|days)\b/);
   if (day) return { days: Number(day[1]), months: null };
   const year = text.match(/\b(\d{1,2})\s*(?:nam|year|years)\b/);
