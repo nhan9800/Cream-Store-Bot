@@ -12,8 +12,8 @@ try {
   const ready = new Promise((resolve) => client.once(Events.ClientReady, resolve));
   await client.login(process.env.BOT_TOKEN);
   await ready;
-  const board = await publishDailyColorSale(client, { tagEveryone: true, tagMember: true });
-  const daily = await publishDailyFlashSale(client, { force: true, tagMember: true });
+  const board = await publishDailyColorSale(client, { tagEveryone: false, tagMember: false });
+  const daily = await publishDailyFlashSale(client, { force: true, tagEveryone: true, tagMember: false });
   console.log(JSON.stringify({ board, daily }, null, 2));
 } finally {
   client.destroy();

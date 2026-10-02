@@ -87,5 +87,5 @@ export async function clearPromotionChannel(client) {
 
 export async function publishPromotionBoard(client) {
   const { publishDailyColorSale } = await import('./dailyColorSale2026.js');
-  return publishDailyColorSale(client, { tagEveryone: true, tagMember: true });
+  return publishDailyColorSale(client, { tagEveryone: false, tagMember: false });
 }

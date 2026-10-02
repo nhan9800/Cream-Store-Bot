@@ -277,7 +277,7 @@ export function startScheduler(client) {
     try {
       const promotionDate = dailySaleDateKey(new Date());
       if (promotionDate !== lastDailyFlashSaleDate) {
-        const result = await publishDailyFlashSale(client);
+        const result = await publishDailyFlashSale(client, { tagEveryone: true, tagMember: false });
         if (result.status === 'posted' || result.status === 'already_posted') {
           lastDailyFlashSaleDate = promotionDate;
           console.log(`[DAILY-FLASH-SALE] status=${result.status} date=${result.dateKey} message=${result.messageId}`);

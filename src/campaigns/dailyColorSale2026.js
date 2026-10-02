@@ -325,8 +325,8 @@ export function buildDailyColorSaleMessages({
   guildId = DAILY_COLOR_SALE.guildId,
   E = createEmojiResolver(guildId),
   customEmojis = {},
-  tagEveryone = true,
-  tagMember = true,
+  tagEveryone = false,
+  tagMember = false,
   now = new Date(),
 } = {}) {
   const sections = buildDailyColorSaleSections({ customEmojis, now });
@@ -377,7 +377,7 @@ export async function preparePromotionRebuild(guild, { now = new Date() } = {}) 
   return {
     revision: DAILY_COLOR_SALE.revision,
     boardPayloads: buildDailyColorSaleMessages({ guildId: guild.id, customEmojis: emojis, tagEveryone: false, tagMember: false, now }),
-    buildDailyPayload: (boardId) => buildDailyFlashSaleMessage({ guildId: guild.id, customEmojis: emojis, boardMessageId: boardId, tagMember: false, now }),
+    buildDailyPayload: (boardId) => buildDailyFlashSaleMessage({ guildId: guild.id, customEmojis: emojis, boardMessageId: boardId, tagEveryone: false, tagMember: false, now }),
     saleData: { campaign: DAILY_COLOR_SALE.campaignName, revision: DAILY_COLOR_SALE.revision, rows: PROMOTION_CATALOG_ROWS },
     emojiNames: DAILY_COLOR_SALE_EMOJIS.map((asset) => asset.name),
   };
@@ -396,6 +396,12 @@ function serializedMessage(message) {
 
 export function dailyFlashSaleMarker(date = new Date()) {
   return `${DAILY_COLOR_SALE.dailyMarker}:${dailySaleDateKey(date)}`;
+}
+
+export function dailyFlashSaleNonce(guildId, date = new Date()) {
+  const nonce = `cs${BigInt(guildId).toString(36)}-${dailySaleDateKey(date).replaceAll('-', '')}`;
+  if (nonce.length > 25) throw new Error('Nonce Flash Sale vượt giới hạn Discord.');
+  return nonce;
 }
 
 export function dailyFlashSaleDateFromMessage(message, botId = null) {
@@ -470,7 +476,7 @@ async function fetchAllMessages(channel, limit = 5000) {
 let boardPublishPromise = null;
 let dailyPublishPromise = null;
 
-async function publishDailyColorSaleInternal(client, { tagEveryone = true, tagMember = true, now = new Date() } = {}) {
+async function publishDailyColorSaleInternal(client, { tagEveryone = false, tagMember = false, now = new Date() } = {}) {
   const guild = client.guilds.cache.get(DAILY_COLOR_SALE.guildId)
     || await client.guilds.fetch(DAILY_COLOR_SALE.guildId);
   await Promise.all([guild.channels.fetch(), guild.roles.fetch()]);
@@ -585,7 +591,8 @@ export function buildDailyFlashSaleMessage({
   E = createEmojiResolver(guildId),
   customEmojis = {},
   boardMessageId,
-  tagMember = true,
+  tagEveryone = true,
+  tagMember = false,
   now = new Date(),
 } = {}) {
   if (!/^\d{15,22}$/.test(String(boardMessageId || ''))) {
@@ -603,6 +610,7 @@ export function buildDailyFlashSaleMessage({
   }).format(now);
 
   const storyText = [
+    tagEveryone ? '@everyone' : null,
     tagMember ? `<@&${DAILY_COLOR_SALE.memberRoleId}>` : null,
     `# ${gift} CENAR ATELIER · ${hasCurrentCampaignBanner(now) ? 'CHUYỆN MÙA THU' : 'CHUYỆN THÁNG MỚI'}`,
     `-# THÁNG ${zonedParts(now).month} · ${theme.name.toUpperCase()} · ${dateLabel}`,
@@ -637,7 +645,7 @@ export function buildDailyFlashSaleMessage({
       new ActionRowBuilder().addComponents(orderButton, boardButton, storeButton))],
     flags: MessageFlags.IsComponentsV2,
     allowedMentions: {
-      parse: [],
+      parse: tagEveryone ? ['everyone'] : [],
       roles: tagMember ? [DAILY_COLOR_SALE.memberRoleId] : [],
       users: [],
       repliedUser: false,
@@ -648,7 +656,8 @@ export function buildDailyFlashSaleMessage({
 async function publishDailyFlashSaleInternal(client, {
   now = new Date(),
   force = false,
-  tagMember = true,
+  tagEveryone = true,
+  tagMember = false,
 } = {}) {
   if (!force && !isDailyFlashSaleDue(now)) {
     return { status: 'not_due', dateKey: dailySaleDateKey(now), publishHour: DAILY_COLOR_SALE.publishHour };
@@ -663,9 +672,6 @@ async function publishDailyFlashSaleInternal(client, {
     || !/khuyến-mãi|khuyen-mai/i.test(channel.name)) {
     throw new Error('Kênh khuyến mãi không hợp lệ hoặc không thể gửi bài Flash Sale hằng ngày.');
   }
-  if (tagMember && !guild.roles.cache.has(DAILY_COLOR_SALE.memberRoleId)) {
-    throw new Error(`Không tìm thấy role Cenar Member ${DAILY_COLOR_SALE.memberRoleId}.`);
-  }
   const member = guild.members.me || await guild.members.fetchMe();
   const required = [
     PermissionFlagsBits.ViewChannel,
@@ -674,14 +680,13 @@ async function publishDailyFlashSaleInternal(client, {
     PermissionFlagsBits.ManageMessages,
     PermissionFlagsBits.ManageGuildExpressions,
   ];
-  if (tagMember) required.push(PermissionFlagsBits.MentionEveryone);
   if (!channel.permissionsFor(member)?.has(required)) {
     throw new Error('Bot thiếu quyền gửi bài, quản lý bảng giá, đồng bộ emoji hoặc tag role tại kênh khuyến mãi.');
   }
 
   const dateKey = dailySaleDateKey(now);
   let recentMessages = await fetchAllMessages(channel);
-  const existing = chooseDailyFlashSaleMessage(recentMessages, dateKey, client.user.id);
+  let existing = chooseDailyFlashSaleMessage(recentMessages, dateKey, client.user.id);
   if (existing && serializedMessage(existing).includes(DAILY_COLOR_SALE.revision)) {
     const removedDuplicates = await removeDuplicateDailyFlashSaleMessages(recentMessages, existing, dateKey, client.user.id);
     return {
@@ -695,6 +700,16 @@ async function publishDailyFlashSaleInternal(client, {
     };
   }
 
+  // Only a new daily post can notify. Silent content recovery must keep
+  // working even if the mention permission or old member role changes.
+  if (!existing && (tagEveryone || tagMember)
+    && !channel.permissionsFor(member)?.has(PermissionFlagsBits.MentionEveryone)) {
+    throw new Error('Bot thiếu quyền Mention Everyone để thông báo tại kênh khuyến mãi.');
+  }
+  if (!existing && tagMember && !guild.roles.cache.has(DAILY_COLOR_SALE.memberRoleId)) {
+    throw new Error(`Không tìm thấy role Cenar Member ${DAILY_COLOR_SALE.memberRoleId}.`);
+  }
+
   // Làm mới bảng giá trước bài hằng ngày để tên/màu chiến dịch đổi đúng tháng,
   // tiêu đề câu chuyện đổi đúng tuần và bài mới luôn trỏ đến giá hiện hành.
   const board = await publishDailyColorSale(client, {
@@ -705,6 +720,21 @@ async function publishDailyFlashSaleInternal(client, {
   const boardMessage = { id: board.messages[0].messageId };
   const emojiResult = { emojis: board.emojis };
   recentMessages = await fetchAllMessages(channel);
+  // Refreshing a complete board takes time. A separate publisher may have
+  // posted today's chapter meanwhile; recover it instead of sending/pinging.
+  existing = chooseDailyFlashSaleMessage(recentMessages, dateKey, client.user.id);
+  if (existing && serializedMessage(existing).includes(DAILY_COLOR_SALE.revision)) {
+    const removedDuplicates = await removeDuplicateDailyFlashSaleMessages(recentMessages, existing, dateKey, client.user.id);
+    return {
+      status: 'already_posted',
+      action: removedDuplicates ? 'deduplicated' : 'current',
+      revision: DAILY_COLOR_SALE.revision,
+      removedDuplicates,
+      dateKey,
+      messageId: existing.id,
+      url: `https://discord.com/channels/${guild.id}/${channel.id}/${existing.id}`,
+    };
+  }
 
   const payload = buildDailyFlashSaleMessage({
     guildId: guild.id,
@@ -712,10 +742,18 @@ async function publishDailyFlashSaleInternal(client, {
     boardMessageId: boardMessage.id,
     // A content revision updates today's existing message without sending
     // another notification to members or creating a second daily chapter.
+    tagEveryone: existing ? false : tagEveryone,
     tagMember: existing ? false : tagMember,
     now,
   });
-  const message = existing ? await existing.edit(payload) : await channel.send(payload);
+  // The shared guild/date nonce also protects the smaller cross-process race
+  // between the final history read and Discord accepting the create request.
+  // Edits deliberately omit create-only nonce fields.
+  const message = existing ? await existing.edit(payload) : await channel.send({
+    ...payload,
+    nonce: dailyFlashSaleNonce(guild.id, now),
+    enforceNonce: true,
+  });
   const removedDuplicates = await removeDuplicateDailyFlashSaleMessages(recentMessages, message, dateKey, client.user.id);
 
   const todaySerial = Date.parse(`${dateKey}T00:00:00Z`);
