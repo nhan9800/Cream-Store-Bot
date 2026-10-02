@@ -82,20 +82,6 @@ export async function buildClient() {
     console.log(`[READY] Loaded ${commands.size} slash commands`);
 
     startPresenceRotation(readyClient);
-    if (ownerConfirmedRenewalRepair.cleanupPending && ownerConfirmedRenewalRepair.subscriptionId) {
-      const cleanup = await cleanupAdminRenewalMessagesForRepair(readyClient, {
-        subscriptionId: ownerConfirmedRenewalRepair.subscriptionId,
-        orderCode: ownerConfirmedRenewalRepair.orderCode,
-        channelId: ownerConfirmedRenewalRepair.staleReminder?.channelId,
-      }).catch((error) => ({ scanned: 0, deleted: [], error: error.message }));
-      console.log(`[SUBSCRIPTION-REMINDER-CLEANUP] order=${ownerConfirmedRenewalRepair.orderCode} scanned=${cleanup.scanned || 0} deleted=${cleanup.deleted?.length || 0}${cleanup.error ? ` error=${cleanup.error}` : ''}`);
-      if (!cleanup.error && !cleanup.reason) {
-        markSubscriptionProgressRepairCleanupComplete(ownerConfirmedRepairMigrationId, cleanup.deleted);
-      }
-    }
-    const stalePanelCleanup = await cleanupStaleAdminRenewalPanels(readyClient)
-      .catch((error) => ({ scanned: 0, deleted: [], reset: [], error: error.message }));
-    console.log(`[SUBSCRIPTION-PANEL-SWEEP] scanned=${stalePanelCleanup.scanned || 0} deleted=${stalePanelCleanup.deleted?.length || 0} reset=${stalePanelCleanup.reset?.length || 0}${stalePanelCleanup.error ? ` error=${stalePanelCleanup.error}` : ''}`);
     try {
       await startWebhookServer(readyClient);
     } catch (error) {
@@ -113,6 +99,32 @@ export async function buildClient() {
     // thể gửi reminder trước khi bị cơ chế khóa launcher dừng lại.
     startScheduler(readyClient);
     startOtpAutoCheck(readyClient);
+
+    // Start publication as soon as this process owns the HTTP port. It must
+    // not wait for optional marketing, admin or warranty Discord operations,
+    // and a slow/failing publication must not block commerce startup either.
+    void import('./services/autoSetupPriceBoardService.js')
+      .then(({ autoSetupPriceBoard }) => autoSetupPriceBoard(readyClient))
+      .catch((error) => {
+        const code = String(error?.code || error?.status || error?.name || 'PUBLICATION_FAILED')
+          .replace(/[^A-Za-z0-9_-]/g, '_').slice(0, 40);
+        console.error(`[AUTO-SETUP-PRICE] Không thể khởi động đồng bộ bảng giá: ${code}`);
+      });
+
+    if (ownerConfirmedRenewalRepair.cleanupPending && ownerConfirmedRenewalRepair.subscriptionId) {
+      const cleanup = await cleanupAdminRenewalMessagesForRepair(readyClient, {
+        subscriptionId: ownerConfirmedRenewalRepair.subscriptionId,
+        orderCode: ownerConfirmedRenewalRepair.orderCode,
+        channelId: ownerConfirmedRenewalRepair.staleReminder?.channelId,
+      }).catch((error) => ({ scanned: 0, deleted: [], error: error.message }));
+      console.log(`[SUBSCRIPTION-REMINDER-CLEANUP] order=${ownerConfirmedRenewalRepair.orderCode} scanned=${cleanup.scanned || 0} deleted=${cleanup.deleted?.length || 0}${cleanup.error ? ` error=${cleanup.error}` : ''}`);
+      if (!cleanup.error && !cleanup.reason) {
+        markSubscriptionProgressRepairCleanupComplete(ownerConfirmedRepairMigrationId, cleanup.deleted);
+      }
+    }
+    const stalePanelCleanup = await cleanupStaleAdminRenewalPanels(readyClient)
+      .catch((error) => ({ scanned: 0, deleted: [], reset: [], error: error.message }));
+    console.log(`[SUBSCRIPTION-PANEL-SWEEP] scanned=${stalePanelCleanup.scanned || 0} deleted=${stalePanelCleanup.deleted?.length || 0} reset=${stalePanelCleanup.reset?.length || 0}${stalePanelCleanup.error ? ` error=${stalePanelCleanup.error}` : ''}`);
 
     // Probe Store 1 once per process start so production can distinguish a
     // configured key from a key that Google actually accepts. This never posts
@@ -277,13 +289,6 @@ export async function buildClient() {
     } catch (error) {
       console.error('[YOUTUBE-WARRANTY] Không thể đồng bộ form bảo hành:', error);
     }
-
-    // Tự động setup kênh Bảng Giá
-    import('./services/autoSetupPriceBoardService.js').then(({ autoSetupPriceBoard }) => {
-      autoSetupPriceBoard(readyClient).catch(err => {
-        console.log(`[AUTO-SETUP-PRICE] Lỗi chạy setup bảng giá: ${err.message}`);
-      });
-    }).catch(err => console.error('Failed to import autoSetupPriceBoardService', err));
 
     // Khởi tạo Invite Tracker (Cache link mời)
     import('./services/inviteTrackerService.js').then(({ initInviteCache, handleInviteCreate, handleInviteDelete }) => {
