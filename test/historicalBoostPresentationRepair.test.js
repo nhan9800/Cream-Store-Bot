@@ -149,6 +149,74 @@ describe('Historical Boost presentation repair', () => {
     messages.forEach((message) => expect(message.edit).not.toHaveBeenCalled());
   });
 
+  it('repairs the original lone inline server ID and verifies its dedicated V2 field', async () => {
+    order();
+    const message = historicalMessage();
+    const originalServer = `**Máy chủ lịch sử**\n\`${SERVER}\`\nLink: [Vào Server](https://discord.gg/example)`;
+    message.embeds[0].fields[4].value = originalServer;
+    // A note containing unrelated identity data must not become the server or
+    // customer source when the converted message is verified.
+    message.embeds[0].fields[6].value = 'Ghi chú cũ: ID: `210000000000000099` · Khách: <@210000000000000099>';
+    const before = database.prepare('SELECT * FROM boost_server_orders').all();
+    const client = clientFor([message]);
+    expect(await runHistoricalBoostPresentationRepairPass(client, options())).toMatchObject({ matched: 1, updated: 1, failures: 0 });
+    expect(payloadText(message.edit.mock.calls[0][0])).toContain(originalServer.replace(/\n/g, '\\n'));
+    const audit = await auditHistoricalBoostPresentation(client, options());
+    expect(audit).toMatchObject({ status: 'COMPLETE', historyComplete: true, nativeV2Logs: 1,
+      matchedLogMessages: 1, staleEmojiReferences: 0, unmatchedReasons: {} });
+    expect(database.prepare('SELECT * FROM boost_server_orders').all()).toEqual(before);
+  });
+
+  it('rejects ambiguous, wrong or non-inline fallback server IDs without editing them', async () => {
+    order();
+    const ambiguous = historicalMessage({ id: '210000000000001001' });
+    ambiguous.embeds[0].fields[4].value = `\`${SERVER}\`\n\`210000000000000099\``;
+    const wrong = historicalMessage({ id: '210000000000001002' });
+    wrong.embeds[0].fields[4].value = '`210000000000000099`';
+    const bare = historicalMessage({ id: '210000000000001003' });
+    bare.embeds[0].fields[4].value = SERVER;
+    const client = clientFor([ambiguous, wrong, bare]);
+    expect(await runHistoricalBoostPresentationRepairPass(client, options())).toMatchObject({ matched: 0, updated: 0, failures: 0 });
+    const audit = await auditHistoricalBoostPresentation(client, options());
+    expect(audit.unmatchedReasons).toEqual({ SERVER_ID_AMBIGUOUS: 1, SERVER_MISMATCH: 1, SERVER_ID_MISSING: 1 });
+    expect(audit.malformedOrUnknownSkipped).toBe(3);
+    [ambiguous, wrong, bare].forEach((message) => expect(message.edit).not.toHaveBeenCalled());
+  });
+
+  it('verifies native V2 identity from its server and customer sections, ignoring staff and note IDs', async () => {
+    order();
+    const message = historicalMessage();
+    message.embeds = [];
+    message.flags = 32768;
+    message.components = [{ type: 17, components: [
+      { type: 10, content: '## [BOOST LOG] Đã thanh toán' },
+      { type: 10, content: '**Mã đơn: `BST_123456`**' },
+      { type: 10, content: `### <:fresh_icon_store:210000000000000010> Máy chủ nhận Boost\nServer ID: \`${SERVER}\`` },
+      { type: 10, content: `**Khách hàng:** <@${CUSTOMER}>\n**Xử lý bởi:** <@210000000000000099>` },
+      { type: 10, content: '### Ghi chú xử lý\nID: `210000000000000099`\nKhách: <@210000000000000099>' },
+    ] }];
+    expect(await auditHistoricalBoostPresentation(clientFor([message]), options())).toMatchObject({
+      status: 'COMPLETE', nativeV2Logs: 1, matchedLogMessages: 1, unmatchedReasons: {},
+    });
+    expect(message.edit).not.toHaveBeenCalled();
+  });
+
+  it('rescans under V2 while preserving and counting successful V1 journal records', async () => {
+    order();
+    const old = historicalMessage();
+    await runHistoricalBoostPresentationRepairPass(clientFor([old]), options({ revision: 'BOOST-LOG-UI-20261002-V1' }));
+    const before = database.prepare("SELECT * FROM boost_log_presentation_repairs WHERE revision = 'BOOST-LOG-UI-20261002-V1'").all();
+    const remaining = historicalMessage({ id: '210000000000001002' });
+    remaining.embeds[0].fields[4].value = `\`${SERVER}\``;
+    const client = clientFor([old, remaining]);
+    expect(await runHistoricalBoostPresentationRepairPass(client, options())).toMatchObject({
+      revision: 'BOOST-LOG-UI-20261002-V2', status: 'DONE', scanned: 2, matched: 1, updated: 1,
+    });
+    expect(database.prepare("SELECT * FROM boost_log_presentation_repairs WHERE revision = 'BOOST-LOG-UI-20261002-V1'").all()).toEqual(before);
+    expect(await auditHistoricalBoostPresentation(client, options())).toMatchObject({ matchedLogMessages: 2, journalConfirmedRepairs: 2 });
+    expect(old.edit).toHaveBeenCalledTimes(1);
+  });
+
   it('never follows a configured log channel into a different guild', async () => {
     order();
     const message = historicalMessage();
@@ -260,12 +328,35 @@ describe('Historical Boost presentation repair', () => {
     const unknown = historicalMessage({ id: '210000000000001002', code: 'BST_999999' });
     const result = await auditHistoricalBoostPresentation(clientFor([message, unknown]), options());
     expect(result).toMatchObject({ status: 'PARTIAL', historyComplete: true, matchedLogMessages: 1,
-      legacyEmbedLogs: 1, nativeV2Logs: 0, malformedOrUnknownSkipped: 1 });
+      legacyEmbedLogs: 1, nativeV2Logs: 0, malformedOrUnknownSkipped: 1,
+      unmatchedReasons: { NO_DB_ORDER: 1 } });
+    expect(result.unmatchedStaleEmojiReferencesByReason.NO_DB_ORDER).toBeGreaterThan(0);
     expect(result.staleEmojiReferences).toBeGreaterThan(0);
     expect(message.edit).not.toHaveBeenCalled();
     expect(unknown.edit).not.toHaveBeenCalled();
     expect(database.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE name LIKE 'boost_log_presentation_%'").get().count).toBe(0);
     expect(JSON.stringify(result)).not.toMatch(/BST_|Tên server|Ghi chú|discord\.gg/);
+  });
+
+  it('reports a safe rejection histogram for missing records, guild mismatch and malformed identity', async () => {
+    order();
+    order('BST_654321', OTHER_GUILD);
+    const unknown = historicalMessage({ id: '210000000000001001', code: 'BST_999999' });
+    const otherGuild = historicalMessage({ id: '210000000000001002', code: 'BST_654321' });
+    const missingCustomer = historicalMessage({ id: '210000000000001003' });
+    missingCustomer.embeds[0].fields[1].name = 'Người mua';
+    const ambiguousCode = historicalMessage({ id: '210000000000001004' });
+    ambiguousCode.embeds[0].fields[6].value = 'Đơn tham chiếu BST_111111';
+    const client = clientFor([unknown, otherGuild, missingCustomer, ambiguousCode]);
+    const before = database.prepare('SELECT * FROM boost_server_orders').all();
+    const audit = await auditHistoricalBoostPresentation(client, options());
+    expect(audit.unmatchedReasons).toEqual({ NO_DB_ORDER: 1, ORDER_GUILD_MISMATCH: 1,
+      CUSTOMER_FIELD_MISSING: 1, AMBIGUOUS_ORDER_CODE: 1 });
+    expect(Object.values(audit.unmatchedReasons).reduce((sum, count) => sum + count, 0)).toBe(audit.malformedOrUnknownSkipped);
+    expect(JSON.stringify(audit)).not.toMatch(/BST_|210000000000|Tên server|discord\.gg/);
+    expect(database.prepare('SELECT * FROM boost_server_orders').all()).toEqual(before);
+    expect(database.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE name LIKE 'boost_log_presentation_%'").get().count).toBe(0);
+    [unknown, otherGuild, missingCustomer, ambiguousCode].forEach((message) => expect(message.edit).not.toHaveBeenCalled());
   });
 
   it('does not report a clean full history when the audit reaches its cap or cannot read history', async () => {
