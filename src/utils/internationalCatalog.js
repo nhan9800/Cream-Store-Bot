@@ -6,9 +6,9 @@ const GROUP_COPY = Object.freeze({
   decor_nitro: ['Discord Profile Decor · Nitro Accounts', 'Profile decorations for accounts that already have Nitro.'],
   decor_no_nitro: ['Discord Profile Decor · Non-Nitro Accounts', 'Packages designed for accounts without an active Nitro subscription.'],
   decor_gift: ['Discord Profile Decor · Gift & Combo', 'Delivered as a gift or combo without requesting your password.'],
-  chatgpt: ['ChatGPT Plus', 'Ready-to-use and personal-account plans with clear warranty terms.'],
+  chatgpt: ['ChatGPT Plus, Pro & Business', 'Compare personal-account and supplied-account plans. Subscription-only coverage excludes the account; no-warranty and two-day coverage do not guarantee a full month of account access.'],
   gemini: ['Gemini & Google One', 'Gemini Advanced/Pro plans with the listed Google One storage.'],
-  claude: ['Claude Pro & Claude API', 'Claude Pro accounts and API usage packages are listed separately.'],
+  claude: ['Claude Pro & Claude API', 'Claude Pro x5 supplied accounts last one month with no warranty or full coverage. Claude Pro and API packages are separate; x5 is the shop package name.'],
   adobe: ['Adobe Creative Cloud', 'All Apps, trial duration and device limits are shown per package.'],
   creative_tools: ['CapCut Pro & Microsoft 365', 'Video, productivity and cloud storage tools.'],
   spotify: ['Spotify Premium', 'Ad-free high-quality music and offline playback for the selected duration.'],
@@ -38,6 +38,9 @@ export function translateProductName(value) {
     .replace(/Chính\s*chủ/gi, 'Personal Account')
     .replace(/Cấp\s*Tài\s*Khoản/gi, 'Account Included')
     .replace(/Cấp\s*Acc/gi, 'Account Included')
+    .replace(/Không\s*BH\s*Acc/gi, 'No Account Warranty')
+    .replace(/BH\s*Gói/gi, 'Subscription Warranty')
+    .replace(/BH\s*(\d+)\s*Ngày/gi, (_, count) => `${count} Days of Warranty`)
     .replace(/Full\s*BH/gi, 'Full Warranty')
     .replace(/Không\s*BH/gi, 'No Warranty')
     .replace(/bảo\s*hành/gi, 'Warranty')
@@ -55,6 +58,14 @@ export function translateProductName(value) {
     .replace(/(\d+)\s*ngày/gi, (_, count) => `${count} Day${count === '1' ? '' : 's'}`)
     .replace(/\s+/g, ' ')
     .trim();
+}
+
+export function translateProductWarranty(value) {
+  return String(value || '')
+    .replace(/Bảo hành gói 1 tháng · không bảo hành tài khoản/gi, 'Subscription coverage for 1 month; the account is excluded')
+    .replace(/Không bảo hành \(KBH\) · không cam kết tài khoản duy trì đủ tháng/gi, 'No warranty; a full month of account access is not guaranteed')
+    .replace(/Bảo hành 2 ngày · thời hạn gói danh nghĩa 1 tháng, không cam kết tài khoản duy trì đủ tháng/gi, '2 days of warranty; nominal subscription period is 1 month, with no guarantee of a full month of account access')
+    .replace(/Xác nhận phạm vi bảo hành với shop trước khi mua/gi, 'Confirm warranty coverage with the shop before buying');
 }
 
 export function translateProductDescription(value) {

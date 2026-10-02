@@ -486,6 +486,17 @@ export function registerBotApiRoutes(app) {
     // Tất cả route /api/bot/* require API key
     app.use('/api/bot', corsHandler, requireApiKey);
 
+    app.get('/api/bot/catalog-publication-status', async (req, res) => {
+        res.set('Cache-Control', 'no-store');
+        try {
+            const { getCatalogPublicationStatus } = await import('./catalogPublicationStatusService.js');
+            const data = await getCatalogPublicationStatus(req.app.locals.discordClient);
+            return res.json({ ok: true, data });
+        } catch {
+            return res.status(503).json({ ok: false, error: 'PUBLICATION_STATUS_UNAVAILABLE' });
+        }
+    });
+
     app.get('/api/bot/payment-audit/:code', async (req, res) => {
         const code = String(req.params.code || '').trim().toUpperCase();
         if (!/^CN_[A-Z0-9_-]{4,40}$/.test(code)) return res.status(400).json({ ok: false, error: 'INVALID_ORDER_CODE' });

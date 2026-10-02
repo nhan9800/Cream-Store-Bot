@@ -27,36 +27,46 @@ describe('Daily Color sale campaign', () => {
     for (const price of [
       '85.000đ', '99.000đ', '120.000đ', '250.000đ', '350.000đ', '450.000đ',
       '680.000đ', '830.000đ', '65.000đ', '110.000đ', '280.000đ', '75.000đ',
-      '190.000đ', '200.000đ', '130.000đ', '390.000đ', '79.000đ', '150.000đ',
+      '190.000đ', '200.000đ', '485.000đ', '500.000đ', '2.650.000đ', '4.800.000đ',
+      '12.700.000đ', '1.900.000đ', '2.300.000đ', '2.500.000đ',
       '55.000đ', '290.000đ', '180.000đ', '58.000đ', '185.000đ', '295.000đ', '530.000đ',
     ]) expect(content).toContain(price);
 
     for (const product of [
       'NITRO BOOST LOGIN', 'BOOST SERVER', 'NETFLIX PREMIUM', 'GEMINI PRO',
-      'OFFICE 365', 'CHATGPT PLUS', 'CAPCUT PRO', 'SPOTIFY PREMIUM', 'YOUTUBE PREMIUM',
+      'OFFICE 365', 'CHATGPT · TÀI KHOẢN CHÍNH CHỦ', 'CLAUDE PRO x5',
+      'CAPCUT PRO', 'SPOTIFY PREMIUM', 'YOUTUBE PREMIUM',
     ]) expect(content).toContain(product);
     expect(content).toContain('Mail bất tử');
     expect(content).toContain('Có thể thêm tối đa **05 thành viên**');
-    expect(content).toContain('BH 60 phút');
+    expect(content).toContain('Không bảo hành tài khoản');
+    expect(content).toContain('Cấp acc · bảo hành 02 ngày` — **120.000đ**');
+    expect(content).not.toMatch(/BH 60 phút|ghép Team|file JSON|MOMO PAY/);
     expect(content).not.toContain('CANVA PRO');
   });
 
   it('uses Components V2, custom emoji art and exactly one everyone/member mention', () => {
     const messages = buildDailyColorSaleMessages({ E: emojiResolver, customEmojis });
-    expect(messages).toHaveLength(3);
+    expect(messages).toHaveLength(4);
     messages.forEach((payload, index) => {
       expect(payload.flags & MessageFlags.IsComponentsV2).toBeTruthy();
       expect(payload.allowedMentions.parse).toEqual(index === 0 ? ['everyone'] : []);
       expect(payload.allowedMentions.roles).toEqual(index === 0 ? [DAILY_COLOR_SALE.memberRoleId] : []);
       const json = JSON.stringify(payload);
       expect(json).toContain(`${DAILY_COLOR_SALE.marker}-PART-${index + 1}`);
+      expect(json).toContain(DAILY_COLOR_SALE.revision);
       if (index === 0) {
         expect(json).toContain('@everyone');
         expect(json).toContain(`<@&${DAILY_COLOR_SALE.memberRoleId}>`);
       } else {
         expect(json).not.toContain('@everyone');
+        expect(json).not.toContain(`<@&${DAILY_COLOR_SALE.memberRoleId}>`);
       }
       expect(json).not.toMatch(NATIVE_EMOJI);
+      const text = payload.components[0].toJSON().components
+        .filter((component) => component.type === 10)
+        .map((component) => component.content).join('');
+      expect(text.length).toBeLessThanOrEqual(4000);
     });
     const finalPanel = messages.at(-1).components[0].toJSON();
     expect(finalPanel.components.at(-1).components).toHaveLength(3);
@@ -64,7 +74,9 @@ describe('Daily Color sale campaign', () => {
 
   it('changes the branded theme monthly using Vietnam time', () => {
     expect(dailySaleTheme(new Date('2026-09-29T05:00:00.000Z')).name).toBe('Thành Phố Lên Đèn');
-    expect(dailySaleTheme(new Date('2026-10-01T05:00:00.000Z')).name).toBe('Đêm Hội Sắc Màu');
+    expect(dailySaleTheme(new Date('2026-10-01T05:00:00.000Z')).name).toBe('Bàn Làm Việc Có Gu');
+    expect(dailySaleTheme(new Date('2026-09-30T16:59:00.000Z')).name).toBe('Thành Phố Lên Đèn');
+    expect(dailySaleTheme(new Date('2026-09-30T17:00:00.000Z')).name).toBe('Bàn Làm Việc Có Gu');
   });
 
   it('cleans event-only emoji names and preserves the current Daily Color set', () => {

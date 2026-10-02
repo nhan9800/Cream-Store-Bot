@@ -17,10 +17,10 @@ import { formatCurrency } from '../utils/formatters.js';
 import { fmt, subtext } from '../utils/embedHelpers.js';
 import { config } from '../config.js';
 import { isInternationalGuild } from '../utils/locale.js';
-import { formatInternationalPrice, translateCatalogGroup, translateProductName } from '../utils/internationalCatalog.js';
+import { formatInternationalPrice, translateCatalogGroup, translateProductName, translateProductWarranty } from '../utils/internationalCatalog.js';
 import { getNitroTrialEligibility, isNitroTrialProduct } from '../constants/nitroTrial.js';
 
-export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.19';
+export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.20';
 const PRIMARY_GUILD_ID = '1282637033340403754';
 const PRIMARY_PRICE_CHANNEL_ID = '1514606995842273280';
 const OFFICIAL_SPOTIFY_PRODUCT_KEYS = new Set([
@@ -37,7 +37,7 @@ export const PRICE_GROUPS = [
   },
   {
     key: 'server_boost', titleSlot: 'brand_boost', title: 'Discord Server Boost', accent: 0xEB459E,
-    note: 'Catalog hiện có hai gói 14 Boosts: 1 tháng 120.000đ hoặc 3 tháng 320.000đ. PUBG Trend Sale có giá ticket 3 tháng 280.000đ khi staff xác nhận.',
+    note: 'Catalog hiện có hai gói 14 Boosts: 1 tháng 120.000đ hoặc 3 tháng 320.000đ. Cenar Studio có giá ticket 3 tháng 280.000đ khi staff xác nhận.',
     match: (p) => p.service_type === 'GAME' && /server boost/i.test(p.name),
   },
   {
@@ -56,8 +56,8 @@ export const PRICE_GROUPS = [
     match: (p) => p.service_type === 'decor' && /gift/i.test(p.name),
   },
   {
-    key: 'chatgpt', titleSlot: 'brand_chatgpt', title: 'ChatGPT Plus & Business', accent: 0x10A37F,
-    note: '4 lựa chọn minh bạch: cấp tài khoản không bảo hành, cấp tài khoản full bảo hành, Business add workspace và Plus thanh toán trực tiếp trên tài khoản chính chủ.',
+    key: 'chatgpt', titleSlot: 'brand_chatgpt', title: 'ChatGPT Plus, Pro & Business', accent: 0x10A37F,
+    note: 'Chọn đúng hình thức chính chủ hoặc cấp tài khoản. BH gói không bao gồm BH tài khoản; KBH và BH 2 ngày không cam kết tài khoản duy trì đủ tháng. Đọc phạm vi bảo hành riêng của từng gói.',
     match: (p) => p.service_type === 'AI' && /chat\s*gpt/i.test(p.name),
   },
   {
@@ -67,7 +67,7 @@ export const PRICE_GROUPS = [
   },
   {
     key: 'claude', titleSlot: 'brand_claude', title: 'Claude Pro & Claude API', accent: 0xD97757,
-    note: 'Phân biệt rõ tài khoản Claude Pro và hạn mức Claude API.',
+    note: 'Claude Pro x5 cấp tài khoản 1 tháng có hai lựa chọn KBH hoặc full bảo hành. Claude Pro và Claude API là các gói riêng; x5 là tên gói của shop.',
     match: (p) => p.service_type === 'AI' && /claude/i.test(p.name),
   },
   {
@@ -158,7 +158,7 @@ function getDurationText(product, international = false) {
     if (Number(product.price) === 0) return 'Custom project';
     if (product.service_type === 'decor') return 'Lifetime';
     const dayMatch = productName.match(/(\d+)\s*ngày/i);
-    if (dayMatch && !/giữ\s*mail/i.test(productName)) return `${dayMatch[1]} day${dayMatch[1] === '1' ? '' : 's'}`;
+    if (dayMatch && !/giữ\s*mail|\d+\s*tháng/i.test(productName)) return `${dayMatch[1]} day${dayMatch[1] === '1' ? '' : 's'}`;
     const yearMatch = productName.match(/(\d+)\s*năm/i);
     if (yearMatch) return `${yearMatch[1]} year${yearMatch[1] === '1' ? '' : 's'}`;
     if (['SERVICE', 'service'].includes(product.service_type)) return 'Custom scope';
@@ -168,7 +168,7 @@ function getDurationText(product, international = false) {
   if (Number(product.price) === 0) return 'Theo dự án';
   if (product.service_type === 'decor') return 'Vĩnh viễn';
   const dayMatch = productName.match(/(\d+)\s*ngày/i);
-  if (dayMatch && !/giữ\s*mail/i.test(productName)) return `${dayMatch[1]} ngày`;
+  if (dayMatch && !/giữ\s*mail|\d+\s*tháng/i.test(productName)) return `${dayMatch[1]} ngày`;
   const yearMatch = productName.match(/(\d+)\s*năm/i);
   if (yearMatch) return `${yearMatch[1]} năm`;
   if (['SERVICE', 'service'].includes(product.service_type)) {
@@ -189,7 +189,9 @@ const FULL_WARRANTY_PRODUCT_KEYS = new Set([
   'chatgpt-plus-account-1-month-full-warranty',
   'chatgpt-business-workspace-1-month-full-warranty',
   'chatgpt-plus-direct-payment-1-month-full-warranty',
+  'chatgpt-pro-100-account-1-month-full-warranty',
   'claude-pro-1-month',
+  'claude-pro-x5-account-1-month-full-warranty',
   'gemini-pro-google-one-5tb-12-months-full-warranty',
   'gemini-pro-google-one-5tb-18-months-full-warranty',
   'adobe-creative-cloud-1-month',
@@ -242,7 +244,7 @@ export function buildPricePortalPayload(guildId, guildConfig, panels = []) {
       international ? `# ${E('icon_store')} CENAR GLOBAL • LIVE PRICING` : `# ${E('icon_store')} BẢNG GIÁ CENAR STORE`,
       international ? `> ${E('status_check')} **Live catalog synchronized across Discord and the website.**` : `> ${E('status_check')} **Đồng bộ trực tiếp từ hệ thống sản phẩm đang hoạt động.**`,
       ...(guildId === PRIMARY_GUILD_ID ? [
-        `> ${E('icon_gift')} **PUBG Trend Sale đang diễn ra tại <#1515008584549797979> · giá ưu đãi và điều kiện được xác nhận tại ticket.**`,
+        `> ${E('icon_gift')} **Cenar Studio đang diễn ra tại <#1515008584549797979> · Bàn Làm Việc Có Gu · giá ưu đãi và điều kiện được xác nhận tại ticket.**`,
       ] : []),
     ].join('\n'))
   );
@@ -347,7 +349,7 @@ export function buildPriceGroupPayload(guildId, group, products) {
         ...(fullDurationWarranty ? [
           `> ${E('warranty_shield')} **${international ? 'Warranty' : 'Bảo hành'}:** ${international ? 'Full coverage for the entire service period' : 'Full trong suốt thời gian sử dụng'}`,
         ] : warrantyPolicy ? [
-          `> ${E('warranty_shield')} **${international ? 'Warranty' : 'Bảo hành'}:** ${warrantyPolicy}`,
+          `> ${E('warranty_shield')} **${international ? 'Warranty' : 'Bảo hành'}:** ${international ? translateProductWarranty(warrantyPolicy) : warrantyPolicy}`,
         ] : []),
       ].join('\n'))
     );
@@ -391,8 +393,41 @@ export function buildPriceBoardPayloads(guildId, guildConfig, products = getActi
   const panels = groupPriceProducts(getPriceBoardProducts(products));
   return [
     buildPricePortalPayload(guildId, guildConfig, panels),
-    ...panels.map(({ group, items }) => buildPriceGroupPayload(guildId, group, items)),
+    ...panels.flatMap(({ group, items }) => buildPriceGroupPages(guildId, group, items)),
   ];
+}
+
+function isPricePayloadWithinLimits(payload) {
+  let textLength = 0;
+  let componentCount = 0;
+  const visit = (component) => {
+    componentCount += 1;
+    textLength += typeof component.content === 'string' ? component.content.length : 0;
+    for (const child of component.components || []) visit(child);
+  };
+  for (const component of payload.components) visit(component.toJSON());
+  // Leave room below Discord's aggregate text and recursive component limits.
+  return textLength <= 3800 && componentCount <= 38;
+}
+
+function buildPriceGroupPages(guildId, group, products) {
+  const pages = [];
+  let current = [];
+  for (const product of products) {
+    const candidate = [...current, product];
+    if (current.length && (candidate.length > 25
+      || !isPricePayloadWithinLimits(buildPriceGroupPayload(guildId, group, candidate)))) {
+      pages.push(buildPriceGroupPayload(guildId, group, current));
+      current = [product];
+    } else {
+      current = candidate;
+    }
+    if (!isPricePayloadWithinLimits(buildPriceGroupPayload(guildId, group, current))) {
+      throw new Error(`Sản phẩm ${product.id} vượt giới hạn hiển thị bảng giá Discord.`);
+    }
+  }
+  if (current.length) pages.push(buildPriceGroupPayload(guildId, group, current));
+  return pages;
 }
 
 async function findPriceChannel(guild, guildConfig) {
