@@ -23,6 +23,12 @@ generic staff/system actions and price edits. It does not return customer or
 staff identifiers, account credentials, bank details, transaction identifiers
 or raw payment payloads. It makes no database or payment mutations.
 
+For a wallet purchase, the projection also reports the selected debit, ledger
+balance before/after it, reconciliation with the current stored balance and a
+bounded recent activity/topup receipt view. A bank topup can be smaller than a
+purchase when prior wallet credit covers the difference. Missing historical
+ledger entries must not be treated as proof of an unpaid purchase.
+
 The `Read-only payment incident audit` workflow accepts an order code and a
 base64 DER RSA public key of at least 2048 bits. It uses operational GitHub
 secrets to call the endpoint and encrypts the result with AES-256-GCM and
