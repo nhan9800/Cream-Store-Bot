@@ -159,7 +159,7 @@ export async function buildClient() {
         });
     }
 
-    // Đồng bộ bảng giá Flash Sale theo câu chuyện tháng/tuần; chỉ bảng mới mới ping.
+    // Đồng bộ bảng giá im lặng; bài hằng ngày mới thông báo @everyone.
     if (String(config.guildId) === STORE_ONE_GUILD_ID) {
       try {
         const { publishPromotionBoard } = await import('./campaigns/promotionBoard2026.js');

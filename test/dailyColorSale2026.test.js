@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { Collection, MessageFlags } from 'discord.js';
+import { Collection, MessageFlags, MessagePayload, PermissionFlagsBits } from 'discord.js';
 import { rebuildPromotionCampaign } from '../src/services/promotionRebuildService.js';
 import {
   DAILY_COLOR_SALE,
@@ -11,6 +11,7 @@ import {
   buildDailyFlashSaleMessage,
   dailyFlashSaleDateFromMessage,
   dailyFlashSaleMarker,
+  dailyFlashSaleNonce,
   dailySaleDateKey,
   dailySaleTheme,
   isDailyFlashSaleDue,
@@ -220,7 +221,7 @@ describe('Cenar daily Flash Sale story campaign', () => {
     expect(isDailyFlashSaleDue(new Date('2026-09-29T02:00:00.000Z'))).toBe(true);
   });
 
-  it('builds one role-only daily post with an exact date marker', () => {
+  it('builds one everyone-only daily post with an exact date marker', () => {
     const now = new Date('2026-09-29T02:00:00.000Z');
     const payload = buildDailyFlashSaleMessage({
       E: emojiResolver,
@@ -232,10 +233,148 @@ describe('Cenar daily Flash Sale story campaign', () => {
 
     expect(json).toContain(dailyFlashSaleMarker(now));
     expect(json).toContain('Chương 2/7');
-    expect(payload.allowedMentions.parse).toEqual([]);
-    expect(payload.allowedMentions.roles).toEqual([DAILY_COLOR_SALE.memberRoleId]);
+    expect(payload.allowedMentions.parse).toEqual(['everyone']);
+    expect(payload.allowedMentions.roles).toEqual([]);
+    expect(json.match(/@everyone/g)).toHaveLength(1);
+    expect(json).not.toContain(`<@&${DAILY_COLOR_SALE.memberRoleId}>`);
     expect(dailyFlashSaleDateFromMessage({ author: { id: 'bot' }, payload }, 'bot')).toBe('2026-09-29');
     expect(dailyFlashSaleDateFromMessage({ author: { id: 'other' }, payload }, 'bot')).toBeNull();
+  });
+
+  it('allows an explicitly silent daily payload and optional member-only manual payload', () => {
+    const common = { E: emojiResolver, customEmojis, boardMessageId: '1531111111111111111' };
+    const silent = buildDailyFlashSaleMessage({ ...common, tagEveryone: false });
+    expect(silent.allowedMentions).toMatchObject({ parse: [], roles: [], users: [] });
+    expect(JSON.stringify(silent)).not.toMatch(/@everyone|<@&/);
+    const member = buildDailyFlashSaleMessage({ ...common, tagEveryone: false, tagMember: true });
+    expect(member.allowedMentions).toMatchObject({ parse: [], roles: [DAILY_COLOR_SALE.memberRoleId] });
+    expect(JSON.stringify(member)).not.toContain('@everyone');
+  });
+
+  it('notifies everyone only on a fresh daily chapter, leaving all board parts and restart silent', async () => {
+    const now = new Date('2026-10-03T02:00:00Z');
+    const state = campaignClient();
+    [...state.client.guilds.cache.values()][0].roles.cache.clear();
+    const [first, concurrent] = await Promise.all([
+      publishDailyFlashSale(state.client, { now }),
+      publishDailyFlashSale(state.client, { now }),
+    ]);
+    expect(first).toMatchObject({ status: 'posted', action: 'created' });
+    expect(concurrent.messageId).toBe(first.messageId);
+    const dailyPosts = state.sends.filter((message) => dailyFlashSaleDateFromMessage(message, 'bot'));
+    expect(dailyPosts).toHaveLength(1);
+    expect(dailyPosts[0].payload.allowedMentions).toMatchObject({ parse: ['everyone'], roles: [], users: [] });
+    expect(dailyPosts[0].payload.nonce).toBe(dailyFlashSaleNonce(DAILY_COLOR_SALE.guildId, now));
+    expect(dailyPosts[0].payload.enforceNonce).toBe(true);
+    expect(JSON.stringify(dailyPosts[0].payload).match(/@everyone/g)).toHaveLength(1);
+    const boardPosts = state.sends.filter((message) => dailyColorSalePart(message, 'bot'));
+    expect(boardPosts).toHaveLength(buildDailyColorSaleMessages({ now }).length);
+    for (const board of boardPosts) {
+      expect(board.payload.allowedMentions).toMatchObject({ parse: [], roles: [] });
+      expect(JSON.stringify(board.payload)).not.toMatch(/@everyone|<@&/);
+    }
+    const sendCount = state.sends.length;
+    expect(await publishDailyFlashSale(state.client, { now })).toMatchObject({ status: 'already_posted', messageId: first.messageId });
+    expect(state.sends).toHaveLength(sendCount);
+    expect(state.edits).toEqual([]);
+  });
+
+  it('rechecks history after the board refresh and keeps a concurrently posted current chapter', async () => {
+    const now = new Date('2026-10-03T02:00:00Z');
+    const state = campaignClient();
+    const channel = await [...state.client.guilds.cache.values()][0].channels.fetch(DAILY_COLOR_SALE.promotionChannelId);
+    const concurrentId = '1532222222222222222';
+    const concurrent = {
+      id: concurrentId, author: { id: 'bot' },
+      payload: { marker: dailyFlashSaleMarker(now), revision: DAILY_COLOR_SALE.revision },
+      edit: vi.fn(), delete: vi.fn(),
+    };
+    let fetches = 0;
+    channel.messages.fetch = async () => {
+      fetches += 1;
+      // Daily first read, board read, then daily's second read.
+      if (fetches === 3) state.history.set(concurrentId, concurrent);
+      return new Collection(state.history);
+    };
+    expect(await publishDailyFlashSale(state.client, { now })).toMatchObject({ status: 'already_posted', messageId: concurrentId });
+    expect(state.sends).toHaveLength(buildDailyColorSaleMessages({ now }).length);
+    expect(state.sends.some((message) => dailyFlashSaleDateFromMessage(message, 'bot'))).toBe(false);
+    expect(concurrent.edit).not.toHaveBeenCalled();
+  });
+
+  it('silently upgrades an old-revision chapter appearing during the board refresh', async () => {
+    const now = new Date('2026-10-03T02:00:00Z');
+    const state = campaignClient();
+    const channel = await [...state.client.guilds.cache.values()][0].channels.fetch(DAILY_COLOR_SALE.promotionChannelId);
+    const concurrentId = '1532222222222222222';
+    const concurrent = { id: concurrentId, author: { id: 'bot' }, payload: { marker: dailyFlashSaleMarker(now) }, edit: vi.fn(), delete: vi.fn() };
+    concurrent.edit.mockImplementation(async (payload) => { concurrent.payload = payload; return concurrent; });
+    let fetches = 0;
+    channel.messages.fetch = async () => {
+      if (++fetches === 3) state.history.set(concurrentId, concurrent);
+      return new Collection(state.history);
+    };
+    expect(await publishDailyFlashSale(state.client, { now })).toMatchObject({ status: 'already_posted', action: 'updated', messageId: concurrentId });
+    expect(concurrent.edit).toHaveBeenCalledOnce();
+    const edited = concurrent.edit.mock.calls[0][0];
+    expect(edited.allowedMentions).toMatchObject({ parse: [], roles: [] });
+    expect(edited.nonce).toBeUndefined();
+    expect(edited.enforceNonce).toBeUndefined();
+    expect(JSON.stringify(edited)).not.toMatch(/@everyone|<@&/);
+    expect(state.sends).toHaveLength(buildDailyColorSaleMessages({ now }).length);
+  });
+
+  it('uses the same Discord-enforced guild/date nonce across independent publisher instances', async () => {
+    const now = new Date('2026-10-03T02:00:00Z');
+    // A reset creates independent module-level promise guards, as two
+    // processes would have, while retaining the first publisher reference.
+    vi.resetModules();
+    const independent = await import('../src/campaigns/dailyColorSale2026.js');
+    const left = campaignClient();
+    const right = campaignClient();
+    await Promise.all([
+      publishDailyFlashSale(left.client, { now }),
+      independent.publishDailyFlashSale(right.client, { now }),
+    ]);
+    const payloads = [left, right].map((state) => state.sends.find((message) => dailyFlashSaleDateFromMessage(message, 'bot')).payload);
+    expect(payloads[0].nonce).toBe(payloads[1].nonce);
+    expect(payloads[0].nonce.length).toBeLessThanOrEqual(25);
+    expect(payloads[0].nonce).not.toBe(dailyFlashSaleNonce(DAILY_COLOR_SALE.guildId, new Date('2026-10-04T02:00:00Z')));
+    expect(payloads[0].nonce).not.toBe(dailyFlashSaleNonce('1282637033340403755', now));
+    for (const payload of payloads) {
+      const apiBody = MessagePayload.create({ client: { options: {} } }, payload).resolveBody().body;
+      expect(apiBody.enforce_nonce).toBe(true);
+      expect(apiBody.nonce).toBe(payload.nonce);
+      expect(apiBody.allowed_mentions.parse).toEqual(['everyone']);
+    }
+  });
+
+  it('refuses a new everyone post without permission while allowing silent existing-post recovery', async () => {
+    const now = new Date('2026-10-03T02:00:00Z');
+    const state = campaignClient();
+    const guild = [...state.client.guilds.cache.values()][0];
+    const channel = await guild.channels.fetch(DAILY_COLOR_SALE.promotionChannelId);
+    channel.permissionsFor = () => ({ has: (permissions) => Array.isArray(permissions)
+      ? !permissions.includes(PermissionFlagsBits.MentionEveryone)
+      : permissions !== PermissionFlagsBits.MentionEveryone });
+    await expect(publishDailyFlashSale(state.client, { now })).rejects.toThrow('Mention Everyone');
+    expect(state.sends).toEqual([]);
+    const currentId = '1532222222222222222';
+    const current = campaignClient([{ id: currentId, author: { id: 'bot' }, payload: {
+      marker: dailyFlashSaleMarker(now), revision: DAILY_COLOR_SALE.revision,
+    } }]);
+    const currentChannel = await [...current.client.guilds.cache.values()][0].channels.fetch(DAILY_COLOR_SALE.promotionChannelId);
+    currentChannel.permissionsFor = channel.permissionsFor;
+    expect(await publishDailyFlashSale(current.client, { now })).toMatchObject({ status: 'already_posted', messageId: currentId });
+    expect(current.sends).toEqual([]);
+    const old = campaignClient([{ id: currentId, author: { id: 'bot' }, payload: { marker: dailyFlashSaleMarker(now) } }]);
+    const oldChannel = await [...old.client.guilds.cache.values()][0].channels.fetch(DAILY_COLOR_SALE.promotionChannelId);
+    oldChannel.permissionsFor = channel.permissionsFor;
+    expect(await publishDailyFlashSale(old.client, { now })).toMatchObject({ status: 'already_posted', action: 'updated', messageId: currentId });
+    for (const payload of [...old.sends.map((message) => message.payload), ...old.edits.map((edit) => edit.payload)]) {
+      expect(payload.allowedMentions).toMatchObject({ parse: [], roles: [] });
+      expect(JSON.stringify(payload)).not.toMatch(/@everyone|<@&/);
+    }
   });
 
   it('does not post a second message when today already exists', async () => {

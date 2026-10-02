@@ -49,23 +49,18 @@ describe('Daily Color sale campaign', () => {
     expect(content.toLocaleLowerCase('vi')).not.toContain('canva pro');
   });
 
-  it('uses Components V2, custom emoji art and exactly one everyone/member mention', () => {
+  it('keeps every price-board part silent while retaining Components V2 and custom artwork', () => {
     const messages = buildDailyColorSaleMessages({ E: emojiResolver, customEmojis, now: new Date('2026-10-02T02:00:00Z') });
     expect(messages).toHaveLength(8);
     messages.forEach((payload, index) => {
       expect(payload.flags & MessageFlags.IsComponentsV2).toBeTruthy();
-      expect(payload.allowedMentions.parse).toEqual(index === 0 ? ['everyone'] : []);
-      expect(payload.allowedMentions.roles).toEqual(index === 0 ? [DAILY_COLOR_SALE.memberRoleId] : []);
+      expect(payload.allowedMentions.parse).toEqual([]);
+      expect(payload.allowedMentions.roles).toEqual([]);
       const json = JSON.stringify(payload);
       expect(json).toContain(`${DAILY_COLOR_SALE.marker}-PART-${index + 1}`);
       expect(json).toContain(DAILY_COLOR_SALE.revision);
-      if (index === 0) {
-        expect(json).toContain('@everyone');
-        expect(json).toContain(`<@&${DAILY_COLOR_SALE.memberRoleId}>`);
-      } else {
-        expect(json).not.toContain('@everyone');
-        expect(json).not.toContain(`<@&${DAILY_COLOR_SALE.memberRoleId}>`);
-      }
+      expect(json).not.toContain('@everyone');
+      expect(json).not.toContain(`<@&${DAILY_COLOR_SALE.memberRoleId}>`);
       expect(json).not.toMatch(NATIVE_EMOJI);
       expect(json).not.toContain('cenar_daily_');
       const text = payload.components[0].toJSON().components
