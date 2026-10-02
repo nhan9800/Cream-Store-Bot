@@ -6,6 +6,8 @@ import {
   ButtonBuilder,
   ButtonStyle,
   ContainerBuilder,
+  MediaGalleryBuilder,
+  MediaGalleryItemBuilder,
   MessageFlags,
   PermissionFlagsBits,
   SeparatorBuilder,
@@ -13,9 +15,13 @@ import {
   TextDisplayBuilder,
 } from 'discord.js';
 import { createEmojiResolver, withButtonEmoji } from '../utils/emojiHelper.js';
+import { PROMOTION_CATALOG_ROWS, PROMOTION_CATALOG_SECTIONS } from './promotionCatalog202610.js';
+import { rebuildPromotionCampaign } from '../services/promotionRebuildService.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const emojiAssetRoot = path.resolve(__dirname, '../../assets/emojis');
+const emojiAssetRoot = path.resolve(__dirname, '../../assets/campaigns/emojis');
+const campaignBannerName = 'cenar-autumn-atelier-202610.png';
+const campaignBannerPath = path.resolve(__dirname, '../../assets/campaigns', campaignBannerName);
 
 export const DAILY_COLOR_SALE = Object.freeze({
   guildId: '1282637033340403754',
@@ -26,17 +32,18 @@ export const DAILY_COLOR_SALE = Object.freeze({
   storeUrl: 'https://cenarstore.xyz/products',
   marker: 'CENAR-STORY-FLASH-SALE-V1',
   dailyMarker: 'CENAR-DAILY-FLASH-SALE',
-  revision: 'CENAR-SALE-REVISION:AI-WORKBENCH-20261002',
-  campaignName: 'Cenar Studio · Bàn Làm Việc Có Gu',
+  revision: 'CENAR-SALE-REVISION:AUTUMN-ATELIER-20261002',
+  campaignName: 'Cenar Atelier · Trạm Thu Dịu',
   timeZone: 'Asia/Ho_Chi_Minh',
   publishHour: 9,
   retentionDays: 45,
 });
 
 export const DAILY_COLOR_SALE_EMOJIS = Object.freeze([
-  Object.freeze({ name: 'cenar_daily_tag', fileName: 'cenar_daily_tag.png' }),
-  Object.freeze({ name: 'cenar_daily_leaf', fileName: 'cenar_daily_leaf.png' }),
-  Object.freeze({ name: 'cenar_daily_gift', fileName: 'cenar_daily_gift.png' }),
+  Object.freeze({ name: 'cenar_autumn_202610_ticket', fileName: 'cenar_autumn_202610_ticket.png' }),
+  Object.freeze({ name: 'cenar_autumn_202610_cup', fileName: 'cenar_autumn_202610_cup.png' }),
+  Object.freeze({ name: 'cenar_autumn_202610_spark', fileName: 'cenar_autumn_202610_spark.png' }),
+  Object.freeze({ name: 'cenar_autumn_202610_leaves', fileName: 'cenar_autumn_202610_leaves.png' }),
 ]);
 
 const LEGACY_EVENT_EMOJI_NAMES = Object.freeze([
@@ -55,7 +62,8 @@ export function isStaleDailyCampaignEmojiName(name) {
   return LEGACY_EVENT_EMOJI_NAMES.includes(normalized)
     || normalized.startsWith('cenar_event_')
     || normalized.startsWith('cenar_pubg_')
-    || (normalized.startsWith('cenar_daily_') && !currentEmojiNames.has(normalized));
+    || (normalized.startsWith('cenar_daily_') && !currentEmojiNames.has(normalized))
+    || (normalized.startsWith('cenar_autumn_') && !currentEmojiNames.has(normalized));
 }
 
 function assetPath(asset) {
@@ -82,15 +90,9 @@ function asCustomEmoji(emoji) {
 export async function syncDailyColorSaleEmojis(guild) {
   validateEmojiAssets();
   await guild.emojis.fetch();
-
+  // The prepared replacement must exist before any historic message or artwork
+  // is removed. Retired emoji cleanup runs only after the durable cutover.
   const removed = [];
-  for (const emoji of guild.emojis.cache.values()) {
-    if (!isStaleDailyCampaignEmojiName(emoji.name)) continue;
-    await guild.emojis.delete(emoji.id, 'Cenar Store · dọn emoji chiến dịch cũ trước Daily Color Sale 2026');
-    removed.push({ id: emoji.id, name: emoji.name });
-  }
-
-  await guild.emojis.fetch();
   const emojis = {};
   for (const asset of DAILY_COLOR_SALE_EMOJIS) {
     let emoji = guild.emojis.cache.find((item) => item.name === asset.name);
@@ -122,49 +124,49 @@ const MONTHLY_THEMES = Object.freeze([
   Object.freeze({ name: 'Khoảng Trời Số', tagline: 'Gom đủ tiện ích cho những chuyến đi và ngày nghỉ.', colors: [0x38BDF8, 0x22C55E, 0xA855F7] }),
   Object.freeze({ name: 'Tựu Trường Thông Minh', tagline: 'Chuẩn bị bộ công cụ học tập và làm việc thật gọn.', colors: [0x4F46E5, 0x06B6D4, 0xF59E0B] }),
   Object.freeze({ name: 'Thành Phố Lên Đèn', tagline: 'Khi ngày bận rộn khép lại, trải nghiệm tốt mới bắt đầu.', colors: [0x7C3AED, 0xEC4899, 0x14B8A6] }),
-  Object.freeze({ name: 'Bàn Làm Việc Có Gu', tagline: 'Gói đúng việc. Giá rõ ràng. Một góc làm việc mang dấu ấn của bạn.', colors: [0x76E0B6, 0xFF8B78, 0xB6A3F3, 0xE8C77D] }),
+  Object.freeze({ name: 'Trạm Thu Dịu', tagline: 'Để ngày bận rộn có một khoảng thảnh thơi.', colors: [0xBA7045, 0xBA7045, 0xBA7045, 0xBA7045] }),
   Object.freeze({ name: 'Gom Điều Hay', tagline: 'Chọn những quyền lợi thiết thực cho mùa cuối năm.', colors: [0xD97706, 0x84CC16, 0x8B5CF6] }),
   Object.freeze({ name: 'Kết Năm Thật Chill', tagline: 'Khép năm bằng trải nghiệm liền mạch và niềm vui dài lâu.', colors: [0xEF4444, 0x22C55E, 0xFBBF24] }),
 ]);
 
 const WEEKLY_STORIES = Object.freeze([
   Object.freeze({
-    title: 'Chiếc Bàn Còn Một Góc Trống',
-    premise: 'Mai nhận một dự án mới. Bảy ngày để biến góc bàn trống thành góc làm việc của riêng mình.',
+    title: 'Tấm Thiệp Dưới Tán Cây',
+    premise: 'Mai muốn gửi hội bạn một tấm thiệp mùa thu. Mỗi ngày, tấm thiệp có thêm một điều để nhớ.',
     chapters: Object.freeze([
-      { name: 'Tờ giấy đầu tiên', copy: 'Mai đặt bản brief lên chiếc bàn trống, viết ra ba việc cần làm rồi chọn công cụ AI theo đúng nhu cầu.', focus: 'ChatGPT Plus chính chủ từ 485.000đ' },
-      { name: 'Cuộc hẹn của nhóm', copy: 'Tờ giấy có thêm tên đồng đội. Mai mở phòng trao đổi, ghi lại ý kiến và chọn gói kết nối cho cả nhóm.', focus: 'Nitro Boost Login từ 85.000đ · Boost Server từ 110.000đ' },
-      { name: 'Chiếc ngăn kéo số', copy: 'Tài liệu đã đầy mặt bàn. Mai xếp chúng vào từng thư mục để ngày mai không phải đi tìm lại từ đầu.', focus: 'Gemini Pro + Google One 5 TB từ 120.000đ · Office 365 200.000đ' },
-      { name: 'Bản nháp có hình hài', copy: 'Mai đặt bản nháp cạnh bản brief. Cô chọn gói ChatGPT hoặc Claude, rồi dùng CapCut để thử nhịp kể cho ý tưởng.', focus: 'ChatGPT · Claude Pro x5 · CapCut Pro từ 55.000đ' },
-      { name: 'Giai điệu ở góc bàn', copy: 'Bản nháp vừa xong, Mai kéo ghế ra một chút. Một playlist bật lên, chiếc bàn bận rộn cũng có khoảng nghỉ.', focus: 'Spotify Premium từ 110.000đ · AI chính chủ hoặc cấp acc, bảo hành ghi rõ' },
-      { name: 'Màn hình sau giờ làm', copy: 'Mai gửi bản nháp cho nhóm rồi đóng tài liệu. Góc bàn chuyển sang một bộ phim và những nội dung cô đã để dành.', focus: 'Netflix 4K Private 75.000đ · YouTube Premium từ 58.000đ' },
-      { name: 'Góc bàn của riêng mình', copy: 'Dự án đầu tiên khép lại. Mai giữ những công cụ mình thực sự dùng và ghi chú rõ gói, thời hạn, bảo hành cho lần sau.', focus: 'Xem đủ bảng giá · chọn đúng tài khoản và quyền lợi' },
+      { name: 'Một lời hẹn', copy: 'Mai viết lời hẹn đầu tiên. Bản nháp còn vụng, nhưng nghe đúng giọng của mình là cô giữ lại.', focus: 'ChatGPT chính chủ Plus 485k hoặc 500k · xem riêng mức bảo hành' },
+      { name: 'Gọi hội bạn', copy: 'Tấm thiệp cần một ngày hẹn. Hội bạn vào phòng trò chuyện, người chọn giờ, người chọn chỗ ngồi.', focus: 'Nitro Boost Login từ 85k · Boost Server từ 110k' },
+      { name: 'Những ảnh chưa gửi', copy: 'Mai lục lại ảnh chuyến đi cũ. Cả nhóm gom vào một thư mục chung để không ai bị bỏ quên trên tấm thiệp.', focus: 'Gemini Pro + Google One 5 TB từ 120k · Office 365 200k' },
+      { name: 'Chiếc lá bên lề', copy: 'Mai đặt một chiếc lá cạnh trang giấy, sửa màu ảnh rồi ghép đoạn video nhỏ. Tấm thiệp bắt đầu có không khí mùa thu.', focus: 'Adobe từ 140k · CapCut từ 55k · Claude Pro x5 từ 1,9 triệu' },
+      { name: 'Bài hát của cả nhóm', copy: 'Có người gửi lại bài hát nghe trên chuyến đi. Mai bật playlist, thêm tên bài vào góc thiệp rồi mỉm cười.', focus: 'Spotify Premium từ 110k · chọn thời hạn theo nhịp nghe' },
+      { name: 'Buổi tối trước cuộc hẹn', copy: 'Thiệp đã gửi, Mai tạm cất điện thoại. Một bộ phim quen làm buổi tối bớt vội trước ngày gặp bạn.', focus: 'Netflix 4K Private 75k · YouTube Premium từ 58k' },
+      { name: 'Chỗ ngồi được giữ lại', copy: 'Tấm thiệp nằm giữa bàn, người nào cũng có một câu chuyện. Mai giữ lại bức ảnh cuối buổi cho lời hẹn tiếp theo.', focus: 'Xem toàn bộ bảng giá · nhờ shop kiểm tra đúng gói trước khi mua' },
     ]),
   }),
   Object.freeze({
-    title: 'Quán Nhỏ Sáng Đèn Lúc 9 Giờ',
-    premise: 'An chuẩn bị mở một quán nhỏ. Từ trang giấy đến buổi tối đầu tiên, mỗi ngày thêm một mảnh ghép.',
+    title: 'Một Góc Cho Ngày Mưa',
+    premise: 'An sửa lại góc đọc sách trước mùa mưa. Bảy ngày, từ chiếc kệ trống đến một nơi muốn trở về.',
     chapters: Object.freeze([
-      { name: 'Tên quán trên giấy', copy: 'An viết tên quán lên giấy, liệt kê câu hỏi và chọn gói AI phù hợp để cùng làm bản nháp đầu tiên.', focus: 'ChatGPT Plus chính chủ · chọn bảo hành gói hoặc bảo hành full' },
-      { name: 'Nhóm cộng sự', copy: 'Tên quán đã có, An mời nhóm cộng sự vào phòng trò chuyện. Mỗi người nhận một phần việc cho ngày khai trương.', focus: 'Nitro Boost Login · Boost Server' },
-      { name: 'Hộp hồ sơ của quán', copy: 'Menu, ảnh và bảng chi phí cần một chỗ lưu chung. An sắp xếp hồ sơ trước khi bắt tay vào nội dung.', focus: 'Google One 5 TB · Office 365 + OneDrive 1 TB' },
-      { name: 'Tấm menu đầu tiên', copy: 'An đọc lại nội dung menu, thử vài cách kể rồi ghép thành đoạn video giới thiệu ngắn cho quán.', focus: 'ChatGPT · Claude Pro x5 · CapCut Pro' },
-      { name: 'Khoảng nghỉ trước giờ mở', copy: 'Menu đã đặt lên bàn. An ngồi xuống kiểm tra từng quyền lợi của gói AI, một playlist riêng đang chạy trong tai nghe.', focus: 'Spotify Premium · xem rõ KBH, bảo hành gói và bảo hành full' },
-      { name: 'Buổi tối đầu tiên', copy: 'Quán vừa đóng cửa sau ngày đầu. An cất điện thoại, chọn một bộ phim để thưởng cho mình một tối chậm rãi.', focus: 'Netflix Premium · YouTube Premium ổn định' },
-      { name: 'Trang sổ mới', copy: 'An mở sổ của tuần tiếp theo, giữ lại những công cụ hữu ích và ghi rõ những khoản cần gia hạn.', focus: 'Toàn bộ bảng giá Cenar Studio' },
+      { name: 'Chiếc kệ còn trống', copy: 'An ghi những thứ cần sửa trước khi mua thêm gì mới. Một bản nháp rõ ràng giúp góc nhỏ bớt chật.', focus: 'ChatGPT chính chủ hoặc cấp acc · chọn theo nhu cầu và bảo hành' },
+      { name: 'Cuộc gọi lúc trời mưa', copy: 'Bạn gọi để góp ý vị trí chiếc kệ. An xoay camera, cùng bạn thử vài cách sắp xếp trước khi dời đồ.', focus: 'Nitro Boost Login · Boost Server' },
+      { name: 'Ngăn kéo cho ý tưởng', copy: 'Sách lên kệ, tài liệu về đúng thư mục. An lưu những ghi chú cũ để mai có thể đọc tiếp từ đoạn đang dở.', focus: 'Google One 5 TB · Office 365 + OneDrive 1 TB' },
+      { name: 'Tấm ảnh bên cửa sổ', copy: 'Ánh sáng vừa đẹp, An chụp góc đọc sách mới rồi thử một bản dựng ngắn. Không cần hoàn hảo ngay từ lần đầu.', focus: 'Adobe · CapCut Pro · Claude Pro x5' },
+      { name: 'Tiếng mưa và playlist', copy: 'An đặt cốc nước xuống cạnh sách. Một playlist vừa đủ nhỏ, tiếng mưa ngoài cửa sổ nghe rõ hơn.', focus: 'Spotify Premium · 3 / 6 / 12 tháng' },
+      { name: 'Một tập phim nữa', copy: 'Sách đã có dấu trang. An chuyển sang xem tập phim để dành, góc nhỏ vẫn là nơi nghỉ sau ngày dài.', focus: 'Netflix Premium · YouTube Premium' },
+      { name: 'Để mai đọc tiếp', copy: 'An gấp chăn, đặt sách về kệ và tắt đèn. Góc đọc đã xong, chỉ còn một trang hẹn cho ngày mai.', focus: 'Giá và điều kiện từng gói có trong bảng Trạm Thu Dịu' },
     ]),
   }),
   Object.freeze({
-    title: 'Bưu Kiện Gửi Cho Tuần Mới',
-    premise: 'Linh nhận một hộp đồ cho dự án cá nhân. Bảy ngày mở hộp, thử việc và chọn thứ đáng giữ lại.',
+    title: 'Cuốn Sổ Đi Qua Mùa Thu',
+    premise: 'Linh dành một tuần ghi lại những điều nhỏ. Cuối tuần, cuốn sổ có đủ một chuyến đi không vội.',
     chapters: Object.freeze([
-      { name: 'Chiếc hộp đầu tuần', copy: 'Linh mở hộp, đặt tờ kế hoạch lên bàn. Công cụ đầu tiên được chọn theo việc cần làm và kiểu tài khoản mong muốn.', focus: 'ChatGPT Plus · chính chủ hoặc cấp acc' },
-      { name: 'Lời mời trong hộp', copy: 'Mảnh giấy thứ hai là lời mời bạn bè cùng góp ý. Linh chuẩn bị chỗ trò chuyện để ý tưởng được nghe rõ hơn.', focus: 'Nitro Boost Login · Boost Server' },
-      { name: 'Chỗ cho tài liệu', copy: 'Ảnh và tài liệu đã nhiều hơn dự tính. Linh dành một buổi sắp xếp để chiếc hộp số có chỗ cho phần việc tiếp theo.', focus: 'Gemini Pro + Google One 5 TB · Office 365' },
-      { name: 'Thử một bản dựng', copy: 'Một tờ storyboard được lấy ra khỏi hộp. Linh thử ChatGPT hoặc Claude cho bản nháp rồi dựng thử bằng CapCut.', focus: 'ChatGPT Pro · Claude Pro x5 · CapCut Pro' },
-      { name: 'Mảnh ghép nghe được', copy: 'Bản dựng có hình, chiếc hộp có thêm âm nhạc. Linh nghỉ một nhịp rồi đọc kỹ điều kiện bảo hành trước khi chọn gói tiếp theo.', focus: 'Spotify Premium · quyền lợi AI ghi riêng từng gói' },
-      { name: 'Một tối mở màn', copy: 'Linh gửi bản dựng cho bạn bè. Hộp đồ tạm khép lại, một buổi xem phim mở ra để cuối tuần có thời gian nghỉ.', focus: 'Netflix 4K Private · YouTube Premium ổn định' },
-      { name: 'Giữ thứ hợp mình', copy: 'Linh xếp lại chiếc hộp. Những công cụ đúng nhu cầu được giữ lại, kèm một ghi chú về giá, thời hạn và bảo hành.', focus: 'Xem bảng giá · mở ticket để được tư vấn đúng gói' },
+      { name: 'Trang đầu không vội', copy: 'Linh mở cuốn sổ, ghi một nơi muốn đến và ba điều muốn nhớ. Bản kế hoạch chỉ cần vừa với một tuần.', focus: 'ChatGPT Plus · chính chủ hoặc cấp acc, bảo hành ghi riêng' },
+      { name: 'Thêm một người bạn', copy: 'Linh gửi lịch hẹn cho bạn rồi cùng chọn đường đi. Chuyến đi vui hơn khi cả hai biết mình muốn gì.', focus: 'Nitro Boost Login · Boost Server' },
+      { name: 'Nhặt những mẩu ghi chú', copy: 'Một tấm ảnh, một địa chỉ, một dòng nhắn được xếp vào thư mục. Linh để cuốn sổ giấy và sổ số cùng kể một chuyện.', focus: 'Gemini Pro + Google One 5 TB · Office 365' },
+      { name: 'Màu của một buổi chiều', copy: 'Linh sửa lại tấm ảnh chiều hôm trước rồi ghép vài khung hình. Cuốn sổ giờ có cả hình lẫn lời.', focus: 'Adobe · CapCut Pro · Claude Pro x5' },
+      { name: 'Bài hát trên đường', copy: 'Bạn gửi một playlist cho chuyến đi. Linh nghe thử, giữ lại ba bài và ghi tên vào trang còn trống.', focus: 'Spotify Premium · chọn gói nghe phù hợp' },
+      { name: 'Tối về nhà', copy: 'Chuyến đi khép lại bằng một tối xem phim. Linh cất cuốn sổ, để những đoạn video đợi đến ngày mai.', focus: 'Netflix 4K Private · YouTube Premium ổn định' },
+      { name: 'Trang để dành', copy: 'Linh dán tấm ảnh cuối vào sổ. Trang kế bên được để trống, vừa đủ chỗ cho lời hẹn của tuần tới.', focus: 'Bảng giá đủ nhóm sản phẩm · mở ticket để chọn đúng gói' },
     ]),
   }),
 ]);
@@ -233,118 +235,88 @@ function campaignIcon(customEmojis, name, fallback) {
   return customEmojis?.[name]?.text || fallback;
 }
 
+function campaignArtwork(customEmojis = {}) {
+  const get = (name, fallback) => campaignIcon(customEmojis, `cenar_autumn_202610_${name}`, fallback);
+  return { ticket: get('ticket', '🎟️'), cup: get('cup', '☕'), spark: get('spark', '✦'), leaves: get('leaves', '🍂') };
+}
+
+function hasCurrentCampaignBanner(now) {
+  const { year, month } = zonedParts(now);
+  return year === '2026' && month === '10';
+}
+
+function renderPromotionRow(row, icon) {
+  let price = row.formattedPrice || `${new Intl.NumberFormat('vi-VN').format(row.price)}đ`;
+  if (row.priceUnit === 'slot' && !price.endsWith('/slot')) price += '/slot';
+  if (row.priceUnit === 'ngày đầu') price += ' / ngày đầu';
+  if (row.priceUnit === 'khởi điểm') price = `Từ ${price}`;
+  const details = [row.duration, row.account, row.warranty].filter(Boolean);
+  const notes = [row.dailyPricingNote, ...(Array.isArray(row.notes) ? row.notes : [row.notes])].filter(Boolean).join(' ');
+  return [
+    `${icon} **${row.label}** · **${price}**`,
+    details.length ? `-# ${details.join(' · ')}` : null,
+    notes ? `-# ${notes}` : null,
+  ].filter(Boolean).join('\n');
+}
+
+// Preserve complete rows and source labels while splitting a long category.
+// This prevents a growing catalog from silently dropping products or exceeding
+// the Components V2 4,000-character limit. The remaining budget is reserved for
+// campaign titles, controls and the durable rebuild's cutover marker.
+function promotionSectionChunks(customEmojis) {
+  const art = campaignArtwork(customEmojis);
+  const chunks = [];
+  for (const section of PROMOTION_CATALOG_SECTIONS) {
+    const rows = PROMOTION_CATALOG_ROWS.filter((row) => row.section === section.key);
+    if (!rows.length) continue;
+    let lines = [`## ${art.leaves} ${section.title}`, section.subtitle ? `> ${section.subtitle}` : null].filter(Boolean);
+    let source = null;
+    let index = 1;
+    const flush = () => {
+      chunks.push({ key: `${section.key}-${index++}`, text: lines.join('\n') });
+      lines = [`## ${art.leaves} ${section.title} · tiếp`];
+      source = null;
+    };
+    for (const row of rows) {
+      const sourceLabel = row.source === 'SALE' ? '**Giá khuyến mãi shop đã công bố**' : '**Giá niêm yết hiện hành**';
+      const text = renderPromotionRow(row, row.source === 'SALE' ? art.ticket : art.spark);
+      const add = [...(source !== row.source ? [`\n${sourceLabel}`] : []), text];
+      if ([...lines, ...add].join('\n\n').length > 2700 && source !== null) flush();
+      if (source !== row.source) lines.push(`\n${sourceLabel}`);
+      lines.push(text);
+      source = row.source;
+      if (lines.join('\n\n').length > 2700) {
+        throw new Error(`Dòng giá quá dài để đăng lên Discord: ${row.key}`);
+      }
+    }
+    chunks.push({ key: `${section.key}-${index}`, text: lines.join('\n\n') });
+  }
+  return chunks;
+}
+
 export function buildDailyColorSaleSections({
-  guildId = DAILY_COLOR_SALE.guildId,
-  E = createEmojiResolver(guildId),
   customEmojis = {},
   now = new Date(),
 } = {}) {
-  const tag = campaignIcon(customEmojis, 'cenar_daily_tag', E('icon_price'));
-  const leaf = campaignIcon(customEmojis, 'cenar_daily_leaf', E('cenar_verified'));
-  const gift = campaignIcon(customEmojis, 'cenar_daily_gift', E('icon_gift'));
+  const art = campaignArtwork(customEmojis);
   const theme = dailySaleTheme(now);
   const story = weeklySaleStory(now);
-
   return {
     hero: [
-      `# ${gift} ${DAILY_COLOR_SALE.campaignName.toUpperCase()}`,
-      `## ${leaf} BẢNG GIÁ SALE · THÁNG ${zonedParts(now).month}`,
+      `# ${art.cup} CENAR ATELIER`,
+      `## ${art.leaves} ${theme.name.toUpperCase()} · BẢNG GIÁ THÁNG ${zonedParts(now).month}`,
       `> ${theme.tagline}`,
-      `${tag} **Một tuần, một câu chuyện:** ${story.title}`,
+      `${art.spark} **Chuyện tuần này: ${story.title}**`,
       `-# ${story.premise}`,
-      `${leaf} **01 / KẾT NỐI** · AI và công cụ ở phần tiếp theo; giải trí ở phần cuối.`,
-      `-# ${DAILY_COLOR_SALE.marker}-PART-1 · ${DAILY_COLOR_SALE.revision} · Giá hiện hành đến khi shop công bố cập nhật mới.`,
+      `-# Giá sale và giá niêm yết được ghi riêng. Mở ticket để chốt đúng gói, thời hạn và bảo hành.`,
     ].join('\n'),
-    nitro: [
-      `## ${E('brand_nitro')} NITRO BOOST LOGIN`,
-      `${tag} \`01 tháng\` — **85.000đ**`,
-      `${tag} \`02 tháng · có liền\` — **99.000đ**`,
-      `${tag} \`02 tháng · có liền · Mail bất tử\` — **120.000đ**`,
-      `${tag} \`04 tháng · có liền\` — **250.000đ**`,
-      `${tag} \`06 tháng · có liền\` — **350.000đ**`,
-      `${tag} \`08 tháng · có liền\` — **450.000đ**`,
-      `${tag} \`12 tháng · có liền · gia hạn tự động\` — **680.000đ**`,
-      `${tag} \`12 tháng · mua thẳng 01 năm · có liền\` — **830.000đ**`,
-      `${gift} **Trial Boost** · \`03 tháng\` — **65.000đ**`,
-      `-# ${E('status_info')} Hai lựa chọn Nitro 02 tháng khác nhau ở loại tài khoản/mail; shop xác nhận đúng gói tại ticket trước khi thanh toán.`,
-    ].join('\n'),
-    boost: [
-      `## ${E('brand_boost')} BOOST SERVER · NÂNG CẤP MÁY CHỦ`,
-      `${leaf} \`01 tháng\` — **110.000đ**`,
-      `${leaf} \`03 tháng\` — **280.000đ**`,
-      '',
-      `## ${E('brand_netflix')} NETFLIX PREMIUM · 4K PRIVATE`,
-      `${leaf} \`01 tháng\` — **75.000đ**`,
-    ].join('\n'),
-    aiHeader: [
-      `# ${tag} 02 / AI · CHỌN GÓI ĐÚNG VIỆC`,
-      '> Giữ tài khoản của mình hay nhận tài khoản từ shop? Chọn cách mua trước, rồi xem quyền lợi bảo hành.',
-      `-# Các gói AI dưới đây đều có thời hạn **01 tháng**. Pro 100 / 200 / 500 và x5 là tên gói shop niêm yết; không phải cam kết về hạn mức dùng.`,
-      `-# ${DAILY_COLOR_SALE.marker}-PART-2 · ${DAILY_COLOR_SALE.revision}`,
-    ].join('\n'),
-    chatgptOwn: [
-      `## ${E('brand_chatgpt')} CHATGPT · TÀI KHOẢN CHÍNH CHỦ`,
-      `${tag} \`Plus · bảo hành gói\` — **485.000đ** · Không bảo hành tài khoản`,
-      `${tag} \`Plus · bảo hành full\` — **500.000đ**`,
-      `${tag} \`Pro 100 · bảo hành gói\` — **2.650.000đ**`,
-      `${tag} \`Pro 200\` — **4.800.000đ**`,
-      `${tag} \`Pro 500\` — **12.700.000đ**`,
-      `-# ${E('status_info')} Pro 200 và Pro 500: xác nhận chính sách bảo hành với shop tại ticket trước khi thanh toán.`,
-    ].join('\n'),
-    chatgptSuppliedClaude: [
-      `## ${E('brand_chatgpt')} CHATGPT · SHOP CẤP TÀI KHOẢN`,
-      `${leaf} \`Pro 100 · KBH\` — **1.900.000đ** · Không bảo hành`,
-      `${leaf} \`Pro 100 · BHF\` — **2.300.000đ** · Bảo hành full`,
-      `${leaf} \`Cấp acc · bảo hành 02 ngày\` — **120.000đ**`,
-      `-# Gói 120k: bảo hành ngắn để phản ánh rủi ro. Thực tế có thể dùng lâu hơn tùy cách sử dụng; không cam kết thời gian dùng vượt quá bảo hành. Shop xác nhận loại gói tại ticket.`,
-      '',
-      `## ${E('brand_claude')} CLAUDE PRO x5 · SHOP CẤP TÀI KHOẢN`,
-      `${gift} \`01 tháng · KBH\` — **1.900.000đ** · Không bảo hành`,
-      `${gift} \`01 tháng · BHF\` — **2.500.000đ** · Bảo hành full`,
-    ].join('\n'),
-    productivityHeader: [
-      `# ${tag} 03 / SÁNG TẠO & LƯU TRỮ`,
-      '> Một chỗ cho tài liệu. Một công cụ cho ý tưởng. Chọn đủ những gì bạn thực sự dùng.',
-      `-# ${DAILY_COLOR_SALE.marker}-PART-3 · ${DAILY_COLOR_SALE.revision}`,
-    ].join('\n'),
-    geminiOffice: [
-      `## ${E('brand_gemini')} GEMINI PRO + GOOGLE ONE 5 TB`,
-      `${leaf} \`12 tháng\` — **120.000đ**`,
-      `${leaf} \`18 tháng\` — **190.000đ**`,
-      `-# ${E('status_check')} Có thể thêm tối đa **05 thành viên** vào gói Google One.`,
-      '',
-      `## ${E('brand_office')} OFFICE 365 + ONEDRIVE 1 TB`,
-      `${leaf} \`12 tháng\` — **200.000đ**`,
-    ].join('\n'),
-    capcut: [
-      `## ${E('brand_capcut')} CAPCUT PRO`,
-      `${gift} \`01 tháng\` — **55.000đ**`,
-      `${gift} \`06 tháng\` — **290.000đ**`,
-    ].join('\n'),
-    entertainmentHeader: [
-      `# ${gift} 04 / TAN CA · BẬT GU RIÊNG`,
-      '> Một playlist cho mình, một tối xem thật thư thả. Chọn gói theo nhịp dùng của bạn.',
-      `-# ${DAILY_COLOR_SALE.marker}-PART-4 · ${DAILY_COLOR_SALE.revision}`,
-    ].join('\n'),
-    spotifyYoutube: [
-      `## ${E('brand_spotify')} SPOTIFY PREMIUM`,
-      `${leaf} \`03 tháng\` — **110.000đ**`,
-      `${leaf} \`06 tháng\` — **180.000đ**`,
-      `${leaf} \`12 tháng\` — **280.000đ**`,
-      '',
-      `## ${E('brand_youtube')} YOUTUBE PREMIUM · DÒNG ỔN ĐỊNH`,
-      `${tag} \`01 tháng\` — **58.000đ**`,
-      `${tag} \`03 tháng\` — **185.000đ**`,
-      `${tag} \`06 tháng\` — **295.000đ**`,
-      `${tag} \`12 tháng\` — **530.000đ**`,
-    ].join('\n'),
+    ...Object.fromEntries(promotionSectionChunks(customEmojis).map((section) => [section.key, section.text])),
     closing: [
-      `## ${gift} CÒN NHIỀU SẢN PHẨM KHÁC GIÁ RẤT ƯU ĐÃI`,
-      `${E('status_check')} Mở ticket để shop kiểm tra tồn kho, điều kiện tài khoản và thời gian xử lý thực tế.`,
-      `${E('warranty_shield')} Chính sách bảo hành áp dụng đúng theo từng dòng sản phẩm ghi trong bài và trên đơn hàng.`,
-      `${E('cenar_support')} Không gửi mật khẩu, OTP hoặc thông tin thanh toán tại kênh công khai.`,
-      '',
-      `> ${leaf} **Gói đúng việc. Giá rõ ràng. Cenar cùng bạn chọn.**`,
+      `## ${art.cup} CHỌN VỪA ĐỦ. DÙNG THẬT VUI.`,
+      `${art.ticket} Mua giá chương trình: mở ticket chọn gói, nhận QR sau khi shop xác nhận.`,
+      `-# Website áp dụng giá hiển thị lúc chốt đơn. Shop kiểm tra tồn kho, tài khoản và thời gian xử lý tại ticket.`,
+      `${art.leaves} KBH: không bảo hành. BHF/FBH: bảo hành full theo thời hạn ghi trên gói. Bảo hành gói và tài khoản là hai quyền lợi khác nhau.`,
+      `-# Giá có hiệu lực đến lần cập nhật tiếp theo. Không gửi mật khẩu hay OTP tại kênh công khai.`,
     ].join('\n'),
   };
 }
@@ -357,66 +329,64 @@ export function buildDailyColorSaleMessages({
   tagMember = true,
   now = new Date(),
 } = {}) {
-  const sections = buildDailyColorSaleSections({ guildId, E, customEmojis, now });
+  const sections = buildDailyColorSaleSections({ customEmojis, now });
   const theme = dailySaleTheme(now);
   const supportUrl = `https://discord.com/channels/${guildId}/${DAILY_COLOR_SALE.supportChannelId}`;
   const priceUrl = `https://discord.com/channels/${guildId}/${DAILY_COLOR_SALE.priceChannelId}`;
-  const mentions = [
-    tagEveryone ? '@everyone' : null,
-    tagMember ? `<@&${DAILY_COLOR_SALE.memberRoleId}>` : null,
-  ].filter(Boolean).join(' · ');
-
-  const supportButton = withButtonEmoji(
-    new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('Mở Ticket Chốt Đơn').setURL(supportUrl),
-    customEmojis?.cenar_daily_gift?.component,
-    E.component?.('ticket_open'),
+  const mentions = [tagEveryone ? '@everyone' : null, tagMember ? `<@&${DAILY_COLOR_SALE.memberRoleId}>` : null].filter(Boolean).join(' · ');
+  const buttons = new ActionRowBuilder().addComponents(
+    withButtonEmoji(new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('Chọn Gói Qua Ticket').setURL(supportUrl),
+      customEmojis?.cenar_autumn_202610_ticket?.component, E.component?.('ticket_open')),
+    withButtonEmoji(new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('Xem Website').setURL(DAILY_COLOR_SALE.storeUrl),
+      customEmojis?.cenar_autumn_202610_cup?.component, E.component?.('icon_store')),
+    withButtonEmoji(new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('Bảng Giá Niêm Yết').setURL(priceUrl),
+      customEmojis?.cenar_autumn_202610_spark?.component, E.component?.('icon_price')),
   );
-  const storeButton = withButtonEmoji(
-    new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('Xem Shop Cenar').setURL(DAILY_COLOR_SALE.storeUrl),
-    customEmojis?.cenar_daily_leaf?.component,
-    E.component?.('icon_store'),
-  );
-  const priceButton = withButtonEmoji(
-    new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('Xem Các Gói Khác').setURL(priceUrl),
-    customEmojis?.cenar_daily_tag?.component,
-    E.component?.('icon_price'),
-  );
-  const actions = new ActionRowBuilder().addComponents(supportButton, storeButton, priceButton);
+  const chunks = Object.entries(sections).filter(([key]) => !['hero', 'closing'].includes(key)).map(([, text]) => text);
+  const pages = chunks.map((text, index) => [index ? `# ${campaignArtwork(customEmojis).cup} Cenar Atelier · ${theme.name}` : `${mentions ? `${mentions}\n` : ''}${sections.hero}`, text]);
+  if (!pages.length) throw new Error('Bảng giá khuyến mãi đang trống.');
+  if ([...pages.at(-1), sections.closing].join('\n').length <= 3500) pages.at(-1).push(sections.closing);
+  else pages.push([sections.closing]);
   const silentMentions = { parse: [], roles: [], users: [], repliedUser: false };
-
-  return [
-    {
-      components: [panel(theme.colors[0], [`${mentions ? `${mentions}\n` : ''}${sections.hero}`, sections.nitro, sections.boost])],
-      flags: MessageFlags.IsComponentsV2,
-      allowedMentions: {
-        parse: tagEveryone ? ['everyone'] : [],
-        roles: tagMember ? [DAILY_COLOR_SALE.memberRoleId] : [],
-        users: [],
-        repliedUser: false,
+  return pages.map((content, index) => {
+    content.push(`-# ${DAILY_COLOR_SALE.marker}-PART-${index + 1} · ${DAILY_COLOR_SALE.revision}`);
+    if (content.join('\n').length > 3500) throw new Error(`Phần bảng giá ${index + 1} vượt giới hạn an toàn Discord.`);
+    const container = panel(theme.colors[0], content, index === pages.length - 1 ? buttons : null);
+    if (!index && hasCurrentCampaignBanner(now)) {
+      container.spliceComponents(1, 0, new MediaGalleryBuilder().addItems(
+        new MediaGalleryItemBuilder().setURL(`attachment://${campaignBannerName}`)
+          .setDescription('Cenar Atelier · Trạm Thu Dịu, bộ sưu tập tiện ích số tháng 10 trong sắc đồng, kem và xanh trà.'),
+      ));
+    }
+    return {
+      components: [container], flags: MessageFlags.IsComponentsV2,
+      ...(index ? {} : { attachments: [], ...(hasCurrentCampaignBanner(now) ? { files: [{ attachment: campaignBannerPath, name: campaignBannerName }] } : {}) }),
+      allowedMentions: index ? silentMentions : {
+        parse: tagEveryone ? ['everyone'] : [], roles: tagMember ? [DAILY_COLOR_SALE.memberRoleId] : [], users: [], repliedUser: false,
       },
-    },
-    {
-      components: [panel(theme.colors[1], [sections.aiHeader, sections.chatgptOwn, sections.chatgptSuppliedClaude])],
-      flags: MessageFlags.IsComponentsV2,
-      allowedMentions: silentMentions,
-    },
-    {
-      components: [panel(theme.colors[2], [sections.productivityHeader, sections.geminiOffice, sections.capcut])],
-      flags: MessageFlags.IsComponentsV2,
-      allowedMentions: silentMentions,
-    },
-    {
-      components: [panel(theme.colors[3] ?? theme.colors[0], [sections.entertainmentHeader, sections.spotifyYoutube, sections.closing], actions)],
-      flags: MessageFlags.IsComponentsV2,
-      allowedMentions: silentMentions,
-    },
-  ];
+    };
+  });
+}
+
+export async function preparePromotionRebuild(guild, { now = new Date() } = {}) {
+  validateEmojiAssets();
+  if (hasCurrentCampaignBanner(now) && (!fs.existsSync(campaignBannerPath) || !fs.statSync(campaignBannerPath).size)) {
+    throw new Error(`Thiếu banner Trạm Thu Dịu: ${campaignBannerPath}`);
+  }
+  const { emojis } = await syncDailyColorSaleEmojis(guild);
+  return {
+    revision: DAILY_COLOR_SALE.revision,
+    boardPayloads: buildDailyColorSaleMessages({ guildId: guild.id, customEmojis: emojis, tagEveryone: false, tagMember: false, now }),
+    buildDailyPayload: (boardId) => buildDailyFlashSaleMessage({ guildId: guild.id, customEmojis: emojis, boardMessageId: boardId, tagMember: false, now }),
+    saleData: { campaign: DAILY_COLOR_SALE.campaignName, revision: DAILY_COLOR_SALE.revision, rows: PROMOTION_CATALOG_ROWS },
+    emojiNames: DAILY_COLOR_SALE_EMOJIS.map((asset) => asset.name),
+  };
 }
 
 export function dailyColorSalePart(message, botId = null) {
   if (!message || (botId && message.author?.id !== botId)) return null;
   const serialized = JSON.stringify(message.toJSON?.() || message);
-  const match = serialized.match(new RegExp(`${DAILY_COLOR_SALE.marker}-PART-(\\d)`));
+  const match = serialized.match(new RegExp(`${DAILY_COLOR_SALE.marker}-PART-(\\d+)`));
   return match ? Number(match[1]) : null;
 }
 
@@ -597,7 +567,15 @@ async function publishDailyColorSaleInternal(client, { tagEveryone = true, tagMe
 
 export function publishDailyColorSale(client, options = {}) {
   if (boardPublishPromise) return boardPublishPromise;
-  boardPublishPromise = publishDailyColorSaleInternal(client, options)
+  boardPublishPromise = (async () => {
+    const now = options.now || new Date();
+    await rebuildPromotionCampaign(client, {
+      revision: DAILY_COLOR_SALE.revision,
+      prepare: (guild) => preparePromotionRebuild(guild, { now }),
+      now,
+    });
+    return publishDailyColorSaleInternal(client, options);
+  })()
     .finally(() => { boardPublishPromise = null; });
   return boardPublishPromise;
 }
@@ -613,9 +591,7 @@ export function buildDailyFlashSaleMessage({
   if (!/^\d{15,22}$/.test(String(boardMessageId || ''))) {
     throw new Error('Thiếu ID bảng giá Flash Sale để tạo bài hằng ngày.');
   }
-  const tag = campaignIcon(customEmojis, 'cenar_daily_tag', E('icon_price'));
-  const leaf = campaignIcon(customEmojis, 'cenar_daily_leaf', E('cenar_verified'));
-  const gift = campaignIcon(customEmojis, 'cenar_daily_gift', E('icon_gift'));
+  const { ticket: tag, leaves: leaf, cup: gift } = campaignArtwork(customEmojis);
   const theme = dailySaleTheme(now);
   const story = weeklySaleStory(now);
   const dateKey = dailySaleDateKey(now);
@@ -628,31 +604,31 @@ export function buildDailyFlashSaleMessage({
 
   const storyText = [
     tagMember ? `<@&${DAILY_COLOR_SALE.memberRoleId}>` : null,
-    `# ${gift} CENAR STUDIO · SALE 09:00`,
+    `# ${gift} CENAR ATELIER · ${hasCurrentCampaignBanner(now) ? 'CHUYỆN MÙA THU' : 'CHUYỆN THÁNG MỚI'}`,
     `-# THÁNG ${zonedParts(now).month} · ${theme.name.toUpperCase()} · ${dateLabel}`,
     `## ${leaf} ${story.title} · Chương ${story.dayIndex + 1}/7`,
     `> **${story.chapter.name}:** ${story.chapter.copy}`,
-    `${tag} **Gói trên bàn hôm nay:** ${story.chapter.focus}`,
+    `${tag} **Gợi ý cho ngày hôm nay:** ${story.chapter.focus}`,
     `${leaf} ${theme.tagline}`,
     '',
-    `${E('status_check')} Giá, thời hạn và bảo hành được ghi rõ trong **[bảng giá Flash Sale](${boardUrl})**.`,
-    `${E('cenar_support')} Mở ticket để shop kiểm tra tồn kho và điều kiện tài khoản trước khi thanh toán.`,
+    `${leaf} Giá, thời hạn và bảo hành có trong **[bảng giá Trạm Thu Dịu](${boardUrl})**.`,
+    `${tag} Mở ticket để shop kiểm tra tồn kho và điều kiện tài khoản trước khi thanh toán.`,
     `-# ${DAILY_COLOR_SALE.dailyMarker}:${dateKey} · STORY-WEEK:${story.weekKey} · ${DAILY_COLOR_SALE.revision}`,
   ].filter(Boolean).join('\n');
 
   const orderButton = withButtonEmoji(
-    new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('Mở Ticket Chốt Đơn').setURL(supportUrl),
-    customEmojis?.cenar_daily_gift?.component,
+    new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('Chọn Gói Qua Ticket').setURL(supportUrl),
+    customEmojis?.cenar_autumn_202610_ticket?.component,
     E.component?.('ticket_open'),
   );
   const boardButton = withButtonEmoji(
-    new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('Xem Bảng Giá Sale').setURL(boardUrl),
-    customEmojis?.cenar_daily_tag?.component,
+    new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('Bảng Giá Trạm Thu Dịu').setURL(boardUrl),
+    customEmojis?.cenar_autumn_202610_leaves?.component,
     E.component?.('icon_price'),
   );
   const storeButton = withButtonEmoji(
     new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('Xem Website').setURL(DAILY_COLOR_SALE.storeUrl),
-    customEmojis?.cenar_daily_leaf?.component,
+    customEmojis?.cenar_autumn_202610_cup?.component,
     E.component?.('icon_store'),
   );
 
@@ -767,7 +743,15 @@ async function publishDailyFlashSaleInternal(client, {
 
 export function publishDailyFlashSale(client, options = {}) {
   if (dailyPublishPromise) return dailyPublishPromise;
-  dailyPublishPromise = publishDailyFlashSaleInternal(client, options)
+  dailyPublishPromise = (async () => {
+    const now = options.now || new Date();
+    await rebuildPromotionCampaign(client, {
+      revision: DAILY_COLOR_SALE.revision,
+      prepare: (guild) => preparePromotionRebuild(guild, { now }),
+      now,
+    });
+    return publishDailyFlashSaleInternal(client, options);
+  })()
     .finally(() => { dailyPublishPromise = null; });
   return dailyPublishPromise;
 }

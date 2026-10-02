@@ -10,8 +10,8 @@ describe('Cenar promotion channel policy', () => {
   it('marks the weekly-story daily Flash Sale as active', () => {
     expect(PROMOTION_BOARD.status).toBe('ACTIVE');
     expect(PROMOTION_BOARD.campaign).toBe('CENAR-STORY-FLASH-SALE-V1');
-    expect(PROMOTION_BOARD.revision).toBe('CENAR-SALE-REVISION:AI-WORKBENCH-20261002');
-    expect(PROMOTION_BOARD.name).toContain('Bàn Làm Việc Có Gu');
+    expect(PROMOTION_BOARD.revision).toBe('CENAR-SALE-REVISION:AUTUMN-ATELIER-20261002');
+    expect(PROMOTION_BOARD.name).toContain('Trạm Thu Dịu');
     expect(PROMOTION_BOARD.channelId).toBe('1515008584549797979');
   });
 

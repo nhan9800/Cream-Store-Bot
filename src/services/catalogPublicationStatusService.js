@@ -6,6 +6,8 @@ import {
   DAILY_COLOR_SALE, DAILY_COLOR_SALE_EMOJIS, dailyColorSalePart,
   dailyFlashSaleDateFromMessage, dailySaleDateKey,
 } from '../campaigns/dailyColorSale2026.js';
+import { getPromotionRebuildStatus, isPromotionSaleMessage, promotionRebuildInternals } from './promotionRebuildService.js';
+import { PROMOTION_CATALOG_ROWS, PROMOTION_CATALOG_VERSION } from '../campaigns/promotionCatalog202610.js';
 
 function publicText(message) {
   const json = message.toJSON();
@@ -66,15 +68,36 @@ export async function getCatalogPublicationStatus(client, { date = new Date() } 
   if (guild.id === DAILY_COLOR_SALE.guildId) {
     const channel = await guild.channels.fetch(DAILY_COLOR_SALE.promotionChannelId);
     const today = dailySaleDateKey(date);
-    const promotion = await inspectBoard(channel, client.user.id, (message) => (
-      dailyColorSalePart(message, client.user.id)
-      || dailyFlashSaleDateFromMessage(message, client.user.id) === today
-    ));
+    if (!channel?.isTextBased?.()) throw new Error('PROMOTION_CHANNEL_UNAVAILABLE');
+    // An exhaustive bounded scan must succeed before claiming old sales are
+    // gone. Return only public sale posts; never include unrelated users.
+    const history = await promotionRebuildInternals.fetchHistory(channel);
+    const saleMessages = history.filter((message) => isPromotionSaleMessage(message, client.user.id));
+    const obsolete = saleMessages.filter((message) => !publicText(message).includes(DAILY_COLOR_SALE.revision));
+    const current = saleMessages.filter((message) => publicText(message).includes(DAILY_COLOR_SALE.revision));
+    const promotion = {
+      available: true, historyComplete: true, scannedMessages: history.length,
+      obsoleteSaleCount: obsolete.length,
+      currentBoardParts: current.filter((message) => dailyColorSalePart(message, client.user.id)).length,
+      currentDayPosts: current.filter((message) => dailyFlashSaleDateFromMessage(message, client.user.id) === today).length,
+      catalogVersion: PROMOTION_CATALOG_VERSION,
+      priceManifest: PROMOTION_CATALOG_ROWS.map(({ key, source, price, priceUnit, label, duration, account, warranty }) => ({
+        key, source, price, priceUnit, label, duration, account, warranty,
+      })),
+      messages: saleMessages.map((message) => ({
+        id: message.id, url: message.url, text: publicText(message),
+        attachments: [...(message.attachments?.values?.() || [])].map((attachment) => ({
+          name: attachment.name, url: attachment.url, size: attachment.size,
+        })),
+      })),
+      rebuild: await getPromotionRebuildStatus(DAILY_COLOR_SALE.revision),
+    };
     await guild.emojis.fetch();
     data.promotion = {
       ...promotion, date: today, revision: DAILY_COLOR_SALE.revision,
       emojis: DAILY_COLOR_SALE_EMOJIS.map(({ name }) => ({
         name, available: Boolean(guild.emojis.cache.find((emoji) => emoji.name === name)),
+        id: guild.emojis.cache.find((emoji) => emoji.name === name)?.id || null,
       })),
     };
   }
