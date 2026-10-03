@@ -1,13 +1,14 @@
 import { SlashCommandBuilder } from 'discord.js';
 import {
   buildMusicPanelPayload,
+  buildMusicAddedMessage,
   playYoutube,
   registerMusicPanelMessage,
 } from '../services/musicPlayerService.js';
 
 export const data = new SlashCommandBuilder()
   .setName('music')
-  .setDescription('Mở Cenar Music hoặc phát một link YouTube')
+  .setDescription('Mở Cenar Music, phát video hoặc thêm playlist YouTube vào hàng đợi')
   .addStringOption((option) => option
     .setName('link')
     .setDescription('Link video hoặc playlist YouTube')
@@ -18,10 +19,11 @@ export async function execute(interaction) {
   const link = interaction.options.getString('link');
   await interaction.deferReply();
   try {
+    let added = null;
     if (link) {
       const voiceChannel = interaction.member?.voice?.channel;
       if (!voiceChannel) throw new Error('Bạn cần vào một phòng thoại trước khi phát nhạc.');
-      await playYoutube({
+      added = await playYoutube({
         guild: interaction.guild,
         voiceChannel,
         url: link,
@@ -29,7 +31,9 @@ export async function execute(interaction) {
         textChannelId: interaction.channelId,
       });
     }
-    await interaction.editReply(buildMusicPanelPayload(interaction.guildId));
+    await interaction.editReply(buildMusicPanelPayload(interaction.guildId, {
+      notice: added ? buildMusicAddedMessage(added) : null,
+    }));
     const message = await interaction.fetchReply();
     await registerMusicPanelMessage(interaction.guildId, message);
   } catch (error) {
