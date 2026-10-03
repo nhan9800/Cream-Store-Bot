@@ -13,7 +13,7 @@ import {
   TextInputBuilder,
   TextInputStyle,
 } from 'discord.js';
-import { GuildQueueEvent, Player, QueueRepeatMode } from 'discord-player';
+import { GuildQueueEvent, Player, QueryType, QueueRepeatMode } from 'discord-player';
 import ffmpegPath from 'ffmpeg-static';
 import { ensureYtDlpRuntime } from '../utils/ytDlpRuntime.js';
 import { config } from '../config.js';
@@ -34,9 +34,15 @@ const VOLUME_STEPS = ['20', '40', '60', '80', '100'];
 const DAVE_HANDSHAKE_TIMEOUT_MS = 8_000;
 const VOLUME_RAMP_DURATION_MS = 360;
 const VOLUME_RAMP_STEP_MS = 20;
+const MUSIC_SOURCE_TIMEOUT_MS = 20_000;
+// Load one more than the highest supported queue capacity, so a large
+// playlist is rejected explicitly instead of being silently truncated.
+const PLAYLIST_SEARCH_LIMIT = 201;
 const panelMessages = new Map();
 const refreshTimers = new Map();
 const volumeRamps = new Map();
+const queueMutations = new Map();
+const extractingTracks = new WeakMap();
 
 let musicPlayer = null;
 let initializePromise = null;
@@ -230,7 +236,69 @@ export function normalizeYoutubeUrl(value) {
   url.username = '';
   url.password = '';
   url.hash = '';
+  const listId = url.searchParams.get('list');
+  if (listId != null) {
+    if (!/^[a-zA-Z0-9_-]{2,150}$/.test(listId)) {
+      throw new Error('Mã playlist YouTube không hợp lệ. Hãy sao chép lại link chia sẻ playlist.');
+    }
+    if (listId.startsWith('RD')) {
+      throw new Error('YouTube Mix/Radio tự tạo chưa được hỗ trợ. Hãy lưu các bài vào playlist rồi gửi link playlist đó.');
+    }
+    // A watch link with list= means the whole playlist, including when
+    // shared from YouTube Music or youtu.be. Discard index/start/time fields.
+    return `https://www.youtube.com/playlist?list=${encodeURIComponent(listId)}`;
+  }
+  if (url.pathname.replace(/\/$/, '') === '/playlist') {
+    throw new Error('Link playlist thiếu mã list. Hãy sao chép lại link chia sẻ playlist.');
+  }
   return url.toString();
+}
+
+async function withQueueMutation(guildId, task) {
+  const key = String(guildId);
+  const previous = queueMutations.get(key) || Promise.resolve();
+  const operation = previous.catch(() => {}).then(task);
+  queueMutations.set(key, operation);
+  try {
+    return await operation;
+  } finally {
+    if (queueMutations.get(key) === operation) queueMutations.delete(key);
+  }
+}
+
+async function loadYoutubeSource(player, url, requestedBy, timeoutMs) {
+  const isPlaylist = new URL(url).searchParams.has('list');
+  let timeout;
+  try {
+    // Extractor timeouts apply to each fallback separately. Bound the whole
+    // metadata read, before any voice connection or queue mutation. A late
+    // result from an abandoned read can never enqueue tracks.
+    const result = await Promise.race([
+      player.search(url, {
+        requestedBy: requestedBy || undefined,
+        searchEngine: isPlaylist ? QueryType.YOUTUBE_PLAYLIST : QueryType.YOUTUBE_VIDEO,
+        // Discord Player's query cache holds mutable Track instances. The
+        // extractor still caches raw metadata and creates fresh tracks.
+        ignoreCache: true,
+      }),
+      new Promise((_, reject) => {
+        timeout = setTimeout(() => reject(new Error('YouTube tải quá lâu. Chưa thêm bài nào; hãy thử lại sau.')), timeoutMs);
+      }),
+    ]);
+    const tracks = isPlaylist ? result?.tracks : result?.tracks?.slice(0, 1);
+    if (!tracks?.length || (isPlaylist && !result.playlist)) {
+      throw new Error(isPlaylist
+        ? 'Không đọc được playlist hoặc playlist không có bài phát được. Hãy dùng playlist Công khai/Không công khai, không phải Riêng tư.'
+        : 'Không đọc được video YouTube này. Video có thể riêng tư, bị xoá hoặc không khả dụng.');
+    }
+    // Reject an extractor response outside the declared source boundary.
+    for (const track of tracks) normalizeYoutubeUrl(track.url);
+    return { tracks, playlist: isPlaylist ? result.playlist : null };
+  } catch (error) {
+    throw new Error(String(error?.message || 'Không thể tải nhạc từ YouTube.'));
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 function serializeTrack(track, index = 0) {
@@ -289,7 +357,7 @@ export function getMusicState(guildId) {
     connected: Boolean(queue?.connection && channel),
     playing: Boolean(queue?.currentTrack && queue.node.isPlaying()),
     paused: Boolean(queue?.node.isPaused()),
-    buffering: Boolean(queue?.node.isBuffering()),
+    buffering: Boolean(queue && (queue.node.isBuffering() || extractingTracks.has(queue))),
     volume: Number(queue?.node.volume ?? readSettings(guildId).defaultVolume),
     repeatMode: Number(queue?.repeatMode ?? QueueRepeatMode.OFF),
     shuffle: Boolean(queue?.isShuffling),
@@ -367,6 +435,7 @@ function schedulePanelRefresh(guildId) {
 
 function wirePlayerEvents(player) {
   player.events.on(GuildQueueEvent.PlayerStart, (queue, track) => {
+    if (extractingTracks.get(queue)?.id === track?.id) extractingTracks.delete(queue);
     saveTrackStart(queue, track);
     // Do not mutate bitrate at runtime. With @discord-player/opus the
     // PlayerStart event can fire while the native encoder is still null; that
@@ -379,6 +448,7 @@ function wirePlayerEvents(player) {
     schedulePanelRefresh(queue.guild.id);
   });
   player.events.on(GuildQueueEvent.PlayerSkip, (queue, track, reason, description) => {
+    if (extractingTracks.get(queue)?.id === track?.id) extractingTracks.delete(queue);
     closeTrackHistory(queue, track, 'SKIPPED');
     console.warn(
       `[MUSIC] Track skipped in ${queue.guild.name}: ${track?.title || track?.url || 'unknown'} · ${reason || 'unknown'}`,
@@ -387,6 +457,7 @@ function wirePlayerEvents(player) {
     schedulePanelRefresh(queue.guild.id);
   });
   player.events.on(GuildQueueEvent.PlayerError, (queue, error, track) => {
+    if (extractingTracks.get(queue)?.id === track?.id) extractingTracks.delete(queue);
     closeTrackHistory(queue, track, 'ERROR', error?.message);
     console.error(`[MUSIC] Playback error in ${queue.guild.name}:`, error);
     schedulePanelRefresh(queue.guild.id);
@@ -401,7 +472,10 @@ function wirePlayerEvents(player) {
     GuildQueueEvent.VolumeChange,
     GuildQueueEvent.Disconnect,
   ]) {
-    player.events.on(event, (queue) => schedulePanelRefresh(queue.guild.id));
+    player.events.on(event, (queue) => {
+      if (event === GuildQueueEvent.Disconnect || event === GuildQueueEvent.EmptyQueue) extractingTracks.delete(queue);
+      schedulePanelRefresh(queue.guild.id);
+    });
   }
   player.events.on(GuildQueueEvent.Error, (queue, error) => {
     console.error(`[MUSIC] Queue error in ${queue.guild.name}:`, error);
@@ -448,7 +522,7 @@ export async function initializeMusicPlayer(client) {
           ...(proxyUri ? { proxyUri } : {}),
         },
         searchLimit: 1,
-        playlistSearchLimit: 100,
+        playlistSearchLimit: PLAYLIST_SEARCH_LIMIT,
         relatedLimit: 0,
         searchTimeoutMs: 8_000,
         videoTimeoutMs: 10_000,
@@ -474,33 +548,10 @@ export async function initializeMusicPlayer(client) {
   return initializePromise;
 }
 
-export async function playYoutube({ guild, voiceChannel, url, requestedBy = null, requestedByLabel = 'Dashboard', textChannelId = null }) {
-  if (!guild || !voiceChannel || voiceChannel.guildId !== guild.id || !voiceChannel.isVoiceBased()) {
-    throw new Error('Phòng thoại không hợp lệ hoặc không thuộc máy chủ này.');
-  }
-  const normalizedUrl = normalizeYoutubeUrl(url);
-  const botMember = guild.members.me;
-  const permissions = voiceChannel.permissionsFor(botMember);
-  if (!permissions?.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect, PermissionFlagsBits.Speak])) {
-    throw new Error(`Bot thiếu quyền Xem kênh, Kết nối hoặc Nói trong #${voiceChannel.name}.`);
-  }
-  const player = await initializeMusicPlayer(guild.client);
-  const settings = readSettings(guild.id);
-  const activeQueue = player.nodes.get(guild.id);
-  const wasAlreadyPlaying = Boolean(
-    activeQueue?.currentTrack
-    && (activeQueue.node.isPlaying() || activeQueue.node.isPaused() || activeQueue.node.isBuffering()),
-  );
-  if (activeQueue && activeQueue.size >= settings.maxQueueSize) {
-    throw new Error(`Hàng đợi đã đạt giới hạn ${settings.maxQueueSize} bài.`);
-  }
-  const result = await player.play(voiceChannel, normalizedUrl, {
-    requestedBy: requestedBy || undefined,
-    connectionOptions: {
-      daveEncryption: true,
-    },
-    nodeOptions: {
+function musicQueueOptions(settings, textChannelId, requestedByLabel) {
+  return {
       volume: settings.defaultVolume,
+      connectionTimeout: 20_000,
       // The extractor already provides clean 48 kHz PCM and this dashboard
       // does not expose EQ/effects. Keep only the volume transformer in the
       // DSP chain to avoid unnecessary passes and CPU jitter on shared hosts.
@@ -518,6 +569,10 @@ export async function playYoutube({ guild, voiceChannel, url, requestedBy = null
       leaveOnStop: true,
       leaveOnStopCooldown: 5_000,
       metadata: { textChannelId, requestedByLabel },
+      onBeforeCreateStream: async (track, _queryType, queue) => {
+        extractingTracks.set(queue, track);
+        return null;
+      },
       // discord-player 7.2.0 may start consuming the audio resource before
       // Discord has processed the initial DAVE MLS commit. The stream then
       // reaches Idle at 0s and disappears from the dashboard. Holding the
@@ -528,28 +583,119 @@ export async function playYoutube({ guild, voiceChannel, url, requestedBy = null
         console.log(`[MUSIC] DAVE ready in ${waitedMs}ms; starting ${track?.title || track?.url || 'track'}`);
         return stream;
       },
-    },
-  });
-  result.track.setMetadata({
-    textChannelId,
-    requestedById: requestedBy?.id || null,
-    requestedByLabel: requestedBy?.username || requestedByLabel,
-  });
-  if (!wasAlreadyPlaying) {
-    // player.play() can resolve as soon as Discord enters the Playing state,
-    // even when the upstream stream ends immediately without yielding audio.
-    // Give the first frames a short stabilization window before the dashboard
-    // reports success to the administrator.
-    await new Promise((resolve) => setTimeout(resolve, 1_200));
-    const activeTrack = result.queue.currentTrack;
-    const stable = activeTrack?.id === result.track.id
-      && (result.queue.node.isPlaying() || result.queue.node.isBuffering());
-    if (!stable) {
-      throw new Error('Nguồn âm thanh YouTube kết thúc trước khi phát. Vui lòng thử lại hoặc kiểm tra giới hạn YouTube trên hosting.');
+  };
+}
+
+function hasActiveMusic(queue) {
+  return Boolean(queue && (extractingTracks.has(queue) || (queue.currentTrack && (
+    queue.node.isPlaying() || queue.node.isPaused() || queue.node.isBuffering()
+  ))));
+}
+
+// Search independently so a slow playlist does not block unrelated metadata
+// reads; serialize capacity checks and the complete batch insertion per guild.
+export async function enqueueYoutubeSource({
+  player, guild, voiceChannel, url, requestedBy = null,
+  requestedByLabel = 'Dashboard', textChannelId = null,
+  getSettings = () => readSettings(guild.id),
+  sourceTimeoutMs = MUSIC_SOURCE_TIMEOUT_MS, stabilizationMs = 1_200,
+}) {
+  const normalizedUrl = normalizeYoutubeUrl(url);
+  const { tracks, playlist } = await loadYoutubeSource(player, normalizedUrl, requestedBy, sourceTimeoutMs);
+  return withQueueMutation(guild.id, async () => {
+    const settings = getSettings();
+    const existing = player.nodes.get(guild.id);
+    if (existing?.channel && existing.channel.id !== voiceChannel.id) {
+      throw new Error(`Bot đang ở #${existing.channel.name}. Hãy vào cùng phòng thoại hoặc cho bot rời phòng trước.`);
     }
+    const pendingCount = Number(existing?.size || 0);
+    if (pendingCount + tracks.length > settings.maxQueueSize) {
+      throw new Error(`Cần thêm ${tracks.length} bài nhưng hàng đợi chỉ còn ${Math.max(0, settings.maxQueueSize - pendingCount)} chỗ (giới hạn ${settings.maxQueueSize}). Chưa thêm bài nào; hãy dùng playlist nhỏ hơn hoặc bớt bài trong hàng đợi.`);
+    }
+    const queue = existing || player.nodes.create(guild, musicQueueOptions(settings, textChannelId, requestedByLabel));
+    // nodes.create reuses a guild's queue without applying new node options.
+    queue.setMaxSize(settings.maxQueueSize);
+    const entry = queue.tasksQueue.acquire();
+    await entry.getTask();
+    try {
+      if (!queue.channel) await queue.connect(voiceChannel, { daveEncryption: true, timeout: 20_000 });
+      // A task acquired elsewhere may have added tracks during our wait.
+      if (queue.size + tracks.length > settings.maxQueueSize) {
+        throw new Error(`Hàng đợi không còn đủ chỗ cho ${tracks.length} bài (giới hạn ${settings.maxQueueSize}). Chưa thêm bài nào.`);
+      }
+      for (const track of tracks) {
+        track.setMetadata({
+          ...(track.metadata && typeof track.metadata === 'object' ? track.metadata : {}),
+          textChannelId,
+          requestedById: requestedBy?.id || null,
+          requestedByLabel: requestedBy?.username || requestedByLabel,
+        });
+      }
+      const wasAlreadyPlaying = hasActiveMusic(queue);
+      // GuildQueue validates array capacity before mutation and preserves its
+      // order. Never feed the first track alone or slice a large playlist.
+      queue.addTrack(tracks);
+      if (!wasAlreadyPlaying) {
+        let playbackError = null;
+        const startup = queue.node.play(null).catch((error) => {
+          if (extractingTracks.get(queue)?.id === tracks[0].id) extractingTracks.delete(queue);
+          playbackError = error;
+          if (playlist) console.error('[MUSIC] Playlist startup failed:', error);
+          else throw error;
+        });
+        // Metadata/connection and accepted batch insertion remain bounded for
+        // the dashboard. Playlist stream extraction continues independently;
+        // its start/error events update the panel and playback history.
+        if (!playlist) await startup;
+        await new Promise((resolve) => setTimeout(resolve, stabilizationMs));
+        if (playbackError) throw playbackError;
+        const selected = new Set(tracks.map((track) => track.id));
+        const activeSelected = selected.has(queue.currentTrack?.id) && hasActiveMusic(queue);
+        const pendingSelected = queue.tracks.toArray().some((track) => selected.has(track.id))
+          || selected.has(extractingTracks.get(queue)?.id);
+        // If a playlist's first unavailable video was skipped, its next item
+        // can still be extracting. The batch is accepted while it remains in
+        // the queue; an error here would encourage adding the batch twice.
+        if (!activeSelected && !(playlist && pendingSelected)) {
+          throw new Error('Nguồn âm thanh YouTube kết thúc trước khi phát. Vui lòng thử lại hoặc kiểm tra giới hạn YouTube trên hosting.');
+        }
+      }
+      return {
+        track: serializeTrack(tracks[0]),
+        addedCount: tracks.length,
+        playlist: playlist ? {
+          id: String(playlist.id || new URL(normalizedUrl).searchParams.get('list') || ''),
+          title: String(playlist.title || 'YouTube Playlist'),
+          url: normalizedUrl,
+          trackCount: tracks.length,
+          addedCount: tracks.length,
+        } : null,
+      };
+    } finally {
+      queue.tasksQueue.release();
+    }
+  });
+}
+
+export async function playYoutube({ guild, voiceChannel, url, requestedBy = null, requestedByLabel = 'Dashboard', textChannelId = null }) {
+  if (!guild || !voiceChannel || voiceChannel.guildId !== guild.id || !voiceChannel.isVoiceBased()) {
+    throw new Error('Phòng thoại không hợp lệ hoặc không thuộc máy chủ này.');
   }
+  normalizeYoutubeUrl(url);
+  const permissions = voiceChannel.permissionsFor(guild.members.me);
+  if (!permissions?.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect, PermissionFlagsBits.Speak])) {
+    throw new Error(`Bot thiếu quyền Xem kênh, Kết nối hoặc Nói trong #${voiceChannel.name}.`);
+  }
+  const player = await initializeMusicPlayer(guild.client);
+  const result = await enqueueYoutubeSource({ player, guild, voiceChannel, url, requestedBy, requestedByLabel, textChannelId });
   schedulePanelRefresh(guild.id);
-  return { track: serializeTrack(result.track), state: getMusicState(guild.id) };
+  return { ...result, state: getMusicState(guild.id) };
+}
+
+export function buildMusicAddedMessage(result) {
+  return result.playlist
+    ? `Đã thêm **${result.addedCount} bài** từ playlist **${plain(result.playlist.title)}** vào hàng đợi theo thứ tự. Bài đang phát được giữ nguyên.`
+    : `Đã thêm **${plain(result.track.title)}** vào Cenar Music.`;
 }
 
 export async function controlMusic(guildId, action, value = null) {
@@ -569,9 +715,11 @@ export async function controlMusic(guildId, action, value = null) {
       if (!queue.node.skip()) throw new Error('Không có bài kế tiếp để chuyển.');
       break;
     case 'stop':
+      extractingTracks.delete(queue);
       queue.node.stop(true);
       break;
     case 'disconnect':
+      extractingTracks.delete(queue);
       queue.delete();
       break;
     case 'shuffle':
@@ -608,7 +756,7 @@ function setButtonEmoji(button, emoji) {
   return button;
 }
 
-export function buildMusicPanelPayload(guildId) {
+export function buildMusicPanelPayload(guildId, { notice = null } = {}) {
   const E = createEmojiResolver(guildId);
   const state = getMusicState(guildId);
   const current = state.current;
@@ -620,12 +768,13 @@ export function buildMusicPanelPayload(guildId) {
   const queueLines = state.queue.slice(0, 8).map((track) => (
     `**${track.index}.** [${plain(track.title)}](${track.url}) · ${track.duration} · *${plain(track.requestedBy)}*`
   ));
-  if (!queueLines.length) queueLines.push('_Hàng đợi đang trống — hãy thêm một link YouTube._');
+  if (!queueLines.length) queueLines.push('_Hàng đợi đang trống — hãy thêm video hoặc playlist YouTube._');
 
   const container = new ContainerBuilder().setAccentColor(accentFor(current ? 'success' : 'primary'));
   container.addTextDisplayComponents(new TextDisplayBuilder().setContent([
     `# ${E('music_wave')} CENAR MUSIC · CONTROL DECK`,
     `> ${E('cenar_verified')} YouTube Engine · 48 kHz Stereo · bitrate tự động theo phòng thoại`,
+    notice ? `> ${notice}` : '',
     '',
     current
       ? `## ${E('music_now')} [${plain(current.title)}](${current.url})`
@@ -633,20 +782,20 @@ export function buildMusicPanelPayload(guildId) {
     current ? `**Kênh:** ${plain(current.author)} · **Yêu cầu:** ${plain(current.requestedBy)}` : '',
     current
       ? `\`${state.progress.currentLabel}\` ${queueProgress(state.progress.percent)} \`${state.progress.totalLabel}\``
-      : `Kết nối vào phòng thoại, nhấn **Thêm bài** rồi dán link YouTube.`,
+      : `Kết nối vào phòng thoại, nhấn **Thêm bài / playlist** rồi dán link YouTube.`,
     '',
-    `**Trạng thái:** ${state.paused ? 'Tạm dừng' : state.playing ? 'Đang phát' : 'Sẵn sàng'} · **Âm lượng:** ${state.volume}% · **${repeatLabel}** · **Shuffle:** ${state.shuffle ? 'Bật' : 'Tắt'}`,
+    `**Trạng thái:** ${state.paused ? 'Tạm dừng' : state.playing ? 'Đang phát' : state.buffering ? 'Đang tải âm thanh' : 'Sẵn sàng'} · **Âm lượng:** ${state.volume}% · **${repeatLabel}** · **Shuffle:** ${state.shuffle ? 'Bật' : 'Tắt'}`,
     `**Phòng thoại:** ${state.voiceChannel ? `🔊 ${plain(state.voiceChannel.name)}` : 'Chưa kết nối'} · **Người nghe:** ${state.listeners.length} · **Ping:** ${state.ping}ms`,
     '',
     `### ${E('music_queue')} HÀNG ĐỢI · ${state.queue.length} BÀI`,
     ...queueLines,
     state.queue.length > 8 ? `-# Và ${state.queue.length - 8} bài khác trên Dashboard.` : '',
     '',
-    `-# Cenar Music chỉ nhận link YouTube · tự rời phòng sau 3 phút không có người nghe`,
+    `-# Video / playlist YouTube Công khai hoặc Không công khai · tự rời phòng sau 3 phút không có người nghe`,
   ].filter(Boolean).join('\n').slice(0, 4000)));
 
   const add = setButtonEmoji(
-    new ButtonBuilder().setCustomId('music:add').setLabel('Thêm bài').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('music:add').setLabel('Thêm bài / playlist').setStyle(ButtonStyle.Success),
     E.component('music_add'),
   );
   const toggle = setButtonEmoji(
@@ -734,11 +883,11 @@ export async function handleMusicInteraction(interaction) {
       await interaction.reply({ content: 'Bạn cần vào một phòng thoại trước khi thêm nhạc.', ephemeral: true });
       return true;
     }
-    const modal = new ModalBuilder().setCustomId('music:add:modal').setTitle('Thêm nhạc vào Cenar Music');
+    const modal = new ModalBuilder().setCustomId('music:add:modal').setTitle('Thêm bài hoặc playlist');
     const input = new TextInputBuilder()
       .setCustomId('youtube_url')
       .setLabel('Link video hoặc playlist YouTube')
-      .setPlaceholder('https://www.youtube.com/watch?v=...')
+      .setPlaceholder('https://www.youtube.com/playlist?list=...')
       .setStyle(TextInputStyle.Short)
       .setRequired(true)
       .setMaxLength(500);
@@ -759,7 +908,7 @@ export async function handleMusicInteraction(interaction) {
         requestedBy: interaction.user,
         textChannelId: interaction.channelId,
       });
-      await interaction.editReply(`Đã thêm **${plain(result.track.title)}** vào Cenar Music.`);
+      await interaction.editReply(buildMusicAddedMessage(result));
     } catch (error) {
       await interaction.editReply(`Không thể thêm bài: ${error.message}`);
     }
