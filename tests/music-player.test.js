@@ -41,13 +41,19 @@ describe('Cenar Music YouTube URL boundary', () => {
 
   it('keeps unused PCM effects out of the clean music path', () => {
     const source = fs.readFileSync(new URL('../src/services/musicPlayerService.js', import.meta.url), 'utf8');
-    for (const option of ['disableEqualizer', 'disableFilterer', 'disableBiquad', 'disableResampler']) {
+    for (const option of ['disableEqualizer', 'disableBiquad', 'disableResampler', 'disableCompressor', 'disableReverb', 'disableSeeker']) {
       expect(source).toMatch(new RegExp(`${option}:\\s*true`));
     }
+    expect(source).toMatch(/disableFilterer:\s*false/);
+    expect(source).toMatch(/disableVolume:\s*false/);
   });
 });
 
 describe('Cenar Music smooth volume control', () => {
+  it('does not falsely report success after the audio volume transform has closed', async () => {
+    const queue = { guild: { id: 'volume-stopped' }, node: { volume: 80, setVolume: () => false } };
+    await expect(setSmoothMusicVolume(queue, 20, { durationMs: 1, stepMs: 1 })).rejects.toThrow(/chưa thay đổi âm lượng/);
+  });
   it('builds a monotonic eased ramp that lands exactly on the target', () => {
     const up = buildSmoothVolumeRamp(20, 80, { durationMs: 100, stepMs: 10 });
     expect(up).toHaveLength(10);

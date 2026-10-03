@@ -7,6 +7,7 @@ import {
   hashAccountPassword, verifyAccountPassword, presentWebUser, getAccountSecurity,
   revokeAccountSessions, issueAccountEmailToken, consumeAccountEmailToken,
   prepareAccountMfa, confirmAccountMfa, verifyAccountMfa, disableAccountMfa, issueAdminStepUp,
+  isWebAccountBanned, rejectBannedWebAccount,
 } from './accountSecurityService.js';
 import { createRateLimiter } from './rateLimitMiddleware.js';
 
@@ -93,6 +94,7 @@ export function registerAuthRoutes(app) {
         recordLoginFailure(clientIp);
         return errorResponse(res, 401, 'Sai tài khoản hoặc mật khẩu');
       }
+      if (isWebAccountBanned(user.id)) return rejectBannedWebAccount(res);
 
       if (getAccountSecurity(user.id).mfa_secret && !verifyAccountMfa(user.id, req.body?.mfaCode)) {
         recordLoginFailure(clientIp);
@@ -136,6 +138,7 @@ export function registerAuthRoutes(app) {
         if (existing && emailVerified !== true) return errorResponse(res, 403, 'Nhà cung cấp cần xác minh email trước khi liên kết.');
         user = existing;
       }
+      if (user && isWebAccountBanned(user.id)) return rejectBannedWebAccount(res);
 
       // Xử lý xung đột tài khoản liên kết Discord
       if (user && provider === 'discord' && discordId) {
@@ -218,6 +221,7 @@ export function registerAuthRoutes(app) {
       }
       const user = db.prepare('SELECT * FROM web_users WHERE id = ? OR discord_id = ?').get(requestedId, requestedId);
       if (!user) return res.status(404).json({ ok: false, error: 'Không tìm thấy user' });
+      if (isWebAccountBanned(user.id)) return rejectBannedWebAccount(res);
       
       res.set('Cache-Control', 'no-store');
       res.json({ ok: true, data: presentWebUser(user) });
@@ -230,6 +234,7 @@ export function registerAuthRoutes(app) {
   function requireCurrentAccount(req, res, next) {
     const userId = String(req.header('x-user-id') || '').trim();
     const user = db.prepare('SELECT * FROM web_users WHERE id = ?').get(userId);
+    if (user && isWebAccountBanned(userId)) return rejectBannedWebAccount(res);
     const security = user ? getAccountSecurity(userId) : null;
     const rawVersion = String(req.header('x-session-version') || '');
     if (!security || !/^\d{1,10}$/.test(rawVersion) || Number(rawVersion) !== security.session_version) {

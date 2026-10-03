@@ -24,6 +24,16 @@ export function getAccountSecurity(userId) {
   db.prepare('INSERT OR IGNORE INTO web_account_security(user_id) VALUES (?)').run(userId);
   return db.prepare('SELECT * FROM web_account_security WHERE user_id = ?').get(userId);
 }
+export function isWebAccountBanned(userId) {
+  return Boolean(userId && Number(db.prepare(`SELECT is_blacklisted FROM customer_flags
+    WHERE guild_id = 'WEB' AND customer_id = ?`).get(String(userId))?.is_blacklisted) === 1);
+}
+
+export function rejectBannedWebAccount(res) {
+  res.set('Cache-Control', 'no-store');
+  return res.status(403).json({ ok: false, code: 'ACCOUNT_BANNED', error: 'Tài khoản đã bị khóa. Liên hệ Cenar Care để được hỗ trợ.' });
+}
+
 export function presentWebUser(user) {
   if (!user) return null;
   const security = getAccountSecurity(user.id);
@@ -34,6 +44,7 @@ export function presentWebUser(user) {
     role: user.role, created_at: user.created_at, updated_at: user.updated_at,
     session_version: security.session_version, email_verified: Boolean(security.email_verified_at),
     mfa_enabled: Boolean(security.mfa_secret),
+    account_banned: isWebAccountBanned(user.id),
   };
 }
 

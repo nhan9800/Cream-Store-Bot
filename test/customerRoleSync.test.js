@@ -63,7 +63,11 @@ function mockDiscord() {
 const job = () => db.prepare('SELECT * FROM customer_role_sync_jobs WHERE guild_id = ? AND customer_id = ?').get(guildId, customerId);
 
 describe('paid website purchaser role synchronization', () => {
-  beforeAll(() => initDatabase());
+  beforeAll(() => {
+    initDatabase();
+    db.prepare(`INSERT INTO web_users (id, email, discord_id, role)
+      VALUES ('web-test', 'role-customer@example.com', ?, 'member')`).run(customerId);
+  });
   beforeEach(() => {
     db.exec(`DELETE FROM order_delivery_items; DELETE FROM order_fulfillments; DELETE FROM checkout_requests;
       DELETE FROM payment_events; DELETE FROM staff_logs; DELETE FROM wallet_transactions; DELETE FROM orders;
