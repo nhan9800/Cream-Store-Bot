@@ -8,10 +8,10 @@ import {
 
 export const data = new SlashCommandBuilder()
   .setName('music')
-  .setDescription('Mở Cenar Music, phát video hoặc thêm playlist YouTube vào hàng đợi')
+  .setDescription('Mở Cenar Music, phát video, playlist hoặc Mix/Radio YouTube')
   .addStringOption((option) => option
     .setName('link')
-    .setDescription('Link video hoặc playlist YouTube')
+    .setDescription('Link video, playlist hoặc Mix/Radio YouTube')
     .setRequired(false)
     .setMaxLength(500));
 

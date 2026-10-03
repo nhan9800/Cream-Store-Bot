@@ -1,8 +1,13 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { QueryType } from 'discord-player';
 import { buildMusicAddedMessage, enqueueYoutubeSource, normalizeYoutubeUrl } from '../src/services/musicPlayerService.js';
 
 vi.mock('../src/database/db.js', () => ({ db: {} }));
+const mixLoader = vi.hoisted(() => ({ load: vi.fn() }));
+vi.mock('../src/services/youtubeMixSource.js', async (importOriginal) => ({
+  ...(await importOriginal()), loadYoutubeMix: mixLoader.load,
+}));
+beforeEach(() => { mixLoader.load.mockReset(); });
 
 const playlistUrl = 'https://www.youtube.com/playlist?list=PLcenar_test';
 const makeTrack = (id, requestedBy = null) => ({
@@ -66,14 +71,63 @@ describe('YouTube playlist URL semantics', () => {
     expect(normalizeYoutubeUrl(url)).toBe(playlistUrl);
   });
 
-  it('rejects malformed, absent and dynamic Radio/Mix playlist identifiers', () => {
+  it('rejects malformed identifiers and invalid Mix seeds', () => {
     expect(() => normalizeYoutubeUrl('https://youtube.com/playlist')).toThrow(/thiếu mã list/);
     expect(() => normalizeYoutubeUrl('https://youtube.com/playlist?list=')).toThrow(/không hợp lệ/);
-    expect(() => normalizeYoutubeUrl('https://youtube.com/watch?v=abc&list=RDabc')).toThrow(/Mix\/Radio/);
+    expect(() => normalizeYoutubeUrl('https://youtube.com/watch?v=abc&list=RDabc')).toThrow(/không hợp lệ/);
+  });
+
+  it('keeps the seed for a Mix link and recognizes a bare video-based Mix', () => {
+    const mix = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=RDdQw4w9WgXcQ&start_radio=1';
+    expect(normalizeYoutubeUrl('https://youtu.be/dQw4w9WgXcQ?list=RDdQw4w9WgXcQ&index=5')).toBe(mix);
+    expect(normalizeYoutubeUrl('https://music.youtube.com/playlist?list=RDdQw4w9WgXcQ')).toBe(mix);
   });
 });
 
 describe('Cenar Music complete playlist batches', () => {
+  it.each([{ paused: false }, { paused: true }, { buffering: true }])('appends a bounded Mix to an active queue (%j)', async (status) => {
+    const h = harness({ current: makeTrack('current'), queued: [makeTrack('previous')], ...status });
+    const tracks = [makeTrack('mix-one'), makeTrack('mix-two')];
+    const result = makeResult(tracks);
+    result.playlist = { ...result.playlist, mix: true, limit: 50, title: 'My Mix' };
+    mixLoader.load.mockResolvedValue(result);
+    const requester = { id: 'requester', username: 'Listener' };
+    const added = await h.play({ url: 'https://music.youtube.com/watch?v=dQw4w9WgXcQ&list=RDMM', requestedBy: requester });
+    expect(mixLoader.load).toHaveBeenCalledWith(h.player, 'https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=RDMM&start_radio=1', requester, { timeoutMs: 20_000 });
+    expect(h.player.search).not.toHaveBeenCalled();
+    expect(h.pending.map((track) => track.id)).toEqual(['previous', 'mix-one', 'mix-two']);
+    expect(h.queue.currentTrack.id).toBe('current');
+    expect(h.queue.node.play).not.toHaveBeenCalled();
+    expect(tracks.every((track) => track.metadata.requestedById === 'requester')).toBe(true);
+    expect(added).toMatchObject({ addedCount: 2, playlist: { mix: true, limit: 50, title: 'My Mix' } });
+    expect(buildMusicAddedMessage(added)).toMatch(/Mix\/Radio.*50 bài/);
+  });
+
+  it('starts a new Mix queue and rejects overflow without partial insertion', async () => {
+    const tracks = [makeTrack('mix-one'), makeTrack('mix-two')];
+    const result = makeResult(tracks);
+    result.playlist = { ...result.playlist, mix: true, limit: 50 };
+    mixLoader.load.mockResolvedValue(result);
+    const url = 'https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=RDdQw4w9WgXcQ';
+    const h = harness({ existing: false });
+    await h.play({ url });
+    expect(h.queue.currentTrack.id).toBe('mix-one');
+    expect(h.pending.map((track) => track.id)).toEqual(['mix-two']);
+    const full = harness({ existing: false, maxQueueSize: 1 });
+    await expect(full.play({ url })).rejects.toThrow(/Chưa thêm bài nào/);
+    expect(full.player.nodes.create).not.toHaveBeenCalled();
+    expect(full.queue.addTrack).not.toHaveBeenCalled();
+  });
+
+  it('never creates a queue or falls back to one video when Mix metadata fails', async () => {
+    const h = harness({ existing: false });
+    mixLoader.load.mockRejectedValue(new Error('YouTube Mix/Radio tải quá lâu. Chưa thêm bài nào; hãy thử lại sau.'));
+    await expect(h.play({ url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ&list=RDMM' })).rejects.toThrow(/Chưa thêm bài nào/);
+    expect(h.player.search).not.toHaveBeenCalled();
+    expect(h.player.nodes.create).not.toHaveBeenCalled();
+    expect(h.queue.addTrack).not.toHaveBeenCalled();
+  });
+
   it('starts the first track and queues all remaining tracks in playlist order', async () => {
     const h = harness({ existing: false });
     const result = await h.play({ url: 'https://youtube.com/watch?v=one&list=PLcenar_test' });
