@@ -21,6 +21,7 @@ import { db } from '../database/db.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { accentFor } from '../utils/uiKit.js';
 import { configureCleanMusicDispatcher, createFrameAlignedMusicPcm, createMusicOpusStream } from './musicAudioPipeline.js';
+import { loadYoutubeMix, normalizeYoutubeMixUrl } from './youtubeMixSource.js';
 
 const YOUTUBE_HOSTS = new Set([
   'youtube.com',
@@ -248,7 +249,7 @@ export function normalizeYoutubeUrl(value) {
       throw new Error('Mã playlist YouTube không hợp lệ. Hãy sao chép lại link chia sẻ playlist.');
     }
     if (listId.startsWith('RD')) {
-      throw new Error('YouTube Mix/Radio tự tạo chưa được hỗ trợ. Hãy lưu các bài vào playlist rồi gửi link playlist đó.');
+      return normalizeYoutubeMixUrl(url.toString());
     }
     // A watch link with list= means the whole playlist, including when
     // shared from YouTube Music or youtu.be. Discard index/start/time fields.
@@ -273,7 +274,9 @@ async function withQueueMutation(guildId, task) {
 }
 
 async function loadYoutubeSource(player, url, requestedBy, timeoutMs) {
-  const isPlaylist = new URL(url).searchParams.has('list');
+  const listId = new URL(url).searchParams.get('list');
+  const isPlaylist = listId != null;
+  if (listId?.startsWith('RD')) return loadYoutubeMix(player, url, requestedBy, { timeoutMs });
   let timeout;
   try {
     // Extractor timeouts apply to each fallback separately. Bound the whole
@@ -708,6 +711,7 @@ export async function enqueueYoutubeSource({
           url: normalizedUrl,
           trackCount: tracks.length,
           addedCount: tracks.length,
+          ...(playlist.mix ? { mix: true, limit: playlist.limit } : {}),
         } : null,
       };
     } finally {
@@ -732,6 +736,9 @@ export async function playYoutube({ guild, voiceChannel, url, requestedBy = null
 }
 
 export function buildMusicAddedMessage(result) {
+  if (result.playlist?.mix) {
+    return `Đã thêm **${result.addedCount} bài** từ Mix/Radio **${plain(result.playlist.title)}** vào hàng đợi theo thứ tự. Mỗi lượt lấy tối đa **${result.playlist.limit} bài** tại thời điểm thêm. Bài đang phát được giữ nguyên.`;
+  }
   return result.playlist
     ? `Đã thêm **${result.addedCount} bài** từ playlist **${plain(result.playlist.title)}** vào hàng đợi theo thứ tự. Bài đang phát được giữ nguyên.`
     : `Đã thêm **${plain(result.track.title)}** vào Cenar Music.`;
@@ -807,7 +814,7 @@ export function buildMusicPanelPayload(guildId, { notice = null } = {}) {
   const queueLines = state.queue.slice(0, 8).map((track) => (
     `**${track.index}.** [${plain(track.title)}](${track.url}) · ${track.duration} · *${plain(track.requestedBy)}*`
   ));
-  if (!queueLines.length) queueLines.push('_Hàng đợi đang trống — hãy thêm video hoặc playlist YouTube._');
+  if (!queueLines.length) queueLines.push('_Hàng đợi đang trống — hãy thêm video, playlist hoặc Mix/Radio YouTube._');
 
   const container = new ContainerBuilder().setAccentColor(accentFor(current ? 'success' : 'primary'));
   container.addTextDisplayComponents(new TextDisplayBuilder().setContent([
@@ -821,7 +828,7 @@ export function buildMusicPanelPayload(guildId, { notice = null } = {}) {
     current ? `**Kênh:** ${plain(current.author)} · **Yêu cầu:** ${plain(current.requestedBy)}` : '',
     current
       ? `\`${state.progress.currentLabel}\` ${queueProgress(state.progress.percent)} \`${state.progress.totalLabel}\``
-      : `Kết nối vào phòng thoại, nhấn **Thêm bài / playlist** rồi dán link YouTube.`,
+      : `Kết nối vào phòng thoại, nhấn **Thêm bài / playlist / Mix** rồi dán link YouTube.`,
     '',
     `**Trạng thái:** ${state.paused ? 'Tạm dừng' : state.playing ? 'Đang phát' : state.buffering ? 'Đang tải âm thanh' : 'Sẵn sàng'} · **Âm lượng:** ${state.volume}% · **${repeatLabel}** · **Shuffle:** ${state.shuffle ? 'Bật' : 'Tắt'}`,
     `**Phòng thoại:** ${state.voiceChannel ? `🔊 ${plain(state.voiceChannel.name)}` : 'Chưa kết nối'} · **Người nghe:** ${state.listeners.length} · **Ping:** ${state.ping}ms`,
@@ -830,11 +837,11 @@ export function buildMusicPanelPayload(guildId, { notice = null } = {}) {
     ...queueLines,
     state.queue.length > 8 ? `-# Và ${state.queue.length - 8} bài khác trên Dashboard.` : '',
     '',
-    `-# Video / playlist YouTube Công khai hoặc Không công khai · tự rời phòng sau 3 phút không có người nghe`,
+    `-# Video / playlist / Mix / Radio YouTube · Mix tối đa 50 bài mỗi lượt · tự rời phòng sau 3 phút không có người nghe`,
   ].filter(Boolean).join('\n').slice(0, 4000)));
 
   const add = setButtonEmoji(
-    new ButtonBuilder().setCustomId('music:add').setLabel('Thêm bài / playlist').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('music:add').setLabel('Thêm bài / playlist / Mix').setStyle(ButtonStyle.Success),
     E.component('music_add'),
   );
   const toggle = setButtonEmoji(
@@ -922,10 +929,10 @@ export async function handleMusicInteraction(interaction) {
       await interaction.reply({ content: 'Bạn cần vào một phòng thoại trước khi thêm nhạc.', ephemeral: true });
       return true;
     }
-    const modal = new ModalBuilder().setCustomId('music:add:modal').setTitle('Thêm bài hoặc playlist');
+    const modal = new ModalBuilder().setCustomId('music:add:modal').setTitle('Thêm bài, playlist hoặc Mix');
     const input = new TextInputBuilder()
       .setCustomId('youtube_url')
-      .setLabel('Link video hoặc playlist YouTube')
+      .setLabel('Link video, playlist hoặc Mix/Radio YouTube')
       .setPlaceholder('https://www.youtube.com/playlist?list=...')
       .setStyle(TextInputStyle.Short)
       .setRequired(true)
