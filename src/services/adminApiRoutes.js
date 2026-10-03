@@ -22,7 +22,7 @@ import { archiveTicketConversation } from './ticketClosureService.js';
 import { recordStaffLog } from './staffLogService.js';
 import { syncPublishedFeedbackMessage } from './feedbackService.js';
 import { config } from '../config.js';
-import { getAccountSecurity, verifyAdminStepUp, revokeAccountSessions } from './accountSecurityService.js';
+import { getAccountSecurity, verifyAdminStepUp, revokeAccountSessions, isWebAccountBanned, rejectBannedWebAccount } from './accountSecurityService.js';
 import {
   createSpotifyFamily,
   createSpotifyFamilyMember,
@@ -87,6 +87,26 @@ function catalogKey(value) {
     .slice(0, 120);
 }
 
+class AdminWalletError extends Error {
+  constructor(status, message) {
+    super(message);
+    this.status = status;
+  }
+}
+
+// Checkout and Discord share this wallet. The historical WEB/user-id wallet
+// stays separate for review; changing a Discord link must never migrate money.
+function getAdminWalletIdentity(userId) {
+  const user = db.prepare('SELECT id, discord_id FROM web_users WHERE id = ?').get(userId);
+  if (!user) throw new AdminWalletError(404, 'Không tìm thấy người dùng.');
+  const discordId = String(user.discord_id || '').trim();
+  return {
+    userId: user.id,
+    guildId: String(config.guildId || '').trim(),
+    customerId: /^\d{15,22}$/.test(discordId) && config.guildId ? discordId : null,
+  };
+}
+
 export function registerAdminRoutes(app) {
   function safeEqual(a, b) {
     const bufA = Buffer.from(String(a ?? ''), 'utf8');
@@ -111,6 +131,7 @@ export function registerAdminRoutes(app) {
     if (!user || (user.role !== 'admin' && user.role !== 'staff')) {
       return res.status(403).json({ ok: false, error: 'Forbidden. Cần quyền Admin hoặc Staff.' });
     }
+    if (isWebAccountBanned(user.id)) return rejectBannedWebAccount(res);
 
     const security = getAccountSecurity(user.id);
     const sessionVersion = req.header('x-session-version') ?? '0';
@@ -594,13 +615,18 @@ export function registerAdminRoutes(app) {
       const users = db.prepare(`
         SELECT u.id, u.email, u.display_name, u.auth_provider, u.role, u.created_at, u.discord_id, u.discord_username, u.discord_avatar, u.google_email,
                COALESCE(cp.wallet_balance, 0) AS wallet_balance,
+               COALESCE(legacy_cp.wallet_balance, 0) AS legacy_wallet_balance,
+               CASE WHEN ? != '' AND LENGTH(TRIM(u.discord_id)) BETWEEN 15 AND 22
+                 AND TRIM(u.discord_id) NOT GLOB '*[^0-9]*' THEN 1 ELSE 0 END AS wallet_linked,
                COALESCE(cf.is_blacklisted, 0) AS is_blacklisted,
                cf.blacklist_reason
         FROM web_users u
-        LEFT JOIN customer_profiles cp ON u.id = cp.customer_id AND cp.guild_id = 'WEB'
+        LEFT JOIN customer_profiles cp ON TRIM(u.discord_id) = cp.customer_id AND cp.guild_id = ?
+          AND LENGTH(TRIM(u.discord_id)) BETWEEN 15 AND 22 AND TRIM(u.discord_id) NOT GLOB '*[^0-9]*'
+        LEFT JOIN customer_profiles legacy_cp ON u.id = legacy_cp.customer_id AND legacy_cp.guild_id = 'WEB'
         LEFT JOIN customer_flags cf ON u.id = cf.customer_id AND cf.guild_id = 'WEB'
         ORDER BY u.created_at DESC
-      `).all();
+      `).all(config.guildId || '', config.guildId || '').map((user) => ({ ...user, wallet_linked: Boolean(user.wallet_linked) }));
       res.json({ ok: true, data: users });
     } catch (e) {
       console.error('[ADMIN]', e); res.status(500).json({ ok: false, error: 'Lỗi máy chủ nội bộ.' });
@@ -639,8 +665,14 @@ export function registerAdminRoutes(app) {
       const { ban, reason } = req.body;
       const userId = sanitizeString(req.params.id, 100);
       const actorId = req.header('x-user-id');
-
-      setBlacklistStatus('WEB', userId, ban ? 1 : 0, actorId, reason);
+      if (typeof ban !== 'boolean') return errorResponse(res, 400, 'Trạng thái khóa phải là true hoặc false.');
+      if (ban && userId === actorId) return errorResponse(res, 403, 'Không thể tự khóa tài khoản đang sử dụng.');
+      if (!db.prepare('SELECT 1 FROM web_users WHERE id = ?').get(userId)) return errorResponse(res, 404, 'Không tìm thấy người dùng.');
+      db.transaction(() => {
+        const changed = isWebAccountBanned(userId) !== ban;
+        setBlacklistStatus('WEB', userId, ban ? 1 : 0, actorId, sanitizeString(reason || '', 500));
+        if (changed) revokeAccountSessions(userId);
+      }).immediate();
 
       // Audit log
       try {
@@ -662,24 +694,36 @@ export function registerAdminRoutes(app) {
       const { amount, type, reason } = req.body;
       const userId = sanitizeString(req.params.id, 100);
       const actorId = req.header('x-user-id');
-
-      let changeAmount;
-      if (type === 'set') {
-        const current = getWalletBalance('WEB', userId);
-        changeAmount = amount - current;
-      } else {
-        changeAmount = type === 'add' ? amount : -amount;
+      const safeAmount = typeof amount === 'number' || (typeof amount === 'string' && amount.trim()) ? Number(amount) : NaN;
+      if (!['add', 'subtract', 'set'].includes(type) || !Number.isSafeInteger(safeAmount)
+        || safeAmount < 0 || (type !== 'set' && safeAmount === 0)) {
+        return errorResponse(res, 400, 'Số tiền phải là số nguyên không âm; cộng/trừ phải lớn hơn 0.');
       }
-      if (changeAmount !== 0) addWalletBalance('WEB', userId, changeAmount, 'ADMIN_ADJUST', reason);
+      const safeReason = sanitizeString(reason || 'Điều chỉnh thủ công từ Admin Web', 500);
+      // Resolve identity, read the balance and append the ledger under the same
+      // write lock, so concurrent checkout cannot invalidate a set/subtract.
+      const changeAmount = db.transaction(() => {
+        const identity = getAdminWalletIdentity(userId);
+        if (!identity.customerId) throw new AdminWalletError(409, 'Tài khoản chưa liên kết Discord; chưa thể điều chỉnh ví mua hàng.');
+        const current = Number(getWalletBalance(identity.guildId, identity.customerId));
+        const nextBalance = type === 'set' ? safeAmount : current + (type === 'add' ? safeAmount : -safeAmount);
+        if (!Number.isSafeInteger(current) || current < 0 || !Number.isSafeInteger(nextBalance) || nextBalance < 0) {
+          throw new AdminWalletError(400, 'Điều chỉnh vượt số dư hoặc giới hạn số tiền hợp lệ.');
+        }
+        const delta = nextBalance - current;
+        if (delta !== 0) addWalletBalance(identity.guildId, identity.customerId, delta, 'ADMIN_ADJUST', safeReason);
+        return delta;
+      }).immediate();
 
       // Audit log
       try {
         db.prepare(`INSERT INTO staff_logs (guild_id, actor_id, action, detail, created_at) VALUES ('WEB', ?, 'ADMIN_WALLET_ADJUST', ?, CURRENT_TIMESTAMP)`)
-          .run(actorId, `Adjusted wallet of user ${userId} by ${changeAmount}đ. Reason: ${reason || 'None'}`);
+          .run(actorId, `Adjusted checkout wallet of user ${userId} by ${changeAmount}đ. Reason: ${safeReason}`);
       } catch { /* ignore audit failures */ }
 
       return successResponse(res, null, 'Cập nhật số dư thành công');
     } catch (e) {
+      if (e instanceof AdminWalletError) return errorResponse(res, e.status, e.message);
       return errorResponse(res, 500, e.message);
     }
   });
@@ -1028,9 +1072,15 @@ export function registerAdminRoutes(app) {
   app.get('/api/bot/admin/users/:id/transactions', requireAdminRole, (req, res) => {
     try {
       const targetUserId = sanitizeString(req.params.id, 100);
-      const transactions = db.prepare('SELECT * FROM wallet_transactions WHERE customer_id = ? ORDER BY created_at DESC').all(targetUserId);
+      const identity = getAdminWalletIdentity(targetUserId);
+      const transactions = db.prepare(`SELECT *,
+          CASE WHEN guild_id = 'WEB' AND customer_id = ? THEN 'LEGACY_WEB' ELSE 'CURRENT' END AS wallet_scope
+        FROM wallet_transactions
+        WHERE (guild_id = ? AND customer_id = ?) OR (guild_id = 'WEB' AND customer_id = ?)
+        ORDER BY created_at DESC, id DESC`).all(identity.userId, identity.guildId, identity.customerId, identity.userId);
       res.json({ ok: true, data: transactions });
     } catch (e) {
+      if (e instanceof AdminWalletError) return errorResponse(res, e.status, e.message);
       console.error('[ADMIN]', e); res.status(500).json({ ok: false, error: 'Lỗi máy chủ nội bộ.' });
     }
   });

@@ -82,7 +82,11 @@ function confirmPayment(order, transactionId) {
 }
 
 describe('payment and fulfillment reliability', () => {
-  beforeAll(() => initDatabase());
+  beforeAll(() => {
+    initDatabase();
+    db.prepare(`INSERT INTO web_users (id, email, discord_id, role)
+      VALUES ('web-user-1', 'fulfillment-customer@example.com', ?, 'member')`).run(customerId);
+  });
 
   beforeEach(() => {
     db.exec(`DELETE FROM order_delivery_items;

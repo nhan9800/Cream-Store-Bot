@@ -18,7 +18,7 @@ import { getAiKnowledge } from './aiKnowledgeService.js';
 import { applyCors } from '../utils/cors.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { safeEqual } from '../utils/crypto.js';
-import { getAccountSecurity, verifyAdminStepUp } from './accountSecurityService.js';
+import { getAccountSecurity, verifyAdminStepUp, isWebAccountBanned, rejectBannedWebAccount } from './accountSecurityService.js';
 import { runtimeCommitSha } from '../utils/revision.js';
 import { discordCollectibleUrl, getDiscordCollectibleShopPrice } from './discordCollectiblePricing.js';
 import { getCustomerDiscordRoleSnapshot, getCustomerMembershipProgress } from './roleService.js';
@@ -324,6 +324,8 @@ function requireApiKey(req, res, next) {
 }
 
 function canAccessCustomerResource(req, customerId) {
+    const requestUserId = String(req.header('x-user-id') || '').trim();
+    if (isWebAccountBanned(requestUserId)) return false;
     const role = String(req.header('x-user-role') || '').trim().toLowerCase();
     if (role === 'admin' || role === 'staff') {
         const userId = String(req.header('x-user-id') || '').trim();
@@ -340,6 +342,9 @@ function canAccessCustomerResource(req, customerId) {
     const discordId = String(req.header('x-discord-id') || '').trim();
     const userId = String(req.header('x-user-id') || '').trim();
     const user = userId ? db.prepare('SELECT discord_id FROM web_users WHERE id = ?').get(userId) : null;
+    const security = user ? getAccountSecurity(userId) : null;
+    const version = String(req.header('x-session-version') || '0');
+    if (!security || !/^\d{1,10}$/.test(version) || Number(version) !== security.session_version) return false;
     return Boolean(user?.discord_id && discordId === user.discord_id && customerId && discordId === String(customerId));
 }
 
@@ -486,7 +491,11 @@ export function registerBotApiRoutes(app) {
     });
 
     // Tất cả route /api/bot/* require API key
-    app.use('/api/bot', corsHandler, requireApiKey);
+    app.use('/api/bot', corsHandler, requireApiKey, (req, res, next) => {
+        const userId = String(req.header('x-user-id') || '').trim();
+        if (isWebAccountBanned(userId)) return rejectBannedWebAccount(res);
+        next();
+    });
 
     app.get('/api/bot/catalog-publication-status', async (req, res) => {
         res.set('Cache-Control', 'no-store');
@@ -1384,6 +1393,9 @@ export function registerBotApiRoutes(app) {
             const customerId = String(req.header('x-discord-id') || '').trim();
             if (!/^\d{15,22}$/.test(customerId)) {
                 return res.status(401).json({ ok: false, error: 'Discord login is required.' });
+            }
+            if (!canAccessCustomerResource(req, customerId)) {
+                return res.status(403).json({ ok: false, error: 'Danh tính hoặc phiên đăng nhập không còn khớp tài khoản website.' });
             }
             const requestId = String(req.header('x-idempotency-key') || '').trim();
             if (!/^[A-Za-z0-9_-]{16,100}$/.test(requestId)) {

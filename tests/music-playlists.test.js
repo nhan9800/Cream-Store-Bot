@@ -83,7 +83,7 @@ describe('Cenar Music complete playlist batches', () => {
     expect(h.queue.currentTrack.id).toBe('one');
     expect(h.pending.map((track) => track.id)).toEqual(['two', 'three']);
     expect(h.queue.addTrack).toHaveBeenCalledTimes(1);
-    expect(h.queue.connect).toHaveBeenCalledWith(h.voiceChannel, { daveEncryption: true, timeout: 20_000 });
+    expect(h.queue.connect).toHaveBeenCalledWith(h.voiceChannel, expect.objectContaining({ daveEncryption: true, timeout: 20_000, audioPlayer: expect.anything() }));
     expect(result).toMatchObject({ track: { id: 'one' }, addedCount: 3, playlist: { title: 'Cenar Chill', trackCount: 3, addedCount: 3, url: playlistUrl } });
     expect(h.queue.tasksQueue.release).toHaveBeenCalledTimes(1);
   });

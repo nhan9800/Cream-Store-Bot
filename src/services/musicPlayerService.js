@@ -13,13 +13,14 @@ import {
   TextInputBuilder,
   TextInputStyle,
 } from 'discord.js';
-import { GuildQueueEvent, Player, QueryType, QueueRepeatMode } from 'discord-player';
+import { GuildQueueEvent, Player, QueryType, QueueRepeatMode, StreamType, createAudioPlayer } from 'discord-player';
 import ffmpegPath from 'ffmpeg-static';
 import { ensureYtDlpRuntime } from '../utils/ytDlpRuntime.js';
 import { config } from '../config.js';
 import { db } from '../database/db.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { accentFor } from '../utils/uiKit.js';
+import { configureCleanMusicDispatcher, createFrameAlignedMusicPcm, createMusicOpusStream } from './musicAudioPipeline.js';
 
 const YOUTUBE_HOSTS = new Set([
   'youtube.com',
@@ -43,6 +44,7 @@ const refreshTimers = new Map();
 const volumeRamps = new Map();
 const queueMutations = new Map();
 const extractingTracks = new WeakMap();
+const audioProfiles = new WeakMap();
 
 let musicPlayer = null;
 let initializePromise = null;
@@ -97,12 +99,16 @@ export async function setSmoothMusicVolume(queue, targetValue, {
       const ramp = buildSmoothVolumeRamp(start, segmentTarget, { durationMs, stepMs });
       for (const nextVolume of ramp) {
         if (rampState.target !== segmentTarget) break;
-        queue.node.setVolume(nextVolume);
+        if (queue.node.setVolume(nextVolume) === false) {
+          throw new Error('Luồng âm thanh đã dừng; chưa thay đổi âm lượng. Hãy phát nhạc rồi thử lại.');
+        }
         await new Promise((resolve) => setTimeout(resolve, stepMs));
       }
       if (rampState.target !== segmentTarget) continue;
 
-      queue.node.setVolume(segmentTarget);
+      if (queue.node.setVolume(segmentTarget) === false) {
+        throw new Error('Luồng âm thanh đã dừng; chưa thay đổi âm lượng. Hãy phát nhạc rồi thử lại.');
+      }
       // Leave one event-loop window for a newer UI request before declaring
       // the ramp stable and removing its coalescing state.
       await new Promise((resolve) => setTimeout(resolve, stepMs));
@@ -335,7 +341,7 @@ export function getMusicRuntimeStatus() {
     ready: Boolean(musicPlayer && !runtimeError),
     initializedAt,
     engine: 'Discord Player 7 · yt-dlp · FFmpeg',
-    audioProfile: '48 kHz stereo · bitrate tự động theo phòng thoại',
+    audioProfile: '48 kHz stereo · Opus music · bitrate theo phòng thoại',
     ffmpegAvailable: Boolean(ffmpegPath && fs.existsSync(ffmpegPath)),
     ytDlpAvailable,
     daveAvailable: Number.isInteger(daveProtocolVersion),
@@ -353,6 +359,7 @@ export function getMusicState(guildId) {
     : [];
   return {
     runtime: getMusicRuntimeStatus(),
+    audio: queue ? audioProfiles.get(queue) || null : null,
     settings: readSettings(guildId),
     connected: Boolean(queue?.connection && channel),
     playing: Boolean(queue?.currentTrack && queue.node.isPlaying()),
@@ -433,14 +440,19 @@ function schedulePanelRefresh(guildId) {
   }, 350));
 }
 
-function wirePlayerEvents(player) {
+export function wirePlayerEvents(player) {
+  player.events.on(GuildQueueEvent.WillPlayTrack, (_queue, _track, streamConfig, resolve) => {
+    try {
+      configureCleanMusicDispatcher(streamConfig.dispatcherConfig);
+    } finally {
+      resolve();
+    }
+  });
   player.events.on(GuildQueueEvent.PlayerStart, (queue, track) => {
     if (extractingTracks.get(queue)?.id === track?.id) extractingTracks.delete(queue);
     saveTrackStart(queue, track);
-    // Do not mutate bitrate at runtime. With @discord-player/opus the
-    // PlayerStart event can fire while the native encoder is still null; that
-    // mutation tears down an otherwise valid audio resource. Discord Player's
-    // default Opus settings already match the voice channel bitrate.
+    // Bitrate is configured on a fresh native encoder before playback;
+    // never mutate an already-ended PlayerStart resource.
     schedulePanelRefresh(queue.guild.id);
   });
   player.events.on(GuildQueueEvent.PlayerFinish, (queue, track) => {
@@ -478,6 +490,12 @@ function wirePlayerEvents(player) {
     });
   }
   player.events.on(GuildQueueEvent.Error, (queue, error) => {
+    // Native AudioPlayer errors use this event, followed by PlayerFinish.
+    // Preserve ERROR history instead of turning a failed stream into COMPLETED.
+    if (error?.code !== 'ERR_STREAM_PREMATURE_CLOSE') {
+      const failedTrack = error?.resource?.metadata || queue.currentTrack;
+      if (failedTrack?.url) closeTrackHistory(queue, failedTrack, 'ERROR', error?.message);
+    }
     console.error(`[MUSIC] Queue error in ${queue.guild.name}:`, error);
     schedulePanelRefresh(queue.guild.id);
   });
@@ -548,17 +566,20 @@ export async function initializeMusicPlayer(client) {
   return initializePromise;
 }
 
-function musicQueueOptions(settings, textChannelId, requestedByLabel) {
+export function musicQueueOptions(settings, textChannelId, requestedByLabel) {
   return {
       volume: settings.defaultVolume,
       connectionTimeout: 20_000,
-      // The extractor already provides clean 48 kHz PCM and this dashboard
-      // does not expose EQ/effects. Keep only the volume transformer in the
-      // DSP chain to avoid unnecessary passes and CPU jitter on shared hosts.
+      // Keep DSP enabled for real volume control; disable unused effects.
+      // WillPlayTrack also supplies explicit disabled optional presets.
       disableEqualizer: true,
-      disableFilterer: true,
+      disableFilterer: false,
+      disableVolume: false,
       disableBiquad: true,
       disableResampler: true,
+      disableCompressor: true,
+      disableReverb: true,
+      disableSeeker: true,
       maxSize: settings.maxQueueSize,
       maxHistorySize: 50,
       selfDeaf: true,
@@ -579,9 +600,23 @@ function musicQueueOptions(settings, textChannelId, requestedByLabel) {
       // extracted stream here keeps yt-dlp back-pressured until encryption is
       // genuinely ready, without consuming or recreating the audio stream.
       onStreamExtracted: async (stream, track, queue) => {
-        const waitedMs = await waitForDaveVoiceReady(queue);
-        console.log(`[MUSIC] DAVE ready in ${waitedMs}ms; starting ${track?.title || track?.url || 'track'}`);
-        return stream;
+        const pcm = stream?.stream || stream;
+        try {
+          const waitedMs = await waitForDaveVoiceReady(queue);
+          console.log(`[MUSIC] DAVE ready in ${waitedMs}ms; starting ${track?.title || track?.url || 'track'}`);
+          // Align before volume DSP as well: odd PCM chunk boundaries must
+          // not corrupt 16-bit samples. Bound initial audio, not paused audio.
+          const aligned = createFrameAlignedMusicPcm(pcm);
+          return stream?.stream ? { ...stream, stream: aligned } : aligned;
+        } catch (error) {
+          pcm?.destroy();
+          throw error;
+        }
+      },
+      onAfterCreateStream: async (pcm, queue) => {
+        const opus = createMusicOpusStream(pcm, queue.channel);
+        audioProfiles.set(queue, opus.audioProfile);
+        return { stream: opus, type: StreamType.Opus };
       },
   };
 }
@@ -618,7 +653,11 @@ export async function enqueueYoutubeSource({
     const entry = queue.tasksQueue.acquire();
     await entry.getTask();
     try {
-      if (!queue.channel) await queue.connect(voiceChannel, { daveEncryption: true, timeout: 20_000 });
+      if (!queue.channel) await queue.connect(voiceChannel, {
+        daveEncryption: true, timeout: 20_000,
+        // Tolerate a brief 500ms shared-host/network hiccup before skipping.
+        audioPlayer: createAudioPlayer({ behaviors: { maxMissedFrames: 25 } }),
+      });
       // A task acquired elsewhere may have added tracks during our wait.
       if (queue.size + tracks.length > settings.maxQueueSize) {
         throw new Error(`Hàng đợi không còn đủ chỗ cho ${tracks.length} bài (giới hạn ${settings.maxQueueSize}). Chưa thêm bài nào.`);
