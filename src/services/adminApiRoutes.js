@@ -1923,7 +1923,7 @@ const fetchWithTimeout = (promise, ms) => {
   app.post('/api/bot/admin/music/control', requireAdminRole, async (req, res) => {
     try {
       const action = sanitizeString(req.body?.action, 30).toLowerCase();
-      if (!['toggle', 'pause', 'resume', 'skip', 'stop', 'disconnect', 'shuffle', 'loop', 'volume', 'remove'].includes(action)) {
+      if (!['toggle', 'pause', 'resume', 'skip', 'stop', 'disconnect', 'shuffle', 'loop', 'volume', 'remove', 'sound'].includes(action)) {
         return res.status(400).json({ ok: false, error: 'Thao tác điều khiển không hợp lệ.' });
       }
       const value = action === 'remove' ? req.body?.index : req.body?.value;
