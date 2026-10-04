@@ -1620,6 +1620,13 @@ export function initDatabase() {
       error_message TEXT
     );
 
+    CREATE TABLE IF NOT EXISTS music_sound_settings (
+      guild_id TEXT PRIMARY KEY,
+      preset TEXT NOT NULL DEFAULT 'original',
+      settings_json TEXT NOT NULL DEFAULT '{}',
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+    );
+
     CREATE INDEX IF NOT EXISTS idx_music_history_guild_started
       ON music_play_history (guild_id, started_at DESC);
     CREATE INDEX IF NOT EXISTS idx_music_history_track

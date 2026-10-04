@@ -22,6 +22,7 @@ import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { accentFor } from '../utils/uiKit.js';
 import { configureCleanMusicDispatcher, createFrameAlignedMusicPcm, createMusicOpusStream } from './musicAudioPipeline.js';
 import { loadYoutubeMix, normalizeYoutubeMixUrl } from './youtubeMixSource.js';
+import { attachMusicSoundEffects, getMusicSoundState, updateMusicSound } from './musicSoundService.js';
 
 const YOUTUBE_HOSTS = new Set([
   'youtube.com',
@@ -363,6 +364,7 @@ export function getMusicState(guildId) {
   return {
     runtime: getMusicRuntimeStatus(),
     audio: queue ? audioProfiles.get(queue) || null : null,
+    sound: getMusicSoundState(guildId, queue),
     settings: readSettings(guildId),
     connected: Boolean(queue?.connection && channel),
     playing: Boolean(queue?.currentTrack && queue.node.isPlaying()),
@@ -617,7 +619,8 @@ export function musicQueueOptions(settings, textChannelId, requestedByLabel) {
         }
       },
       onAfterCreateStream: async (pcm, queue) => {
-        const opus = createMusicOpusStream(pcm, queue.channel);
+        const sound = attachMusicSoundEffects(pcm, queue);
+        const opus = createMusicOpusStream(sound, queue.channel);
         audioProfiles.set(queue, opus.audioProfile);
         return { stream: opus, type: StreamType.Opus };
       },
@@ -746,6 +749,11 @@ export function buildMusicAddedMessage(result) {
 
 export async function controlMusic(guildId, action, value = null) {
   const queue = musicPlayer?.nodes.get(String(guildId));
+  if (String(action || '').toLowerCase() === 'sound') {
+    updateMusicSound(guildId, value, queue);
+    schedulePanelRefresh(guildId);
+    return getMusicState(guildId);
+  }
   if (!queue) throw new Error('Hiện chưa có phiên phát nhạc trong máy chủ.');
   switch (String(action || '').toLowerCase()) {
     case 'toggle':
@@ -806,6 +814,7 @@ export function buildMusicPanelPayload(guildId, { notice = null } = {}) {
   const E = createEmojiResolver(guildId);
   const state = getMusicState(guildId);
   const current = state.current;
+  const soundName = state.sound.presets.find((preset) => preset.id === state.sound.preset)?.label || 'Tùy chỉnh';
   const repeatLabel = state.repeatMode === QueueRepeatMode.TRACK
     ? 'Lặp bài'
     : state.repeatMode === QueueRepeatMode.QUEUE
@@ -831,6 +840,7 @@ export function buildMusicPanelPayload(guildId, { notice = null } = {}) {
       : `Kết nối vào phòng thoại, nhấn **Thêm bài / playlist / Mix** rồi dán link YouTube.`,
     '',
     `**Trạng thái:** ${state.paused ? 'Tạm dừng' : state.playing ? 'Đang phát' : state.buffering ? 'Đang tải âm thanh' : 'Sẵn sàng'} · **Âm lượng:** ${state.volume}% · **${repeatLabel}** · **Shuffle:** ${state.shuffle ? 'Bật' : 'Tắt'}`,
+    `**Âm thanh:** ${plain(soundName)} · ${state.sound.live ? 'Áp dụng live' : 'Sẵn sàng cho bài tiếp theo'}`,
     `**Phòng thoại:** ${state.voiceChannel ? `🔊 ${plain(state.voiceChannel.name)}` : 'Chưa kết nối'} · **Người nghe:** ${state.listeners.length} · **Ping:** ${state.ping}ms`,
     '',
     `### ${E('music_queue')} HÀNG ĐỢI · ${state.queue.length} BÀI`,
@@ -875,6 +885,14 @@ export function buildMusicPanelPayload(guildId, { notice = null } = {}) {
     })));
   container.addActionRowComponents(new ActionRowBuilder().addComponents(volume));
 
+  const soundPresets = new StringSelectMenuBuilder()
+    .setCustomId('music:sound').setPlaceholder(`Âm thanh: ${soundName}`)
+    .addOptions(state.sound.presets.map((preset) => ({
+      label: preset.label, value: preset.id, description: preset.description.slice(0, 100),
+      default: preset.id === state.sound.preset,
+    })));
+  container.addActionRowComponents(new ActionRowBuilder().addComponents(soundPresets));
+
   const shuffle = setButtonEmoji(
     new ButtonBuilder().setCustomId('music:shuffle').setLabel(state.shuffle ? 'Shuffle: Bật' : 'Shuffle: Tắt').setStyle(state.shuffle ? ButtonStyle.Success : ButtonStyle.Secondary).setDisabled(!current),
     E.component('music_shuffle'),
@@ -892,6 +910,10 @@ export function buildMusicPanelPayload(guildId, { notice = null } = {}) {
     E.component('music_disconnect'),
   );
   container.addActionRowComponents(new ActionRowBuilder().addComponents(shuffle, refresh, dashboard, disconnect));
+  container.addActionRowComponents(new ActionRowBuilder().addComponents(
+    new ButtonBuilder().setCustomId('music:sound-edit').setLabel('Chỉnh âm live').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId('music:sound-reset').setLabel('Về Bản gốc').setStyle(ButtonStyle.Secondary),
+  ));
   return { components: [container], flags: MessageFlags.IsComponentsV2, allowedMentions: { parse: [] } };
 }
 
@@ -966,9 +988,47 @@ export async function handleMusicInteraction(interaction) {
     return true;
   }
 
+  if (interaction.customId === 'music:sound-edit') {
+    const sound = getMusicSoundState(interaction.guildId);
+    const modal = new ModalBuilder().setCustomId('music:sound-edit:modal').setTitle('Chỉnh âm thanh live');
+    for (const [key, label] of [
+      ['bass', 'Bass: -6 đến +6 dB'], ['treble', 'Treble: -6 đến +6 dB'],
+      ['width', 'Độ rộng stereo: 0 đến 150%'], ['reverb', 'Độ vang: 0 đến 35%'], ['echo', 'Echo: 0 đến 25%'],
+    ]) {
+      modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder()
+        .setCustomId(key).setLabel(label).setValue(String(sound.settings[key]))
+        .setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(8)));
+    }
+    await interaction.showModal(modal);
+    return true;
+  }
+
+  if (interaction.customId === 'music:sound-edit:modal' && interaction.isModalSubmit()) {
+    await interaction.deferReply({ ephemeral: true });
+    try {
+      const settings = {};
+      for (const key of ['bass', 'treble', 'width', 'reverb', 'echo']) {
+        const raw = interaction.fields.getTextInputValue(key).trim();
+        if (!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)$/.test(raw)) throw new Error('Thông số âm thanh phải là số hợp lệ.');
+        settings[key] = Number(raw);
+      }
+      const result = await controlMusic(interaction.guildId, 'sound', { settings });
+      await interaction.editReply(result.sound.live
+        ? 'Đã áp dụng âm thanh live cho bài đang phát.'
+        : 'Đã lưu âm thanh. Cấu hình sẽ áp dụng khi phát bài tiếp theo.');
+    } catch (error) {
+      await interaction.editReply(`Chưa thay đổi âm thanh: ${error.message}`);
+    }
+    return true;
+  }
+
   await interaction.deferUpdate();
   try {
-    if (interaction.customId === 'music:volume' && interaction.isStringSelectMenu()) {
+    if (interaction.customId === 'music:sound' && interaction.isStringSelectMenu()) {
+      await controlMusic(interaction.guildId, 'sound', { preset: interaction.values[0] });
+    } else if (interaction.customId === 'music:sound-reset') {
+      await controlMusic(interaction.guildId, 'sound', { preset: 'original' });
+    } else if (interaction.customId === 'music:volume' && interaction.isStringSelectMenu()) {
       await controlMusic(interaction.guildId, 'volume', interaction.values[0]);
     } else {
       const action = interaction.customId.split(':')[1];
