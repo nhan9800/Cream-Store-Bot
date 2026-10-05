@@ -5,6 +5,7 @@ import path from 'path';
 import { timingSafeEqual } from 'node:crypto';
 import { resolveLauncherPorts } from './utils/ports.js';
 import { acquireProcessLock } from './utils/processLock.js';
+import { watchLauncherConnection } from './utils/launcherConnection.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -51,6 +52,7 @@ if (process.env.IS_CHILD_BOT === 'true') {
 
   process.once('SIGTERM', () => void stopChild('SIGTERM'));
   process.once('SIGINT', () => void stopChild('SIGINT'));
+  watchLauncherConnection(stopChild);
 
   async function main() {
     try {

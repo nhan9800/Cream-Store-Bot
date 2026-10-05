@@ -448,6 +448,14 @@ export function initDatabase() {
       created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
     );
 
+    CREATE TABLE IF NOT EXISTS link_warnings (
+      user_id TEXT NOT NULL,
+      guild_id TEXT NOT NULL,
+      warning_count INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (user_id, guild_id)
+    );
+
     CREATE TABLE IF NOT EXISTS scam_image_fingerprints (
       sha256 TEXT PRIMARY KEY,
       verdict TEXT NOT NULL,
