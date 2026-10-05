@@ -107,6 +107,14 @@ runtime_valid() {
   node "$RUNTIME_CHECK" "$APP_ROOT" >/dev/null 2>&1
 }
 
+cleanup_old_dependency_stages() {
+  # No installer/other managed supervisor can race cleanup while this flock is held.
+  [[ "$SUPERVISOR_EXCLUSIVE" == true && -f scripts/cleanup-dependency-stages.mjs ]] || return 0
+  timeout --foreground 90s node scripts/cleanup-dependency-stages.mjs \
+    --root "$APP_ROOT" --active-stage "$DEPENDENCY_STAGE" --apply 9>&- \
+    || log 'Dependency cleanup skipped/stopped; protected data and runtime retained'
+}
+
 install_dependencies_for_transition() {
   local from_sha="$1"
   local to_sha="$2"
@@ -404,6 +412,7 @@ while [[ "$STOPPING" == false ]]; do
     continue
   fi
 
+  cleanup_old_dependency_stages
   log "Starting bot from revision ${CURRENT_READY_SHA}"
   node src/index.js 9>&- &
   BOT_PID=$!

@@ -75,4 +75,5 @@ scripts/*
 !scripts/setup-dev-channels.js
 !scripts/vibehost-supervisor.sh
 !scripts/check-runtime-dependencies.mjs
+!scripts/cleanup-dependency-stages.mjs
 !scripts/payment-incident-audit.js
