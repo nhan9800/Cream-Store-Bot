@@ -20,6 +20,7 @@ beforeEach(async () => {
   await fs.writeFile(path.join(outside, 'protected'), 'outside-keep'); runtimeCheck.mockClear();
 });
 afterEach(async () => {
+  vi.restoreAllMocks();
   const resolved = await fs.realpath(fixture);
   if (path.dirname(resolved) !== await fs.realpath(os.tmpdir()) || !path.basename(resolved).startsWith('cenar-cleanup-')) throw new Error('Unsafe test cleanup');
   await fs.rm(resolved, { recursive: true, force: true });
@@ -38,6 +39,16 @@ async function exists(target) { return fs.stat(target).then(() => true, error =>
 const apply = () => cleanupDependencyStages(root, { apply: true, now, runtimeCheck });
 
 describe('bounded hosting dependency cleanup', () => {
+  it('starts a fresh deletion budget after a slow scan/native preflight and emits confirmed progress', async () => {
+    for (let id = 1; id <= 4; id++) await stage(id);
+    let elapsed = 0;
+    vi.spyOn(performance, 'now').mockImplementation(() => elapsed);
+    const progress = vi.fn();
+    const report = await cleanupDependencyStages(root, { apply: true, now, runtimeCheck: () => { elapsed = 65000; return true; }, onProgress: progress });
+    expect(report.removed).toHaveLength(2);
+    expect(progress).toHaveBeenCalledTimes(2);
+    expect(progress).toHaveBeenLastCalledWith(expect.objectContaining({ removedCount: 2, reclaimedBytes: report.reclaimedBytes }));
+  });
   it('audit measures old stages without deleting anything', async () => {
     for (let id = 1; id <= 5; id++) await stage(id);
     const report = await cleanupDependencyStages(root, { now });

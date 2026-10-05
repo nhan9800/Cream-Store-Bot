@@ -12,7 +12,7 @@ function inside(parent, child) {
   return relative === '' || (!path.isAbsolute(relative) && relative !== '..' && !relative.startsWith(`..${path.sep}`));
 }
 function budget(context) {
-  if (++context.entries > 500000 || performance.now() > context.deadline) throw new Error('SCAN_LIMIT_REACHED');
+  if (++context.entries > 500000 || performance.now() > context.deadline) throw new Error(context.phase === 'apply' ? 'APPLY_LIMIT_REACHED' : 'SCAN_LIMIT_REACHED');
 }
 async function walk(target, context, visit, seen = new Set()) {
   budget(context);
@@ -68,7 +68,7 @@ function verifyRuntime(root) {
 }
 
 /** Only the exclusively locked supervisor calls apply, after native runtime validation. */
-export async function cleanupDependencyStages(input, { apply = false, activeStage = '', now = Date.now(), runtimeCheck = verifyRuntime, onAudit = () => {} } = {}) {
+export async function cleanupDependencyStages(input, { apply = false, activeStage = '', now = Date.now(), runtimeCheck = verifyRuntime, onAudit = () => {}, onProgress = () => {} } = {}) {
   const { root, state, revision } = await validateRoot(input);
   const context = { entries: 0, deadline: performance.now() + 60000 };
   const references = await runtimeReferences(root, context);
@@ -105,6 +105,10 @@ export async function cleanupDependencyStages(input, { apply = false, activeStag
   await onAudit(report);
   if (!apply || !candidates.length) return report;
   if (runtimeCheck(root) !== true) throw new Error('CURRENT_RUNTIME_INVALID');
+  // Native preflight and scan do not consume the deletion phase's time budget.
+  context.deadline = performance.now() + 180000;
+  context.entries = 0;
+  context.phase = 'apply';
   for (const stage of candidates) {
     budget(context);
     if ((await validateRoot(root)).revision !== revision) throw new Error('REVISION_CHANGED');
@@ -125,6 +129,7 @@ export async function cleanupDependencyStages(input, { apply = false, activeStag
     }
     report.removed.push(stage.name);
     report.reclaimedBytes += stage.bytes;
+    await onProgress({ name: stage.name, bytes: stage.bytes, removedCount: report.removed.length, reclaimedBytes: report.reclaimedBytes });
   }
   report.stageBytesAfter = report.stageBytesBefore - report.reclaimedBytes;
   return report;
@@ -137,6 +142,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.me
   try {
     const report = await cleanupDependencyStages(root, { apply: args.includes('--apply'), activeStage,
       onAudit: plan => console.log(`[hosting-cleanup] plan ${JSON.stringify(plan)}`),
+      onProgress: progress => console.log(`[hosting-cleanup] removed ${JSON.stringify(progress)}`),
     });
     console.log(`[hosting-cleanup] result ${JSON.stringify(report)}`);
   } catch (error) {

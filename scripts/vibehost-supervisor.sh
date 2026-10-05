@@ -110,7 +110,7 @@ runtime_valid() {
 cleanup_old_dependency_stages() {
   # No installer/other managed supervisor can race cleanup while this flock is held.
   [[ "$SUPERVISOR_EXCLUSIVE" == true && -f scripts/cleanup-dependency-stages.mjs ]] || return 0
-  timeout --foreground 90s node scripts/cleanup-dependency-stages.mjs \
+  timeout --foreground 300s node scripts/cleanup-dependency-stages.mjs \
     --root "$APP_ROOT" --active-stage "$DEPENDENCY_STAGE" --apply 9>&- \
     || log 'Dependency cleanup skipped/stopped; protected data and runtime retained'
 }
