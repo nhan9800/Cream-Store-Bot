@@ -3,6 +3,7 @@ import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import Database from 'better-sqlite3';
+import { requiresSystemAdmin } from '../utils/adminPermissions.js';
 import {
   sanitizeString, sanitizePositiveInt, sanitizePagination,
   isValidRole, isValidOrderStatus, isValidServiceType,
@@ -140,6 +141,10 @@ export function registerAdminRoutes(app) {
     }
     if (security.mfa_secret && !verifyAdminStepUp(req.header('x-admin-step-up'), user.id)) {
       return res.status(403).json({ ok: false, code: 'MFA_REQUIRED', error: 'Xác minh Authenticator để sử dụng Admin.' });
+    }
+
+    if (requiresSystemAdmin(req.route?.path) && user.role !== 'admin') {
+      return res.status(403).json({ ok: false, error: 'Chỉ Admin mới có quyền quản lý cấu hình và dữ liệu hệ thống.' });
     }
 
     req.adminRole = user.role; // 'admin' or 'staff'
@@ -936,7 +941,7 @@ export function registerAdminRoutes(app) {
   app.post('/api/bot/admin/settings', requireAdminRole, (req, res) => {
     try {
       const { settings } = req.body;
-      if (!settings || typeof settings !== 'object') {
+      if (!settings || typeof settings !== 'object' || Array.isArray(settings)) {
         return res.status(400).json({ ok: false, error: 'Thiếu cấu hình gửi lên' });
       }
 
@@ -1053,15 +1058,18 @@ export function registerAdminRoutes(app) {
         return res.status(403).json({ ok: false, error: 'Chỉ Admin mới có quyền dọn dẹp log.' });
       }
       const { days = 90 } = req.body;
+      if (!Number.isSafeInteger(days) || days < 90 || days > 3650) {
+        return res.status(400).json({ ok: false, error: 'Thời gian giữ nhật ký phải là số nguyên từ 90 đến 3650 ngày.' });
+      }
       const cutoffDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
 
       const resultLogs = db.prepare("DELETE FROM staff_logs WHERE created_at < ?").run(cutoffDate);
-      const resultTrans = db.prepare("DELETE FROM wallet_transactions WHERE created_at < ?").run(cutoffDate);
-      const resultEvents = db.prepare("DELETE FROM payment_events WHERE created_at < ?").run(cutoffDate);
+      // Ledger and payment receipts are reconciliation/replay evidence. A log
+      // cleanup must never erase them or silently change financial retention.
 
       res.json({
         ok: true,
-        message: `Dọn dẹp hoàn tất. Đã xóa: ${resultLogs.changes} audit logs, ${resultTrans.changes} transactions, ${resultEvents.changes} payment events.`
+        message: `Đã xóa ${resultLogs.changes} nhật ký vận hành quá hạn. Lịch sử ví và thanh toán được giữ nguyên.`
       });
     } catch (e) {
       console.error('[ADMIN]', e); res.status(500).json({ ok: false, error: 'Lỗi máy chủ nội bộ.' });
