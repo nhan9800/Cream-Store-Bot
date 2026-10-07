@@ -1,10 +1,11 @@
-import { ChannelType, PermissionFlagsBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder, ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, SeparatorSpacingSize, MediaGalleryBuilder, MediaGalleryItemBuilder, MessageFlags } from 'discord.js';
+import { ChannelType, PermissionFlagsBits, ActionRowBuilder, AttachmentBuilder } from 'discord.js';
 import { db } from '../database/db.js';
-import { API_CREDIT_BANNER, API_CREDIT_DURATION, getApiCreditProducts } from '../config/apiCreditCatalog.js';
-import { buildApiCreditPanel, buildApiCreditSelector } from './apiCreditPanel.js';
+import { API_CREDIT_BANNER, getApiCreditProducts } from '../config/apiCreditCatalog.js';
+import { buildApiCreditPanel, buildApiCreditPricingReply, buildApiCreditDetails } from './apiCreditPanel.js';
+import { buildLocketProductPanel, buildLocketDetails, LOCKET_PANEL_IMAGE } from './locketProductPanel.js';
 import { handleProductSelect } from '../events/productHandlers.js';
 import { getActiveProducts, getProductByName } from './productCatalogService.js';
-import { createEmojiResolver, withButtonEmoji } from '../utils/emojiHelper.js';
+import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { getWalletBalance } from './walletService.js';
 import { getGuildConfig } from './guildConfigService.js';
 import { createOrder, payOrderWithWallet, saveOrderLogMessage } from './orderService.js';
@@ -183,9 +184,6 @@ export async function publishPremiumProductsForGuild(guild, settingOverrides = {
     return;
   }
 
-  const E = createEmojiResolver(guild.id);
-
-
   // ══════════════════════════════════════════
   // CLAUDE API — Component V2
   // ══════════════════════════════════════════
@@ -217,82 +215,11 @@ export async function publishPremiumProductsForGuild(guild, settingOverrides = {
   // ══════════════════════════════════════════
   const locketProduct = getProductByName('WEB', 'Locket Gold — 1 năm');
   if (locketProduct) {
-    const { ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, SeparatorSpacingSize, MediaGalleryBuilder, MediaGalleryItemBuilder, MessageFlags } = await import('discord.js');
-
-    const locketBannerPath = path.join(botRoot, 'assets/products/locket-gold/locket-gold-banner.webp');
+    const locketBannerPath = path.join(botRoot, 'assets/products/locket-gold', LOCKET_PANEL_IMAGE);
     const locketHasBanner = fs.existsSync(locketBannerPath);
-
-    const container = new ContainerBuilder().setAccentColor(0xFFD700);
-
-    if (locketHasBanner) {
-      container.addMediaGalleryComponents(
-        new MediaGalleryBuilder().addItems(
-          new MediaGalleryItemBuilder().setURL('attachment://locket-gold-banner.webp')
-        )
-      );
-    }
-
-    container.addSeparatorComponents(
-      new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small)
-    );
-
-    container.addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(
-        `## ${E('brand_locket')} LOCKET GOLD — 1 NĂM\n` +
-        `> ${E('icon_sparkle')} Nâng cấp chính chủ bằng Username · Không cần mật khẩu · Không cần OTP`
-      )
-    );
-
-    container.addSeparatorComponents(
-      new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
-    );
-
-    container.addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(
-        `### ${E('icon_wallet')} THÔNG TIN NÂNG CẤP\n` +
-        `${E('payment_money')} **Giá trọn gói** · \`${locketProduct.base_price.toLocaleString('vi-VN')}đ\`\n` +
-        `${E('icon_duration')} **Thời hạn** · \`12 tháng\`\n` +
-        `${E('icon_id')} **Thông tin cần gửi** · \`Username Locket chính xác\`\n` +
-        `${E('icon_key')} **Bảo mật** · \`Không thu mật khẩu hoặc OTP\``
-      )
-    );
-
-    container.addSeparatorComponents(
-      new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
-    );
-
-    container.addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(
-        `### ${E('icon_crown')} ĐẶC QUYỀN & QUY TRÌNH\n` +
-        `${E('icon_star')} Mở khóa tùy biến biểu tượng ứng dụng và trải nghiệm không quảng cáo.\n` +
-        `${E('icon_fire')} Hỗ trợ khôi phục streak khi bị gián đoạn theo chính sách Locket.\n` +
-        `${E('cenar_verified')} Bấm **Mua ngay** · Nhập Username · Xác nhận giá · Thanh toán trong ticket.\n` +
-        `${E('cenar_staff')} Staff kiểm tra Username và thông báo ngay khi nâng cấp hoàn tất.\n` +
-        `${E('status_warn')} *Kiểm tra kỹ Username trước khi xác nhận; sai Username có thể làm chậm xử lý.*`
-      )
-    );
-
-    container.addSeparatorComponents(
-      new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small)
-    );
-
-    container.addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(
-        `-# ${E('icon_heart_purple')} Cenar Store · Nâng cấp an toàn · Theo dõi đơn trong ticket · Hỗ trợ rõ ràng`
-      )
-    );
-
-    const locketRow = new ActionRowBuilder().addComponents(
-      withButtonEmoji(new ButtonBuilder().setCustomId('product:locket:buy').setLabel('Mua ngay').setStyle(ButtonStyle.Success), E.component('panel_order')),
-      withButtonEmoji(new ButtonBuilder().setCustomId('product:locket:features').setLabel('Đặc quyền').setStyle(ButtonStyle.Secondary), E.component('icon_star')),
-      withButtonEmoji(new ButtonBuilder().setCustomId('product:locket:policy').setLabel('Điều khoản').setStyle(ButtonStyle.Secondary), E.component('icon_gem'))
-    );
-
-    const locketAttachment = new AttachmentBuilder(locketBannerPath);
     const locketPayload = {
-      components: [container, locketRow],
-      files: locketHasBanner ? [locketAttachment] : [],
-      flags: MessageFlags.IsComponentsV2,
+      ...buildLocketProductPanel(guild.id, locketProduct, locketHasBanner),
+      files: locketHasBanner ? [new AttachmentBuilder(locketBannerPath)] : [],
     };
 
     if (settings.locket_product_message_id) {
@@ -321,17 +248,13 @@ export async function handlePremiumProductInteraction(interaction) {
   if (customId === 'product:claude:credit_select') {
     const products = getApiCreditProducts(getActiveProducts(interaction.guildId));
     const selected = products.find((product) => String(product.id) === interaction.values?.[0]);
-    if (!selected) return interaction.reply({ content: 'Gói đã thay đổi hoặc ngừng bán. Vui lòng mở bảng giá mới.', flags: 64 });
+    if (!selected) return interaction.reply({ content: `${createEmojiResolver(interaction.guildId)('status_warn')} Gói đã thay đổi hoặc ngừng bán. Vui lòng mở bảng giá mới.`, flags: 64, allowedMentions: { parse: [] } });
     return handleProductSelect(interaction);
   }
 
   if (customId === 'product:claude:buy' || customId === 'product:claude:modal_buy' || customId === 'product:claude:pricing') {
     const products = getApiCreditProducts(getActiveProducts(interaction.guildId));
-    const selector = buildApiCreditSelector(products);
-    return interaction.reply({
-      content: `**API Codex/Claude · Bảng giá hiện tại**\n${products.map((product) => `**$${product.quota_value} credit** · ${Number(product.price).toLocaleString('vi-VN')}đ`).join('\n')}\n\n${API_CREDIT_DURATION}. Chọn gói bên dưới để đặt hàng.`,
-      components: selector ? [selector] : [], flags: 64, allowedMentions: { parse: [] },
-    });
+    return interaction.reply(buildApiCreditPricingReply(interaction.guildId, products));
   }
 
   if (customId === 'product:locket:buy') {
@@ -354,77 +277,14 @@ export async function handlePremiumProductInteraction(interaction) {
     return;
   }
 
-  if (customId === 'product:claude:models') {
-    return interaction.reply({
-      content: '**Hướng dẫn API Codex/Claude**\nNhận token/API riêng, địa chỉ kết nối và hướng dẫn trong ticket sau khi thanh toán. Không gửi token vào kênh công khai.\n\nModel khả dụng và mức tiêu hao credit theo hệ thống nhà cung cấp tại thời điểm sử dụng; shop xác nhận trước khi giao.\nHướng dẫn: https://cenarstore.xyz/huong-dan-api\nKiểm tra token/model: https://cenarstore.xyz/check-token',
-      flags: 64, allowedMentions: { parse: [] },
-    });
+  if (customId === 'product:claude:models' || customId === 'product:claude:policy') {
+    return interaction.reply(buildApiCreditDetails(interaction.guildId, customId.split(':').at(-1)));
   }
 
-  if (customId === 'product:claude:policy') {
-    return interaction.reply({
-      content: '**Điều khoản API AI Credit**\n• Không giới hạn ngày; dùng đến khi hết credit đã mua. Không tính phí gia hạn theo ngày.\n• Credit là hạn mức sử dụng API, không phải tiền mặt hay số token cố định. Mức tiêu hao theo model và hệ thống nhà cung cấp.\n• Token/API và hướng dẫn được giao riêng trong ticket, không cần mật khẩu tài khoản cá nhân.\n• Bảo hành và hỗ trợ trong thời gian sử dụng đến hết credit.\n• Danh sách model có thể thay đổi. Không hoàn tiền sau khi đã kích hoạt và sử dụng token.',
-      flags: 64, allowedMentions: { parse: [] },
-    });
-  }
-
-  if (customId === 'product:locket:features') {
-    const { ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, SeparatorSpacingSize, MessageFlags } = await import('discord.js');
-    const E = createEmojiResolver(interaction.guildId);
-    const container = new ContainerBuilder().setAccentColor(0xFFD700);
-    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
-      `## ${E('icon_heart_purple', '💛')} Đặc Quyền Locket Gold\n` +
-      `> ${E('icon_sparkle', '✨')} *Tất cả những gì bạn nhận được khi nâng cấp Gold.*`
-    ));
-    container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
-    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
-      `### ${E('icon_crown', '🏆')} TÍNH NĂNG ĐỘC QUYỀN GOLD\n` +
-      `${E('status_check', '✅')} **Biểu tượng app tùy chỉnh** — Đổi icon app theo sở thích.\n` +
-      `${E('status_check', '✅')} **Streak Shield** — Bảo vệ & khôi phục streak dễ dàng.\n` +
-      `${E('status_check', '✅')} **Không quảng cáo** — Trải nghiệm sạch hoàn toàn.\n` +
-      `${E('status_check', '✅')} **Reaction đặc biệt** — Emoji phản ứng độc quyền Gold.\n` +
-      `${E('status_check', '✅')} **Chủ đề màu sắc** — Cá nhân hóa giao diện Locket.`
-    ));
-    container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
-    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
-      `### ${E('icon_wallet', '💳')} GÓI 1 NĂM — GIÁ TỐT NHẤT\n` +
-      `${E('icon_price', '💰')} Chỉ **\`150,000đ\`** cho **12 tháng** đầy đủ đặc quyền!\n` +
-      `${E('icon_key', '🔒')} Kích hoạt bằng **Username** — Không cần mật khẩu.`
-    ));
-    container.addSeparatorComponents(new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small));
-    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
-      `-# ${E('icon_heart_purple', '💜')} Nhấn **Mua ngay** để đặt hàng ngay!`
-    ));
-    return interaction.reply({ components: [container], flags: MessageFlags.IsComponentsV2 | 64 });
-  }
-
-  if (customId === 'product:locket:policy') {
-    const { ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, SeparatorSpacingSize, MessageFlags } = await import('discord.js');
-    const E = createEmojiResolver(interaction.guildId);
-    const container = new ContainerBuilder().setAccentColor(0xFFD700);
-    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
-      `## ${E('icon_gem', '💎')} Điều Khoản Dịch Vụ — Locket Gold\n` +
-      `> ${E('icon_sparkle', '✨')} *Vui lòng đọc kỹ trước khi mua.*`
-    ));
-    container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
-    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
-      `### ${E('status_check', '✅')} CAM KẾT CỦA SHOP\n` +
-      `${E('icon_gem', '💎')} Bảo hành full 12 tháng thời hạn đã mua.\n` +
-      `${E('icon_key', '🔒')} Kích hoạt bằng Username — Không cần mật khẩu/OTP.\n` +
-      `${E('status_check', '✅')} Hỗ trợ trong suốt thời hạn sử dụng.`
-    ));
-    container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
-    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
-      `### ${E('status_warn', '⚠️')} LƯU Ý QUAN TRỌNG\n` +
-      `${E('status_warn', '⚠️')} **Kiểm tra thật kỹ Username trước khi xác nhận!**\n` +
-      `${E('status_cross', '❌')} Không hoàn tiền sau khi đã kích hoạt thành công.\n` +
-      `${E('icon_duration', '⏱️')} Thời hạn 12 tháng tính từ ngày kích hoạt.`
-    ));
-    container.addSeparatorComponents(new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small));
-    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
-      `-# ${E('icon_heart_purple', '💜')} Cenar Store — Uy Tín · Chất Lượng · Hỗ Trợ 24/7`
-    ));
-    return interaction.reply({ components: [container], flags: MessageFlags.IsComponentsV2 | 64 });
+  if (customId === 'product:locket:features' || customId === 'product:locket:policy') {
+    const product = getProductByName('WEB', 'Locket Gold — 1 năm');
+    if (!product) return interaction.reply({ content: `${createEmojiResolver(interaction.guildId)('status_warn')} Sản phẩm không khả dụng.`, flags: 64, allowedMentions: { parse: [] } });
+    return interaction.reply(buildLocketDetails(interaction.guildId, customId.split(':').at(-1), product));
   }
 
   // Handle modals
@@ -432,7 +292,7 @@ export async function handlePremiumProductInteraction(interaction) {
     const username = interaction.fields.getTextInputValue('username');
     
     const product = getProductByName('WEB', 'Locket Gold — 1 năm');
-    if (!product) return interaction.reply({ content: '❌ Sản phẩm không khả dụng.', ephemeral: true });
+    if (!product) return interaction.reply({ content: `${createEmojiResolver(interaction.guildId)('status_warn')} Sản phẩm không khả dụng.`, flags: 64, allowedMentions: { parse: [] } });
 
     const locketPrice = product.base_price ?? product.price ?? 0;
     await handlePremiumBuyOrder(interaction, product.name, 1, locketPrice, `Username Locket: ${username}`, product);

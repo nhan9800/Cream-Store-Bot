@@ -15,6 +15,8 @@ Owner confirmed +60,000 VND per reference pack and **no day limit; usage ends wh
 
 `src/services/apiCreditPanel.js` builds the compact Discord Components V2 panel. Startup edits the existing premium message, silently. The selector uses actual catalog IDs and normal catalog checkout; forged/inactive choices are rejected. A submitted legacy 85k modal returns the current selector without creating an order. Models and instructions are provider-dependent, not a static invented model list. API tokens remain private. Original full-usage warranty is retained until credit is exhausted.
 
+The public board, private pricing, model guide and policy use verified custom icons with Discord Markdown; each selector option also has a custom icon. See [premium panel presentation](premium-discord-panels.md) for layout, publication and test contracts.
+
 Website variants are grouped together, display their exact price and no-day-limit terms, including the cart and account orders. Unspecified API stock shows “Đang nhận đơn”, not a made-up count. Do not migrate prior daily orders automatically.
 
 ## Artwork
