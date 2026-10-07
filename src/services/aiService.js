@@ -1,3 +1,4 @@
+import { API_CREDIT_DURATION, isApiCreditProduct } from '../config/apiCreditCatalog.js';
 import { PermissionFlagsBits } from 'discord.js';
 import { GoogleGenAI } from '@google/genai';
 import { config } from '../config.js';
@@ -29,6 +30,7 @@ function cleanAssistantReply(content) {
 }
 
 function productDuration(product) {
+  if (isApiCreditProduct(product)) return API_CREDIT_DURATION;
   return product.duration_days
     ? `${product.duration_days} ngày`
     : `${product.duration_months || 1} tháng`;

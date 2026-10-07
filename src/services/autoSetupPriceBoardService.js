@@ -19,8 +19,9 @@ import { config } from '../config.js';
 import { isInternationalGuild } from '../utils/locale.js';
 import { formatInternationalPrice, translateCatalogGroup, translateProductName, translateProductWarranty } from '../utils/internationalCatalog.js';
 import { getNitroTrialEligibility, isNitroTrialProduct } from '../constants/nitroTrial.js';
+import { API_CREDIT_DURATION, isApiCreditProduct } from '../config/apiCreditCatalog.js';
 
-export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.21';
+export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.22';
 const publicationStates = new Map();
 export function getPriceBoardPublicationState(guildId) {
   return publicationStates.get(String(guildId)) || { status: 'not_started' };
@@ -71,7 +72,7 @@ export const PRICE_GROUPS = [
   },
   {
     key: 'claude', titleSlot: 'brand_claude', title: 'Claude Pro & Claude API', accent: 0xD97757,
-    note: 'Claude Pro x5 cấp tài khoản 1 tháng có hai lựa chọn KBH hoặc full bảo hành. Claude Pro và Claude API là các gói riêng; x5 là tên gói của shop.',
+    note: 'Claude Pro x5 cấp tài khoản 1 tháng có hai lựa chọn KBH hoặc full bảo hành. API Codex/Claude dùng đến hết credit, không giới hạn ngày; x5 là tên gói của shop.',
     match: (p) => p.service_type === 'AI' && /claude/i.test(p.name),
   },
   {
@@ -157,6 +158,7 @@ function inferProductSlot(product) {
 }
 
 function getDurationText(product, international = false) {
+  if (isApiCreditProduct(product)) return international ? 'No day limit · Until credit is used up' : API_CREDIT_DURATION;
   const productName = String(product.name || '');
   if (international) {
     if (Number(product.price) === 0) return 'Custom project';

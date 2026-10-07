@@ -33,7 +33,7 @@ function deliveryRouting(order) {
     .replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd');
   return {
     ai,
-    manual: String(product?.activation_method || '').toUpperCase() === 'OWN_ACCOUNT'
+    manual: ['OWN_ACCOUNT', 'TOKEN'].includes(String(product?.activation_method || '').toUpperCase())
       || (ai && /\bchinh\s+chu\b/.test(canonicalName)),
   };
 }

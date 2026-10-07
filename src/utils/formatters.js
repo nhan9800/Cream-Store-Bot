@@ -1,4 +1,5 @@
 import { createEmojiResolver } from './emojiHelper.js';
+import { API_CREDIT_DURATION, isApiCreditProduct } from '../config/apiCreditCatalog.js';
 
 export function getOrderStatusLabel(status, guildId = null) {
   const E = createEmojiResolver(guildId);
@@ -63,6 +64,7 @@ export function resolveOrderDuration(order = {}, fallbackMonths = 1) {
 }
 
 export function formatOrderDuration(order = {}, fallbackMonths = 1) {
+  if (isApiCreditProduct(order)) return API_CREDIT_DURATION;
   const duration = resolveOrderDuration(order, fallbackMonths);
   if (duration.unit === 'permanent') return 'Vĩnh viễn';
   return duration.unit === 'day'

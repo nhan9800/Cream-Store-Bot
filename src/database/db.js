@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import { API_CREDIT_PRODUCTS } from '../config/apiCreditCatalog.js';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { fileURLToPath } from 'node:url';
@@ -2114,7 +2115,7 @@ export const DEFAULT_PRODUCT_CATALOG = [
     { product_key: 'discord-bot-rescue-ui', name: 'Fix Bot Lỗi & Nâng Cấp Giao Diện', description: 'Kiểm tra nguyên nhân bot lỗi, sửa luồng hoạt động và làm mới giao diện thân thiện bằng Components V2 cùng emoji custom. Giá 500.000đ là mức khởi điểm; báo giá cuối dựa trên tình trạng mã nguồn.', price: 500000, duration_months: 1, service_type: 'SERVICE', emoji: 'warranty_shield', original_price: 0, is_featured: 1, virtual_purchase_count: 0 },
     
     // Nâng cấp: Claude API & Locket Gold
-    { name: 'Claude API 100M', description: 'Trải nghiệm hệ sinh thái Claude mạnh mẽ, phù hợp cho lập trình, phân tích dữ liệu, viết nội dung, nghiên cứu và xử lý công việc chuyên sâu.', price: 85000, duration_months: 1, service_type: 'AI', emoji: 'brand_claude', original_price: 0, base_price: 85000, base_duration_days: 1, additional_day_price: 5000, minimum_days: 1, maximum_days: 365, quota_value: 100, quota_unit: 'M', activation_method: 'TOKEN', username_required: 0, login_required: 0 },
+    ...API_CREDIT_PRODUCTS,
     { name: 'Locket Gold — 1 năm', description: 'Nâng cấp trải nghiệm Locket với nhiều tính năng cá nhân hóa, kết nối bạn bè và chia sẻ khoảnh khắc tiện lợi hơn.', price: 150000, duration_months: 12, service_type: 'premium', emoji: 'locket_gold', original_price: 0, base_price: 150000, activation_method: 'USERNAME', username_required: 1, login_required: 0 }
 ];
 
@@ -2289,6 +2290,8 @@ export function seedProductCatalog(dbInstance) {
     // Giữ các gói hiện hành cùng các gói AI mới trong allowlist ở trên.
     // Các hàng lịch sử vẫn được giữ trong database để bảo toàn đơn cũ, nhưng
     // không còn xuất hiện trên bot, website hoặc bảng giá Discord.
+    dbInstance.prepare(`UPDATE product_catalog SET is_active = 0, updated_at = CURRENT_TIMESTAMP
+      WHERE product_key = 'claude-api-100m' OR LOWER(TRIM(name)) = 'claude api 100m'`).run();
     retireReplacedAiCatalogStmt.run();
     retireReplacedStreamingCatalogStmt.run();
     retireReplacedNetflixCatalogStmt.run();

@@ -15,6 +15,7 @@ import {
   PermissionFlagsBits,
 } from 'discord.js';
 import { config } from '../config.js';
+import { isApiCreditProduct } from '../config/apiCreditCatalog.js';
 import { db } from '../database/db.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { getGuildConfig } from '../services/guildConfigService.js';
@@ -82,6 +83,10 @@ export async function handleProductSelect(interaction) {
   }
 
   const flag = getCustomerFlag(interaction.guildId, interaction.user.id);
+  if (product.is_active !== 1) {
+    await safeReply(interaction, { content: 'Gói này đã ngừng bán. Vui lòng chọn từ bảng giá mới.', flags: 64 });
+    return;
+  }
   if (Number(flag.is_blacklisted) === 1) {
     await safeReply(interaction, { content: `${E('status_cross')} Bạn đang bị chặn.`, ephemeral: true });
     return;
@@ -123,7 +128,7 @@ export async function handleProductSelect(interaction) {
 export async function handleProductPurchaseFlow(interaction, productId) {
   const E = createEmojiResolver(interaction.guildId);
   const product = getProductById(Number(productId));
-  if (!product) {
+  if (!product || product.is_active !== 1) {
     await safeReply(interaction, { content: `${E('status_cross')} Sản phẩm không còn tồn tại.`, ephemeral: true });
     return;
   }
@@ -132,6 +137,10 @@ export async function handleProductPurchaseFlow(interaction, productId) {
   // const discountCode = interaction.fields.getTextInputValue('discount_code'); // For future
 
   const quantity = Number.parseInt(rawQty, 10);
+  if (isApiCreditProduct(product) && (!/^\d+$/.test(rawQty.trim()) || quantity < 1 || quantity > 10)) {
+    await safeReply(interaction, { content: 'Số lượng gói credit phải là số nguyên từ 1 đến 10.', flags: 64 });
+    return;
+  }
   if (Number.isNaN(quantity) || quantity <= 0) {
     await safeReply(interaction, { content: `${E('status_cross')} Số lượng không hợp lệ.`, ephemeral: true });
     return;

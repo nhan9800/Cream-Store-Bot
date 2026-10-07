@@ -93,7 +93,7 @@ function usefulTokens(value) {
 
 function productDurationMatches(product, duration) {
   if (duration.days) return Number(product.duration_days) === duration.days;
-  if (duration.months) return !product.duration_days && Number(product.duration_months || 1) === duration.months;
+  if (duration.months) return !product.duration_days && Number(product.duration_months ?? 1) === duration.months;
   return false;
 }
 
