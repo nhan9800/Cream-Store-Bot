@@ -108,9 +108,10 @@ describe('Cenar daily Flash Sale story campaign', () => {
     expect(text).toContain('Locket');
     expect(text).toContain('GearUP');
     expect(text).toContain('Bot Custom');
-    expect(text).toContain('Claude API');
-    expect(text).toContain('**85.000đ / ngày đầu**');
-    expect(text).toContain('thêm 5.000đ mỗi ngày tiếp theo');
+    expect(text).toContain('API Codex/Claude');
+    expect(text).toContain('**155.000đ**');
+    expect(text).toContain('Không giới hạn ngày');
+    expect(text).not.toContain('ngày đầu');
     expect(text).toContain('**Từ 500.000đ**');
     expect(text).toContain('Giá khuyến mãi shop đã công bố');
     expect(text).toContain('Giá niêm yết hiện hành');
@@ -157,7 +158,7 @@ describe('Cenar daily Flash Sale story campaign', () => {
     const state = campaignClient();
     const guild = [...state.client.guilds.cache.values()][0];
     const prepared = await preparePromotionRebuild(guild, { now: new Date('2026-10-02T02:00:00Z') });
-    expect(prepared.saleData.rows).toHaveLength(83);
+    expect(prepared.saleData.rows).toHaveLength(88);
     expect(prepared.emojiNames).toEqual(DAILY_COLOR_SALE_EMOJIS.map((asset) => asset.name));
     expect(prepared.boardPayloads[0].files).toHaveLength(1);
     for (const payload of [...prepared.boardPayloads, prepared.buildDailyPayload('1531111111111111111')]) {
