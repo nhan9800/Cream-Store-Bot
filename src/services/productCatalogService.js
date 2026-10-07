@@ -1,5 +1,6 @@
 import { db, nowIso } from '../database/db.js';
 import { resolveProductEmoji } from './emojiService.js';
+import { API_CREDIT_DURATION, isApiCreditProduct } from '../config/apiCreditCatalog.js';
 
 // ═══════════════════════════════════════════════
 // Product Catalog CRUD
@@ -145,7 +146,7 @@ export function generateProductKnowledgeText(guildId) {
   const lines = ['=== DANH SÁCH SẢN PHẨM HIỆN TẠI ==='];
   for (const p of products) {
     const priceText = p.price > 0 ? `${Number(p.price).toLocaleString('vi-VN')} VND` : 'Liên hệ';
-    const durationText = p.duration_days
+    const durationText = isApiCreditProduct(p) ? API_CREDIT_DURATION : p.duration_days
       ? `${p.duration_days} ngày`
       : `${p.duration_months || 1} tháng`;
     const emoji = resolveProductEmoji(guildId, p.emoji);

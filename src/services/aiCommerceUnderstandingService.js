@@ -1,6 +1,8 @@
 import { getActiveProducts } from './productCatalogService.js';
+import { isApiCreditProduct } from '../config/apiCreditCatalog.js';
 
 const PRODUCT_GROUPS = Object.freeze([
+  ['api_credit', ['codex', 'api claude', 'claude api', 'api credit', 'credit api', 'api codex']],
   ['youtube', ['youtube', 'yt premium', 'premium youtube', 'ytb', 'yout', 'yt']],
   ['netflix', ['netflix']],
   ['spotify', ['spotify', 'spoti']],
@@ -41,6 +43,7 @@ function signaledGroups(value) {
 }
 
 function productMatchesGroup(product, group) {
+  if (group === 'api_credit') return isApiCreditProduct(product);
   const text = normalizeCommerceText(`${product.name} ${product.description || ''} ${product.service_type || ''}`);
   const aliases = PRODUCT_GROUPS.find(([name]) => name === group)?.[1] || [group];
   return aliases.some((alias) => ` ${text} `.includes(` ${normalizeCommerceText(alias)} `));
@@ -93,8 +96,15 @@ function usefulTokens(value) {
 
 function productDurationMatches(product, duration) {
   if (duration.days) return Number(product.duration_days) === duration.days;
-  if (duration.months) return !product.duration_days && Number(product.duration_months || 1) === duration.months;
+  if (duration.months) return !product.duration_days && Number(product.duration_months ?? 1) === duration.months;
   return false;
+}
+
+function requestedApiCredit(value) {
+  const raw = String(value || '');
+  const match = raw.match(/\$\s*(\d+)\b/)
+    || normalizeCommerceText(raw).match(/\b(\d+)\s*(?:usd\s*)?credit\b/);
+  return match ? Number(match[1]) : null;
 }
 
 /**
@@ -114,6 +124,7 @@ export function rankCatalogProducts(products, { content, contextMessages = [], l
   let contextGroups = [];
   let contextDuration = { days: null, months: null };
   let contextQuantity = null;
+  let contextCredit = null;
   if (canUseContext) {
     for (const item of [...contextMessages].reverse().slice(0, 8)) {
       const normalized = normalizeCommerceText(item);
@@ -121,13 +132,16 @@ export function rankCatalogProducts(products, { content, contextMessages = [], l
       const groups = signaledGroups(normalized);
       if (!groups.length) continue;
       context = normalized;
+      contextCredit = requestedApiCredit(item);
       contextGroups = groups;
       contextDuration = extractRequestedDuration(normalized);
       break;
     }
   }
 
-  const groups = currentGroups.length ? currentGroups : contextGroups;
+  const signaled = currentGroups.length ? currentGroups : contextGroups;
+  const groups = signaled.includes('api_credit') ? ['api_credit'] : signaled;
+  const credit = requestedApiCredit(content) ?? contextCredit;
   const duration = currentDuration.days || currentDuration.months ? currentDuration : contextDuration;
   const tokenSource = [currentGroups.length ? current : '', context].filter(Boolean).join(' ');
   const tokens = usefulTokens(tokenSource);
@@ -155,6 +169,10 @@ export function rankCatalogProducts(products, { content, contextMessages = [], l
   if (duration.days || duration.months) {
     const exactDuration = ranked.filter(({ product }) => productDurationMatches(product, duration));
     if (exactDuration.length) ranked = exactDuration;
+  }
+  if (groups.includes('api_credit') && credit !== null) {
+    ranked = ranked.filter(({ product }) => Number(product.quota_value) === credit);
+    for (const item of ranked) item.score += 180;
   }
   ranked.sort((left, right) => right.score - left.score
     || Number(right.product.is_featured || 0) - Number(left.product.is_featured || 0)

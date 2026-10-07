@@ -8,7 +8,7 @@ const GROUP_COPY = Object.freeze({
   decor_gift: ['Discord Profile Decor · Gift & Combo', 'Delivered as a gift or combo without requesting your password.'],
   chatgpt: ['ChatGPT Plus, Pro & Business', 'Compare personal-account and supplied-account plans. Subscription-only coverage excludes the account; no-warranty and two-day coverage do not guarantee a full month of account access.'],
   gemini: ['Gemini & Google One', 'Gemini Advanced/Pro plans with the listed Google One storage.'],
-  claude: ['Claude Pro & Claude API', 'Claude Pro x5 supplied accounts last one month with no warranty or full coverage. Claude Pro and API packages are separate; x5 is the shop package name.'],
+  claude: ['Claude Pro & Codex/Claude API', 'Claude Pro x5 supplied accounts last one month with no warranty or full coverage. API packs have no day limit and end when credit is used up; x5 is the shop package name.'],
   adobe: ['Adobe Creative Cloud', 'All Apps, trial duration and device limits are shown per package.'],
   creative_tools: ['CapCut Pro & Microsoft 365', 'Video, productivity and cloud storage tools.'],
   spotify: ['Spotify Premium', 'Ad-free high-quality music and offline playback for the selected duration.'],

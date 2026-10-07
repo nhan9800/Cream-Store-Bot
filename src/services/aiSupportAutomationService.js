@@ -1,3 +1,4 @@
+import { API_CREDIT_DURATION, isApiCreditProduct } from '../config/apiCreditCatalog.js';
 import {
   ActionRowBuilder,
   ButtonBuilder,
@@ -306,6 +307,7 @@ function resolveOrderProduct(guildId, productId) {
 }
 
 function productDurationLabel(product) {
+  if (isApiCreditProduct(product)) return API_CREDIT_DURATION;
   return product.duration_days
     ? `${product.duration_days} ngày`
     : `${product.duration_months || 1} tháng`;
@@ -445,7 +447,7 @@ async function createVerifiedOrderFromInteraction(interaction, ticket, product, 
     quantity,
     note: `AI hỗ trợ · catalog #${product.id} · khách xác nhận bằng nút`,
     totalAmount: total,
-    durationMonths: product.duration_months || 1,
+    durationMonths: product.duration_months ?? 1,
     durationDays: product.duration_days || null,
     orderLogChannelId: guildConfig.order_log_channel_id,
     createdById: interaction.client.user.id,

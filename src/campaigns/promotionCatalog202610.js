@@ -1,13 +1,14 @@
+import { API_CREDIT_PRODUCTS, API_CREDIT_DURATION } from '../config/apiCreditCatalog.js';
 // Data-only publication manifest. Never import database/db.js here: importing
 // that module opens SQLite. These public prices contain no customer data.
 // SALE means the owner supplied this campaign price, not an inferred discount.
 // Source: original sale board at 3f7bb80 plus catalog at 755910a (2026-10-02).
-export const PROMOTION_CATALOG_VERSION = 'CENAR-PROMOTION-CATALOG-20261002-COMPLETE';
+export const PROMOTION_CATALOG_VERSION = 'CENAR-PROMOTION-CATALOG-20261007-API-CREDIT';
 
 export const PROMOTION_CATALOG_SECTIONS = Object.freeze([
   { key: 'connection', title: 'Kết nối có gu', subtitle: 'Nitro, nâng cấp máy chủ và gói xem phim.' },
   { key: 'ai_own', title: 'AI trên tài khoản của bạn', subtitle: 'Phân biệt chính chủ, cấp acc và tham gia Team/Workspace.' },
-  { key: 'ai_supplied', title: 'AI cấp acc & gói JSON', subtitle: 'Bảo hành và hình thức nhận được ghi riêng từng gói.' },
+  { key: 'ai_supplied', title: 'AI cấp acc, API credit & JSON', subtitle: 'Bảo hành và hình thức nhận được ghi riêng từng gói.' },
   { key: 'creation', title: 'Sáng tạo & lưu trữ', subtitle: 'Adobe, Gemini, Office và CapCut theo từng thời hạn.' },
   { key: 'entertainment', title: 'Khoảng nghỉ của riêng bạn', subtitle: 'Spotify, YouTube và Locket.' },
   { key: 'decor_account', title: 'Trang trí hồ sơ Discord', subtitle: 'Giá niêm yết cho tài khoản có Nitro hoặc chưa có Nitro.' },
@@ -182,12 +183,10 @@ export const PROMOTION_CATALOG_ROWS = Object.freeze([
   catalog('ai_supplied', 'claude-pro-1-month', 'Claude Pro', 530000, {
     duration: '1 tháng', warranty: 'Full BH 1 tháng',
   }),
-  catalog('ai_supplied', 'claude-api-100m', 'Claude API 100M', 85000, {
-    duration: 'Ngày đầu', account: 'Token API', priceUnit: 'ngày đầu',
-    baseDurationDays: 1, additionalDayPrice: 5000, minimumDays: 1, maximumDays: 365,
-    dailyPricingNote: '85.000đ cho ngày đầu · thêm 5.000đ mỗi ngày tiếp theo',
-    notes: ['Giá khởi điểm cho 1 ngày, không phải 85.000đ/tháng.'],
-  }),
+  ...API_CREDIT_PRODUCTS.map((product) => catalog('ai_supplied', product.product_key, product.name, product.price, {
+    duration: API_CREDIT_DURATION, account: 'Token/API riêng', warranty: product.warranty_policy,
+    notes: ['Hạn mức credit API theo hệ thống nhà cung cấp; không tính phí theo ngày.'],
+  })),
 
   // 04: Adobe is newly included at exact current catalog prices.
   catalog('creation', 'adobe-creative-cloud-1-month', 'Adobe Creative Cloud · Không AI credits', 140000, {

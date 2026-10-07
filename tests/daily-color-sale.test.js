@@ -38,7 +38,7 @@ describe('Daily Color sale campaign', () => {
       'NITRO BOOST LOGIN', 'BOOST SERVER', 'NETFLIX PREMIUM', 'GEMINI PRO',
       'OFFICE 365', 'CHATGPT PLUS CHÍNH CHỦ', 'CLAUDE PRO x5',
       'CAPCUT PRO', 'SPOTIFY PREMIUM', 'YOUTUBE PREMIUM',
-      'ADOBE', 'LOCKET', 'GEARUP', 'BOT CUSTOM', 'CLAUDE API',
+      'ADOBE', 'LOCKET', 'GEARUP', 'BOT CUSTOM', 'API CODEX/CLAUDE',
     ]) expect(content.toLocaleLowerCase('vi')).toContain(product.toLocaleLowerCase('vi'));
     expect(content).toContain('Mail bất tử');
     expect(content).toContain('Có thể thêm 5 thành viên');
@@ -51,7 +51,7 @@ describe('Daily Color sale campaign', () => {
 
   it('keeps every price-board part silent while retaining Components V2 and custom artwork', () => {
     const messages = buildDailyColorSaleMessages({ E: emojiResolver, customEmojis, now: new Date('2026-10-02T02:00:00Z') });
-    expect(messages).toHaveLength(8);
+    expect(messages).toHaveLength(9);
     messages.forEach((payload, index) => {
       expect(payload.flags & MessageFlags.IsComponentsV2).toBeTruthy();
       expect(payload.allowedMentions.parse).toEqual([]);

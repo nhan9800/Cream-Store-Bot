@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import { describe, expect, it } from 'vitest';
+import { API_CREDIT_PRODUCTS } from '../src/config/apiCreditCatalog.js';
 import {
   PROMOTION_CATALOG_ROWS,
   PROMOTION_CATALOG_SECTIONS,
@@ -56,7 +57,7 @@ const ownerPrices = {
 function seedProducts() {
   const source = fs.readFileSync(new URL('../src/database/db.js', import.meta.url), 'utf8');
   const literal = `${source.split('export const DEFAULT_PRODUCT_CATALOG = ')[1].split('\n];')[0]}\n]`;
-  return Function(`return ${literal}`)();
+  return Function('API_CREDIT_PRODUCTS', `return ${literal}`)(API_CREDIT_PRODUCTS);
 }
 
 function keyOf(product) {
@@ -73,14 +74,14 @@ describe('Complete October promotion data', () => {
       .map((row) => [row.key, row.price]))).toEqual(ownerPrices);
   });
 
-  it('covers every current seed SKU once without rewriting the 44 catalog prices', () => {
+  it('covers every current seed SKU once without rewriting the 49 catalog prices', () => {
     const products = seedProducts();
     const byProductKey = new Map(products.map((product) => [keyOf(product), product]));
     const catalogRows = PROMOTION_CATALOG_ROWS.filter((row) => row.source === 'CATALOG');
     const linked = PROMOTION_CATALOG_ROWS.map((row) => row.catalogKey).filter(Boolean);
     expect(new Set(linked).size).toBe(linked.length);
     expect([...linked].sort()).toEqual([...byProductKey.keys()].sort());
-    expect(catalogRows).toHaveLength(44);
+    expect(catalogRows).toHaveLength(49);
     for (const row of catalogRows) {
       expect(row.price, row.key).toBe(byProductKey.get(row.catalogKey)?.price);
     }
@@ -107,14 +108,15 @@ describe('Complete October promotion data', () => {
     expect(byKey('sale-chatgpt-pro-5x-account-json').duration).toContain('Xác nhận');
   });
 
-  it('states the Claude API first-day price instead of advertising a full month', () => {
-    const api = byKey('claude-api-100m');
-    expect(api.price).toBe(85000);
-    expect(api.baseDurationDays).toBe(1);
-    expect(api.additionalDayPrice).toBe(5000);
-    expect(api.dailyPricingNote).toBe('85.000đ cho ngày đầu · thêm 5.000đ mỗi ngày tiếp theo');
-    expect(api.formattedPresentation).toContain('/ngày đầu');
-    expect(api.presentation).not.toContain('tháng');
+  it('lists all six API credit packs with exact marked-up prices and no day charge', () => {
+    const rows = PROMOTION_CATALOG_ROWS.filter((row) => row.key.startsWith('api-codex-claude-credit-'));
+    expect(rows.map((row) => row.price)).toEqual([70000,90000,110000,155000,250000,530000]);
+    for (const api of rows) {
+      expect(api.duration).toBe('Không giới hạn ngày · Dùng đến hết credit');
+      expect(api.additionalDayPrice).toBeUndefined();
+      expect(api.formattedPresentation).not.toMatch(/ngày đầu|tháng/);
+    }
+    expect(byKey('claude-api-100m')).toBeUndefined();
   });
 
   it('does not invent warranty coverage for Pro 200/500 or short-warranty accounts', () => {
@@ -136,8 +138,8 @@ describe('Complete October promotion data', () => {
   it('keeps catalog listings distinct from owner campaign prices with eight complete groups', () => {
     expect(PROMOTION_PRICE_SOURCE_LABELS.CATALOG).toBe('Giá niêm yết hiện hành');
     expect(PROMOTION_CATALOG_SECTIONS).toHaveLength(8);
-    expect(getPromotionCatalogGroups().flatMap((group) => group.rows)).toHaveLength(83);
-    expect(new Set(PROMOTION_CATALOG_ROWS.map((row) => row.key)).size).toBe(83);
+    expect(getPromotionCatalogGroups().flatMap((group) => group.rows)).toHaveLength(88);
+    expect(new Set(PROMOTION_CATALOG_ROWS.map((row) => row.key)).size).toBe(88);
     for (const row of PROMOTION_CATALOG_ROWS) {
       expect(Number.isSafeInteger(row.price)).toBe(true);
       expect(row.price).toBeGreaterThan(0);

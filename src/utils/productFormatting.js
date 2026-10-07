@@ -1,4 +1,7 @@
+import { API_CREDIT_DURATION, isApiCreditProduct } from '../config/apiCreditCatalog.js';
+
 export function getDurText(p, options = []) {
+  if (isApiCreditProduct(p)) return API_CREDIT_DURATION;
   if (p.price === 0) return 'Thương lượng';
   if (p.duration_months === null || p.duration_months === undefined) return 'Vĩnh viễn';
   if (p.duration_months === 0) return 'Vĩnh viễn';

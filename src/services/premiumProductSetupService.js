@@ -1,6 +1,9 @@
 import { ChannelType, PermissionFlagsBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle, AttachmentBuilder, ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, SeparatorSpacingSize, MediaGalleryBuilder, MediaGalleryItemBuilder, MessageFlags } from 'discord.js';
 import { db } from '../database/db.js';
-import { getProductByName } from './productCatalogService.js';
+import { API_CREDIT_BANNER, API_CREDIT_DURATION, getApiCreditProducts } from '../config/apiCreditCatalog.js';
+import { buildApiCreditPanel, buildApiCreditSelector } from './apiCreditPanel.js';
+import { handleProductSelect } from '../events/productHandlers.js';
+import { getActiveProducts, getProductByName } from './productCatalogService.js';
 import { createEmojiResolver, withButtonEmoji } from '../utils/emojiHelper.js';
 import { getWalletBalance } from './walletService.js';
 import { getGuildConfig } from './guildConfigService.js';
@@ -186,84 +189,13 @@ export async function publishPremiumProductsForGuild(guild, settingOverrides = {
   // ══════════════════════════════════════════
   // CLAUDE API — Component V2
   // ══════════════════════════════════════════
-  const claudeProduct = getProductByName('WEB', 'Claude API 100M');
-  if (claudeProduct) {
-    const claudeBannerPath = path.join(botRoot, 'assets/products/claude/claude-banner.webp');
+  const creditProducts = getApiCreditProducts(getActiveProducts(guild.id));
+  if (creditProducts.length) {
+    const claudeBannerPath = path.join(botRoot, 'assets/products/claude', API_CREDIT_BANNER);
     const claudeHasBanner = fs.existsSync(claudeBannerPath);
-
-    const container = new ContainerBuilder().setAccentColor(0xD97757);
-
-    if (claudeHasBanner) {
-      container.addMediaGalleryComponents(
-        new MediaGalleryBuilder().addItems(
-          new MediaGalleryItemBuilder().setURL('attachment://claude-banner.webp')
-        )
-      );
-    }
-
-    container.addSeparatorComponents(
-      new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small)
-    );
-
-    container.addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(
-        `## ${E('brand_claude')} CLAUDE API 100M\n` +
-        `> ${E('ctv_crystal')} Hạn mức rõ ràng · Giao nhanh · Bảo hành trọn thời gian sử dụng`
-      )
-    );
-
-    container.addSeparatorComponents(
-      new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
-    );
-
-    container.addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(
-        `### ${E('icon_wallet')} THÔNG TIN GÓI\n` +
-        `${E('payment_money')} **Giá khởi điểm** · \`${claudeProduct.base_price.toLocaleString('vi-VN')}đ\`\n` +
-        `${E('icon_duration')} **Thời hạn cơ bản** · \`${claudeProduct.base_duration_days} ngày\`\n` +
-        `${E('icon_gift')} **Gia hạn thêm** · \`+${claudeProduct.additional_day_price.toLocaleString('vi-VN')}đ/ngày\`\n` +
-        `${E('icon_chart')} **Hạn mức sử dụng** · \`${claudeProduct.quota_value}${claudeProduct.quota_unit}\`\n` +
-        `${E('icon_key')} **Hình thức kích hoạt** · \`Token/API riêng tư\``
-      )
-    );
-
-    container.addSeparatorComponents(
-      new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
-    );
-
-    container.addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(
-        `### ${E('icon_crown')} QUYỀN LỢI & CAM KẾT\n` +
-        `${E('cenar_verified')} Truy cập hệ thống model Claude phục vụ coding, phân tích và nghiên cứu.\n` +
-        `${E('icon_gem')} Không yêu cầu mật khẩu cá nhân; thông tin kích hoạt được gửi riêng trong ticket.\n` +
-        `${E('warranty_shield')} Bảo hành trong toàn bộ thời hạn gói và hỗ trợ khi token gặp sự cố.\n` +
-        `${E('cenar_staff')} Có nhân viên tiếp nhận đơn, kiểm tra thanh toán và cập nhật tiến độ rõ ràng.\n` +
-        `${E('status_warn')} *Danh sách model có thể thay đổi theo chính sách của nhà cung cấp.*`
-      )
-    );
-
-    container.addSeparatorComponents(
-      new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small)
-    );
-
-    container.addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(
-        `-# ${E('icon_heart_purple')} Cenar Store · Thanh toán an toàn · Giao trong ticket · Bảo hành trọn gói`
-      )
-    );
-
-    const claudeRow = new ActionRowBuilder().addComponents(
-      withButtonEmoji(new ButtonBuilder().setCustomId('product:claude:buy').setLabel('Mua ngay').setStyle(ButtonStyle.Success), E.component('card_success')),
-      withButtonEmoji(new ButtonBuilder().setCustomId('product:claude:pricing').setLabel('Tính giá').setStyle(ButtonStyle.Secondary), E.component('payment_money')),
-      withButtonEmoji(new ButtonBuilder().setCustomId('product:claude:models').setLabel('Models').setStyle(ButtonStyle.Secondary), E.component('brand_claude')),
-      withButtonEmoji(new ButtonBuilder().setCustomId('product:claude:policy').setLabel('Điều khoản').setStyle(ButtonStyle.Secondary), E.component('icon_gem'))
-    );
-
-    const claudeAttachment = new AttachmentBuilder(claudeBannerPath);
     const claudePayload = {
-      components: [container, claudeRow],
-      files: claudeHasBanner ? [claudeAttachment] : [],
-      flags: MessageFlags.IsComponentsV2,
+      ...buildApiCreditPanel(guild.id, creditProducts, claudeHasBanner),
+      files: claudeHasBanner ? [new AttachmentBuilder(claudeBannerPath)] : [],
     };
 
     if (settings.claude_product_message_id) {
@@ -386,31 +318,20 @@ import { ModalBuilder, TextInputBuilder, TextInputStyle } from 'discord.js';
 export async function handlePremiumProductInteraction(interaction) {
   const { customId } = interaction;
 
-  if (customId === 'product:claude:buy') {
-    const modal = new ModalBuilder()
-      .setCustomId('product:claude:modal_buy')
-      .setTitle('Mua Claude API 100M');
+  if (customId === 'product:claude:credit_select') {
+    const products = getApiCreditProducts(getActiveProducts(interaction.guildId));
+    const selected = products.find((product) => String(product.id) === interaction.values?.[0]);
+    if (!selected) return interaction.reply({ content: 'Gói đã thay đổi hoặc ngừng bán. Vui lòng mở bảng giá mới.', flags: 64 });
+    return handleProductSelect(interaction);
+  }
 
-    const daysInput = new TextInputBuilder()
-      .setCustomId('days')
-      .setLabel('Số lượng gói muốn mua (1 gói 100M = 85k)')
-      .setStyle(TextInputStyle.Short)
-      .setPlaceholder('Mặc định: 1')
-      .setRequired(true);
-
-    const emailInput = new TextInputBuilder()
-      .setCustomId('email')
-      .setLabel('Email nhận thông báo (Không bắt buộc)')
-      .setStyle(TextInputStyle.Short)
-      .setRequired(false);
-
-    modal.addComponents(
-      new ActionRowBuilder().addComponents(daysInput),
-      new ActionRowBuilder().addComponents(emailInput)
-    );
-
-    await interaction.showModal(modal);
-    return;
+  if (customId === 'product:claude:buy' || customId === 'product:claude:modal_buy' || customId === 'product:claude:pricing') {
+    const products = getApiCreditProducts(getActiveProducts(interaction.guildId));
+    const selector = buildApiCreditSelector(products);
+    return interaction.reply({
+      content: `**API Codex/Claude · Bảng giá hiện tại**\n${products.map((product) => `**$${product.quota_value} credit** · ${Number(product.price).toLocaleString('vi-VN')}đ`).join('\n')}\n\n${API_CREDIT_DURATION}. Chọn gói bên dưới để đặt hàng.`,
+      components: selector ? [selector] : [], flags: 64, allowedMentions: { parse: [] },
+    });
   }
 
   if (customId === 'product:locket:buy') {
@@ -433,87 +354,18 @@ export async function handlePremiumProductInteraction(interaction) {
     return;
   }
 
-  if (customId === 'product:claude:pricing') {
-    const { ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, SeparatorSpacingSize, MessageFlags } = await import('discord.js');
-    const E = createEmojiResolver(interaction.guildId);
-    const container = new ContainerBuilder().setAccentColor(0xD97757);
-    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
-      `## ${E('brand_claude', '🤖')} Bảng Tính Giá Claude API\n` +
-      `> ${E('icon_sparkle', '✨')} *Giá được tính linh hoạt theo số ngày bạn chọn.*`
-    ));
-    container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
-    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
-      `### ${E('icon_price', '💰')} CÔNG THỨC TÍNH GIÁ\n` +
-      `${E('icon_gift', '🎁')} **Ngày đầu tiên:** \`85,000đ\`\n` +
-      `${E('icon_duration', '⏱️')} **Từ ngày 2 trở đi:** \`+5,000đ / ngày\`\n\n` +
-      `### ${E('icon_chart', '📊')} VÍ DỤ THỰC TẾ\n` +
-      `${E('status_check', '✅')} 1 ngày = \`85,000đ\`\n` +
-      `${E('status_check', '✅')} 7 ngày = \`85k + 6×5k\` = \`115,000đ\`\n` +
-      `${E('status_check', '✅')} 30 ngày = \`85k + 29×5k\` = \`230,000đ\`\n` +
-      `${E('status_check', '✅')} 90 ngày = \`85k + 89×5k\` = \`530,000đ\``
-    ));
-    container.addSeparatorComponents(new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small));
-    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
-      `-# ${E('icon_heart_purple', '💜')} Nhấn **Mua ngay** để nhập số ngày và đặt hàng ngay!`
-    ));
-    return interaction.reply({ components: [container], flags: MessageFlags.IsComponentsV2 | 64 });
-  }
-
   if (customId === 'product:claude:models') {
-    const { ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, SeparatorSpacingSize, MessageFlags } = await import('discord.js');
-    const E = createEmojiResolver(interaction.guildId);
-    const container = new ContainerBuilder().setAccentColor(0xD97757);
-    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
-      `## ${E('brand_claude', '🤖')} Danh Sách Models Khả Dụng\n` +
-      `> ${E('icon_sparkle', '✨')} *Cập nhật theo hệ thống Anthropic — Tháng 7/2026*`
-    ));
-    container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
-    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
-      `### ${E('icon_crown', '👑')} CLAUDE 5 — FRONTIER \`MỚI NHẤT\`\n` +
-      `${E('status_check', '✅')} \`claude-fable-5\` — Mạnh nhất tuyệt đối, AI tự trị sâu\n` +
-      `${E('status_check', '✅')} \`claude-opus-5\` — Flagship tư duy, ra mắt 24/7/2026\n` +
-      `${E('status_check', '✅')} \`claude-sonnet-5\` — Cân bằng tốc độ & thông minh`
-    ));
-    container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
-    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
-      `### ${E('icon_gem', '💎')} CLAUDE 4 — STABLE\n` +
-      `${E('status_check', '✅')} \`claude-opus-4-8\` — Flagship coding dài hạn\n` +
-      `${E('status_check', '✅')} \`claude-haiku-4-5\` — Siêu nhanh, chi phí thấp`
-    ));
-    container.addSeparatorComponents(new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small));
-    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
-      `-# ${E('status_warn', '⚠️')} Model khả dụng có thể thay đổi theo chính sách Anthropic. Mua API để truy cập tất cả models trên.`
-    ));
-    return interaction.reply({ components: [container], flags: MessageFlags.IsComponentsV2 | 64 });
+    return interaction.reply({
+      content: '**Hướng dẫn API Codex/Claude**\nNhận token/API riêng, địa chỉ kết nối và hướng dẫn trong ticket sau khi thanh toán. Không gửi token vào kênh công khai.\n\nModel khả dụng và mức tiêu hao credit theo hệ thống nhà cung cấp tại thời điểm sử dụng; shop xác nhận trước khi giao.\nHướng dẫn: https://cenarstore.xyz/huong-dan-api\nKiểm tra token/model: https://cenarstore.xyz/check-token',
+      flags: 64, allowedMentions: { parse: [] },
+    });
   }
 
   if (customId === 'product:claude:policy') {
-    const { ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, SeparatorSpacingSize, MessageFlags } = await import('discord.js');
-    const E = createEmojiResolver(interaction.guildId);
-    const container = new ContainerBuilder().setAccentColor(0xD97757);
-    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
-      `## ${E('icon_gem', '💎')} Điều Khoản Dịch Vụ — Claude API\n` +
-      `> ${E('icon_sparkle', '✨')} *Vui lòng đọc kỹ trước khi mua.*`
-    ));
-    container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
-    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
-      `### ${E('status_check', '✅')} CAM KẾT CỦA SHOP\n` +
-      `${E('icon_gem', '💎')} Bảo hành full thời hạn sử dụng đã mua.\n` +
-      `${E('icon_key', '🔒')} Không yêu cầu cung cấp mật khẩu hay thông tin cá nhân.\n` +
-      `${E('status_check', '✅')} Hỗ trợ kỹ thuật trong suốt thời hạn.`
-    ));
-    container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
-    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
-      `### ${E('status_warn', '⚠️')} LƯU Ý QUAN TRỌNG\n` +
-      `${E('status_warn', '⚠️')} Model khả dụng có thể thay đổi theo chính sách Anthropic.\n` +
-      `${E('status_cross', '❌')} Không hoàn tiền sau khi đã kích hoạt & sử dụng API token.\n` +
-      `${E('icon_duration', '⏱️')} Thời hạn tính từ ngày kích hoạt, không gia hạn khi hết hạn.`
-    ));
-    container.addSeparatorComponents(new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small));
-    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
-      `-# ${E('icon_heart_purple', '💜')} Cenar Store — Uy Tín · Chất Lượng · Hỗ Trợ 24/7`
-    ));
-    return interaction.reply({ components: [container], flags: MessageFlags.IsComponentsV2 | 64 });
+    return interaction.reply({
+      content: '**Điều khoản API AI Credit**\n• Không giới hạn ngày; dùng đến khi hết credit đã mua. Không tính phí gia hạn theo ngày.\n• Credit là hạn mức sử dụng API, không phải tiền mặt hay số token cố định. Mức tiêu hao theo model và hệ thống nhà cung cấp.\n• Token/API và hướng dẫn được giao riêng trong ticket, không cần mật khẩu tài khoản cá nhân.\n• Bảo hành và hỗ trợ trong thời gian sử dụng đến hết credit.\n• Danh sách model có thể thay đổi. Không hoàn tiền sau khi đã kích hoạt và sử dụng token.',
+      flags: 64, allowedMentions: { parse: [] },
+    });
   }
 
   if (customId === 'product:locket:features') {
@@ -576,21 +428,6 @@ export async function handlePremiumProductInteraction(interaction) {
   }
 
   // Handle modals
-  if (customId === 'product:claude:modal_buy') {
-    const daysStr = interaction.fields.getTextInputValue('days');
-    const email = interaction.fields.getTextInputValue('email') || '';
-    const days = parseInt(daysStr, 10);
-    if (isNaN(days) || days < 1) {
-      return interaction.reply({ content: '❌ Số ngày không hợp lệ!', ephemeral: true });
-    }
-
-    const { calculateClaudePrice } = await import('../utils/pricing.js');
-    const price = calculateClaudePrice(days);
-    
-    await handlePremiumBuyOrder(interaction, 'Claude API 100M', days, price, email ? `Email nhận: ${email}` : '');
-    return;
-  }
-
   if (customId === 'product:locket:modal_buy') {
     const username = interaction.fields.getTextInputValue('username');
     
