@@ -1,6 +1,5 @@
 import { db, nowIso } from '../database/db.js';
 import { config } from '../config.js';
-import { listActivityCustomers } from './customerActivityService.js';
 
 const inFlight = new Map();
 const snowflake = (value) => /^\d{15,22}$/.test(String(value || ''));
@@ -37,19 +36,23 @@ export function queueCustomerRoleSync(guildId, customerId, { preservePending = f
 }
 
 export function backfillCustomerRoleSync(guildId = config.guildId) {
-  const purchases = db.prepare(`SELECT DISTINCT guild_id, customer_id FROM orders
-    WHERE guild_id = ? AND payment_status = 'PAID'
-      AND status NOT IN ('CANCELLED', 'REFUNDED') AND total_amount > 0 AND amount_paid >= total_amount`)
-    .all(guildId);
-  const customers = new Map([...purchases, ...listActivityCustomers().filter((row) => row.guild_id === guildId)]
-    .map((row) => [`${row.guild_id}:${row.customer_id}`, row]));
+  // Include former purchasers as well as current ones. Filtering eligibility
+  // here would miss stale roles after a historical refund/cancellation. The
+  // role service alone decides which roles each customer's live data earns.
+  const history = db.prepare(`SELECT customer_id FROM orders WHERE guild_id = @guildId
+    UNION SELECT customer_id FROM viotp_orders WHERE guild_id = @guildId
+    UNION SELECT customer_id FROM card_charging_orders WHERE guild_id = @guildId
+    UNION SELECT customer_id FROM card_buy_orders WHERE guild_id = @guildId
+    UNION SELECT customer_id FROM customer_role_sync_jobs WHERE guild_id = @guildId`)
+    .all({ guildId });
+  const customers = history.filter((row) => snowflake(guildId) && snowflake(row.customer_id));
   let queued = 0;
   db.transaction(() => {
-    for (const row of customers.values()) {
-      if (queueCustomerRoleSync(row.guild_id, row.customer_id, { preservePending: true })) queued++;
+    for (const row of customers) {
+      if (queueCustomerRoleSync(guildId, row.customer_id, { preservePending: true })) queued++;
     }
   })();
-  lastBackfill = { scanned: customers.size, queued, at: nowIso() };
+  lastBackfill = { scanned: customers.length, queued, skipped: history.length - customers.length, at: nowIso() };
   return lastBackfill;
 }
 

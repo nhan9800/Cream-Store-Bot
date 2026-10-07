@@ -17,6 +17,8 @@ Revision: `CENAR-MEMBERSHIP-20261007`.
 
 Role eligibility counts positive fully paid, noncancelled/nonrefunded orders and eligible service spending. Purchaser roles stack; durable sync jobs retry Discord errors and absent members on rejoin. Payment paths never claim a role was granted before Discord confirms it.
 
+Startup reconciliation scans all historical order/service customers and existing sync jobs in the current guild, including cancelled/refunded history so stale buyer tiers can be removed. Only valid Discord identities are queued; unlinked website identities are counted as skipped. Eligibility is recalculated from current commerce data when each job runs. Already pending retries keep their backoff; successful old jobs are queued for a fresh check. Startup processes at most100 jobs, then the independent minute scheduler drains25 at a time. Member rejoin queues an immediate check. No order, payment, balance or unrelated role is rewritten by the scan.
+
 ## Benefits
 
 New Store 1 orders receive priority 100/200/300/400 at Select/Signature/Prestige/Sovereign based on valid paid history. Existing product VIP bonus and other stores' legacy behavior remain. Existing orders are not rewritten. Refunds affect the next priority calculation. Queue priority does not override payment or delivery checks and does not guarantee a response time.
