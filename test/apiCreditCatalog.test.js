@@ -21,6 +21,7 @@ import { deliverPaidOrder } from '../src/services/autoDeliveryService.js';
 import { formatOrderDuration } from '../src/utils/formatters.js';
 import { getDurText } from '../src/utils/productFormatting.js';
 import { buildAiOrderConfirmationPayload } from '../src/services/aiSupportAutomationService.js';
+import { rankCatalogProducts } from '../src/services/aiCommerceUnderstandingService.js';
 
 beforeAll(() => initDatabase());
 afterAll(() => {
@@ -92,5 +93,14 @@ describe('API credit commerce', () => {
     expect(reply.mock.calls[0][0].content).toContain('70.000đ');
     expect(reply.mock.calls[0][0].components[0].toJSON().components[0].options).toHaveLength(6);
     expect(db.prepare('SELECT COUNT(*) AS count FROM orders').get().count).toBe(before);
+  });
+  it('recognizes the requested dollar credit tier without mixing Claude subscriptions or quantities', () => {
+    const result = rankCatalogProducts(getActiveProducts('WEB'), { content: 'Lên đơn 2 gói Claude API $500 credit cho mình' });
+    expect(result.confidentProduct?.product_key).toBe('api-codex-claude-credit-500');
+    expect(result.quantity).toBe(2);
+    expect(result.products).toHaveLength(1);
+    expect(rankCatalogProducts(getActiveProducts('WEB'), { content: 'mua API Codex $60 credit' }).products).toHaveLength(0);
+    const contextual = rankCatalogProducts(getActiveProducts('WEB'), { content: 'Ok lấy gói này', contextMessages: ['Claude API $200 credit'] });
+    expect(contextual.confidentProduct?.product_key).toBe('api-codex-claude-credit-200');
   });
 });
