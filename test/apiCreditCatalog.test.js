@@ -90,8 +90,19 @@ describe('API credit commerce', () => {
     const reply = vi.fn();
     const before = db.prepare('SELECT COUNT(*) AS count FROM orders').get().count;
     await handlePremiumProductInteraction({ customId: 'product:claude:modal_buy', guildId: 'WEB', reply });
-    expect(reply.mock.calls[0][0].content).toContain('70.000đ');
-    expect(reply.mock.calls[0][0].components[0].toJSON().components[0].options).toHaveLength(6);
+    const payload = reply.mock.calls[0][0];
+    expect(payload.components[0].toJSON().components[0].content).toContain('70.000đ');
+    expect(payload.components[1].toJSON().components[0].options).toHaveLength(6);
+    expect(db.prepare('SELECT COUNT(*) AS count FROM orders').get().count).toBe(before);
+  });
+  it.each(['product:claude:models', 'product:claude:policy', 'product:locket:features', 'product:locket:policy'])('routes %s to private Markdown details without creating an order', async (customId) => {
+    const reply = vi.fn();
+    const before = db.prepare('SELECT COUNT(*) AS count FROM orders').get().count;
+    await handlePremiumProductInteraction({ customId, guildId: 'WEB', reply });
+    const payload = reply.mock.calls[0][0];
+    expect(payload.components[0].toJSON().components[0].content).toMatch(/^## /);
+    expect(payload.flags).toBe(32768 | 64);
+    expect(payload.allowedMentions).toEqual({ parse: [] });
     expect(db.prepare('SELECT COUNT(*) AS count FROM orders').get().count).toBe(before);
   });
   it('recognizes the requested dollar credit tier without mixing Claude subscriptions or quantities', () => {
