@@ -188,6 +188,79 @@ describe('paid website purchaser role synchronization', () => {
     expect(await processPendingCustomerRoles(mockDiscord().client)).toMatchObject({ synced: 1 });
   });
 
+  it('rescans historical refunds and stale synced jobs without changing money or unrelated roles', async () => {
+    const order = paidOrder(1_000_000);
+    db.prepare("UPDATE orders SET status = 'REFUNDED' WHERE id = ?").run(order.id);
+    db.exec('DELETE FROM customer_role_sync_jobs'); // Historical data predating the queue.
+    const { client, member } = mockDiscord();
+    const unrelated = '777777777777777777';
+    for (const id of [patronId, vipId, unrelated]) member.roles.cache.set(id, { id });
+    const financialBefore = db.prepare('SELECT status, payment_status, total_amount, amount_paid FROM orders WHERE id = ?').get(order.id);
+    expect(backfillCustomerRoleSync()).toMatchObject({ scanned: 1, queued: 1, skipped: 0 });
+    expect(await processPendingCustomerRoles(client)).toMatchObject({ scanned: 1, synced: 1 });
+    expect([...member.roles.cache.keys()]).toEqual([unrelated]);
+    expect(member.send).not.toHaveBeenCalled();
+    expect(db.prepare('SELECT status, payment_status, total_amount, amount_paid FROM orders WHERE id = ?').get(order.id)).toEqual(financialBefore);
+
+    db.prepare('DELETE FROM orders WHERE id = ?').run(order.id);
+    expect(backfillCustomerRoleSync()).toMatchObject({ scanned: 1, queued: 1 });
+    expect(job().status).toBe('PENDING'); // The historical job is still reconciled.
+  });
+
+  it('deduplicates all history, skips non-Discord identities and keeps other guilds and retry backoff intact', () => {
+    pendingOrder();
+    pendingOrder(50_000); // Same customer's second historical order.
+    pendingOrder(75_000, 'web_unlinked');
+    const otherGuild = '1070676180103086132';
+    queueCustomerRoleSync(otherGuild, customerId);
+    queueCustomerRoleSync(guildId, customerId);
+    db.prepare("UPDATE customer_role_sync_jobs SET attempts = 4, retry_at = ?, last_error = 'MEMBER_NOT_FOUND' WHERE guild_id = ?")
+      .run('2099-01-01T00:00:00.000Z', guildId);
+    const before = job();
+    expect(backfillCustomerRoleSync()).toMatchObject({ scanned: 1, queued: 1, skipped: 1 });
+    expect(job()).toEqual(before);
+    expect(db.prepare('SELECT COUNT(*) AS n FROM customer_role_sync_jobs').get().n).toBe(2);
+    expect(JSON.stringify(getCustomerRoleSyncState())).not.toContain(customerId);
+  });
+
+  it('includes service-only historical customers and lets current service eligibility decide their roles', async () => {
+    db.prepare(`INSERT INTO viotp_orders (guild_id, customer_id, service_id, service_name, price, request_id, status)
+      VALUES (?, ?, 1, 'test service', 15000, 'role-scan-otp', 'CANCELLED')`).run(guildId, customerId);
+    db.prepare(`INSERT INTO card_charging_orders (request_id, guild_id, customer_id, telco, code, serial, declared_value, status, created_at, updated_at)
+      VALUES ('role-scan-charge', ?, ?, 'test', 'test', 'test', 50000, 'FAILED', ?, ?)`)
+      .run(guildId, customerId, nowIso(), nowIso());
+    const second = '888888888888888888';
+    db.prepare(`INSERT INTO card_buy_orders (request_id, guild_id, customer_id, service_code, value, qty, total_price, status, created_at, updated_at)
+      VALUES ('role-scan-buy', ?, ?, 'test', 50000, 1, 50000, 'COMPLETED', ?, ?)`)
+      .run(guildId, second, nowIso(), nowIso());
+    expect(backfillCustomerRoleSync()).toMatchObject({ scanned: 2, queued: 2, skipped: 0 });
+    const { client, guild, member } = mockDiscord();
+    const other = { ...member, roles: { cache: new Map(), add: vi.fn(), remove: vi.fn() }, send: vi.fn().mockResolvedValue(null) };
+    member.roles.cache.set(patronId, { id: patronId });
+    guild.members.fetch.mockImplementation(async ({ user }) => user === second ? other : member);
+    expect(await processPendingCustomerRoles(client)).toMatchObject({ scanned: 2, synced: 2 });
+    expect(member.roles.remove).toHaveBeenCalledWith(patronId, expect.any(String));
+    expect(other.roles.add).toHaveBeenCalledWith(patronId, expect.any(String));
+    expect(other.roles.add).not.toHaveBeenCalledWith(vipId, expect.any(String));
+  });
+
+  it('rechecks stacked spending tiers and drops only the tiers above the remaining paid history', async () => {
+    const top = paidOrder(8_000_000);
+    paidOrder(3_000_000);
+    const { client, guild, member } = mockDiscord();
+    const signature = '1282637470139420694';
+    const prestige = '1282637814571466808';
+    const sovereign = '1282637775291551776';
+    for (const id of [signature, prestige, sovereign]) guild.roles.cache.set(id, { id });
+    await syncCustomerRolesNow(client, guildId, customerId);
+    expect(new Set(member.roles.cache.keys())).toEqual(new Set([patronId, vipId, signature, prestige, sovereign]));
+    db.prepare("UPDATE orders SET status = 'REFUNDED' WHERE id = ?").run(top.id);
+    db.exec('DELETE FROM customer_role_sync_jobs');
+    backfillCustomerRoleSync();
+    await processPendingCustomerRoles(client);
+    expect(new Set(member.roles.cache.keys())).toEqual(new Set([patronId, vipId, signature]));
+  });
+
   it('commits wallet debit and the durable role job atomically and rolls both back on failure', () => {
     const order = pendingOrder();
     addWalletBalance(guildId, customerId, order.total_amount, 'TOPUP', 'test', 'wallet-role-topup');
