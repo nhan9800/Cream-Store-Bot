@@ -22,6 +22,7 @@ import { getAccountSecurity, verifyAdminStepUp, isWebAccountBanned, rejectBanned
 import { runtimeCommitSha } from '../utils/revision.js';
 import { discordCollectibleUrl, getDiscordCollectibleShopPrice } from './discordCollectiblePricing.js';
 import { getCustomerDiscordRoleSnapshot, getCustomerMembershipProgress } from './roleService.js';
+import { getMembershipPresentationStatus } from './membershipPresentationService.js';
 import { getCustomerActivitySummary, getCustomerRecentActivities } from './customerActivityService.js';
 import { getCustomerRoleSyncState } from './customerRoleSyncService.js';
 import { getDiscordNitroEligibility } from '../utils/discordNitro.js';
@@ -485,6 +486,7 @@ export function registerBotApiRoutes(app) {
             discordReady,
             youtubeWarrantySync: getYoutubeWarrantySyncState(),
             customerRoleSync: getCustomerRoleSyncState(),
+            membershipPresentation: getMembershipPresentationStatus(req.app.locals.discordClient),
             uptime: Math.floor(process.uptime()),
             timestamp: Date.now(),
         });

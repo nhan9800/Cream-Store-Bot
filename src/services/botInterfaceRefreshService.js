@@ -3,6 +3,7 @@ import { autoSetupPriceBoard } from './autoSetupPriceBoardService.js';
 import { refreshBoostPanel } from './boostServerService.js';
 import { startHistoricalBoostPresentationRepair } from './historicalBoostPresentationRepairService.js';
 import { getCoreEmojiPackStatus } from './coreEmojiPackService.js';
+import { refreshMembershipPresentation } from './membershipPresentationService.js';
 
 const summaries=new WeakMap();
 const priceArtwork=new WeakMap();
@@ -25,6 +26,9 @@ export async function refreshBotInterfaces(client) {
     priceArtwork.set(client,artwork);
     const panel=await refreshBoostPanel(client,config.guildId);
     if (!['updated','not_configured'].includes(panel?.status)) throw new Error('BOOST_PANEL_REFRESH_FAILED');
+    // Membership permissions or artwork failures must not stop the existing
+    // catalog and Boost repairs. Keep the whole job retryable afterwards.
+    await refreshMembershipPresentation(client);
     const summary={status:'ready',priceBoard:products[0]?.status || 'not_configured',boostPanel:panel.status,updatedAt:new Date().toISOString()};
     summaries.set(client,summary);
     return summary;

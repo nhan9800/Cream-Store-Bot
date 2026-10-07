@@ -5,6 +5,7 @@ import {
 } from 'discord.js';
 import { db } from '../database/db.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
+import { membershipTierForSpend } from '../config/membershipProgram.js';
 import {
   getLeaderboardPeriodBounds,
   getLeaderboardRows,
@@ -35,16 +36,9 @@ export const data = new SlashCommandBuilder()
 
 // ─── Huy hiệu top ────────────────────────────────────────
 const MEDAL_SLOTS = ['icon_gold', 'icon_silver', 'icon_bronze', 'icon_num4', 'icon_num5', 'icon_num6', 'icon_num7', 'icon_num8', 'icon_num9', 'icon_num10'];
-const VIP_TIERS = [
-  { min: 8_000_000, label: 'Diamond', emojiSlot: 'icon_gem', color: 0x60A5FA },
-  { min: 5_000_000, label: 'Ruby',    emojiSlot: 'icon_heart', color: 0xF87171 },
-  { min: 3_000_000, label: 'Elite',   emojiSlot: 'icon_crown', color: 0xFBBF24 },
-  { min: 1_000_000, label: 'VIP',     emojiSlot: 'icon_star',  color: 0xA78BFA },
-  { min: 0,         label: 'Khách',   emojiSlot: 'icon_cart', color: 0x6B7280 },
-];
-
 function getTier(spent) {
-  return VIP_TIERS.find(t => spent >= t.min) || VIP_TIERS[VIP_TIERS.length - 1];
+  const tier=membershipTierForSpend(spent);
+  return {label:tier.label,emojiSlot:tier.slot};
 }
 
 function fmt(n) { return new Intl.NumberFormat('vi-VN').format(Number(n||0)); }
