@@ -15,6 +15,9 @@ import {
   scheduleAdminOrderCenterRefresh,
 } from './adminOrderCenterService.js';
 import { unscheduleOrderTicketAutoClose } from './ticketService.js';
+import { getCustomerPurchaseSummary, getCustomerActivitySummary } from './customerActivityService.js';
+import { membershipPriorityForSpend } from '../config/membershipProgram.js';
+import { STORE_ONE_GUILD_ID } from '../utils/locale.js';
 
 function createOrderStmt() {
   return db.prepare(`
@@ -74,7 +77,14 @@ function averageCompletionTimeStmt(){return db.prepare(`SELECT AVG((julianday(co
 
 export function generateUniqueOrderCode(){while(true){const c=`CN_${randomDigits(6)}`; if(!orderCodeExistsStmt().get(c)) return c;}}
 function ensureAmountValue(v){const a=Number(v ?? 0); return Number.isFinite(a)&&a>0?Math.trunc(a):0;}
-function computePriority(guildId, customerId, productName){const profile=getCustomerProfile(guildId, customerId); const completed=Number(profile?.total_completed_orders ?? 0); let rank=0; if (completed >= config.vipRoleThreshold) rank += 100; if ((productName||'').toLowerCase().includes('vip')) rank += 20; return rank;}
+function computePriority(guildId, customerId, productName) {
+  const profile=getCustomerProfile(guildId,customerId);
+  const legacy=Number(profile?.total_completed_orders || 0)>=config.vipRoleThreshold ? 100 : 0;
+  const rank=guildId===STORE_ONE_GUILD_ID
+    ? membershipPriorityForSpend(getCustomerPurchaseSummary(guildId,customerId).spent + getCustomerActivitySummary(guildId,customerId).serviceSpent)
+    : legacy;
+  return rank + (/vip/i.test(productName || '') ? 20 : 0);
+}
 
 function normalizeCatalogServiceType(value) {
   const normalized = normalizeServiceSearch(value);

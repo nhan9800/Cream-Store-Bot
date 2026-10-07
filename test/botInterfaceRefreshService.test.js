@@ -1,11 +1,12 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({ price: vi.fn(), panel: vi.fn(), history: vi.fn(), core: vi.fn() }));
+const mocks = vi.hoisted(() => ({ price: vi.fn(), panel: vi.fn(), history: vi.fn(), core: vi.fn(), membership: vi.fn() }));
 vi.mock('../src/config.js', () => ({ config: { guildId: 'interface-refresh-target' } }));
 vi.mock('../src/services/autoSetupPriceBoardService.js', () => ({ autoSetupPriceBoard: mocks.price }));
 vi.mock('../src/services/boostServerService.js', () => ({ refreshBoostPanel: mocks.panel }));
 vi.mock('../src/services/historicalBoostPresentationRepairService.js', () => ({ startHistoricalBoostPresentationRepair: mocks.history }));
 vi.mock('../src/services/coreEmojiPackService.js', () => ({ getCoreEmojiPackStatus: mocks.core }));
+vi.mock('../src/services/membershipPresentationService.js', () => ({ refreshMembershipPresentation: mocks.membership }));
 
 import { getBotInterfaceRefreshStatus, refreshBotInterfaces } from '../src/services/botInterfaceRefreshService.js';
 
@@ -16,9 +17,21 @@ beforeEach(() => {
   mocks.panel.mockResolvedValue({ status: 'updated', channelId: '1550000000000000811' });
   mocks.history.mockReturnValue({ status: 'in_progress' });
   mocks.core.mockReturnValue({ status: 'ready', available: 57, created: 0 });
+  mocks.membership.mockResolvedValue({ status: 'ready' });
 });
 
 describe('bot interface refresh orchestration', () => {
+  it('repairs catalog and Boost before retrying a failed membership update', async () => {
+    const client = {};
+    mocks.membership.mockRejectedValueOnce(new Error('MANAGE_ROLES_REQUIRED'));
+    await expect(refreshBotInterfaces(client)).rejects.toThrow('BOT_UI_REFRESH_FAILED');
+    expect(mocks.price).toHaveBeenCalledOnce();
+    expect(mocks.panel).toHaveBeenCalledOnce();
+    expect(getBotInterfaceRefreshStatus(client)).toEqual({ status: 'retry_required' });
+    await refreshBotInterfaces(client);
+    expect(mocks.price.mock.calls[1][1].force).toBe(false);
+    expect(getBotInterfaceRefreshStatus(client).status).toBe('ready');
+  });
   it('forces the first refresh when all icons were reused instead of created and records only actual UI results', async () => {
     const client = {};
     expect(getBotInterfaceRefreshStatus(client)).toEqual({ status: 'not_started' });

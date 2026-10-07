@@ -4,14 +4,9 @@ import { getCustomerFlag } from './blacklistService.js';
 import { getCustomerActivitySummary, getCustomerPurchaseSummary } from './customerActivityService.js';
 import { backfillCustomerRoleSync, processPendingCustomerRoles, queueCustomerRoleSync } from './customerRoleSyncService.js';
 import { STORE_ONE_GUILD_ID } from '../utils/locale.js';
+import { BUYER_TIERS, MEMBER_ROLES, PROGRESS_TIERS } from '../config/membershipProgram.js';
 
-const VIP_TIERS = [
-  { id: '1282637775291551776', name: 'Ruby Client', minSpent: 8000000 },
-  { id: '1282637814571466808', name: 'Diamond Client', minSpent: 5000000 },
-  { id: '1282637470139420694', name: 'Elite VIP', minSpent: 3000000 },
-  { id: '1282637168149532724', name: 'VIP Client', minSpent: 1000000 },
-  { id: '1282637103045279820', name: 'Cenar Patron', minSpent: 0, requireActivity: true },
-];
+const VIP_TIERS = BUYER_TIERS.map(tier => ({...tier, name:tier.label}));
 
 const CENAR_PROGRAM_ROLE_IDS = new Set([
   ...VIP_TIERS.map((tier) => tier.id),
@@ -58,13 +53,7 @@ export async function getCustomerDiscordRoleSnapshot(client, customerId) {
   };
 }
 
-export const CUSTOMER_MEMBERSHIP_TIERS = [
-  { key: 'active', label: 'Active Customer', minSpent: 0, requireOrder: true },
-  { key: 'vip', label: 'VIP Client', minSpent: 1_000_000 },
-  { key: 'elite', label: 'Elite VIP', minSpent: 3_000_000 },
-  { key: 'diamond', label: 'Diamond Client', minSpent: 5_000_000 },
-  { key: 'ruby', label: 'Ruby Client', minSpent: 8_000_000 },
-];
+export const CUSTOMER_MEMBERSHIP_TIERS = PROGRESS_TIERS;
 
 export function getCustomerMembershipProgress(profile = {}) {
   const orderSpent = Math.max(0, Number(profile.total_spent || 0));
@@ -75,7 +64,7 @@ export function getCustomerMembershipProgress(profile = {}) {
   const achieved = CUSTOMER_MEMBERSHIP_TIERS.filter((tier) => (
     tier.requireOrder ? completedOrders > 0 || serviceActivityCount > 0 || spent > 0 : spent >= tier.minSpent
   ));
-  const current = achieved[achieved.length - 1] || { key: 'explorer', label: 'Explorer', minSpent: 0 };
+  const current = achieved[achieved.length - 1] || MEMBER_ROLES.at(-1);
   const next = CUSTOMER_MEMBERSHIP_TIERS.find((tier) => !achieved.some((entry) => entry.key === tier.key)) || null;
   const currentFloor = Number(current.minSpent || 0);
   const nextTarget = Number(next?.minSpent || 0);

@@ -53,6 +53,7 @@ scripts/*
 !scripts/publish-partner-national-day-update.js
 !scripts/setup-sale-channels.js
 !scripts/apply-role-icons.js
+!scripts/generate-membership-assets.mjs
 !scripts/backfill-payment-codes.js
 !scripts/backup-production.js
 !scripts/verify-backup.js

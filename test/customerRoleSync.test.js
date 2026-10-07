@@ -81,6 +81,27 @@ describe('paid website purchaser role synchronization', () => {
     for (const suffix of ['', '-wal', '-shm']) fs.rmSync(`${path.resolve(databasePath)}${suffix}`, { force: true });
   });
 
+  it('prioritizes new Cenar orders using paid history and removes the benefit after refund', () => {
+    const cenar = '1282637033340403754';
+    const createCenar = (amount) => {
+      const code = `CN_${930000 + ++sequence}`;
+      const ticket = createTicket({ guildId: cenar, channelId: `web-${code}`, customerId,
+        openedById: customerId, ticketType: 'ORDER', supportSource: 'WEBSITE_ORDER' });
+      return createOrder({ orderCode: code, guildId: cenar, ticketId: ticket.id, ticketChannelId: ticket.channel_id,
+        customerId, productName: 'Netflix Web', quantity: 1, totalAmount: amount,
+        orderLogChannelId: 'unavailable-log', createdById: customerId });
+    };
+    createCenar(8_000_000); // Unpaid checkouts never grant priority.
+    const partial = createCenar(5_000_000);
+    db.prepare("UPDATE orders SET payment_status='PAID',amount_paid=1 WHERE id=?").run(partial.id);
+    const purchase = createCenar(1_000_000);
+    expect(purchase.priority_rank).toBe(0);
+    markOrderPaid(purchase.order_code, { amountPaid: 1_000_000, transactionId: 'MEMBER_PRIORITY_PAID' });
+    expect(createCenar(75_000).priority_rank).toBe(100);
+    db.prepare("UPDATE orders SET status='REFUNDED' WHERE id=?").run(purchase.id);
+    expect(createCenar(75_000).priority_rank).toBe(0);
+  });
+
   it('grants the configured guild customer role immediately after paid checkout, before delivery', async () => {
     paidOrder();
     const { client, guild, member } = mockDiscord();
