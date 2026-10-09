@@ -79,6 +79,19 @@ const oldBoard = { id: '1550000000000000010', text: 'CENAR-STORY-FLASH-SALE-V1-P
 const oldDaily = { id: '1550000000000000011', text: 'CENAR-DAILY-FLASH-SALE:2026-09-29' };
 
 describe('durable public promotion cutover', () => {
+  it('publishes a deliberate board-only rebuild once without sending a daily chapter', async () => {
+    const state = setup([oldBoard, oldDaily]);
+    state.prepare.mockResolvedValue({ boardOnly: true, boardPayloads: [payload('NEW WEEKLY BOARD')] });
+    const first = await state.run();
+    expect(first.status).toBe('DONE');
+    expect(first.dailyMessageId).toBeNull();
+    expect(first.boardMessageIds).toHaveLength(1);
+    expect(state.channel.send).toHaveBeenCalledTimes(1);
+    expect(state.history.size).toBe(1);
+    expect(await state.run()).toEqual(first);
+    expect(state.channel.send).toHaveBeenCalledTimes(1);
+  });
+
   it('reads an unstarted status without creating or changing any table', async () => {
     const state = setup();
     expect(await getPromotionRebuildStatus(revision, { dbInstance: state.database })).toEqual({ status: 'not_started', revision });

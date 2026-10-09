@@ -204,12 +204,13 @@ async function rebuildInternal(client, { revision, prepare, dbInstance, now = ne
   // Preparation may add new campaign emoji, but must not remove old artwork
   // or messages. The caller supplies an original, already-reviewed price set.
   const prepared = await prepare(guild);
-  if (!prepared?.boardPayloads?.length || typeof prepared.buildDailyPayload !== 'function') {
+  const boardOnly = prepared?.boardOnly === true;
+  if (!prepared?.boardPayloads?.length || (!boardOnly && typeof prepared.buildDailyPayload !== 'function')) {
     throw fail('PROMOTION_PREPARATION_INVALID');
   }
   const prefix = `CENAR-PROMOTION-CUTOVER:${revision}:`;
   const boardPayloads = prepared.boardPayloads.map((payload, index) => payloadWithMarker(payload, `${prefix}PART-${index + 1}`));
-  payloadWithMarker(prepared.buildDailyPayload('100000000000000001'), `${prefix}DAILY`);
+  if (!boardOnly) payloadWithMarker(prepared.buildDailyPayload('100000000000000001'), `${prefix}DAILY`);
   if (!job) {
     snapshot.saleData = prepared.saleData || [];
     snapshot.emojiNames = prepared.emojiNames || [];
@@ -235,12 +236,16 @@ async function rebuildInternal(client, { revision, prepare, dbInstance, now = ne
       ids[index] = String(message.id);
       updateJob(database, revision, { board_ids_json: JSON.stringify(ids) });
     }
-    const dailyPayload = payloadWithMarker(prepared.buildDailyPayload(ids[0]), `${prefix}DAILY`);
-    const oldDaily = history.find((message) => String(message.author?.id) === String(client.user.id)
-      && (String(message.id) === job.daily_message_id || publicMessageText(message).includes(`${prefix}DAILY`)));
-    const daily = oldDaily ? await oldDaily.edit(dailyPayload) : await channel.send(dailyPayload);
-    updateJob(database, revision, { daily_message_id: String(daily.id), status: 'CLEANUP' });
-    const keep = new Set([...ids, String(daily.id)]);
+    let dailyMessageId = null;
+    if (!boardOnly) {
+      const dailyPayload = payloadWithMarker(prepared.buildDailyPayload(ids[0]), `${prefix}DAILY`);
+      const oldDaily = history.find((message) => String(message.author?.id) === String(client.user.id)
+        && (String(message.id) === job.daily_message_id || publicMessageText(message).includes(`${prefix}DAILY`)));
+      const daily = oldDaily ? await oldDaily.edit(dailyPayload) : await channel.send(dailyPayload);
+      dailyMessageId = String(daily.id);
+    }
+    updateJob(database, revision, { daily_message_id: dailyMessageId, status: 'CLEANUP' });
+    const keep = new Set([...ids, ...(dailyMessageId ? [dailyMessageId] : [])]);
     const deleted = new Set(JSON.parse(loadJob(database, revision).deleted_ids_json));
     history = await fetchHistory(channel);
     const archived = JSON.parse(loadJob(database, revision).snapshot_json);
