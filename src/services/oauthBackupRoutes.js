@@ -23,6 +23,10 @@ function safeKeyMatch(provided) {
   return timingSafeEqual(a, b);
 }
 
+export function isOAuthApiKeyAuthorized(req) {
+  return safeKeyMatch(req?.headers?.['x-bot-api-key'] || req?.headers?.['X-Bot-Api-Key']);
+}
+
 export function registerOauthRoutes(app) {
   
   // 1. Route redirect to Discord OAuth2 page
@@ -277,8 +281,9 @@ export function registerOauthRoutes(app) {
 
   // 3. Check if a Discord user is verified (used by admin API)
   app.get('/oauth/status/:discordId', (req, res) => {
-    const providedKey = req.headers['x-bot-api-key'] || req.query.api_key;
-    if (!safeKeyMatch(providedKey)) {
+    // The API key is server-to-server and must never travel in a URL where it
+    // can be retained by browser history, referrers, access logs or analytics.
+    if (!isOAuthApiKeyAuthorized(req)) {
       return res.status(401).json({ ok: false, error: 'Unauthorized' });
     }
     const { discordId } = req.params;

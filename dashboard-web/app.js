@@ -12,12 +12,16 @@ async function checkPassword() {
         const res = await fetch(`${API_BASE_URL}/dashboard/api/login`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
             body: JSON.stringify({ password: input })
         });
         const data = await res.json();
         if (data.ok) {
-            sessionStorage.setItem(SESSION_KEY, data.token);
-            API_TOKEN = data.token;
+            // Authentication now uses an HttpOnly dashboard session cookie.
+            // Keep only a tab-local marker; never persist DASHBOARD_TOKEN in
+            // sessionStorage or expose it to page scripts.
+            sessionStorage.setItem(SESSION_KEY, 'session');
+            API_TOKEN = '';
             document.getElementById('password-gate').style.display = 'none';
             await loadData();
             renderAll();
@@ -37,11 +41,13 @@ async function checkPassword() {
 
 function initPasswordGate() {
     const saved = sessionStorage.getItem(SESSION_KEY);
-    if (saved) {
-        API_TOKEN = saved;
+    if (saved === 'session') {
+        API_TOKEN = '';
         document.getElementById('password-gate').style.display = 'none';
         return true;
     } else {
+        sessionStorage.removeItem(SESSION_KEY);
+        API_TOKEN = '';
         document.getElementById('password-gate').style.display = 'flex';
         setTimeout(() => document.getElementById('gate-password').focus(), 100);
         return false;
@@ -111,6 +117,14 @@ async function loadData() {
         const res = await fetch(`${API_BASE_URL}/dashboard/api/accounts`, {
             headers: { 'x-dashboard-token': API_TOKEN }
         });
+        if (res.status === 401) {
+            // Do not fall back to the old local credential cache after the
+            // HttpOnly session expires or is revoked.
+            sessionStorage.removeItem(SESSION_KEY);
+            API_TOKEN = '';
+            document.getElementById('password-gate').style.display = 'flex';
+            return;
+        }
         if (!res.ok) throw new Error('API Error');
         const data = await res.json();
         if (data.ok) accounts = data.accounts || [];

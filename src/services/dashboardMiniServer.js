@@ -8,6 +8,18 @@ import { encrypt, decrypt } from '../utils/crypto.js';
 import { applyCors } from '../utils/cors.js';
 import { awardOrderPoints } from './loyaltyService.js';
 import { orderLookupLimiter } from './rateLimitMiddleware.js';
+import {
+  checkDashboardLoginLock,
+  clearDashboardLoginFailures,
+  dashboardLoginLimiter,
+  invalidateDashboardSession,
+  isDashboardAuthorized,
+  issueDashboardSession,
+  recordDashboardLoginFailure,
+  setDashboardSessionCookie,
+  clearDashboardSessionCookie,
+  safeEqual,
+} from './dashboardAuth.js';
 import { anonymizeCustomerEmail } from '../utils/productFormatting.js';
 import { config } from '../config.js';
 import { getSubscriptionProgress } from './subscriptionService.js';
@@ -101,20 +113,6 @@ function getDashboardSnapshotRaw() {
     staffKpi,
     generatedAt: new Date().toISOString(),
   };
-}
-
-function safeEqual(a, b) {
-  const bufA = Buffer.from(String(a ?? ''), 'utf8');
-  const bufB = Buffer.from(String(b ?? ''), 'utf8');
-  if (bufA.length !== bufB.length) return false;
-  return crypto.timingSafeEqual(bufA, bufB);
-}
-
-function isDashboardAuthorized(req) {
-  const token = String(process.env.DASHBOARD_TOKEN ?? '').trim();
-  if (!token) return false;
-  const provided = req.headers['x-dashboard-token'] || req.query.token;
-  return safeEqual(provided, token);
 }
 
 export function registerDashboardRoutes(app) {
@@ -350,7 +348,7 @@ export function registerDashboardRoutes(app) {
   app.use('/dashboard/api', (req, res, next) => {
     if (applyCors(req, res, { headers: 'Origin, X-Requested-With, Content-Type, Accept, x-dashboard-token' })) return;
 
-    if (req.path === '/login') {
+    if (req.path === '/login' || req.path === '/logout') {
       return next();
     }
 
@@ -371,16 +369,39 @@ export function registerDashboardRoutes(app) {
     return 'other';
   }
 
-  app.post('/dashboard/api/login', (req, res) => {
+  app.post('/dashboard/api/login', dashboardLoginLimiter, (req, res) => {
     const { password } = req.body || {};
     const validPassword = String(process.env.DASHBOARD_TOKEN ?? '').trim();
     if (!validPassword) {
       return res.status(503).json({ ok: false, error: 'Dashboard chưa cấu hình DASHBOARD_TOKEN.' });
     }
+    const lock = checkDashboardLoginLock(req);
+    if (lock.locked) {
+      const retryAfter = Math.max(1, Math.ceil(lock.remainMs / 1000));
+      res.set('Retry-After', String(retryAfter));
+      return res.status(429).json({ ok: false, error: 'Đăng nhập dashboard tạm khóa. Vui lòng thử lại sau.', retryAfter });
+    }
     if (safeEqual(password, validPassword)) {
-      return res.json({ ok: true, token: validPassword });
+      clearDashboardLoginFailures(req);
+      const session = issueDashboardSession();
+      setDashboardSessionCookie(req, res, session.token);
+      res.set('Cache-Control', 'no-store');
+      return res.json({ ok: true, session: true, expiresAt: new Date(session.expiresAt).toISOString() });
+    }
+    const failure = recordDashboardLoginFailure(req);
+    if (failure.lockedUntil) {
+      const retryAfter = Math.max(1, Math.ceil((failure.lockedUntil - Date.now()) / 1000));
+      res.set('Retry-After', String(retryAfter));
+      return res.status(429).json({ ok: false, error: 'Đăng nhập dashboard tạm khóa. Vui lòng thử lại sau.', retryAfter });
     }
     return res.status(401).json({ ok: false, error: 'Sai mật khẩu!' });
+  });
+
+  app.post('/dashboard/api/logout', (req, res) => {
+    invalidateDashboardSession(req);
+    clearDashboardSessionCookie(req, res);
+    res.set('Cache-Control', 'no-store');
+    return res.json({ ok: true });
   });
 
   app.get('/dashboard/api/accounts', (req, res) => {
@@ -1116,12 +1137,11 @@ export function registerWebSocketUpgrade(server) {
       return;
     }
 
-    // Auth: yêu cầu token hợp lệ qua query (?token=) hoặc header
-    const token = String(process.env.DASHBOARD_TOKEN ?? '').trim();
-    if (!token) { socket.destroy(); return; }
-    const provided = parsedUrl.searchParams.get('token')
-      || request.headers['x-dashboard-token'];
-    if (!safeEqual(provided, token)) { socket.destroy(); return; }
+    // Native browser WebSocket cannot set custom headers, so authenticated
+    // dashboard sessions use the HttpOnly cookie issued by /dashboard/api/login.
+    // Static credentials remain header-only for non-browser operators. Never
+    // accept the dashboard token in a query string.
+    if (!isDashboardAuthorized({ headers: request.headers })) { socket.destroy(); return; }
 
     // Simple WebSocket handshake
     const key = request.headers['sec-websocket-key'];
