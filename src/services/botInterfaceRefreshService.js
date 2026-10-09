@@ -20,7 +20,7 @@ export async function refreshBotInterfaces(client) {
     const products=await autoSetupPriceBoard(client,{
       targetGuildId:config.guildId,force:priceArtwork.get(client)!==artwork,
     });
-    if (!products.length || products.some(result=>!['published','current'].includes(result.status))) throw new Error('PRICE_BOARD_REFRESH_FAILED');
+    if (!products.length || products.some(result=>!['published','current','paused'].includes(result.status))) throw new Error('PRICE_BOARD_REFRESH_FAILED');
     // A failed Boost panel must not republish an already refreshed catalog on
     // every retry. New icon uploads still require one new catalog refresh.
     priceArtwork.set(client,artwork);
