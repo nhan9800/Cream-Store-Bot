@@ -47,6 +47,18 @@ afterEach(() => { global.discordClient = previousClient; });
 afterAll(() => db.close());
 
 describe('Discord live emoji message boundary', () => {
+  it('blocks all send/edit requests in paused marketing channels while allowing deletion and commerce', async () => {
+    installDiscordEmojiBoundary(client);
+    for (const id of ['1514606987839672563', '1515008584549797979', '1531206050383134842']) {
+      for (const method of ['POST', 'PATCH']) {
+        await expect(client.rest.request({ method, fullRoute: `/channels/${id}/messages${method === 'PATCH' ? '/1550000000000000120' : ''}`, body: { content: '@everyone' } })).rejects.toMatchObject({ code: 'MARKETING_PAUSED' });
+      }
+      expect(client.rest.request({ method: 'DELETE', fullRoute: `/channels/${id}/messages/1550000000000000120` })).toBe('original-result');
+      expect(client.rest.request({ method: 'GET', fullRoute: `/channels/${id}/messages` })).toBe('original-result');
+    }
+    expect(request).toHaveBeenCalledTimes(6);
+    expect(client.rest.request({ method: 'POST', fullRoute: `/channels/${channelId}/messages`, body: { content: 'Order paid' } })).toBe('original-result');
+  });
   it('normalizes channel sends/edits, interaction messages/updates and webhook messages at the final REST boundary', () => {
     expect(installDiscordEmojiBoundary(client)).toBe(true);
     const routes = [

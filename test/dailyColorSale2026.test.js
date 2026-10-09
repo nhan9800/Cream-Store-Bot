@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
+// Retain campaign mechanics coverage for a future explicitly authorized run.
+// Production stays paused; marketingPause.test.js covers its real default.
+vi.mock('../src/config/marketingAutomationPolicy.js', () => ({ AUTOMATIC_MARKETING_PAUSED: false }));
 import { Collection, MessageFlags, MessagePayload, PermissionFlagsBits } from 'discord.js';
 import { rebuildPromotionCampaign } from '../src/services/promotionRebuildService.js';
 import {

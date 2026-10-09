@@ -1,3 +1,4 @@
+import { AUTOMATIC_MARKETING_PAUSED } from '../config/marketingAutomationPolicy.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -112,6 +113,7 @@ export function buildProfileEffectGiveawayPayload({
 }
 
 export async function publishProfileEffectGiveaway(client) {
+  if (AUTOMATIC_MARKETING_PAUSED) return { action: 'paused', reason: 'owner_request' };
   if (!fs.existsSync(bannerPath)) throw new Error(`Thiếu banner giveaway: ${bannerPath}`);
   const guild = client.guilds.cache.get(PROFILE_EFFECT_GIVEAWAY.guildId)
     || await client.guilds.fetch(PROFILE_EFFECT_GIVEAWAY.guildId);

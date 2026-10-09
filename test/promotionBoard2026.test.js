@@ -7,8 +7,8 @@ import {
 } from '../src/campaigns/promotionBoard2026.js';
 
 describe('Cenar promotion channel policy', () => {
-  it('marks the weekly-story daily Flash Sale as active', () => {
-    expect(PROMOTION_BOARD.status).toBe('ACTIVE');
+  it('marks the old story Flash Sale as paused after owner revoked automatic posts', () => {
+    expect(PROMOTION_BOARD.status).toBe('PAUSED');
     expect(PROMOTION_BOARD.campaign).toBe('CENAR-STORY-FLASH-SALE-V1');
     expect(PROMOTION_BOARD.revision).toBe('CENAR-SALE-REVISION:AUTUMN-ATELIER-20261002');
     expect(PROMOTION_BOARD.name).toContain('Trạm Thu Dịu');

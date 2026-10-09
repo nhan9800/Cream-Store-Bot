@@ -33,9 +33,11 @@ import { initializeMusicPlayer } from './services/musicPlayerService.js';
 import { installDiscordEmojiBoundary } from './utils/discordEmojiBoundary.js';
 import { startCoreEmojiMaintenance, getCoreEmojiPackStatus } from './services/coreEmojiPackService.js';
 import { refreshBotInterfaces } from './services/botInterfaceRefreshService.js';
+import { pauseAutomaticMarketing } from './services/marketingPauseService.js';
 
 export async function buildClient() {
   initDatabase();
+  console.log('[MARKETING-PAUSE]', JSON.stringify(pauseAutomaticMarketing()));
   const adminOrderAgingMigration = resetLegacyWarrantyAgingStateOnce();
   console.log(`[ADMIN-ORDER-AGING-MIGRATION] changed=${adminOrderAgingMigration.changed} skipped=${adminOrderAgingMigration.skipped}`);
   const walletReconciliation = reconcileWalletPaidOrders();

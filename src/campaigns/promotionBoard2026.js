@@ -1,10 +1,11 @@
 import { db, nowIso } from '../database/db.js';
+import { AUTOMATIC_MARKETING_PAUSED } from '../config/marketingAutomationPolicy.js';
 import { DAILY_COLOR_SALE } from './dailyColorSale2026.js';
 
 export const PROMOTION_BOARD = Object.freeze({
   guildId: '1282637033340403754',
   channelId: '1515008584549797979',
-  status: 'ACTIVE',
+  status: AUTOMATIC_MARKETING_PAUSED ? 'PAUSED' : 'ACTIVE',
   campaign: DAILY_COLOR_SALE.marker,
   revision: DAILY_COLOR_SALE.revision,
   name: DAILY_COLOR_SALE.campaignName,

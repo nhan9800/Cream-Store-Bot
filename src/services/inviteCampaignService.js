@@ -11,6 +11,7 @@ import {
   TextDisplayBuilder,
 } from 'discord.js';
 import { config } from '../config.js';
+import { AUTOMATIC_MARKETING_PAUSED } from '../config/marketingAutomationPolicy.js';
 import { db, nowIso } from '../database/db.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { getGuildConfig } from './guildConfigService.js';
@@ -67,6 +68,7 @@ function formatMoney(value) {
 
 export function ensureInviteDecorCampaign(guildId = INVITE_DECOR_CAMPAIGN.guildId, { startsAt = nowIso() } = {}) {
   if (String(guildId) !== String(INVITE_DECOR_CAMPAIGN.guildId)) return null;
+  if (AUTOMATIC_MARKETING_PAUSED) return db.prepare('SELECT * FROM invite_campaigns WHERE event_key = ? AND guild_id = ?').get(INVITE_DECOR_CAMPAIGN.eventKey, guildId) || null;
   const startMs = Date.parse(startsAt);
   const endMs = Date.parse(INVITE_DECOR_CAMPAIGN.endsAt);
   const safeStartsAt = Number.isFinite(startMs) && startMs < endMs ? new Date(startMs).toISOString() : nowIso();
@@ -129,6 +131,7 @@ export function classifyInviteCampaignJoin({
 }
 
 export async function registerInviteCampaignJoin({ member, inviterId = null, inviteCode = null, priorInviteRecord = null }) {
+  if (AUTOMATIC_MARKETING_PAUSED) return null;
   if (!member || String(member.guild?.id) !== String(INVITE_DECOR_CAMPAIGN.guildId)) return null;
   const campaign = ensureInviteDecorCampaign(member.guild.id);
   if (!campaign) return null;
@@ -476,6 +479,7 @@ async function ensureInviteCampaignAnnouncement(guild, campaign) {
 }
 
 export async function ensureInviteCampaignDiscordSetup(guild) {
+  if (AUTOMATIC_MARKETING_PAUSED) return null;
   if (!guild || String(guild.id) !== String(INVITE_DECOR_CAMPAIGN.guildId)) return null;
   let campaign = ensureInviteDecorCampaign(guild.id);
   const logChannel = await ensureInviteAdminLogChannel(guild, campaign);
@@ -634,6 +638,7 @@ async function notifyEligibleReward(client, guild, campaign, reward) {
 }
 
 export async function processInviteDecorCampaign(client, now = new Date()) {
+  if (AUTOMATIC_MARKETING_PAUSED) return { validated: 0, left: 0, rewards: 0, skipped: true, status: 'paused' };
   const guild = client?.guilds?.cache?.get(INVITE_DECOR_CAMPAIGN.guildId)
     || await client?.guilds?.fetch?.(INVITE_DECOR_CAMPAIGN.guildId).catch(() => null);
   if (!guild) return { validated: 0, left: 0, rewards: 0, skipped: true };
