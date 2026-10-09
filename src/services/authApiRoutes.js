@@ -219,7 +219,13 @@ export function registerAuthRoutes(app) {
       if (!callerId || (!isStaff && callerId !== requestedId)) {
         return res.status(403).json({ ok: false, error: 'Forbidden' });
       }
-      if (isStaff) {
+      const user = db.prepare('SELECT * FROM web_users WHERE id = ? OR discord_id = ?').get(requestedId, requestedId);
+      if (!user) return res.status(404).json({ ok: false, error: 'Không tìm thấy user' });
+      if (isWebAccountBanned(user.id)) return rejectBannedWebAccount(res);
+      // The current account must be able to read its own role/security state
+      // while enrolling MFA. Cross-account staff lookups still require a
+      // current session and a valid step-up proof.
+      if (isStaff && user.id !== callerId) {
         const security = getAccountSecurity(callerId);
         const rawVersion = String(req.header('x-session-version') || '');
         if (!/^\d{1,10}$/.test(rawVersion) || Number(rawVersion) !== security.session_version) {
@@ -231,9 +237,6 @@ export function registerAuthRoutes(app) {
           return res.status(status).json({ ok: false, ...body });
         }
       }
-      const user = db.prepare('SELECT * FROM web_users WHERE id = ? OR discord_id = ?').get(requestedId, requestedId);
-      if (!user) return res.status(404).json({ ok: false, error: 'Không tìm thấy user' });
-      if (isWebAccountBanned(user.id)) return rejectBannedWebAccount(res);
       
       res.set('Cache-Control', 'no-store');
       res.json({ ok: true, data: presentWebUser(user) });

@@ -106,6 +106,10 @@ describe('web API authorization', () => {
     expect(await blocked.json()).toMatchObject({ code: 'MFA_ENROLLMENT_REQUIRED', mfa_required: true });
     const setup = await call('/auth/security', { userId: 'admin', role: 'admin', version: 0, proof: false });
     expect(setup.status).toBe(200);
+    const self = await call('/auth/user/admin', { userId: 'admin', role: 'admin', version: 0, proof: false });
+    expect(self.status).toBe(200);
+    const cross = await call('/auth/user/owner', { userId: 'admin', role: 'admin', version: 0, proof: false });
+    expect(cross.status).toBe(403);
     db.prepare('UPDATE web_account_security SET mfa_secret = ? WHERE user_id = ?').run('test-mfa-present', 'admin');
   });
   it('rejects automatic OAuth linking by unverified email', async () => {
