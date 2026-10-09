@@ -11,6 +11,7 @@ const state = vi.hoisted(() => ({
   icons: vi.fn(),
   iconStatus: vi.fn(),
   refreshInterfaces: vi.fn(),
+  pauseMarketing: vi.fn(() => ({ paused: true })),
 }));
 
 vi.mock('discord.js', () => ({
@@ -28,6 +29,7 @@ vi.mock('../src/config.js', () => ({
   config: { guildId: '1070676180103086132', httpPort: 4200 }, assertRuntimeConfig: vi.fn(),
 }));
 vi.mock('../src/database/db.js', () => ({ initDatabase: vi.fn() }));
+vi.mock('../src/services/marketingPauseService.js', () => ({ pauseAutomaticMarketing: state.pauseMarketing }));
 vi.mock('../src/events/interactionCreate.js', () => ({ getClientOptions: () => ({}), loadCommands: async () => new Map(), registerInteractionHandler: vi.fn() }));
 vi.mock('../src/services/schedulerService.js', () => ({ startScheduler: state.scheduler }));
 vi.mock('../src/services/webhookServer.js', () => ({ startWebhookServer: state.webhook }));
