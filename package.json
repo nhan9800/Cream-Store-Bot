@@ -41,7 +41,7 @@
     "backup": "node scripts/backup-production.js",
     "verify:backup": "node scripts/verify-backup.js",
     "test": "vitest run --maxWorkers=1 --fileParallelism=false",
-    "postinstall": "node scripts/patch-dependency-compat.js",
+    "postinstall": "node -e \"const fs=require('fs');const path=require('path');const entry=require.resolve('@discord-player/extractor');for(const file of [entry,path.join(path.dirname(entry),'index.mjs')]){const source=fs.readFileSync(file,'utf8');const patched=source.replaceAll('fileType.fromFile(','fileType.fileTypeFromFile(');if(patched===source&&!source.includes('fileType.fileTypeFromFile('))throw new Error('Extractor compatibility target missing');if(patched!==source)fs.writeFileSync(file,patched)}\"",
     "check:deps": "node scripts/check-dependency-security.js"
   },
   "engines": {

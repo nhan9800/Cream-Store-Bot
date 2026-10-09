@@ -31,6 +31,9 @@ jobs:
       - name: Audit production dependencies
         run: npm audit --omit=dev --audit-level=high
 
+      - name: Apply dependency compatibility patches
+        run: node scripts/patch-dependency-compat.js
+
       - name: Verify dependency compatibility patches
         run: npm run check:deps
 
