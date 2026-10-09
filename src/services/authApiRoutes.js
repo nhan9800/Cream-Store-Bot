@@ -7,7 +7,7 @@ import {
   hashAccountPassword, verifyAccountPassword, presentWebUser, getAccountSecurity,
   revokeAccountSessions, issueAccountEmailToken, consumeAccountEmailToken,
   prepareAccountMfa, confirmAccountMfa, verifyAccountMfa, disableAccountMfa, issueAdminStepUp,
-  isWebAccountBanned, rejectBannedWebAccount,
+  getWebStaffMfaError, isWebAccountBanned, rejectBannedWebAccount,
 } from './accountSecurityService.js';
 import { createRateLimiter } from './rateLimitMiddleware.js';
 
@@ -222,6 +222,21 @@ export function registerAuthRoutes(app) {
       const user = db.prepare('SELECT * FROM web_users WHERE id = ? OR discord_id = ?').get(requestedId, requestedId);
       if (!user) return res.status(404).json({ ok: false, error: 'Không tìm thấy user' });
       if (isWebAccountBanned(user.id)) return rejectBannedWebAccount(res);
+      // The current account must be able to read its own role/security state
+      // while enrolling MFA. Cross-account staff lookups still require a
+      // current session and a valid step-up proof.
+      if (isStaff && user.id !== callerId) {
+        const security = getAccountSecurity(callerId);
+        const rawVersion = String(req.header('x-session-version') || '');
+        if (!/^\d{1,10}$/.test(rawVersion) || Number(rawVersion) !== security.session_version) {
+          return errorResponse(res, 401, 'Phiên đăng nhập đã hết hiệu lực. Vui lòng đăng nhập lại.');
+        }
+        const mfaError = getWebStaffMfaError(callerId, req.header('x-admin-step-up'));
+        if (mfaError) {
+          const { status, ...body } = mfaError;
+          return res.status(status).json({ ok: false, ...body });
+        }
+      }
       
       res.set('Cache-Control', 'no-store');
       res.json({ ok: true, data: presentWebUser(user) });

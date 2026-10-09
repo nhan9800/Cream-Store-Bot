@@ -4,7 +4,7 @@ import path from 'node:path';
 import express from 'express';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
-let root, db, server, base, wallet;
+let root, db, server, base, wallet, security;
 const original = { ...process.env };
 const guildId = '123456789012345678';
 const otherGuildId = '222222222222222222';
@@ -21,8 +21,13 @@ beforeAll(async () => {
   db = database.db;
   database.initDatabase();
   wallet = await import('../src/services/walletService.js');
+  security = await import('../src/services/accountSecurityService.js');
   for (const [id, role, discord] of [['admin', 'admin', null], ['staff', 'staff', null], ['buyer', 'member', discordId], ['unlinked', 'member', null]]) {
     db.prepare('INSERT INTO web_users(id, email, role, discord_id) VALUES (?, ?, ?, ?)').run(id, `${id}@example.com`, role, discord);
+    if (role === 'admin' || role === 'staff') {
+      security.getAccountSecurity(id);
+      db.prepare('UPDATE web_account_security SET mfa_secret = ? WHERE user_id = ?').run('test-mfa-present', id);
+    }
   }
   const app = express();
   app.use(express.json());
@@ -55,7 +60,11 @@ afterAll(async () => {
 async function call(route, { method = 'GET', body, userId = 'admin', key = 'admin-wallet-test-only' } = {}) {
   return fetch(`${base}${route}`, {
     method,
-    headers: { 'Content-Type': 'application/json', 'X-Bot-Api-Key': key, 'X-User-Id': userId, 'X-Discord-Id': userId === 'buyer' ? discordId : '', 'X-Session-Version': '0' },
+    headers: {
+      'Content-Type': 'application/json', 'X-Bot-Api-Key': key, 'X-User-Id': userId,
+      'X-Discord-Id': userId === 'buyer' ? discordId : '', 'X-Session-Version': '0',
+      ...(userId === 'admin' || userId === 'staff' ? { 'X-Admin-Step-Up': security.issueAdminStepUp(userId) } : {}),
+    },
     body: body === undefined ? undefined : JSON.stringify(body),
   });
 }

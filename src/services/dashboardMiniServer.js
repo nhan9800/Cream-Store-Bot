@@ -18,6 +18,7 @@ import {
   recordDashboardLoginFailure,
   setDashboardSessionCookie,
   clearDashboardSessionCookie,
+  isDashboardWebSocketOriginAllowed,
   safeEqual,
 } from './dashboardAuth.js';
 import { anonymizeCustomerEmail } from '../utils/productFormatting.js';
@@ -300,6 +301,22 @@ export function registerDashboardRoutes(app) {
   });
 
   const enabled = String(process.env.DASHBOARD_ENABLED ?? 'false').toLowerCase() === 'true';
+  const production = ['production', 'prod'].includes(String(process.env.NODE_ENV || '').trim().toLowerCase());
+  if (production) {
+    // The legacy dashboard accepted a static operator secret and cannot
+    // participate in the website's MFA flow. Retire it at the bot boundary;
+    // the supported staff/admin surface is https://cenarstore.xyz/admin.
+    app.use(['/dashboard', '/web'], (req, res) => {
+      res.set('Cache-Control', 'no-store');
+      return res.status(410).json({
+        ok: false,
+        code: 'LEGACY_DASHBOARD_RETIRED',
+        error: 'Dashboard cũ đã ngừng hoạt động. Vui lòng dùng https://cenarstore.xyz/admin.',
+        adminUrl: 'https://cenarstore.xyz/admin',
+      });
+    });
+    return;
+  }
   if (!enabled) return;
 
   app.get('/dashboard/health', (req, res) => {
@@ -1125,6 +1142,12 @@ export function registerWebSocketUpgrade(server) {
   if (!server) return;
 
   server.on('upgrade', (request, socket, head) => {
+    const enabled = String(process.env.DASHBOARD_ENABLED ?? 'false').toLowerCase() === 'true';
+    const production = ['production', 'prod'].includes(String(process.env.NODE_ENV || '').trim().toLowerCase());
+    if (!enabled || production || !isDashboardWebSocketOriginAllowed(request)) {
+      socket.destroy();
+      return;
+    }
     let parsedUrl;
     try {
       parsedUrl = new URL(request.url, 'http://localhost');

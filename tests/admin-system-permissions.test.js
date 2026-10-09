@@ -5,7 +5,7 @@ import express from 'express';
 import { Collection } from 'discord.js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-let root, db, server, base;
+let root, db, server, base, security;
 const original = { ...process.env };
 beforeAll(async () => {
   root = fs.mkdtempSync(path.join(os.tmpdir(), 'cenar-system-permissions-'));
@@ -17,8 +17,13 @@ beforeAll(async () => {
   process.env.GUILD_ID = '123456789012345678';
   const database = await import('../src/database/db.js');
   db = database.db; database.initDatabase();
+  security = await import('../src/services/accountSecurityService.js');
   for (const role of ['staff', 'admin', 'member']) {
     db.prepare('INSERT INTO web_users(id, email, role) VALUES (?, ?, ?)').run(role, `${role}@example.invalid`, role);
+    if (role !== 'member') {
+      security.getAccountSecurity(role);
+      db.prepare('UPDATE web_account_security SET mfa_secret = ? WHERE user_id = ?').run('test-mfa-present', role);
+    }
   }
   const app = express(); app.use(express.json());
   const guild = { id: process.env.GUILD_ID, channels: { cache: new Collection() } };
@@ -40,6 +45,7 @@ function call(route, method = 'GET', body, userId = 'staff') {
     method, headers: {
       'Content-Type': 'application/json', 'X-Bot-Api-Key': 'system-permissions-test-only',
       'X-User-Id': userId, 'X-User-Role': 'admin', 'X-Session-Version': '0',
+      'X-Admin-Step-Up': userId === 'admin' || userId === 'staff' ? security.issueAdminStepUp(userId) : '',
     }, body: body === undefined ? undefined : JSON.stringify(body),
   });
 }

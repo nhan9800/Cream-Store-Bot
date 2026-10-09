@@ -42,7 +42,7 @@ const guildId = '123456789012345678';
 const otherGuildId = '222222222222222222';
 const apiKey = 'music-sound-test-key-only';
 const originalEnv = { ...process.env };
-let db, sound, effectsModule, player, server, base;
+let db, sound, effectsModule, player, security, server, base;
 
 beforeAll(async () => {
   process.env.ENV_FILE = 'music-sound-tests-missing-env';
@@ -52,6 +52,7 @@ beforeAll(async () => {
   sound = await import('../src/services/musicSoundService.js');
   effectsModule = await import('../src/services/musicSoundEffects.js');
   player = await import('../src/services/musicPlayerService.js');
+  security = await import('../src/services/accountSecurityService.js');
   for (const [id, role] of [['admin', 'admin'], ['staff', 'staff'], ['buyer', 'member']]) {
     db.prepare('INSERT INTO web_users(id, email, display_name, role) VALUES (?, ?, ?, ?)')
       .run(id, `${id}@example.com`, id, role);
@@ -69,6 +70,9 @@ beforeEach(() => {
     DELETE FROM music_sound_settings; DELETE FROM music_guild_settings;
     DELETE FROM music_play_history; DELETE FROM customer_flags;
     DELETE FROM web_account_security;`);
+  for (const userId of ['admin', 'staff']) {
+    db.prepare('INSERT INTO web_account_security(user_id, mfa_secret) VALUES (?, ?)').run(userId, 'test-mfa-present');
+  }
 });
 
 afterAll(async () => {
@@ -97,9 +101,10 @@ async function collect(stream) {
   return Buffer.concat(chunks);
 }
 
-async function call(value, { userId = 'admin', key = apiKey, sessionVersion = '0', action = 'sound' } = {}) {
+async function call(value, { userId = 'admin', key = apiKey, sessionVersion = '0', action = 'sound', proof = true } = {}) {
   const headers = { 'Content-Type': 'application/json', 'X-Bot-Api-Key': key, 'X-Session-Version': sessionVersion };
   if (userId !== null) headers['X-User-Id'] = userId;
+  if (proof && (userId === 'admin' || userId === 'staff')) headers['X-Admin-Step-Up'] = security.issueAdminStepUp(userId);
   return fetch(base, {
     method: 'POST', headers, body: JSON.stringify({ action, value }),
   });
@@ -305,8 +310,7 @@ describe('admin music sound API authorization and validation', () => {
     expect(banned.status).toBe(403);
     expect(await banned.json()).toMatchObject({ code: 'ACCOUNT_BANNED' });
     db.exec('DELETE FROM customer_flags');
-    db.prepare('INSERT INTO web_account_security(user_id, mfa_secret) VALUES (?, ?)').run('admin', 'test-mfa-present');
-    const mfa = await call({ preset: 'bass' });
+    const mfa = await call({ preset: 'bass' }, { proof: false });
     expect(mfa.status).toBe(403);
     expect(await mfa.json()).toMatchObject({ code: 'MFA_REQUIRED' });
     expect(savedRows()).toEqual([]);

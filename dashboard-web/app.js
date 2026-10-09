@@ -54,7 +54,6 @@ function initPasswordGate() {
     }
 }
 
-const DB_KEY = 'netflix_accounts_db';
 let accounts = [];
 let currentFilter = 'all';
 let serviceFilter = 'all';
@@ -91,6 +90,10 @@ const SERVICE_META = {
 // ===== DATA =====
 const API_BASE_URL = window.location.origin;
 let API_TOKEN = '';
+// Remove the legacy plaintext account cache once per page load. Older builds
+// stored delivery credentials under this key; the authenticated API is now
+// the only source of truth.
+try { localStorage.removeItem('netflix_accounts_db'); } catch {}
 
 function showLoader(text = "Đang đồng bộ dữ liệu...") {
     const el = document.getElementById('global-loader');
@@ -129,12 +132,11 @@ async function loadData() {
         const data = await res.json();
         if (data.ok) accounts = data.accounts || [];
         else accounts = [];
-    } catch(e) { 
-        console.error('Failed to load API, fallback to local', e);
-        try {
-            const raw = localStorage.getItem(DB_KEY);
-            accounts = raw ? JSON.parse(raw) : [];
-        } catch(err) { accounts = []; }
+    } catch(e) {
+        // Account credentials are never available from an offline browser
+        // cache. Keep the UI empty until the authenticated API is reachable.
+        console.error('Failed to load dashboard API', e);
+        accounts = [];
     }
     hideLoader();
 }
@@ -177,7 +179,8 @@ async function apiDeliverAccount(id) {
 }
 
 function saveData() {
-    localStorage.setItem(DB_KEY, JSON.stringify(accounts));
+    // Kept as a compatibility no-op for existing mutation call sites. The
+    // server is the only source of truth; never persist credentials locally.
 }
 function genId() {
     return 'CR_W_' + Math.floor(Math.random()*1000000);

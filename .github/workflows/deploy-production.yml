@@ -35,6 +35,9 @@ jobs:
       - name: Audit production dependencies
         run: npm audit --omit=dev --audit-level=high
 
+      - name: Verify dependency compatibility patches
+        run: npm run check:deps
+
       - name: Validate VibeHost supervisor
         run: bash -n scripts/vibehost-supervisor.sh
 

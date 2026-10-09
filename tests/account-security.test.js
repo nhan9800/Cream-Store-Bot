@@ -28,7 +28,7 @@ function user() {
 describe('account security', () => {
   it('preserves legacy sessions at version zero without exposing authentication secrets', () => {
     const row = user();
-    expect(service.presentWebUser(row)).toMatchObject({ session_version: 0, mfa_enabled: false, email_verified: false });
+    expect(service.presentWebUser(row)).toMatchObject({ session_version: 0, mfa_enabled: false, mfa_required: true, email_verified: false });
     expect(JSON.stringify(service.presentWebUser(row))).not.toContain('password_hash');
   });
   it('validates RFC 6238 SHA1 test vectors', () => {
@@ -83,6 +83,9 @@ describe('account security', () => {
     const row = user(); const now = Date.now();
     const setup = service.prepareAccountMfa(row.id, now);
     expect(service.confirmAccountMfa(row.id, service.totpCode(setup.secret, Math.floor((now + 11 * 60_000) / 30_000)), now + 11 * 60_000)).toBeNull();
+    const activeSetup = service.prepareAccountMfa(row.id, now + 12 * 60_000);
+    const activeCode = service.totpCode(activeSetup.secret, Math.floor((now + 12 * 60_000) / 30_000));
+    expect(service.confirmAccountMfa(row.id, activeCode, now + 12 * 60_000)).toHaveLength(8);
     const proof = service.issueAdminStepUp(row.id, now);
     expect(service.verifyAdminStepUp(proof, row.id, now)).toBe(true);
     expect(service.verifyAdminStepUp(proof, 'another-user', now)).toBe(false);
