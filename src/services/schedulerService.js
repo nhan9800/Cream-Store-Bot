@@ -30,6 +30,7 @@ import { reconcileRecentPayOSPayments } from './paymentService.js';
 import { processPendingCustomerRoles } from './customerRoleSyncService.js';
 import { dailySaleDateKey, publishDailyFlashSale } from '../campaigns/dailyColorSale2026.js';
 import { STORE_ONE_GUILD_ID } from '../utils/locale.js';
+import { AUTOMATIC_MARKETING_PAUSED } from '../config/marketingAutomationPolicy.js';
 
 let schedulerHandle = null;
 let backupHandle = null;
@@ -331,7 +332,7 @@ export function startScheduler(client) {
 
   // Chạy độc lập với vòng bảo trì chính để một tác vụ mạng chậm không làm lỡ
   // bài Flash Sale 09:00. Khóa ngày và marker Discord vẫn ngăn đăng trùng.
-  if (String(config.guildId) === STORE_ONE_GUILD_ID && !dailyPromotionHandle) {
+  if (!AUTOMATIC_MARKETING_PAUSED && String(config.guildId) === STORE_ONE_GUILD_ID && !dailyPromotionHandle) {
     dailyPromotionHandle = setTimeout(runDailyPromotionLoop, 8000);
   }
 

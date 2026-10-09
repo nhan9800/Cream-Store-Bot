@@ -1,3 +1,4 @@
+import { getMarketingPauseStatus } from './marketingPauseService.js';
 /**
  * ╔══════════════════════════════════════════════════════╗
  * ║       Bot API Routes — Read-only API cho web         ║
@@ -487,6 +488,7 @@ export function registerBotApiRoutes(app) {
             youtubeWarrantySync: getYoutubeWarrantySyncState(),
             customerRoleSync: getCustomerRoleSyncState(),
             membershipPresentation: getMembershipPresentationStatus(req.app.locals.discordClient),
+            marketingAutomation: getMarketingPauseStatus(),
             uptime: Math.floor(process.uptime()),
             timestamp: Date.now(),
         });

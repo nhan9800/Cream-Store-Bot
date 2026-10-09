@@ -1,4 +1,6 @@
-import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+// Keep historical invite eligibility tests without enabling the live campaign.
+vi.mock('../src/config/marketingAutomationPolicy.js', () => ({ AUTOMATIC_MARKETING_PAUSED: false }));
 import { db, initDatabase, nowIso } from '../src/database/db.js';
 import {
   INVITE_DECOR_CAMPAIGN,

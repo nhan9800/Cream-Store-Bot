@@ -1,3 +1,4 @@
+import { AUTOMATIC_MARKETING_PAUSED } from '../config/marketingAutomationPolicy.js';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -572,6 +573,7 @@ async function publishDailyColorSaleInternal(client, { tagEveryone = false, tagM
 }
 
 export function publishDailyColorSale(client, options = {}) {
+  if (AUTOMATIC_MARKETING_PAUSED) return Promise.resolve({ status: 'paused', reason: 'owner_request' });
   if (boardPublishPromise) return boardPublishPromise;
   boardPublishPromise = (async () => {
     const now = options.now || new Date();
@@ -780,6 +782,7 @@ async function publishDailyFlashSaleInternal(client, {
 }
 
 export function publishDailyFlashSale(client, options = {}) {
+  if (AUTOMATIC_MARKETING_PAUSED) return Promise.resolve({ status: 'paused', reason: 'owner_request' });
   if (dailyPublishPromise) return dailyPublishPromise;
   dailyPublishPromise = (async () => {
     const now = options.now || new Date();
