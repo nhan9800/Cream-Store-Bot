@@ -86,6 +86,11 @@ install_dependencies() {
   local stage=""
   stage="$(mktemp -d "${STATE_DIR}/dependencies-XXXXXXXX")" || return 1
   cp package.json package-lock.json "$stage/" || return 1
+  # npm ci runs the root postinstall hook from the isolated stage. Keep the
+  # compatibility patch available there; the application checkout itself is
+  # intentionally not copied into the stage.
+  mkdir -p "$stage/scripts" || return 1
+  cp scripts/patch-dependency-compat.js "$stage/scripts/" || return 1
   log 'Installing dependencies in an isolated staging directory'
   if ! (cd "$stage" && timeout --foreground 5m npm ci --omit=dev --no-audit --no-fund 9>&-); then
     log "Dependency staging failed; existing node_modules preserved (stage: ${stage})"

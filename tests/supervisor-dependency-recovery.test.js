@@ -16,6 +16,8 @@ function setup() {
   fs.writeFileSync(path.join(dir, 'node_modules', 'original'), 'working');
   fs.writeFileSync(path.join(dir, 'package.json'), '{"dependencies":{"nonexistent-cenar-test-package":"1.0.0"}}');
   fs.writeFileSync(path.join(dir, 'package-lock.json'), '{}');
+  fs.mkdirSync(path.join(dir, 'scripts'));
+  fs.writeFileSync(path.join(dir, 'scripts', 'patch-dependency-compat.js'), '// test fixture');
   fs.writeFileSync(path.join(dir, 'functions.sh'), source);
   return dir;
 }
