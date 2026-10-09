@@ -96,6 +96,10 @@ install_dependencies() {
     log "Dependency staging failed; existing node_modules preserved (stage: ${stage})"
     return 1
   fi
+  if ! (cd "$stage" && node scripts/patch-dependency-compat.js); then
+    log "Dependency compatibility patch failed; existing node_modules preserved (stage: ${stage})"
+    return 1
+  fi
   node "$RUNTIME_CHECK" "$stage" || return 1
   if [[ -d node_modules ]]; then
     mv node_modules "${stage}/previous-node_modules" || return 1
