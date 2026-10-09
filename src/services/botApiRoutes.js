@@ -20,7 +20,7 @@ import { getAiKnowledge } from './aiKnowledgeService.js';
 import { applyCors } from '../utils/cors.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { safeEqual } from '../utils/crypto.js';
-import { getAccountSecurity, verifyAdminStepUp, isWebAccountBanned, rejectBannedWebAccount } from './accountSecurityService.js';
+import { getAccountSecurity, getWebStaffMfaError, isWebAccountBanned, rejectBannedWebAccount } from './accountSecurityService.js';
 import { runtimeCommitSha } from '../utils/revision.js';
 import { discordCollectibleUrl, getDiscordCollectibleShopPrice } from './discordCollectiblePricing.js';
 import { getCustomerDiscordRoleSnapshot, getCustomerMembershipProgress } from './roleService.js';
@@ -339,7 +339,7 @@ function canAccessCustomerResource(req, customerId) {
             const security = getAccountSecurity(userId);
             const version = String(req.header('x-session-version') || '0');
             if (/^\d{1,10}$/.test(version) && Number(version) === security.session_version
-                && (!security.mfa_secret || verifyAdminStepUp(req.header('x-admin-step-up'), userId))) return true;
+                && !getWebStaffMfaError(userId, req.header('x-admin-step-up'))) return true;
         }
     }
     const discordId = String(req.header('x-discord-id') || '').trim();
@@ -473,7 +473,11 @@ function enrichFeedbackAuthor(feedback, req) {
 export function registerBotApiRoutes(app) {
     // CORS — allowlist (server-to-server callers không gửi Origin nên không bị chặn)
     const corsHandler = (req, res, next) => {
-        if (applyCors(req, res, { methods: 'GET, POST, OPTIONS', headers: 'Content-Type, X-Bot-Api-Key, x-bot-api-key, X-Idempotency-Key, x-idempotency-key, X-User-Id, X-User-Role, X-Discord-Id' })) return;
+        if (applyCors(req, res, {
+            methods: 'GET, POST, OPTIONS',
+            headers: 'Content-Type, X-Bot-Api-Key, x-bot-api-key, X-Idempotency-Key, x-idempotency-key, '
+                + 'X-User-Id, X-User-Role, X-Discord-Id, X-Session-Version, X-Admin-Step-Up, X-Auth-Time',
+        })) return;
         next();
     };
 
@@ -499,6 +503,16 @@ export function registerBotApiRoutes(app) {
     app.use('/api/bot', corsHandler, requireApiKey, (req, res, next) => {
         const userId = String(req.header('x-user-id') || '').trim();
         if (isWebAccountBanned(userId)) return rejectBannedWebAccount(res);
+        // Auth login, linking, recovery and MFA setup must remain reachable
+        // with the current session so an Admin/Staff account can enroll. Every
+        // other authenticated staff request needs a fresh step-up proof.
+        if (!String(req.path || '').startsWith('/auth/')) {
+            const mfaError = getWebStaffMfaError(userId, req.header('x-admin-step-up'));
+            if (mfaError) {
+                const { status, ...body } = mfaError;
+                return res.status(status).json({ ok: false, ...body });
+            }
+        }
         next();
     });
 

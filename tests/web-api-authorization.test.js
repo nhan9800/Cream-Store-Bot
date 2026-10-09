@@ -14,6 +14,10 @@ beforeAll(async () => {
   security = await import('../src/services/accountSecurityService.js');
   for (const [id, email, discord, role] of [['owner', 'owner@example.com', owner, 'member'], ['other', 'other@example.com', other, 'member'], ['admin', 'admin@example.com', '111111111111111111', 'admin']]) {
     db.prepare('INSERT INTO web_users(id, email, discord_id, role, password_hash) VALUES (?, ?, ?, ?, ?)').run(id, email, discord, role, security.hashAccountPassword('test-password'));
+    if (role === 'admin') {
+      security.getAccountSecurity(id);
+      db.prepare('UPDATE web_account_security SET mfa_secret = ? WHERE user_id = ?').run('test-mfa-present', id);
+    }
   }
   const app = express(); app.use(express.json());
   const { registerBotApiRoutes } = await import('../src/services/botApiRoutes.js'); registerBotApiRoutes(app);
@@ -40,6 +44,7 @@ async function call(route, { method = 'GET', body, userId = 'owner', discordId =
   const headers = { 'Content-Type': 'application/json', 'X-Bot-Api-Key': key, 'X-User-Id': userId, 'X-Discord-Id': discordId, 'X-User-Role': role };
   if (version !== undefined) headers['X-Session-Version'] = String(version);
   if (proof) headers['X-Admin-Step-Up'] = proof;
+  if (proof !== false && !proof && userId === 'admin' && role === 'admin') headers['X-Admin-Step-Up'] = security.issueAdminStepUp('admin');
   return fetch(`${base}${route}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
 }
 describe('web API authorization', () => {
@@ -76,25 +81,32 @@ describe('web API authorization', () => {
     }
   });
   it('requires MFA proof and rejects revoked versions at both bot staff boundaries', async () => {
-    const setup = security.prepareAccountMfa('admin');
-    const code = security.totpCode(setup.secret, Math.floor(Date.now() / 30000)); security.confirmAccountMfa('admin', code);
     const guard = adminHandlers[0].guard;
-    const headers = { 'x-bot-api-key': 'authorization-test-only', 'x-user-id': 'admin', 'x-session-version': '1' };
+    const headers = { 'x-bot-api-key': 'authorization-test-only', 'x-user-id': 'admin', 'x-session-version': '0' };
     const response = { status: vi.fn().mockReturnThis(), json: vi.fn().mockReturnThis() }; const next = vi.fn();
     guard({ header: (name) => headers[name] }, response, next); expect(next).not.toHaveBeenCalled(); expect(response.status).toHaveBeenCalledWith(403);
     headers['x-admin-step-up'] = security.issueAdminStepUp('admin');
-    expect((await call(`/wallet/${other}`, { userId: 'admin', role: 'admin', discordId: '111111111111111111', version: 1 })).status).toBe(403);
-    expect((await call(`/wallet/${other}`, { userId: 'admin', role: 'admin', discordId: '111111111111111111', version: 1, proof: headers['x-admin-step-up'] })).status).toBe(200);
+    expect((await call(`/wallet/${other}`, { userId: 'admin', role: 'admin', discordId: '111111111111111111', version: 0, proof: false })).status).toBe(403);
+    expect((await call(`/wallet/${other}`, { userId: 'admin', role: 'admin', discordId: '111111111111111111', version: 0, proof: headers['x-admin-step-up'] })).status).toBe(200);
     guard({ header: (name) => headers[name] }, response, next); expect(next).toHaveBeenCalledOnce();
     next.mockClear(); security.revokeAccountSessions('admin');
     guard({ header: (name) => headers[name] }, response, next); expect(next).not.toHaveBeenCalled(); expect(response.status).toHaveBeenCalledWith(401);
-    expect((await call(`/wallet/${other}`, { userId: 'admin', role: 'admin', discordId: '111111111111111111', version: 1, proof: headers['x-admin-step-up'] })).status).toBe(403);
+    expect((await call(`/wallet/${other}`, { userId: 'admin', role: 'admin', discordId: '111111111111111111', version: 0, proof: headers['x-admin-step-up'] })).status).toBe(403);
   });
   it('requires the current session version and password for account revocation', async () => {
     expect((await call('/auth/security/revoke', { method: 'POST', body: { password: 'test-password' } })).status).toBe(401);
     expect((await call('/auth/security/revoke', { method: 'POST', body: { password: 'wrong' }, version: 0 })).status).toBe(401);
     expect((await call('/auth/security/revoke', { method: 'POST', body: { password: 'test-password' }, version: 0 })).status).toBe(200);
     expect((await call('/auth/security', { version: 0 })).status).toBe(401);
+  });
+  it('blocks unenrolled staff business access while keeping MFA setup reachable', async () => {
+    db.prepare('UPDATE web_account_security SET mfa_secret = NULL, session_version = 0 WHERE user_id = ?').run('admin');
+    const blocked = await call(`/wallet/${other}`, { userId: 'admin', role: 'admin', version: 0, proof: false });
+    expect(blocked.status).toBe(403);
+    expect(await blocked.json()).toMatchObject({ code: 'MFA_ENROLLMENT_REQUIRED', mfa_required: true });
+    const setup = await call('/auth/security', { userId: 'admin', role: 'admin', version: 0, proof: false });
+    expect(setup.status).toBe(200);
+    db.prepare('UPDATE web_account_security SET mfa_secret = ? WHERE user_id = ?').run('test-mfa-present', 'admin');
   });
   it('rejects automatic OAuth linking by unverified email', async () => {
     const response = await call('/auth/upsert-oauth', { method: 'POST', body: { provider: 'google', googleId: 'attacker-google', email: 'owner@example.com', emailVerified: false } });

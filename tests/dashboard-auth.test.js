@@ -8,6 +8,7 @@ import {
   dashboardLoginLimiter,
   isDashboardAuthorized,
   isDashboardSessionValid,
+  isDashboardWebSocketOriginAllowed,
   issueDashboardSession,
   recordDashboardLoginFailure,
   readCookie,
@@ -15,10 +16,16 @@ import {
 } from '../src/services/dashboardAuth.js';
 
 const originalDashboardToken = process.env.DASHBOARD_TOKEN;
+const originalNodeEnv = process.env.NODE_ENV;
+const originalStoreWebsiteUrl = process.env.STORE_WEBSITE_URL;
 
 afterEach(() => {
   if (originalDashboardToken === undefined) delete process.env.DASHBOARD_TOKEN;
   else process.env.DASHBOARD_TOKEN = originalDashboardToken;
+  if (originalNodeEnv === undefined) delete process.env.NODE_ENV;
+  else process.env.NODE_ENV = originalNodeEnv;
+  if (originalStoreWebsiteUrl === undefined) delete process.env.STORE_WEBSITE_URL;
+  else process.env.STORE_WEBSITE_URL = originalStoreWebsiteUrl;
 });
 
 describe('dashboard authentication hardening', () => {
@@ -48,10 +55,22 @@ describe('dashboard authentication hardening', () => {
   });
 
   it('expires dashboard sessions and scopes failure keys by source address', () => {
+    process.env.DASHBOARD_TOKEN = 'dashboard-rotation-a';
     const issued = issueDashboardSession(5_000);
     expect(isDashboardSessionValid(issued.token, 5_000 + DASHBOARD_SESSION_TTL_MS)).toBe(false);
+    const rotated = issueDashboardSession(6_000);
+    process.env.DASHBOARD_TOKEN = 'dashboard-rotation-b';
+    expect(isDashboardSessionValid(rotated.token, 6_001)).toBe(false);
     expect(dashboardLoginKey({ ip: '127.0.0.1' })).toBe('dashboard:127.0.0.1');
     expect(dashboardLoginKey({ connection: { remoteAddress: '::1' } })).toBe('dashboard:::1');
+  });
+
+  it('requires an explicit same-origin Origin for dashboard WebSocket upgrades', () => {
+    process.env.NODE_ENV = 'test';
+    process.env.STORE_WEBSITE_URL = '';
+    expect(isDashboardWebSocketOriginAllowed({ headers: { host: '127.0.0.1:4010', origin: 'http://127.0.0.1:4010' } })).toBe(true);
+    expect(isDashboardWebSocketOriginAllowed({ headers: { host: '127.0.0.1:4010', origin: 'https://attacker.example' } })).toBe(false);
+    expect(isDashboardWebSocketOriginAllowed({ headers: { host: '127.0.0.1:4010' } })).toBe(false);
   });
 
   it('locks repeated dashboard failures and applies the strict request budget', () => {

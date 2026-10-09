@@ -23,6 +23,7 @@ beforeAll(async () => {
   for (const [id, role, discord, google] of [['admin', 'admin', null, null], ['staff', 'staff', null, null], ['buyer', 'member', discordId, 'google-buyer'], ['second-admin', 'admin', null, null]]) {
     db.prepare('INSERT INTO web_users(id, email, role, discord_id, google_id, password_hash) VALUES (?, ?, ?, ?, ?, ?)').run(id, `${id}@example.com`, role, discord, google, security.hashAccountPassword('valid-password'));
     security.getAccountSecurity(id);
+    if (role === 'admin' || role === 'staff') db.prepare('UPDATE web_account_security SET mfa_secret = ? WHERE user_id = ?').run('test-mfa-present', id);
   }
   const app = express(); app.use(express.json());
   const { registerBotApiRoutes } = await import('../src/services/botApiRoutes.js'); registerBotApiRoutes(app);
@@ -47,7 +48,12 @@ afterAll(async () => {
 
 async function call(route, { method = 'GET', body, userId = 'admin', version = 0 } = {}) {
   const headers = { 'Content-Type': 'application/json', 'X-Bot-Api-Key': 'account-ban-test-only' };
-  if (userId) Object.assign(headers, { 'X-User-Id': userId, 'X-Discord-Id': userId === 'buyer' ? discordId : '', 'X-User-Role': userId === 'buyer' ? 'member' : 'admin', 'X-Session-Version': String(version) });
+  if (userId) Object.assign(headers, {
+    'X-User-Id': userId, 'X-Discord-Id': userId === 'buyer' ? discordId : '',
+    'X-User-Role': userId === 'buyer' ? 'member' : 'admin', 'X-Session-Version': String(version),
+    ...(userId === 'admin' || userId === 'staff' || userId === 'second-admin'
+      ? { 'X-Admin-Step-Up': security.issueAdminStepUp(userId) } : {}),
+  });
   return fetch(`${base}${route}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
 }
 function setBan(id = 'buyer', ban = true, userId = 'admin') {

@@ -5,6 +5,11 @@ import { decrypt, encrypt, isEncrypted, safeEqual } from '../utils/crypto.js';
 const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 const digest = (value) => crypto.createHash('sha256').update(String(value)).digest('hex');
 const nowIso = () => new Date().toISOString();
+const STAFF_ROLES = new Set(['admin', 'staff']);
+
+export function isWebStaffRole(role) {
+  return STAFF_ROLES.has(String(role || '').trim().toLowerCase());
+}
 
 export function hashAccountPassword(password) {
   const salt = crypto.randomBytes(16).toString('hex');
@@ -44,8 +49,43 @@ export function presentWebUser(user) {
     role: user.role, created_at: user.created_at, updated_at: user.updated_at,
     session_version: security.session_version, email_verified: Boolean(security.email_verified_at),
     mfa_enabled: Boolean(security.mfa_secret),
+    // Staff and Admin accounts must enroll Authenticator before using any
+    // privileged commerce or administration API. Keep this flag explicit so
+    // the website can route the user to the security setup screen.
+    mfa_required: isWebStaffRole(user.role),
     account_banned: isWebAccountBanned(user.id),
   };
+}
+
+/**
+ * Return the authoritative MFA gate for a web staff account.
+ *
+ * This is intentionally based on the role currently stored in SQLite rather
+ * than an untrusted x-user-role header. Account setup and recovery routes call
+ * this helper only after establishing the current session, so an unenrolled
+ * owner can still finish setup without being locked out.
+ */
+export function getWebStaffMfaError(userId, proof, now = Date.now()) {
+  const user = db.prepare('SELECT id, role FROM web_users WHERE id = ? LIMIT 1').get(String(userId || ''));
+  if (!user || !isWebStaffRole(user.role)) return null;
+  const security = getAccountSecurity(user.id);
+  if (!security?.mfa_secret) {
+    return {
+      status: 403,
+      code: 'MFA_ENROLLMENT_REQUIRED',
+      mfa_required: true,
+      error: 'Tài khoản Admin/Staff phải bật Authenticator trước khi sử dụng khu vực vận hành.',
+    };
+  }
+  if (!verifyAdminStepUp(proof, user.id, now)) {
+    return {
+      status: 403,
+      code: 'MFA_REQUIRED',
+      mfa_required: true,
+      error: 'Cần xác minh Authenticator để sử dụng khu vực vận hành.',
+    };
+  }
+  return null;
 }
 
 export function revokeAccountSessions(userId) {
@@ -180,6 +220,7 @@ export function issueAdminStepUp(userId, now = Date.now()) {
   const key = String(process.env.BOT_API_KEY || '').trim();
   if (!key) throw new Error('Missing signing key');
   const security = getAccountSecurity(userId);
+  if (!security?.mfa_secret) throw new Error('MFA enrollment required');
   const payload = Buffer.from(JSON.stringify({ sub: userId, version: security.session_version, exp: now + 15 * 60_000, purpose: 'admin-step-up' })).toString('base64url');
   const signature = crypto.createHmac('sha256', key).update(payload).digest('base64url');
   return `${payload}.${signature}`;
@@ -193,6 +234,6 @@ export function verifyAdminStepUp(proof, userId, now = Date.now()) {
   try {
     const claim = JSON.parse(Buffer.from(payload, 'base64url').toString());
     const security = getAccountSecurity(userId);
-    return Boolean(security && claim.sub === userId && claim.purpose === 'admin-step-up' && claim.exp > now && claim.exp <= now + 15 * 60_000 && claim.version === security.session_version);
+    return Boolean(security?.mfa_secret && claim.sub === userId && claim.purpose === 'admin-step-up' && claim.exp > now && claim.exp <= now + 15 * 60_000 && claim.version === security.session_version);
   } catch { return false; }
 }

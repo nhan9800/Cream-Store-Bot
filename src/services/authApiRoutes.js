@@ -7,7 +7,7 @@ import {
   hashAccountPassword, verifyAccountPassword, presentWebUser, getAccountSecurity,
   revokeAccountSessions, issueAccountEmailToken, consumeAccountEmailToken,
   prepareAccountMfa, confirmAccountMfa, verifyAccountMfa, disableAccountMfa, issueAdminStepUp,
-  isWebAccountBanned, rejectBannedWebAccount,
+  getWebStaffMfaError, isWebAccountBanned, rejectBannedWebAccount,
 } from './accountSecurityService.js';
 import { createRateLimiter } from './rateLimitMiddleware.js';
 
@@ -218,6 +218,18 @@ export function registerAuthRoutes(app) {
         && (currentRole === 'admin' || currentRole === 'staff');
       if (!callerId || (!isStaff && callerId !== requestedId)) {
         return res.status(403).json({ ok: false, error: 'Forbidden' });
+      }
+      if (isStaff) {
+        const security = getAccountSecurity(callerId);
+        const rawVersion = String(req.header('x-session-version') || '');
+        if (!/^\d{1,10}$/.test(rawVersion) || Number(rawVersion) !== security.session_version) {
+          return errorResponse(res, 401, 'Phiên đăng nhập đã hết hiệu lực. Vui lòng đăng nhập lại.');
+        }
+        const mfaError = getWebStaffMfaError(callerId, req.header('x-admin-step-up'));
+        if (mfaError) {
+          const { status, ...body } = mfaError;
+          return res.status(status).json({ ok: false, ...body });
+        }
       }
       const user = db.prepare('SELECT * FROM web_users WHERE id = ? OR discord_id = ?').get(requestedId, requestedId);
       if (!user) return res.status(404).json({ ok: false, error: 'Không tìm thấy user' });

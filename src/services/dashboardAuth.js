@@ -10,10 +10,19 @@ export const DASHBOARD_SESSION_COOKIE = 'cenar_dashboard_session';
 export const DASHBOARD_SESSION_TTL_MS = 8 * 60 * 60 * 1000;
 
 const dashboardSessions = new Map();
+function dashboardSecretBinding() {
+  const secret = String(process.env.DASHBOARD_TOKEN ?? '').trim();
+  return secret ? crypto.createHash('sha256').update(secret).digest('hex') : '';
+}
+
+function isProductionRuntime() {
+  return ['production', 'prod'].includes(String(process.env.NODE_ENV || '').trim().toLowerCase());
+}
+
 const dashboardSessionCleanup = setInterval(() => {
   const now = Date.now();
-  for (const [token, expiresAt] of dashboardSessions) {
-    if (expiresAt <= now) dashboardSessions.delete(token);
+  for (const [token, session] of dashboardSessions) {
+    if (session.expiresAt <= now || session.binding !== dashboardSecretBinding()) dashboardSessions.delete(token);
   }
 }, 10 * 60 * 1000);
 dashboardSessionCleanup.unref?.();
@@ -69,7 +78,7 @@ export function readCookie(header, name) {
 export function issueDashboardSession(now = Date.now()) {
   const token = crypto.randomBytes(32).toString('base64url');
   const expiresAt = now + DASHBOARD_SESSION_TTL_MS;
-  dashboardSessions.set(token, expiresAt);
+  dashboardSessions.set(token, { expiresAt, binding: dashboardSecretBinding() });
   return { token, expiresAt };
 }
 
@@ -79,9 +88,9 @@ export function revokeDashboardSession(token) {
 
 export function isDashboardSessionValid(token, now = Date.now()) {
   const key = String(token || '');
-  const expiresAt = dashboardSessions.get(key);
-  if (!expiresAt) return false;
-  if (expiresAt <= now) {
+  const session = dashboardSessions.get(key);
+  if (!session) return false;
+  if (session.expiresAt <= now || session.binding !== dashboardSecretBinding()) {
     dashboardSessions.delete(key);
     return false;
   }
@@ -107,14 +116,43 @@ export function isDashboardAuthorized(req, now = Date.now()) {
 }
 
 export function setDashboardSessionCookie(req, res, token) {
-  const secure = req?.secure || req?.headers?.['x-forwarded-proto'] === 'https';
+  const secure = isProductionRuntime() || req?.secure || req?.headers?.['x-forwarded-proto'] === 'https';
   const maxAge = Math.floor(DASHBOARD_SESSION_TTL_MS / 1000);
   // maxAge is intentionally derived from the fixed TTL, not user input.
   res.setHeader('Set-Cookie', `${DASHBOARD_SESSION_COOKIE}=${encodeURIComponent(token)}; Max-Age=${maxAge}; Path=/; HttpOnly; SameSite=Strict${secure ? '; Secure' : ''}`);
 }
 
 export function clearDashboardSessionCookie(req, res) {
-  const secure = req?.secure || req?.headers?.['x-forwarded-proto'] === 'https';
+  const secure = isProductionRuntime() || req?.secure || req?.headers?.['x-forwarded-proto'] === 'https';
   res.setHeader('Set-Cookie', `${DASHBOARD_SESSION_COOKIE}=; Max-Age=0; Path=/; HttpOnly; SameSite=Strict${secure ? '; Secure' : ''}`);
+}
+
+export function isDashboardWebSocketOriginAllowed(req) {
+  const origin = String(req?.headers?.origin || '').trim();
+  if (!origin) return false;
+  let parsed;
+  try { parsed = new URL(origin); } catch { return false; }
+  if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password || parsed.pathname !== '/' && parsed.pathname !== '') return false;
+
+  const configured = [
+    process.env.DASHBOARD_ORIGIN,
+    process.env.STORE_WEBSITE_URL,
+    process.env.PUBLIC_BASE_URL,
+    'https://cenarstore.xyz',
+  ].filter(Boolean).flatMap((value) => {
+    try { return [new URL(String(value)).origin]; } catch { return []; }
+  });
+  if (configured.includes(parsed.origin)) return true;
+
+  // Local development may serve the legacy dashboard from the same origin.
+  if (!isProductionRuntime()) {
+    const proto = String(req?.headers?.['x-forwarded-proto'] || 'http').split(',')[0].trim();
+    const host = String(req?.headers?.host || '').trim();
+    if ((proto === 'http:' || proto === 'https:' || proto === 'http' || proto === 'https') && host) {
+      const requestOrigin = `${proto.replace(/:$/, '')}://${host}`;
+      if (parsed.origin === requestOrigin) return true;
+    }
+  }
+  return false;
 }
 

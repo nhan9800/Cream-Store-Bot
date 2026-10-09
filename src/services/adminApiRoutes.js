@@ -23,7 +23,7 @@ import { archiveTicketConversation } from './ticketClosureService.js';
 import { recordStaffLog } from './staffLogService.js';
 import { syncPublishedFeedbackMessage } from './feedbackService.js';
 import { config } from '../config.js';
-import { getAccountSecurity, verifyAdminStepUp, revokeAccountSessions, isWebAccountBanned, rejectBannedWebAccount } from './accountSecurityService.js';
+import { getAccountSecurity, getWebStaffMfaError, revokeAccountSessions, isWebAccountBanned, rejectBannedWebAccount } from './accountSecurityService.js';
 import {
   createSpotifyFamily,
   createSpotifyFamilyMember,
@@ -139,8 +139,10 @@ export function registerAdminRoutes(app) {
     if (String(security.session_version) !== String(sessionVersion)) {
       return errorResponse(res, 401, 'Phiên đăng nhập đã bị thu hồi.');
     }
-    if (security.mfa_secret && !verifyAdminStepUp(req.header('x-admin-step-up'), user.id)) {
-      return res.status(403).json({ ok: false, code: 'MFA_REQUIRED', error: 'Xác minh Authenticator để sử dụng Admin.' });
+    const mfaError = getWebStaffMfaError(user.id, req.header('x-admin-step-up'));
+    if (mfaError) {
+      const { status, ...body } = mfaError;
+      return res.status(status).json({ ok: false, ...body });
     }
 
     if (requiresSystemAdmin(req.route?.path) && user.role !== 'admin') {
