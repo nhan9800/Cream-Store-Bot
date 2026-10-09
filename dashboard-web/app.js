@@ -117,6 +117,14 @@ async function loadData() {
         const res = await fetch(`${API_BASE_URL}/dashboard/api/accounts`, {
             headers: { 'x-dashboard-token': API_TOKEN }
         });
+        if (res.status === 401) {
+            // Do not fall back to the old local credential cache after the
+            // HttpOnly session expires or is revoked.
+            sessionStorage.removeItem(SESSION_KEY);
+            API_TOKEN = '';
+            document.getElementById('password-gate').style.display = 'flex';
+            return;
+        }
         if (!res.ok) throw new Error('API Error');
         const data = await res.json();
         if (data.ok) accounts = data.accounts || [];
