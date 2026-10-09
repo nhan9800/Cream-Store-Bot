@@ -20,6 +20,7 @@ import { isInternationalGuild } from '../utils/locale.js';
 import { formatInternationalPrice, translateCatalogGroup, translateProductName, translateProductWarranty } from '../utils/internationalCatalog.js';
 import { getNitroTrialEligibility, isNitroTrialProduct } from '../constants/nitroTrial.js';
 import { API_CREDIT_DURATION, isApiCreditProduct } from '../config/apiCreditCatalog.js';
+import { AUTOMATIC_PRICE_BOARD_PAUSED } from '../config/marketingAutomationPolicy.js';
 
 export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.22';
 const publicationStates = new Map();
@@ -534,7 +535,14 @@ export async function publishPriceBoard(guild, { force = false, keepMessageIds =
   };
 }
 
-export async function autoSetupPriceBoard(client, { force = false, targetGuildId = null } = {}) {
+export async function autoSetupPriceBoard(client, { force = false, targetGuildId = null, automatic = true } = {}) {
+  if (automatic && AUTOMATIC_PRICE_BOARD_PAUSED) {
+    const guildIds = targetGuildId ? [String(targetGuildId)] : [];
+    for (const guildId of guildIds) publicationStates.set(guildId, {
+      status: 'paused', version: PRICE_BOARD_VERSION, finishedAt: new Date().toISOString(), reason: 'owner_request',
+    });
+    return guildIds.map((guildId) => ({ guildId, status: 'paused', reason: 'owner_request' }));
+  }
   const results = [];
   for (const guild of client.guilds.cache.values()) {
     if (targetGuildId && guild.id !== targetGuildId) continue;

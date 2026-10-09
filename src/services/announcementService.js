@@ -13,6 +13,7 @@ import {
 } from 'discord.js';
 import { createEmojiResolver, withButtonEmoji } from '../utils/emojiHelper.js';
 import { publishPriceBoard } from './autoSetupPriceBoardService.js';
+import { AUTOMATIC_PRICE_BOARD_PAUSED } from '../config/marketingAutomationPolicy.js';
 
 const SNOWFLAKE_RE = /^\d{17,20}$/;
 const ANNOUNCEMENT_IMAGE_TTL_MS = 10 * 60 * 1000;
@@ -95,6 +96,9 @@ export function isPriceRelatedAnnouncement(content) {
 
 async function refreshPricingAnnouncementBoard(guild, content, announcementMessageId) {
   if (!isPriceRelatedAnnouncement(content)) return null;
+  if (AUTOMATIC_PRICE_BOARD_PAUSED) {
+    return { guildId: guild.id, status: 'paused', reason: 'owner_request' };
+  }
 
   try {
     return await publishPriceBoard(guild, {

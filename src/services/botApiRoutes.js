@@ -1,4 +1,5 @@
 import { getMarketingPauseStatus } from './marketingPauseService.js';
+import { AUTOMATIC_PRICE_BOARD_PAUSED } from '../config/marketingAutomationPolicy.js';
 /**
  * ╔══════════════════════════════════════════════════════╗
  * ║       Bot API Routes — Read-only API cho web         ║
@@ -488,7 +489,7 @@ export function registerBotApiRoutes(app) {
             youtubeWarrantySync: getYoutubeWarrantySyncState(),
             customerRoleSync: getCustomerRoleSyncState(),
             membershipPresentation: getMembershipPresentationStatus(req.app.locals.discordClient),
-            marketingAutomation: getMarketingPauseStatus(),
+            marketingAutomation: { ...getMarketingPauseStatus(), priceBoardResendPaused: AUTOMATIC_PRICE_BOARD_PAUSED },
             uptime: Math.floor(process.uptime()),
             timestamp: Date.now(),
         });
