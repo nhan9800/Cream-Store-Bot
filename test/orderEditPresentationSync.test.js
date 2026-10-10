@@ -22,10 +22,11 @@ import {
   sendCompletedTicketFlow,
   inspectOrderPresentation,
 } from '../src/services/notificationService.js';
-import { syncOrderFeedbackMessages } from '../src/services/feedbackService.js';
+import { syncOrderFeedbackMessages, inspectOrderFeedbackMessages } from '../src/services/feedbackService.js';
 import { execute as editOrderCommand } from '../src/commands/sua-don.js';
 import { registerAdminRoutes } from '../src/services/adminApiRoutes.js';
 import { config } from '../src/config.js';
+import { normalizeMessagePresentation } from '../src/utils/discordEmojiBoundary.js';
 
 const suffix = Date.now().toString();
 const guildId = `guild_edit_sync_${suffix}`;
@@ -269,6 +270,13 @@ describe('/sua-don completion presentation synchronization', () => {
     for (const field of ['status', 'total_amount', 'amount_paid', 'expiry_at', 'completed_at', 'feedback_submitted_at']) {
       expect(after[field]).toBe(before[field]);
     }
+    const storedDm = dm.messages.get(created.messageId);
+    // Discord and the send boundary normalize custom emoji and optional inline
+    // fields. Object property order is not a difference in the visible message.
+    const delivered = normalizeMessagePresentation({ embeds: storedDm.embeds }, guildId).embeds[0];
+    storedDm.embeds = [{ ...delivered, fields: delivered.fields.map((field) => ({
+      value: field.value, ...(field.inline ? { inline: true } : {}), name: field.name,
+    })) }];
     const evidence = await inspectOrderPresentation({ guild, order: after });
     expect(evidence).toMatchObject({ update_dm_status: 'available', dm_matches_current_order: true });
     guild.channels.fetch.mockResolvedValue(channel);
@@ -360,6 +368,8 @@ describe('/sua-don completion presentation synchronization', () => {
     const payload = review.edit.mock.calls[0][0];
     expect(JSON.stringify(payload)).toContain('Tên sản phẩm mới'); expect(JSON.stringify(payload)).toContain('x2');
     expect(payload.allowedMentions).toEqual({ parse: [] }); expect(channel.send).not.toHaveBeenCalled();
+    review.components = payload.components;
+    expect(await inspectOrderFeedbackMessages({ guild, order: edited })).toEqual({ count: 1, verified: 1 });
   });
 
   it('supports an authorized sync-only command without changing price, expiry or fulfillment', async () => {

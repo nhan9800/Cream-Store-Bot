@@ -22,6 +22,7 @@ import { recordTranscriptDiscordMirror } from './transcriptService.js';
 import { syncCtvOrderLog } from './ctvOrderLogService.js';
 import { getOrderByCode, saveCompletionMessageReference, saveCompletionUpdateDmReference } from './orderService.js';
 import { getTicketById, getTicketByChannelId } from './ticketService.js';
+import { normalizeMessagePresentation } from '../utils/discordEmojiBoundary.js';
 
 const COMPLETION_MESSAGE_SCAN_LIMIT = 500;
 const completionLocks = new Map();
@@ -258,6 +259,7 @@ export async function inspectOrderPresentation({ guild, order }) {
     completion_message_status: 'missing',
     update_dm_status: 'not_created',
     dm_matches_current_order: false,
+    dm_field_matches: [],
   };
   try {
     const channel = await fetchOrMissing(() => guild.channels.fetch(order.completion_channel_id || order.ticket_channel_id), 10003);
@@ -275,10 +277,18 @@ export async function inspectOrderPresentation({ guild, order }) {
       if (!channel?.isDMBased?.() || channel.recipientId !== order.customer_id) throw new Error('DM mismatch');
       const message = await fetchOrMissing(() => channel.messages.fetch(order.completion_update_dm_message_id), 10008);
       result.update_dm_status = message ? 'available' : 'missing';
-      const expected = buildCompletionDmEmbed(order).setTitle('Thông Tin Đơn Hàng Đã Cập Nhật').toJSON();
+      const expected = normalizeMessagePresentation({
+        embeds: [buildCompletionDmEmbed(order).setTitle('Thông Tin Đơn Hàng Đã Cập Nhật')],
+      }, guild.id).embeds[0];
       const actual = message?.embeds?.[0]?.toJSON?.() || message?.embeds?.[0];
+      const canonicalFields = (fields = []) => fields.map((field) => ({
+        name: field.name, value: field.value, inline: Boolean(field.inline),
+      }));
+      result.dm_field_matches = (expected.fields || []).map((field, index) => ({
+        index, matches: actual?.fields?.[index]?.name === field.name && actual.fields[index].value === field.value,
+      }));
       result.dm_matches_current_order = message?.author?.id === guild.client.user.id
-        && JSON.stringify(actual?.fields) === JSON.stringify(expected.fields);
+        && JSON.stringify(canonicalFields(actual?.fields)) === JSON.stringify(canonicalFields(expected.fields));
     } catch (error) { result.update_dm_status = `error:${error.code || 'READ_FAILED'}`; }
   }
   return result;

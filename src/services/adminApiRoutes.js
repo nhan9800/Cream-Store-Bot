@@ -21,7 +21,7 @@ import { sendCompletedFlow, updateOrderLogMessage, refreshCompletedTicketMessage
 import { getLatestTicketTranscriptMetadata } from './transcriptService.js';
 import { archiveTicketConversation } from './ticketClosureService.js';
 import { recordStaffLog } from './staffLogService.js';
-import { syncPublishedFeedbackMessage, syncOrderFeedbackMessages } from './feedbackService.js';
+import { syncPublishedFeedbackMessage, syncOrderFeedbackMessages, inspectOrderFeedbackMessages } from './feedbackService.js';
 import { config } from '../config.js';
 import { getAccountSecurity, getWebStaffMfaError, revokeAccountSessions, isWebAccountBanned, rejectBannedWebAccount } from './accountSecurityService.js';
 import {
@@ -565,7 +565,10 @@ export function registerAdminRoutes(app) {
       const resolved = await resolvePresentationOrder(req);
       if (!resolved) return errorResponse(res, 404, 'Không tìm thấy đơn trong server hiện tại.');
       if (!resolved.guild) return errorResponse(res, 503, 'Discord chưa sẵn sàng.');
-      return successResponse(res, await inspectOrderPresentation(resolved));
+      return successResponse(res, {
+        ...await inspectOrderPresentation(resolved),
+        feedback: await inspectOrderFeedbackMessages(resolved),
+      });
     } catch (error) {
       console.warn(`[ORDER-PRESENTATION] Inspect: ${error.code || 'READ_FAILED'}`);
       return errorResponse(res, 503, 'Không đọc được trạng thái thẻ Discord.');
