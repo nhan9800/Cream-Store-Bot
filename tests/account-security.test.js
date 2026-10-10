@@ -28,8 +28,23 @@ function user() {
 describe('account security', () => {
   it('preserves legacy sessions at version zero without exposing authentication secrets', () => {
     const row = user();
-    expect(service.presentWebUser(row)).toMatchObject({ session_version: 0, mfa_enabled: false, mfa_required: true, email_verified: false });
+    expect(service.presentWebUser(row)).toMatchObject({ session_version: 0, mfa_enabled: false, mfa_required: false, email_verified: false });
     expect(JSON.stringify(service.presentWebUser(row))).not.toContain('password_hash');
+  });
+  it('allows unenrolled Admin but retains Staff enrollment and opt-in Admin MFA', () => {
+    const row = user();
+    expect(service.getWebStaffMfaError(row.id, '')).toBeNull();
+    db.prepare('UPDATE web_users SET role = ? WHERE id = ?').run('staff', row.id);
+    expect(service.getWebStaffMfaError(row.id, '')?.code).toBe('MFA_ENROLLMENT_REQUIRED');
+    expect(service.presentWebUser({ ...row, role: 'staff' }).mfa_required).toBe(true);
+    db.prepare('UPDATE web_users SET role = ? WHERE id = ?').run('admin', row.id);
+    db.prepare('UPDATE web_account_security SET mfa_secret = ? WHERE user_id = ?').run('test-mfa-present', row.id);
+    expect(service.getWebStaffMfaError(row.id, '')?.code).toBe('MFA_REQUIRED');
+    const proof = service.issueAdminStepUp(row.id);
+    expect(service.getWebStaffMfaError(row.id, proof)).toBeNull();
+    expect(service.presentWebUser(row).mfa_required).toBe(true);
+    service.revokeAccountSessions(row.id);
+    expect(service.getWebStaffMfaError(row.id, proof)?.code).toBe('MFA_REQUIRED');
   });
   it('validates RFC 6238 SHA1 test vectors', () => {
     const secret = service.encodeBase32(Buffer.from('12345678901234567890'));

@@ -100,6 +100,7 @@ describe('web API authorization', () => {
     expect((await call('/auth/security', { version: 0 })).status).toBe(401);
   });
   it('blocks unenrolled staff business access while keeping MFA setup reachable', async () => {
+    db.prepare('UPDATE web_users SET role = ? WHERE id = ?').run('staff', 'admin');
     db.prepare('UPDATE web_account_security SET mfa_secret = NULL, session_version = 0 WHERE user_id = ?').run('admin');
     const blocked = await call(`/wallet/${other}`, { userId: 'admin', role: 'admin', version: 0, proof: false });
     expect(blocked.status).toBe(403);
@@ -110,7 +111,24 @@ describe('web API authorization', () => {
     expect(self.status).toBe(200);
     const cross = await call('/auth/user/owner', { userId: 'admin', role: 'admin', version: 0, proof: false });
     expect(cross.status).toBe(403);
+    db.prepare('UPDATE web_users SET role = ? WHERE id = ?').run('admin', 'admin');
     db.prepare('UPDATE web_account_security SET mfa_secret = ? WHERE user_id = ?').run('test-mfa-present', 'admin');
+  });
+  it('allows unenrolled Admin only with a current account session', async () => {
+    db.prepare('UPDATE web_account_security SET mfa_secret = NULL, session_version = 0 WHERE user_id = ?').run('admin');
+    const guard = adminHandlers.find(({ route }) => route === '/api/bot/admin/stats').guard;
+    const headers = { 'x-bot-api-key': 'authorization-test-only', 'x-user-id': 'admin', 'x-session-version': '0' };
+    const response = { status: vi.fn().mockReturnThis(), json: vi.fn().mockReturnThis() };
+    const next = vi.fn();
+    guard({ header: name => headers[name] }, response, next);
+    expect(next).toHaveBeenCalledOnce();
+    const current = await call('/auth/user/owner', { userId: 'admin', role: 'admin', version: 0, proof: false });
+    expect(current.status).toBe(200);
+    next.mockClear(); security.revokeAccountSessions('admin');
+    guard({ header: name => headers[name] }, response, next);
+    expect(next).not.toHaveBeenCalled(); expect(response.status).toHaveBeenCalledWith(401);
+    expect((await call('/auth/user/owner', { userId: 'admin', role: 'admin', version: 0, proof: false })).status).toBe(401);
+    db.prepare('UPDATE web_account_security SET mfa_secret = ?, session_version = 0 WHERE user_id = ?').run('test-mfa-present', 'admin');
   });
   it('rejects automatic OAuth linking by unverified email', async () => {
     const response = await call('/auth/upsert-oauth', { method: 'POST', body: { provider: 'google', googleId: 'attacker-google', email: 'owner@example.com', emailVerified: false } });
