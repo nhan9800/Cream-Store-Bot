@@ -20,17 +20,19 @@ describe('feedback Discord synchronization', () => {
 
   it('edits the original Discord feedback message with the updated values', async () => {
     const edit = vi.fn().mockResolvedValue({ id: 'message-1' });
-    const messageFetch = vi.fn().mockResolvedValue({ edit });
+    const messageFetch = vi.fn().mockResolvedValue({ edit, author: { id: 'bot-1' } });
     const channelFetch = vi.fn().mockResolvedValue({
       isTextBased: () => true,
       messages: { fetch: messageFetch },
     });
     const memberFetch = vi.fn().mockResolvedValue({ id: 'customer-1' });
     const guild = {
+      id: 'guild-1',
       channels: { fetch: channelFetch },
       members: { fetch: memberFetch },
     };
     const client = {
+      user: { id: 'bot-1' },
       guilds: {
         cache: new Map([['guild-1', guild]]),
         fetch: vi.fn(),
@@ -61,7 +63,7 @@ describe('feedback Discord synchronization', () => {
       stars: 4,
       content: 'Nội dung đã chỉnh sửa',
     });
-    expect(edit).toHaveBeenCalledWith({ components: [container], flags: 32768 });
+    expect(edit).toHaveBeenCalledWith({ content: null, embeds: [], components: [container], flags: 32768, allowedMentions: { parse: [] } });
   });
 
   it('reports a missing Discord reference without touching the API', async () => {

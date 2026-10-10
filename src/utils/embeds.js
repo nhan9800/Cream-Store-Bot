@@ -1106,11 +1106,11 @@ export function buildCompletionDmEmbed(order) {
     new EmbedBuilder()
       .setColor(config.accentColorSuccess)
       .setTitle('Đơn Hàng Đã Hoàn Thành')
-      .setDescription('> Cảm ơn bạn đã ủng hộ Cream Store!')
+      .setDescription(`> Cảm ơn bạn đã ủng hộ ${isInternationalGuild(order.guild_id) ? 'Cenar Global' : 'Cenar Store'}!`)
       .addFields(
         { name: 'Mã Đơn', value: `\`${order.order_code}\``, inline: true },
         { name: 'Sản Phẩm', value: formatOrderProduct(order.quantity, order.product_name), inline: true },
-        ...(order.expiry_at ? [{ name: 'Hết Hạn', value: `<t:${unixTs(order.expiry_at)}:D>`, inline: false }] : []),
+        ...(order.expiry_at ? [{ name: 'Hết Hạn', value: `<t:${unixTs(order.expiry_at)}:F>`, inline: false }] : []),
       )
       .setTimestamp(),
   );
@@ -1158,8 +1158,12 @@ export function buildOrderCompletedV2(order, staffId, supportId = null) {
   // Nhắc feedback + bảo hành (gộp tin thừa, chống spam)
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(joinLines(
-      `## ${E('icon_star')} ${international ? 'SHARE YOUR EXPERIENCE' : 'HÃY ĐÁNH GIÁ TRẢI NGHIỆM MUA HÀNG CỦA BẠN!'}`,
-      `> ${E('icon_sparkle')} ${international ? 'Your feedback helps us improve global service quality.' : 'Feedback giúp shop cải thiện dịch vụ — và bạn được **giảm giá đơn sau**.'}`,
+      `## ${E('icon_star')} ${order.feedback_submitted_at
+        ? (international ? 'FEEDBACK RECEIVED' : 'ĐÃ NHẬN ĐÁNH GIÁ CỦA BẠN')
+        : (international ? 'SHARE YOUR EXPERIENCE' : 'HÃY ĐÁNH GIÁ TRẢI NGHIỆM MUA HÀNG CỦA BẠN!')}`,
+      `> ${E('icon_sparkle')} ${order.feedback_submitted_at
+        ? (international ? 'Thank you! Your original review is preserved.' : 'Cảm ơn bạn! Số sao và nhận xét đã được lưu nguyên vẹn.')
+        : (international ? 'Your feedback helps us improve global service quality.' : 'Feedback giúp shop cải thiện dịch vụ — và bạn được **giảm giá đơn sau**.')}`,
       `> ${E('panel_warranty')} ${international ? 'Need warranty support? Use the warranty option linked to this purchase.' : 'Cần **bảo hành**? Dùng nút bên dưới bất cứ lúc nào.'}`,
     ))
   );

@@ -169,6 +169,10 @@ export const getLatestOrderByTicketChannel = (ticketChannelId) => getLatestOrder
 
 export function saveOrderLogMessage(orderCode, messageId){updateOrderLogStmt().run(messageId, nowIso(), orderCode); return getOrderByCode(orderCode);}
 export function saveCompletionMessageReference(orderCode,{channelId,messageId,staffId,supportId}){saveCompletionMessageStmt().run(channelId ?? null,messageId ?? null,staffId ?? null,supportId ?? staffId ?? null,nowIso(),orderCode); return getOrderByCode(orderCode);}
+export function saveCompletionUpdateDmReference(orderCode, { channelId, messageId }) {
+  db.prepare('UPDATE orders SET completion_update_dm_channel_id=?, completion_update_dm_message_id=? WHERE order_code=?')
+    .run(channelId, messageId, orderCode);
+}
 export function savePaymentMessage(orderCode, messageId){attachPaymentMessageStmt().run(messageId ?? null, nowIso(), orderCode); return getOrderByCode(orderCode);}
 export function savePaymentLinkData(orderCode,{paymentLinkId,checkoutUrl,qrCode,qrUrl=null,qrText=null,expiredAt=null}){savePaymentLinkStmt().run(paymentLinkId ?? null, checkoutUrl ?? null, qrCode ?? null, qrUrl ?? null, qrText ?? null, expiredAt ?? null, nowIso(), orderCode); return getOrderByCode(orderCode);}
 

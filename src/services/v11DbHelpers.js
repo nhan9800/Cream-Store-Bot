@@ -74,6 +74,9 @@ export function updateOrderFieldsRaw(orderCode, payload) {
   );
 
   syncCustomerStats(order.guild_id, order.customer_id);
+  // Website reviews retain the customer's rating/text and follow the edited item.
+  db.prepare('UPDATE feedbacks SET product_name=?, updated_at=CURRENT_TIMESTAMP WHERE guild_id=? AND order_code=? AND product_name IS NOT ?')
+    .run(nextProduct, order.guild_id, orderCode, nextProduct);
   return getOrderByCodeRaw(orderCode);
 }
 

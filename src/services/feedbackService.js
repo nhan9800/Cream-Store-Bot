@@ -5,6 +5,7 @@ import { buildFeedbackV2 } from '../utils/embeds.js';
 import { isManager } from '../utils/permissions.js';
 import { config } from '../config.js';
 import { getFeedbackAutoCloseState, scheduleOrderTicketAutoClose } from './ticketService.js';
+import { db } from '../database/db.js';
 
 export function scheduleFeedbackTicketAutoClose(order) {
   const ticket = scheduleOrderTicketAutoClose(order, config.autoCloseCompletedTicketMinutes);
@@ -19,20 +20,24 @@ export function scheduleFeedbackTicketAutoClose(order) {
 }
 
 /** Rebuild the Discord card after an admin edits the published feedback. */
-export async function syncPublishedFeedbackMessage({ client, feedback }) {
+export async function syncPublishedFeedbackMessage({ client, feedback, guild: providedGuild = null }) {
   const channelId = String(feedback?.feedback_channel_id || '').trim();
   const messageId = String(feedback?.feedback_message_id || '').trim();
   if (!client || !channelId || !messageId) return { synced: false, reason: 'missing_message_reference' };
 
   const guildId = String(feedback?.guild_id || '').trim();
-  const guild = (guildId && client.guilds?.cache?.get(guildId))
+  const guild = providedGuild || (guildId && client.guilds?.cache?.get(guildId))
     || (guildId ? await client.guilds?.fetch(guildId).catch(() => null) : null);
   if (!guild) return { synced: false, reason: 'guild_unavailable' };
+  if (guild.id !== guildId) return { synced: false, reason: 'guild_mismatch' };
 
   const channel = await guild.channels.fetch(channelId).catch(() => null);
   if (!channel?.isTextBased()) return { synced: false, reason: 'channel_unavailable' };
   const message = await channel.messages.fetch(messageId).catch(() => null);
   if (!message) return { synced: false, reason: 'message_unavailable' };
+  if (!client.user?.id || message.author?.id !== client.user.id) {
+    return { synced: false, reason: 'message_owner_mismatch' };
+  }
 
   const storedOrder = getOrderByCode(feedback.order_code) || {};
   const order = {
@@ -50,9 +55,31 @@ export async function syncPublishedFeedbackMessage({ client, feedback }) {
     stars: feedback.stars,
     content: feedback.content,
   });
-  await message.edit({ components: [container], flags });
+  await message.edit({ content: null, embeds: [], components: [container], flags, allowedMentions: { parse: [] } });
   console.info(`[FEEDBACK-SYNC] Updated Discord message ${messageId} for order ${order.order_code}`);
   return { synced: true, channelId, messageId };
+}
+
+/** Only change the purchased item label; the customer's opinion and rating stay intact. */
+export async function syncOrderFeedbackMessages({ guild, order }) {
+  if (!guild || order?.guild_id !== guild.id) return { synced: false, status: 'guild_mismatch' };
+  order = getOrderByCode(order.order_code) || order;
+  if (order.guild_id !== guild.id) return { synced: false, status: 'guild_mismatch' };
+  db.prepare('UPDATE feedbacks SET product_name=?, updated_at=CURRENT_TIMESTAMP WHERE guild_id=? AND order_code=? AND product_name IS NOT ?')
+    .run(order.product_name, guild.id, order.order_code, order.product_name);
+  const feedbacks = db.prepare('SELECT * FROM feedbacks WHERE guild_id=? AND order_code=?')
+    .all(guild.id, order.order_code);
+  if (!feedbacks.length) return { synced: true, status: 'not_submitted', count: 0 };
+  let synced = 0;
+  for (const feedback of feedbacks) {
+    try {
+      const result = await syncPublishedFeedbackMessage({ client: guild.client, guild, feedback });
+      if (result.synced) synced += 1;
+    } catch (error) {
+      console.warn(`[FEEDBACK-SYNC] ${order.order_code}: ${error.code || 'SYNC_FAILED'}`);
+    }
+  }
+  return { synced: synced === feedbacks.length, status: synced === feedbacks.length ? 'updated' : 'error', count: synced };
 }
 
 export async function publishFeedback({ guild, userId, orderCode, stars, content, actorId = null }) {
