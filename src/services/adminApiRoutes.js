@@ -17,11 +17,11 @@ import { getAiKnowledge, updateAiKnowledge } from './aiKnowledgeService.js';
 import { transitionOrderStatus } from './orderStateMachine.js';
 import { hydrateOrderDiscordCustomer, OrderLinkError, resolveOrderLink } from './orderLinkService.js';
 import { encrypt, decrypt } from '../utils/crypto.js';
-import { sendCompletedFlow, updateOrderLogMessage } from './notificationService.js';
+import { sendCompletedFlow, updateOrderLogMessage, refreshCompletedTicketMessage, inspectOrderPresentation } from './notificationService.js';
 import { getLatestTicketTranscriptMetadata } from './transcriptService.js';
 import { archiveTicketConversation } from './ticketClosureService.js';
 import { recordStaffLog } from './staffLogService.js';
-import { syncPublishedFeedbackMessage } from './feedbackService.js';
+import { syncPublishedFeedbackMessage, syncOrderFeedbackMessages } from './feedbackService.js';
 import { config } from '../config.js';
 import { getAccountSecurity, getWebStaffMfaError, revokeAccountSessions, isWebAccountBanned, rejectBannedWebAccount } from './accountSecurityService.js';
 import {
@@ -550,6 +550,50 @@ export function registerAdminRoutes(app) {
   });
 
   // ==== 3. ORDERS ====
+  const resolvePresentationOrder = async (req) => {
+    const code = String(req.params.code || '').trim().toUpperCase();
+    if (!/^CN_[A-Z0-9_-]{4,40}$/.test(code)) return null;
+    const order = db.prepare('SELECT * FROM orders WHERE order_code=? AND guild_id=?').get(code, config.guildId);
+    if (!order) return null;
+    const client = req.app.locals.discordClient;
+    const guild = client?.guilds?.cache?.get(order.guild_id)
+      || await client?.guilds?.fetch?.(order.guild_id);
+    return { order, guild };
+  };
+  app.get('/api/bot/admin/orders/:code/presentation', requireAdminRole, async (req, res) => {
+    try {
+      const resolved = await resolvePresentationOrder(req);
+      if (!resolved) return errorResponse(res, 404, 'Không tìm thấy đơn trong server hiện tại.');
+      if (!resolved.guild) return errorResponse(res, 503, 'Discord chưa sẵn sàng.');
+      return successResponse(res, await inspectOrderPresentation(resolved));
+    } catch (error) {
+      console.warn(`[ORDER-PRESENTATION] Inspect: ${error.code || 'READ_FAILED'}`);
+      return errorResponse(res, 503, 'Không đọc được trạng thái thẻ Discord.');
+    }
+  });
+  app.post('/api/bot/admin/orders/:code/presentation', requireAdminRole, async (req, res) => {
+    try {
+      const resolved = await resolvePresentationOrder(req);
+      if (!resolved) return errorResponse(res, 404, 'Không tìm thấy đơn trong server hiện tại.');
+      if (!resolved.guild) return errorResponse(res, 503, 'Discord chưa sẵn sàng.');
+      if (!['COMPLETED', 'WARRANTY_OPEN'].includes(resolved.order.status)) {
+        return errorResponse(res, 409, 'Chỉ đồng bộ thẻ cho đơn đã hoàn thành hoặc đang bảo hành.');
+      }
+      const completion = await refreshCompletedTicketMessage(resolved);
+      const feedback = await syncOrderFeedbackMessages(resolved);
+      const current = db.prepare('SELECT * FROM orders WHERE order_code=?').get(resolved.order.order_code);
+      const preservedFields = ['status', 'payment_status', 'total_amount', 'amount_paid', 'expiry_at', 'product_name', 'quantity', 'completed_at', 'feedback_submitted_at'];
+      const commerceUnchanged = preservedFields.every((field) => current[field] === resolved.order[field]);
+      recordStaffLog({ guildId: resolved.guild.id, actorId: req.header('x-user-id'),
+        action: 'ORDER_PRESENTATION_SYNC', relatedOrderCode: current.order_code,
+        detail: `completion=${completion.status}; feedback=${feedback.status}` });
+      return successResponse(res, { completion, feedback, commerceUnchanged });
+    } catch (error) {
+      console.warn(`[ORDER-PRESENTATION] Sync: ${error.code || 'SYNC_FAILED'}`);
+      return errorResponse(res, 503, 'Không đồng bộ được thẻ Discord; dữ liệu đơn vẫn được giữ nguyên.');
+    }
+  });
+
   app.get('/api/bot/admin/order-links/:code', requireAdminRole, async (req, res) => {
     try {
       let order = resolveOrderLink(req.params.code, {

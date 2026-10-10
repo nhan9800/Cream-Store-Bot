@@ -206,6 +206,8 @@ export function initDatabase() {
       completion_message_id TEXT,
       completion_staff_id TEXT,
       completion_support_id TEXT,
+      completion_update_dm_channel_id TEXT,
+      completion_update_dm_message_id TEXT,
       ctv_order_log_channel_id TEXT,
       ctv_order_log_message_id TEXT,
       payment_message_id TEXT,
@@ -1151,6 +1153,8 @@ export function initDatabase() {
   ensureColumn('orders', 'payment_message_id', 'TEXT');
   ensureColumn('orders', 'completion_channel_id', 'TEXT');
   ensureColumn('orders', 'completion_message_id', 'TEXT');
+  ensureColumn('orders', 'completion_update_dm_channel_id', 'TEXT');
+  ensureColumn('orders', 'completion_update_dm_message_id', 'TEXT');
   ensureColumn('orders', 'completion_staff_id', 'TEXT');
   ensureColumn('orders', 'completion_support_id', 'TEXT');
   ensureColumn('orders', 'ctv_order_log_channel_id', 'TEXT');

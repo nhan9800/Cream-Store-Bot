@@ -10,6 +10,9 @@ import {
   updateOrderLogMessage,
 } from '../services/notificationService.js';
 import { scheduleAdminOrderCenterRefresh } from '../services/adminOrderCenterService.js';
+import { syncOrderFeedbackMessages } from '../services/feedbackService.js';
+import { getGuildConfig } from '../services/guildConfigService.js';
+import { assertStaffCapability } from '../utils/permissions.js';
 
 export const data = new SlashCommandBuilder()
   .setName('sua-don')
@@ -25,16 +28,22 @@ export const data = new SlashCommandBuilder()
     .setDescription('Chọn Vĩnh viễn để xóa ngày hết hạn hiện tại của đơn')
     .setRequired(false)
     .addChoices({ name: 'Vĩnh viễn', value: 'permanent' }))
-  .addIntegerOption((o) => o.setName('gia_tien').setDescription('Giá mới').setRequired(false).setMinValue(0));
+  .addIntegerOption((o) => o.setName('gia_tien').setDescription('Giá mới').setRequired(false).setMinValue(0))
+  .addBooleanOption((o) => o.setName('dong_bo').setDescription('Đồng bộ lại thẻ/feedback, không cần đổi dữ liệu đơn').setRequired(false));
 
 export async function execute(interaction) {
   const E = createEmojiResolver(interaction?.guildId);
   await interaction.deferReply({ flags: 64 });
 
   try {
+    const member = await interaction.guild?.members.fetch(interaction.user.id).catch(() => null);
+    if (!assertStaffCapability(member, getGuildConfig(interaction.guildId), 'MANAGE')) {
+      await interaction.editReply(`${E('status_warn')} Chỉ manager mới được sửa hoặc đồng bộ đơn.`);
+      return;
+    }
     const orderCode = interaction.options.getString('ma_don', true).trim().toUpperCase();
     const before = getOrderByCodeRaw(orderCode);
-    if (!before) {
+    if (!before || before.guild_id !== interaction.guildId) {
       await interaction.editReply(`${E('status_warn')} Không tìm thấy mã đơn.`);
       return;
     }
@@ -75,12 +84,13 @@ export async function execute(interaction) {
     }
     if (amount !== null) payload.total_amount = amount;
 
-    if (Object.keys(payload).length === 0) {
+    const hasChanges = Object.keys(payload).length > 0;
+    if (!hasChanges && !interaction.options.getBoolean('dong_bo')) {
       await interaction.editReply(`${E('status_warn')} Bạn chưa nhập trường nào để sửa.`);
       return;
     }
 
-    const after = updateOrderFieldsRaw(orderCode, payload);
+    const after = hasChanges ? updateOrderFieldsRaw(orderCode, payload) : before;
     const syncIssues = [];
     try {
       await updateOrderLogMessage(interaction.guild, after);
@@ -93,13 +103,16 @@ export async function execute(interaction) {
       guild: interaction.guild,
       order: after,
     });
-    if (completionSync.status === 'error') syncIssues.push('thẻ hoàn thành');
+    if (!completionSync.synced && completionSync.status !== 'not_completed') syncIssues.push('thẻ hoàn thành');
+    if (completionSync.dm_synced === false) syncIssues.push('DM cập nhật');
+    const feedbackSync = await syncOrderFeedbackMessages({ guild: interaction.guild, order: after });
+    if (!feedbackSync.synced) syncIssues.push('bài feedback');
     scheduleAdminOrderCenterRefresh(after.guild_id, 250);
 
     insertStaffLogRaw({
       guildId: interaction.guildId,
       actorId: interaction.user.id,
-      action: 'ORDER_EDITED',
+      action: hasChanges ? 'ORDER_EDITED' : 'ORDER_PRESENTATION_SYNC',
       orderCode,
       targetCustomerId: after.customer_id,
       beforeJson: JSON.stringify({
@@ -126,14 +139,20 @@ export async function execute(interaction) {
         ? '\n♾️ Thời hạn mới: **Vĩnh viễn**'
         : '';
     const completionText = completionSync.synced
-      ? '\n🔄 Đã đồng bộ **thẻ hoàn thành/feedback** trong ticket.'
+      ? completionSync.status === 'dm_updated'
+        ? `\n${E('status_check')} Thẻ ticket cũ không thể cập nhật; đã đồng bộ thông tin đơn qua **DM riêng của khách**.`
+        : completionSync.status === 'created'
+          ? `\n${E('status_check')} Đã phục hồi **thẻ hoàn thành** trong ticket.`
+          : `\n${E('status_check')} Đã đồng bộ **thẻ hoàn thành** trong ticket.`
       : ['missing', 'channel_missing', 'missing_staff'].includes(completionSync.status)
         ? '\n⚠️ Dữ liệu đã lưu nhưng không tìm thấy thẻ hoàn thành cũ để sửa.'
         : '';
     const issueText = syncIssues.length
       ? `\n⚠️ Chưa đồng bộ được: **${syncIssues.join(', ')}**. Dữ liệu đơn vẫn đã được lưu.`
       : '';
-    await interaction.editReply(`${E('status_check')} Đã cập nhật đơn \`${after.order_code}\`.${expiryText}${completionText}${issueText}`);
+    const feedbackText = feedbackSync.count > 0 ? `\n${E('status_check')} Đã đồng bộ **bài feedback**, giữ nguyên số sao và nhận xét.` : '';
+    const retryText = syncIssues.length ? `\nThử lại bằng \`/sua-don ma_don:${after.order_code} dong_bo:true\`; nếu vẫn lỗi, kiểm tra quyền bot và DM của khách.` : '';
+    await interaction.editReply(`${E('status_check')} Đã ${hasChanges ? 'cập nhật' : 'đồng bộ'} đơn \`${after.order_code}\`.${expiryText}${completionText}${feedbackText}${issueText}${retryText}`);
   } catch (error) {
     console.error('[ORDER/EDIT] Lỗi:', error);
     await interaction.editReply(`${E('status_cross')} Không thể sửa đơn: ${error.message ?? 'Lỗi không xác định'}`);
