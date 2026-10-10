@@ -7,6 +7,7 @@ The VibeHost supervisor previously retained every dependency stage after `npm ci
 ## Retention and boundaries
 
 - Only direct `.vibehost/dependencies-XXXXXXXX` directories with the supervisor's recognized package manifests and known stage contents are eligible.
+- Recognize the installer's optional `scripts` directory only when it contains the single regular, unlinked `patch-dependency-compat.js` file of at most64KiB. Unknown scripts, linked directories/files and larger files remain protected. This prevents the parser security update from creating permanently skipped dependency snapshots.
 - Keep the two newest stages, plus the newest stage containing rollback modules if newer failed installs occupy those two slots.
 - Preserve any stage younger than24hours, the current install stage and stages referenced by live `node_modules` symlinks. Skip unfamiliar content, external/symbolic stage roots and filesystem mount boundaries.
 - Verify current native dependencies before applying. Recheck revision/path/inode/manifest identity, rename each candidate within the same state directory and recheck the deletion target before removing it. Symlink destinations are never traversed.
@@ -15,4 +16,4 @@ The VibeHost supervisor previously retained every dependency stage after `npm ci
 
 Console emits aggregate `[hosting-cleanup] plan`, `removed` and `result` records with stage names, allocated bytes, retained/deleted counts and reclaimed bytes. No environment contents or customer records are printed. Hosting quota percentage must be checked in the actual panel after it refreshes; allocated file bytes are not an assertion about the provider's quota accounting.
 
-On each managed restart, old stages are bounded again, so subsequent dependency updates retain recovery copies without accumulating every prior installation. Actual cleanup/deployment evidence is kept in the project's `.project-memory/ACTIVE.md`.
+On each managed restart and at most once per hour while the bots run, old stages are bounded again. The hourly check holds the same exclusive supervisor lock and does not stop the bots, allowing recent stages to age out after24hours without requiring another deployment. Recovery retention and runtime guards remain unchanged. Actual cleanup/deployment evidence is kept in the project's `.project-memory/ACTIVE.md`.

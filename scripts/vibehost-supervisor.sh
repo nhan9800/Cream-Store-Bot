@@ -18,6 +18,7 @@ SUPERVISOR_EXCLUSIVE=false
 DEPENDENCY_STAGE=""
 RUNTIME_CHECK="${STATE_DIR}/check-runtime-dependencies.mjs"
 SUPERVISOR_HASH=""
+LAST_DEPENDENCY_CLEANUP_SECONDS=0
 
 export NODE_ENV="${NODE_ENV:-production}"
 export GIT_TERMINAL_PROMPT=0
@@ -119,9 +120,19 @@ runtime_valid() {
 cleanup_old_dependency_stages() {
   # No installer/other managed supervisor can race cleanup while this flock is held.
   [[ "$SUPERVISOR_EXCLUSIVE" == true && -f scripts/cleanup-dependency-stages.mjs ]] || return 0
+  LAST_DEPENDENCY_CLEANUP_SECONDS=$SECONDS
   timeout --foreground 300s node scripts/cleanup-dependency-stages.mjs \
     --root "$APP_ROOT" --active-stage "$DEPENDENCY_STAGE" --apply 9>&- \
     || log 'Dependency cleanup skipped/stopped; protected data and runtime retained'
+}
+
+cleanup_dependency_stages_if_due() {
+  # Let recently failed stages age out without needing another deploy/restart.
+  # The running bots keep their live modules; apply still validates all guards.
+  if [[ "$SUPERVISOR_EXCLUSIVE" == true ]] && (( SECONDS - LAST_DEPENDENCY_CLEANUP_SECONDS >= 3600 )); then
+    cleanup_old_dependency_stages
+  fi
+  return 0
 }
 
 install_dependencies_for_transition() {
@@ -446,6 +457,7 @@ while [[ "$STOPPING" == false ]]; do
         break
       fi
     fi
+    cleanup_dependency_stages_if_due
   done
 
   if [[ "$STOPPING" == true ]]; then

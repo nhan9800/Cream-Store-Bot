@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const STAGE_NAME = /^dependencies-[A-Za-z0-9]{8}$/;
-const ALLOWED = new Set(['package.json', 'package-lock.json', 'node_modules', 'previous-node_modules', 'rejected-node_modules']);
+const ALLOWED = new Set(['package.json', 'package-lock.json', 'node_modules', 'previous-node_modules', 'rejected-node_modules', 'scripts']);
 const MIN_AGE = 24 * 60 * 60 * 1000;
 function inside(parent, child) {
   const relative = path.relative(parent, child);
@@ -28,6 +28,17 @@ async function walk(target, context, visit, seen = new Set()) {
 async function shape(stage) {
   const names = await fs.readdir(stage);
   if (!names.includes('package.json') || !names.includes('package-lock.json') || names.some(name => !ALLOWED.has(name))) return null;
+  // New installers copy this one compatibility script into the isolated stage.
+  // Preserve stages containing other scripts or linked paths as unfamiliar data.
+  if (names.includes('scripts')) {
+    const directory = path.join(stage, 'scripts');
+    const stat = await fs.lstat(directory);
+    if (!stat.isDirectory() || stat.isSymbolicLink()) return null;
+    const scripts = await fs.readdir(directory);
+    if (scripts.length !== 1 || scripts[0] !== 'patch-dependency-compat.js') return null;
+    const script = await fs.lstat(path.join(directory, scripts[0]));
+    if (!script.isFile() || script.isSymbolicLink() || script.size > 64 * 1024) return null;
+  }
   for (const name of ['package.json', 'package-lock.json']) {
     const stat = await fs.lstat(path.join(stage, name));
     if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 2 * 1024 * 1024) return null;

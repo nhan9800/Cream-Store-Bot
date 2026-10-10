@@ -99,6 +99,40 @@ describe('bounded hosting dependency cleanup', () => {
     for (let id = 1; id <= 4; id++) await stage(id, 0.25);
     expect((await apply()).removed).toEqual([]);
   });
+  it('recognizes old installer stages containing only the bounded compatibility script', async () => {
+    const old = await stage(1);
+    await fs.mkdir(path.join(old, 'scripts'));
+    await fs.writeFile(path.join(old, 'scripts/patch-dependency-compat.js'), '/* installer patch fixture */');
+    await fs.utimes(old, (now - 9 * day) / 1000, (now - 9 * day) / 1000);
+    await stage(2); await stage(3);
+    const report = await apply();
+    expect(report.removed).toContain(path.basename(old));
+    expect(report.skipped).toBe(0);
+  });
+  it.each(['unexpected', 'oversized', 'linked-script', 'linked-directory'])('preserves unfamiliar stage scripts: %s', async (kind) => {
+    const old = await stage(1);
+    const directory = path.join(old, 'scripts');
+    if (kind === 'linked-directory') {
+      await fs.symlink(outside, directory, 'junction');
+    } else {
+      await fs.mkdir(directory);
+      const script = path.join(directory, 'patch-dependency-compat.js');
+      if (kind === 'linked-script') {
+        // Windows junctions need no administrator permission; Linux CI also
+        // verifies the actual file-symlink case used by hosting.
+        await fs.symlink(process.platform === 'win32' ? outside : path.join(outside, 'protected'), script, process.platform === 'win32' ? 'junction' : 'file');
+      }
+      else await fs.writeFile(script, kind === 'oversized' ? Buffer.alloc(64 * 1024 + 1) : '/* fixture */');
+      if (kind === 'unexpected') await fs.writeFile(path.join(directory, 'keep.js'), 'preserve');
+    }
+    await fs.utimes(old, (now - 9 * day) / 1000, (now - 9 * day) / 1000);
+    await stage(2); await stage(3);
+    const report = await apply();
+    expect(report.removed).toEqual([]);
+    expect(report.skipped).toBe(1);
+    expect(await exists(old)).toBe(true);
+    expect(await fs.readFile(path.join(outside, 'protected'), 'utf8')).toBe('outside-keep');
+  });
   it('rejects a state-directory symlink outside the application', async () => {
     await fs.rm(state, { recursive: true }); await fs.symlink(outside, state, 'junction');
     await expect(apply()).rejects.toThrow('INVALID_STATE_DIRECTORY');
