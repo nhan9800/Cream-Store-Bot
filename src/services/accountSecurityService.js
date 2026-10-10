@@ -49,10 +49,9 @@ export function presentWebUser(user) {
     role: user.role, created_at: user.created_at, updated_at: user.updated_at,
     session_version: security.session_version, email_verified: Boolean(security.email_verified_at),
     mfa_enabled: Boolean(security.mfa_secret),
-    // Staff and Admin accounts must enroll Authenticator before using any
-    // privileged commerce or administration API. Keep this flag explicit so
-    // the website can route the user to the security setup screen.
-    mfa_required: isWebStaffRole(user.role),
+    // Owner opted out of mandatory Admin enrollment on 2026-10-10.
+    // Staff must enroll; an Admin who enabled MFA keeps step-up protection.
+    mfa_required: user.role === 'staff' || (isWebStaffRole(user.role) && Boolean(security.mfa_secret)),
     account_banned: isWebAccountBanned(user.id),
   };
 }
@@ -69,12 +68,13 @@ export function getWebStaffMfaError(userId, proof, now = Date.now()) {
   const user = db.prepare('SELECT id, role FROM web_users WHERE id = ? LIMIT 1').get(String(userId || ''));
   if (!user || !isWebStaffRole(user.role)) return null;
   const security = getAccountSecurity(user.id);
+  if (user.role === 'admin' && !security?.mfa_secret) return null;
   if (!security?.mfa_secret) {
     return {
       status: 403,
       code: 'MFA_ENROLLMENT_REQUIRED',
       mfa_required: true,
-      error: 'Tài khoản Admin/Staff phải bật Authenticator trước khi sử dụng khu vực vận hành.',
+      error: 'Tài khoản Staff phải bật Authenticator trước khi sử dụng khu vực vận hành.',
     };
   }
   if (!verifyAdminStepUp(proof, user.id, now)) {
