@@ -6,6 +6,7 @@ import { isManager } from '../utils/permissions.js';
 import { config } from '../config.js';
 import { getFeedbackAutoCloseState, scheduleOrderTicketAutoClose } from './ticketService.js';
 import { db } from '../database/db.js';
+import { normalizeMessagePresentation } from '../utils/discordEmojiBoundary.js';
 
 export function scheduleFeedbackTicketAutoClose(order) {
   const ticket = scheduleOrderTicketAutoClose(order, config.autoCloseCompletedTicketMinutes);
@@ -80,6 +81,35 @@ export async function syncOrderFeedbackMessages({ guild, order }) {
     }
   }
   return { synced: synced === feedbacks.length, status: synced === feedbacks.length ? 'updated' : 'error', count: synced };
+}
+
+export async function inspectOrderFeedbackMessages({ guild, order }) {
+  if (!guild || order?.guild_id !== guild.id) return { count: 0, verified: 0 };
+  const feedbacks = db.prepare('SELECT * FROM feedbacks WHERE guild_id=? AND order_code=?').all(guild.id, order.order_code);
+  let verified = 0;
+  const texts = (components) => {
+    const result = [];
+    const visit = (node) => {
+      node = node?.toJSON?.() || node;
+      if (node?.type === 10) result.push(node.content);
+      for (const child of node?.components || []) visit(child);
+    };
+    for (const component of components || []) visit(component);
+    return result;
+  };
+  for (const feedback of feedbacks) {
+    try {
+      const channel = await guild.channels.fetch(feedback.feedback_channel_id);
+      const message = await channel?.messages?.fetch(feedback.feedback_message_id);
+      if (!message || message.author?.id !== guild.client.user?.id) continue;
+      const { container } = buildFeedbackV2({ member: { id: feedback.customer_id },
+        order: { ...order, product_name: feedback.product_name || order.product_name },
+        stars: feedback.stars, content: feedback.content });
+      const expected = normalizeMessagePresentation({ components: [container] }, guild.id);
+      if (JSON.stringify(texts(message.components)) === JSON.stringify(texts(expected.components))) verified += 1;
+    } catch { /* Report failed reads as unverified; never recreate a public review. */ }
+  }
+  return { count: feedbacks.length, verified };
 }
 
 export async function publishFeedback({ guild, userId, orderCode, stars, content, actorId = null }) {
