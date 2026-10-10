@@ -16,4 +16,4 @@ The VibeHost supervisor previously retained every dependency stage after `npm ci
 
 Console emits aggregate `[hosting-cleanup] plan`, `removed` and `result` records with stage names, allocated bytes, retained/deleted counts and reclaimed bytes. No environment contents or customer records are printed. Hosting quota percentage must be checked in the actual panel after it refreshes; allocated file bytes are not an assertion about the provider's quota accounting.
 
-On each managed restart, old stages are bounded again, so subsequent dependency updates retain recovery copies without accumulating every prior installation. Actual cleanup/deployment evidence is kept in the project's `.project-memory/ACTIVE.md`.
+On each managed restart and at most once per hour while the bots run, old stages are bounded again. The hourly check holds the same exclusive supervisor lock and does not stop the bots, allowing recent stages to age out after24hours without requiring another deployment. Recovery retention and runtime guards remain unchanged. Actual cleanup/deployment evidence is kept in the project's `.project-memory/ACTIVE.md`.

@@ -22,6 +22,26 @@ function setup() {
   return dir;
 }
 describe('supervisor dependency recovery', () => {
+  it('periodic cleanup is throttled and requires the exclusive supervisor lock', () => {
+    const dir = setup();
+    fs.writeFileSync(path.join(dir, 'scripts', 'cleanup-dependency-stages.mjs'), '// fixture');
+    const result = spawnSync(bash, ['-c', [
+      'export VIBEHOST_APP_ROOT="$PWD"',
+      'source functions.sh',
+      'timeout() { printf "%s\\n" "$*" >> cleanup-calls; return 0; }',
+      'LAST_DEPENDENCY_CLEANUP_SECONDS=$((SECONDS - 3600))',
+      'cleanup_dependency_stages_if_due',
+      '[[ ! -f cleanup-calls ]] || exit 21',
+      'SUPERVISOR_EXCLUSIVE=true',
+      'cleanup_dependency_stages_if_due',
+      'cleanup_dependency_stages_if_due',
+    ].join('; ')], { cwd: dir, encoding: 'utf8' });
+    expect(result.status).toBe(0);
+    const calls = fs.readFileSync(path.join(dir, 'cleanup-calls'), 'utf8').trim().split('\n');
+    expect(calls).toHaveLength(1);
+    expect(calls[0]).toContain('cleanup-dependency-stages.mjs');
+    expect(calls[0]).toContain('--apply');
+  });
   it('a failed staged install leaves the working directory untouched', () => {
     const dir = setup();
     const result = spawnSync(bash, ['-c', 'export VIBEHOST_APP_ROOT="$PWD"; source functions.sh; timeout() { mkdir -p node_modules; return 23; }; install_dependencies'], { cwd: dir, encoding: 'utf8' });
