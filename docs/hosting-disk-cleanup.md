@@ -7,6 +7,7 @@ The VibeHost supervisor previously retained every dependency stage after `npm ci
 ## Retention and boundaries
 
 - Only direct `.vibehost/dependencies-XXXXXXXX` directories with the supervisor's recognized package manifests and known stage contents are eligible.
+- Recognize the installer's optional `scripts` directory only when it contains the single regular, unlinked `patch-dependency-compat.js` file of at most64KiB. Unknown scripts, linked directories/files and larger files remain protected. This prevents the parser security update from creating permanently skipped dependency snapshots.
 - Keep the two newest stages, plus the newest stage containing rollback modules if newer failed installs occupy those two slots.
 - Preserve any stage younger than24hours, the current install stage and stages referenced by live `node_modules` symlinks. Skip unfamiliar content, external/symbolic stage roots and filesystem mount boundaries.
 - Verify current native dependencies before applying. Recheck revision/path/inode/manifest identity, rename each candidate within the same state directory and recheck the deletion target before removing it. Symlink destinations are never traversed.
