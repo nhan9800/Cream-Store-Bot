@@ -892,6 +892,17 @@ export function initDatabase() {
       updated_at TEXT NOT NULL
     );
     CREATE INDEX IF NOT EXISTS idx_fulfillment_retry ON order_fulfillments(status, retry_at);
+    CREATE TABLE IF NOT EXISTS order_progress_events (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      order_code TEXT NOT NULL REFERENCES orders(order_code) ON DELETE CASCADE,
+      stage TEXT NOT NULL,
+      note TEXT NOT NULL DEFAULT '',
+      actor_id TEXT NOT NULL,
+      request_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      UNIQUE(order_code, request_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_order_progress ON order_progress_events(order_code, id);
     CREATE TABLE IF NOT EXISTS customer_role_sync_jobs (
       guild_id TEXT NOT NULL,
       customer_id TEXT NOT NULL,
@@ -1150,6 +1161,7 @@ export function initDatabase() {
   ensureColumn('orders', 'payment_qr_url', 'TEXT');
   ensureColumn('orders', 'payment_qr_text', 'TEXT');
   ensureColumn('orders', 'payment_status', "TEXT NOT NULL DEFAULT 'UNPAID'");
+  ensureColumn('orders', 'fulfillment_mode', "TEXT NOT NULL DEFAULT 'LEGACY'");
   ensureColumn('orders', 'payment_message_id', 'TEXT');
   ensureColumn('orders', 'completion_channel_id', 'TEXT');
   ensureColumn('orders', 'completion_message_id', 'TEXT');

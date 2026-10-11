@@ -2,7 +2,7 @@ import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { PermissionFlagsBits, SlashCommandBuilder } from 'discord.js';
 import { config } from '../config.js';
 import { getGuildConfig } from '../services/guildConfigService.js';
-import { getOrderByCode, markOrderCompleted, saveDelivery, ensureOrderExpiry } from '../services/orderService.js';
+import { getOrderByCode, markOrderCompleted, saveDelivery } from '../services/orderService.js';
 import { sendCompletedTicketFlow, updateOrderLogMessage } from '../services/notificationService.js';
 import { applyCustomerRoles } from '../services/roleService.js';
 import { emitStaffLog } from '../services/staffLogService.js';
@@ -54,7 +54,7 @@ export async function execute(interaction) {
   const sendDirect = interaction.options.getBoolean('gui_truc_tiep') ?? true;
 
   let order = getOrderByCode(orderCode);
-  if (!order) {
+  if (!order || order.guild_id !== interaction.guildId) {
     await interaction.editReply({ content: `${E('status_warn')} Không tìm thấy mã đơn này.`, ephemeral: true });
     return;
   }
@@ -72,9 +72,9 @@ export async function execute(interaction) {
 
   if (isSubProduct) {
     if (!credentialEmail || credentialEmail.trim() === '') {
-      await interaction.editReply({ 
-        content: `${E('status_warn')} Đơn hàng **${order.product_name}** bắt buộc phải nhập \`gmail\` để hệ thống lưu lại và cảnh báo hết hạn sau này. Vui lòng chạy lại lệnh và điền tham số Gmail!`, 
-        ephemeral: true 
+      await interaction.editReply({
+        content: `${E('status_warn')} Đơn hàng **${order.product_name}** bắt buộc phải nhập \`gmail\` để hệ thống lưu lại và cảnh báo hết hạn sau này. Vui lòng chạy lại lệnh và điền tham số Gmail!`,
+        ephemeral: true
       });
       return;
     }
@@ -89,24 +89,13 @@ export async function execute(interaction) {
   }
 
   const completedDuringDelivery = order.status !== 'COMPLETED';
-  if (order.status !== 'COMPLETED') {
-    if (order.total_amount > 0 && !['PAID', 'FREE'].includes(order.payment_status)) {
-      await interaction.editReply({ content: `${E('status_warn')} Đơn chưa thanh toán xong nên bot chưa thể tự đồng bộ sang hoàn thành khi giao hàng.`, ephemeral: true });
-      return;
-    }
-    order = markOrderCompleted(order.order_code, interaction.user.id, config.feedbackTimeoutHours) ?? order;
-    await updateOrderLogMessage(interaction.guild, order);
-    
-    // Áp dụng role khách hàng và gửi log công khai (lịch sử mua hàng)
-    await applyCustomerRoles(interaction.guild, order.customer_id);
-    if (guildConfig?.public_order_log_channel_id) {
-      const publicLogChannel = await interaction.guild.channels.fetch(guildConfig.public_order_log_channel_id).catch(() => null);
-      if (publicLogChannel?.isTextBased()) {
-        await publicLogChannel.send(buildPublicOrderLogV2(order)).catch(() => null);
-      }
-    }
-    
-    await emitStaffLog(interaction.client, { guildId: interaction.guildId, actorId: interaction.user.id, targetId: order.customer_id, action: 'ORDER_COMPLETE_AUTO', detail: 'Tự đồng bộ hoàn thành trong /giaohang', relatedOrderCode: order.order_code });
+  if (['CANCELLED', 'REFUNDED', 'FAILED'].includes(order.status)) {
+    await interaction.editReply({ content: `${E('status_warn')} Đơn đã dừng xử lý nên không thể giao hàng.`, ephemeral: true });
+    return;
+  }
+  if (order.status !== 'COMPLETED' && order.total_amount > 0 && !['PAID', 'FREE'].includes(order.payment_status)) {
+    await interaction.editReply({ content: `${E('status_warn')} Đơn chưa thanh toán xong nên chưa thể giao hàng.`, ephemeral: true });
+    return;
   }
 
   const customer = await interaction.client.users.fetch(order.customer_id).catch(() => null);
@@ -146,6 +135,38 @@ export async function execute(interaction) {
     storedOrder = persist(dmMessage.id);
   }
 
+  if (order.status !== 'COMPLETED') {
+    if (order.total_amount > 0 && !['PAID', 'FREE'].includes(order.payment_status)) {
+      await interaction.editReply({ content: `${E('status_warn')} Đơn chưa thanh toán xong nên bot chưa thể tự đồng bộ sang hoàn thành khi giao hàng.`, ephemeral: true });
+      return;
+    }
+    order = markOrderCompleted(order.order_code, interaction.user.id, config.feedbackTimeoutHours) ?? order;
+    await updateOrderLogMessage(interaction.guild, order);
+
+    // Áp dụng role khách hàng và gửi log công khai (lịch sử mua hàng)
+    await applyCustomerRoles(interaction.guild, order.customer_id);
+    if (guildConfig?.public_order_log_channel_id) {
+      const publicLogChannel = await interaction.guild.channels.fetch(guildConfig.public_order_log_channel_id).catch(() => null);
+      if (publicLogChannel?.isTextBased()) {
+        await publicLogChannel.send(buildPublicOrderLogV2(order)).catch(() => null);
+      }
+    }
+
+    await emitStaffLog(interaction.client, { guildId: interaction.guildId, actorId: interaction.user.id, targetId: order.customer_id, action: 'ORDER_COMPLETE_AUTO', detail: 'Tự đồng bộ hoàn thành trong /giaohang', relatedOrderCode: order.order_code });
+  }
+
+  storedOrder = getOrderByCode(order.order_code) || storedOrder;
+  // Completion starts the service duration; refresh the same receipt with that expiry.
+  if (completedDuringDelivery && storedOrder.expiry_at && dmMessage?.edit) {
+    const payload = Boolean(credentialEmail && credentialPassword) && sendDirect
+      ? { embeds: buildDeliveryCredentialEmbeds(storedOrder), components: buildDeliveryLoginComponents(storedOrder) }
+      : (() => {
+        const { container, flags } = buildDeliveryNoticeV2(storedOrder);
+        return { flags, components: shouldShowClaimButton ? [container, ...buildDeliveryClaimComponents(order.order_code)] : [container] };
+      })();
+    await dmMessage.edit(payload).catch(() => null);
+  }
+
   let subscriptionRecord = null;
   let subscriptionSyncError = null;
   if (trackedSubscriptionService) {
@@ -162,7 +183,7 @@ export async function execute(interaction) {
       console.error(`[SUBSCRIPTION-SYNC] ${order.order_code}: ${error.message}`);
     }
   }
-  
+
   const hub = getCenarHub();
   if (hub) {
     await hub.deliverOrder(order.order_code, {

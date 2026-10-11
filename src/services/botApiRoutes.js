@@ -58,6 +58,7 @@ import {
 import { getPriceBoardProducts, PRICE_BOARD_VERSION } from './autoSetupPriceBoardService.js';
 import { scheduleFeedbackTicketAutoClose } from './feedbackService.js';
 import { buildCustomerOrderView } from './orderCustomerView.js';
+import { getOrderProgress } from './orderProgressService.js';
 import { readLatestTicketTranscript, readTranscriptArchive } from './transcriptService.js';
 import {
   getPublicYoutubeWarrantyClaim,
@@ -814,6 +815,7 @@ export function registerBotApiRoutes(app) {
             data: buildCustomerOrderView(order, {
                 includeDelivery: canAccess,
                 includeOwnership: canAccess,
+                ...(canAccess ? { progress: getOrderProgress(order) } : {}),
             }),
         });
     });
@@ -1595,7 +1597,10 @@ export function registerBotApiRoutes(app) {
                 db.prepare(`INSERT INTO checkout_requests
                     (customer_id, request_id, request_hash, order_code, created_at)
                     VALUES (?, ?, ?, ?, ?)`).run(customerId, requestId, requestHash, newOrderCode, nowIso());
-                return { order: created, reused: false };
+                // Website purchases wait for staff in their live ticket.
+                // Reused checkout requests preserve their historical mode.
+                db.prepare("UPDATE orders SET fulfillment_mode='MANUAL' WHERE order_code=?").run(created.order_code);
+                return { order: getOrderByCode(created.order_code), reused: false };
             });
             const created = createOrReuseOrder.immediate();
             order = created.order;
