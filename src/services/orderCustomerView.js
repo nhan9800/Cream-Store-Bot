@@ -47,7 +47,7 @@ function deliveryFor(order) {
  * metadata and encrypted credentials, so they must never be spread into an API
  * response.
  */
-export function buildCustomerOrderView(order, { includeDelivery = false, includeOwnership = false } = {}) {
+export function buildCustomerOrderView(order, { includeDelivery = false, includeOwnership = false, progress } = {}) {
   const view = {
     order_code: clean(order?.order_code, 48),
     ...(includeOwnership ? {
@@ -75,6 +75,7 @@ export function buildCustomerOrderView(order, { includeDelivery = false, include
     discord_original_price: Number(order?.discord_original_price) || null,
     discord_nitro_eligible: Number(order?.discord_nitro_eligible) === 1,
     ...(includeDelivery ? { delivered_account: deliveryFor(order) } : {}),
+    ...(includeOwnership && progress ? { order_progress: progress } : {}),
   };
   return view;
 }

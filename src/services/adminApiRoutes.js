@@ -15,6 +15,7 @@ import { createCoupon, listCoupons, deactivateCoupon } from './couponService.js'
 import * as subService from './subscriptionService.js';
 import { getAiKnowledge, updateAiKnowledge } from './aiKnowledgeService.js';
 import { transitionOrderStatus } from './orderStateMachine.js';
+import { getOrderProgress, updateOrderProgress, OrderProgressError } from './orderProgressService.js';
 import { hydrateOrderDiscordCustomer, OrderLinkError, resolveOrderLink } from './orderLinkService.js';
 import { encrypt, decrypt } from '../utils/crypto.js';
 import { sendCompletedFlow, updateOrderLogMessage, refreshCompletedTicketMessage, inspectOrderPresentation } from './notificationService.js';
@@ -628,6 +629,34 @@ export function registerAdminRoutes(app) {
     }
   });
 
+  app.get('/api/bot/admin/orders/:code/progress', requireAdminRole, (req, res) => {
+    try {
+      const order = db.prepare('SELECT * FROM orders WHERE order_code=? AND guild_id=?')
+        .get(String(req.params.code || '').toUpperCase(), config.guildId);
+      if (!order) return errorResponse(res, 404, 'Không tìm thấy đơn trong shop hiện tại.');
+      return successResponse(res, { code: order.order_code, productName: order.product_name,
+        status: order.status, paymentStatus: order.payment_status, progress: getOrderProgress(order) });
+    } catch (error) {
+      console.warn('[ORDER-PROGRESS] Read failed:', error.code || error.name);
+      return errorResponse(res, 503, 'Chưa đọc được tiến độ. Hãy thử lại.');
+    }
+  });
+  app.put('/api/bot/admin/orders/:code/progress', requireAdminRole, (req, res) => {
+    try {
+      const code = String(req.params.code || '').toUpperCase();
+      const { stage, note, requestId, expectedVersion } = req.body || {};
+      const result = updateOrderProgress({ stage, note, requestId, expectedVersion,
+        orderCode: code, guildId: config.guildId, actorId: req.header('x-user-id') });
+      if (!result.duplicate) recordStaffLog({ guildId: config.guildId, actorId: req.header('x-user-id'),
+        action: 'ORDER_PROGRESS_UPDATE', relatedOrderCode: code, detail: `stage=${result.progress.stage}` });
+      return successResponse(res, result);
+    } catch (error) {
+      if (error instanceof OrderProgressError) return errorResponse(res, error.status, error.message);
+      console.warn('[ORDER-PROGRESS] Update failed:', error.code || error.name);
+      return errorResponse(res, 503, 'Chưa lưu được tiến độ. Hãy thử lại.');
+    }
+  });
+
   app.put('/api/bot/admin/orders/:code/status', requireAdminRole, async (req, res) => {
     try {
       const { status } = req.body;
@@ -1213,10 +1242,15 @@ const fetchWithTimeout = (promise, ms) => {
             ? (t.ticket_type === 'ORDER' ? 'WEBSITE_ORDER' : 'WEBSITE_AI')
             : (['ORDER', 'WARRANTY'].includes(t.ticket_type) ? 'DISCORD_ORDER' : 'DISCORD_SUPPORT'));
         const transcript = latestTranscript.get(t.id) || null;
+        const orderCodes = db.prepare(`SELECT order_code FROM orders
+          WHERE guild_id=? AND customer_id=? AND (ticket_id=? OR order_code=?) ORDER BY created_at DESC LIMIT 50`)
+          .all(t.guild_id, t.customer_id, t.id, t.related_order_code || '').map(o => o.order_code);
 
         return {
           ...t,
           customer_name: name,
+          order_codes: orderCodes,
+          related_order_code: t.related_order_code || orderCodes[0] || null,
           customer_avatar: avatar,
           support_source: supportSource,
           channel_connected: /^\d{15,22}$/.test(String(t.channel_id || '')),

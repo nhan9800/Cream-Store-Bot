@@ -342,9 +342,10 @@ describe('payment and fulfillment reliability', () => {
       const delivered = await deliverPaidOrder({
         users: { fetch: vi.fn().mockResolvedValue({ createDM: vi.fn().mockResolvedValue({ id: 'journey-dm', send }) }) },
       }, first.data.order_code);
-      expect(delivered.delivered).toBe(true);
-      expect(send).toHaveBeenCalledOnce();
-      expect(getOrderByCode(first.data.order_code).status).toBe('COMPLETED');
+      expect(delivered.delivered).toBe(false);
+      expect(send).not.toHaveBeenCalled();
+      expect(getOrderByCode(first.data.order_code)).toMatchObject({ status: 'PROCESSING', fulfillment_mode: 'MANUAL' });
+      expect(db.prepare("SELECT COUNT(*) AS total FROM account_stock WHERE status='SOLD'").get().total).toBe(0);
 
       db.prepare(`INSERT INTO web_users (id, email, display_name, role)
         VALUES ('revoked-staff', 'revoked@example.com', 'Revoked', 'member')`).run();
