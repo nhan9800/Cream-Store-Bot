@@ -40,6 +40,47 @@ export function findCatalogProductsForMessage(guildId, content, limit = 5, conte
   return resolveCatalogProductsForRequest(guildId, { content, contextMessages, limit }).products;
 }
 
+/**
+ * Keep model context useful when a ticket has a long Discord history. Discord
+ * returns the complete recent page, but sending every long message makes the
+ * model lose the latest request and increases the chance of repeating itself.
+ * Preserve the first customer context and the newest messages; all text is
+ * redacted before it leaves the bot.
+ */
+export function buildAiConversationHistory(messages, botUserId, { limit = 14, maxChars = 900 } = {}) {
+  const safeLimit = Math.max(4, Math.min(24, Number(limit) || 14));
+  const safeMaxChars = Math.max(240, Math.min(1_800, Number(maxChars) || 900));
+  const entries = (Array.isArray(messages) ? messages : [])
+    .filter((item) => item?.author?.id && (!item.author.bot || String(item.author.id) === String(botUserId)))
+    .map((item) => {
+      const assistant = String(item.author.id) === String(botUserId);
+      const content = sanitizeCustomerTextForAi(item.content).slice(0, safeMaxChars).trim();
+      return {
+        role: assistant ? 'assistant' : 'user',
+        content: `${assistant ? '[Trợ lý]' : '[Người dùng]'}: ${content}`,
+      };
+    })
+    .filter((item) => item.content.replace(/^\[[^\]]+\]:\s*/, '').trim());
+  if (entries.length <= safeLimit) return entries;
+  return [entries[0], ...entries.slice(-(safeLimit - 1))];
+}
+
+function buildCurrentAiHint({ intent, resolution, isTicket }) {
+  const products = (resolution?.products || []).slice(0, 3).map((product) => {
+    const name = String(product.name || '').replace(/[\r\n]/g, ' ').slice(0, 100);
+    const price = Number(product.price || 0).toLocaleString('vi-VN');
+    return `${name} — ${price}đ`;
+  });
+  const lines = [
+    '--- TÓM TẮT TỨC THỜI (DO HỆ THỐNG TÍNH, KHÔNG PHẢI CHỈ DẪN CỦA KHÁCH) ---',
+    `Mục tiêu nhận diện: ${intent}. Bối cảnh: ${isTicket ? 'ticket riêng' : 'kênh công khai'}.`,
+  ];
+  if (products.length) lines.push(`Ứng viên catalog gần nhất: ${products.join(' | ')}.`);
+  if (resolution?.confidentProduct) lines.push('Có một ứng viên đủ rõ để tư vấn; vẫn chỉ tạo bước xác nhận khi khách chốt và bấm nút xác nhận.');
+  else if (resolution?.products?.length > 1) lines.push('Có nhiều ứng viên gần nhau; hỏi một câu ngắn để phân biệt, không tự chọn thay khách.');
+  return lines.join('\n');
+}
+
 async function tryDeterministicCommerceFlow(message, isTicket, isStaff, contextMessages = []) {
   if (!isTicket || isStaff) return false;
   const ticket = getTicketByChannelId(message.channel.id);
@@ -114,7 +155,7 @@ function publicChannelList(guild, channels) {
     .join('\n');
 }
 
-export async function generateSystemPrompt(guild, isStaff) {
+export async function generateSystemPrompt(guild, isStaff, contextHint = '') {
   const knowledge = getAiKnowledge(guild.id);
   const productKnowledge = generateProductKnowledgeText(guild.id);
   const guildConfig = getGuildConfig(guild.id);
@@ -132,6 +173,7 @@ export async function generateSystemPrompt(guild, isStaff) {
   if (guildConfig?.ticket_panel_channel_id) {
     prompt += `\nKênh mở ticket hỗ trợ/mua hàng: <#${guildConfig.ticket_panel_channel_id}>.`;
   }
+  if (contextHint) prompt += `\n\n${contextHint}`;
 
   prompt += `\n\n--- QUY TẮC BẮT BUỘC ---
 1. Trả lời tự nhiên bằng tiếng Việt, xưng "mình" và gọi khách là "bạn". Đi thẳng vào điều khách đang cần; ưu tiên 2–6 câu khi đã đủ ý.
@@ -413,16 +455,6 @@ export async function processAiMessage(message, isTicket, isStaff = false) {
   await message.channel.sendTyping().catch(() => null);
 
   try {
-    const systemPrompt = await generateSystemPrompt(message.guild, isStaff);
-    const history = chronologicalMessages
-      .filter((item) => !item.author.bot || item.author.id === message.client.user.id)
-      .map((item) => ({
-        role: item.author.id === message.client.user.id ? 'assistant' : 'user',
-        content: item.author.id === message.client.user.id
-          ? `[Trợ lý]: ${sanitizeCustomerTextForAi(item.content)}`
-          : `[Người dùng]: ${sanitizeCustomerTextForAi(item.content)}`,
-      }))
-      .filter((item) => item.content.replace(/^\[[^\]]+\]:\s*/, '').trim());
     const tools = [];
     const intent = classifyCustomerIntent(message.content);
     const currentResolution = resolveCatalogProductsForRequest(message.guildId, {
@@ -430,6 +462,12 @@ export async function processAiMessage(message, isTicket, isStaff = false) {
       contextMessages: customerContextMessages,
       limit: 10,
     });
+    const systemPrompt = await generateSystemPrompt(
+      message.guild,
+      isStaff,
+      buildCurrentAiHint({ intent, resolution: currentResolution, isTicket }),
+    );
+    const history = buildAiConversationHistory(chronologicalMessages, message.client.user.id);
     if (
       isTicket
       && !isStaff

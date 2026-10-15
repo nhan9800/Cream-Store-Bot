@@ -82,6 +82,21 @@ export function extractRequestedDuration(content) {
   return { days: null, months: null };
 }
 
+function extractRequestedDurations(content) {
+  const text = normalizeCommerceText(content)
+    .replace(/\b(?:bh|bao hanh)\s+(?:trong\s+)?\d{1,3}\s*(?:ngay|day|days)\b/g, ' ');
+  const values = [];
+  for (const match of text.matchAll(/\b(\d{1,3})\s*(ngay|day|days|thang|month|months|nam|year|years)\b/g)) {
+    const amount = Number(match[1]);
+    const unit = match[2];
+    if (!Number.isFinite(amount)) continue;
+    if (/^(?:ngay|day|days)$/.test(unit)) values.push(`d:${amount}`);
+    else if (/^(?:nam|year|years)$/.test(unit)) values.push(`m:${amount * 12}`);
+    else values.push(`m:${amount}`);
+  }
+  return [...new Set(values)];
+}
+
 export function isContextualPurchaseConfirmation(content) {
   const text = normalizeCommerceText(content);
   return /^(?:(?:ok|oke|okay)(?: chot| lay)?|duoc|dong y|chot|lay|lay goi nay|chot goi nay|mua luon|lam luon|len don|tao don)(?:(?: nha| nhe| a| di| luon))*$/.test(text)
@@ -115,6 +130,7 @@ export function rankCatalogProducts(products, { content, contextMessages = [], l
   const current = normalizeCommerceText(content);
   const currentGroups = signaledGroups(current);
   const currentDuration = extractRequestedDuration(current);
+  const currentDurationOptions = extractRequestedDurations(current);
   const canUseContext = currentGroups.length === 0 && (
     isContextualPurchaseConfirmation(current)
     || /\b(?:goi nay|cai nay|goi do|cai do|nhu tren)\b/.test(current)
@@ -166,7 +182,12 @@ export function rankCatalogProducts(products, { content, contextMessages = [], l
   } else {
     ranked = ranked.filter(({ score }) => score > 2);
   }
-  if (duration.days || duration.months) {
+  // When a customer compares plans ("1 tháng hay 3 tháng"), retaining only
+  // the first duration would make the assistant appear decisive while
+  // silently choosing the wrong plan. Keep both candidates and require an
+  // explicit selection instead.
+  const hasConflictingDuration = currentDurationOptions.length > 1;
+  if ((duration.days || duration.months) && !hasConflictingDuration) {
     const exactDuration = ranked.filter(({ product }) => productDurationMatches(product, duration));
     if (exactDuration.length) ranked = exactDuration;
   }
@@ -182,7 +203,8 @@ export function rankCatalogProducts(products, { content, contextMessages = [], l
   const selected = ranked.slice(0, Math.max(1, Math.min(10, Number(limit) || 5)));
   const first = selected[0];
   const second = selected[1];
-  const confident = Boolean(first && first.score >= 100 && (!second || first.score - second.score >= 40));
+  const confident = !hasConflictingDuration
+    && Boolean(first && first.score >= 100 && (!second || first.score - second.score >= 40));
   return {
     products: selected.map(({ product }) => product),
     confidentProduct: confident ? first.product : null,
