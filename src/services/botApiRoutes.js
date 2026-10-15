@@ -734,7 +734,7 @@ export function registerBotApiRoutes(app) {
         const result = safeQuery(() => {
             let sql = `
                 SELECT
-                    order_code, guild_id, customer_id, product_name, quantity,
+                    order_code, guild_id, customer_id, product_id, product_name, quantity,
                     total_amount, amount_paid, payment_provider, payment_status,
                     payment_code, status, status_changed_at,
                     duration_months, duration_days, expiry_at,
@@ -1581,6 +1581,7 @@ export function registerBotApiRoutes(app) {
                     ticketId: ticket.id,
                     ticketChannelId: placeholderChannelId,
                     customerId,
+                    productId: Number.isSafeInteger(Number(firstItem.id)) ? Number(firstItem.id) : null,
                     productName: firstItem.name,
                     serviceType: firstItem.service_type,
                     quantity,

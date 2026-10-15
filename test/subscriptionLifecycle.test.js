@@ -392,6 +392,32 @@ describe('subscription monthly lifecycle', () => {
     expect(getSubscriptionProgress(migrated)).toMatchObject({ fulfilledMonths: 2, completedCycles: 1 });
   });
 
+  it('repairs a Nitro record whose cycle is two months but next reminder is still one month', () => {
+    const created = createSubscription({ months: 12, serviceType: 'nitro', suffix: 'nitro-stale-two-month-schedule' });
+    db.prepare(`
+      UPDATE subscription_accounts
+      SET renewal_cycle_months = 2, times_renewed = 0,
+          next_renewal_at = '2026-02-28T10:30:00.000Z'
+      WHERE id = ?
+    `).run(created.id);
+
+    migrateSubscriptionMonthlyCycles({ guildId: GUILD_ID });
+    const repaired = db.prepare('SELECT * FROM subscription_accounts WHERE id = ?').get(created.id);
+
+    expect(repaired).toMatchObject({
+      renewal_cycle_months: 2,
+      times_renewed: 0,
+      next_renewal_at: '2026-03-31T10:30:00.000Z',
+      progress_status: 'VERIFIED',
+    });
+    expect(getSubscriptionProgress(repaired)).toMatchObject({
+      fulfilledMonths: 2,
+      nextCycleStartMonth: 3,
+      nextCycleEndMonth: 4,
+    });
+    expect(getSubscriptionHistory(repaired.id).some((event) => /Sửa lịch nitro/i.test(event.note))).toBe(true);
+  });
+
   it('repairs the owner-confirmed Nitro record to cycle 3 of 6', () => {
     const sub = createSubscription({ months: 12, serviceType: 'nitro', suffix: 'owner-nitro-cycle-3' });
     db.prepare(`

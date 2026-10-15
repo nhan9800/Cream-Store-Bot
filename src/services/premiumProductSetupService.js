@@ -398,6 +398,7 @@ async function handlePremiumBuyOrder(interaction, productName, quantity, totalPr
       ticketId: ticket.id,
       ticketChannelId: channel.id,
       customerId: interaction.user.id,
+      productId: productObj?.id,
       productName: productName,
       serviceType: productObj?.service_type,
       quantity,

@@ -1149,8 +1149,21 @@ export function migrateSubscriptionMonthlyCycles({ guildId = null } = {}) {
         const total = Math.max(1, Number(sub.total_duration_months || 1));
         const oldCycle = Math.max(1, Number(sub.renewal_cycle_months || 1));
         const targetCycle = getDefaultRenewalCycleMonths(sub.service_type, total, sub.renewal_mode);
-        if (oldCycle !== targetCycle) {
-          const fulfilled = Math.min(total, oldCycle * (Math.max(0, Number(sub.times_renewed || 0)) + 1));
+        const fulfilled = Math.min(total, oldCycle * (Math.max(0, Number(sub.times_renewed || 0)) + 1));
+        const completedCycles = Math.max(1, Math.ceil(fulfilled / targetCycle));
+        const normalizedFulfilled = Math.min(total, completedCycles * targetCycle);
+        const expectedNextRenewal = normalizedFulfilled < total
+          ? addSubscriptionMonths(sub.purchase_date, normalizedFulfilled)
+          : null;
+        const scheduleMismatch = !dateTimesMatch(sub.next_renewal_at, expectedNextRenewal);
+
+        // A previous release could already have stored the new two-month
+        // cycle while leaving the old one-month next_renewal_at in place.
+        // Checking only oldCycle !== targetCycle therefore let those Nitro
+        // records alert after one month forever. Treat the schedule itself as
+        // part of the migration contract and repair verified rows from the
+        // canonical purchase date + fulfilled cycle count.
+        if (oldCycle !== targetCycle || scheduleMismatch) {
           const isFreshNitroRecord = String(sub.service_type || '').toLowerCase() === 'nitro'
             && oldCycle === 1
             && targetCycle === 2
@@ -1165,11 +1178,7 @@ export function migrateSubscriptionMonthlyCycles({ guildId = null } = {}) {
             && Number(sub.times_renewed || 0) > 0;
           const aligned = (fulfilled >= total || fulfilled % targetCycle === 0 || isFreshNitroRecord)
             && !isUntrustedMonthlyNitro;
-          const completedCycles = Math.max(1, Math.ceil(fulfilled / targetCycle));
-          const normalizedFulfilled = Math.min(total, completedCycles * targetCycle);
-          const nextRenewal = normalizedFulfilled < total
-            ? addSubscriptionMonths(sub.purchase_date, normalizedFulfilled)
-            : null;
+          const nextRenewal = expectedNextRenewal;
           const ts = nowIso();
           db.prepare(`
             UPDATE subscription_accounts
@@ -1199,7 +1208,9 @@ export function migrateSubscriptionMonthlyCycles({ guildId = null } = {}) {
           recordSubscriptionEvent(sub.id, 'CYCLE_NORMALIZED', {
             source: 'SERVICE_CYCLE_MIGRATION',
             note: aligned
-              ? `Chuẩn hóa ${sub.service_type} từ ${oldCycle} tháng/kỳ sang ${targetCycle} tháng/kỳ; giữ ${normalizedFulfilled}/${total} tháng đã cấp.`
+              ? oldCycle !== targetCycle
+                ? `Chuẩn hóa ${sub.service_type} từ ${oldCycle} tháng/kỳ sang ${targetCycle} tháng/kỳ; giữ ${normalizedFulfilled}/${total} tháng đã cấp.`
+                : `Sửa lịch ${sub.service_type}: kỳ tiếp theo phải cách ngày bắt đầu ${targetCycle} tháng (${sub.next_renewal_at || 'trống'} → ${nextRenewal || 'đã đủ thời hạn'}).`
               : isUntrustedMonthlyNitro
                 ? `Khóa nhắc tự động vì lịch sử Nitro chu kỳ tháng đã có ${sub.times_renewed} lần bấm gia hạn và có thể chứa thao tác lặp.`
                 : `Khóa nhắc tự động vì tiến độ cũ ${fulfilled}/${total} tháng không khớp chu kỳ ${targetCycle} tháng/kỳ.`,

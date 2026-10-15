@@ -46,6 +46,27 @@ export function getProductByName(guildId, name) {
   return product;
 }
 
+function normalizeOrderProductName(value) {
+  return String(value || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/gi, 'd')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/** Resolve a staff-entered order name to one canonical active WEB catalog row. */
+export function findCatalogProductForOrder(guildId, name) {
+  const wanted = normalizeOrderProductName(name);
+  if (!wanted) return null;
+  const matches = getActiveProducts(guildId).filter((product) => (
+    normalizeOrderProductName(product.name) === wanted
+  ));
+  return matches.length === 1 ? matches[0] : null;
+}
+
 export function addProduct({
   guildId,
   name,

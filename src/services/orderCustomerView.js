@@ -55,6 +55,7 @@ export function buildCustomerOrderView(order, { includeDelivery = false, include
       created_by_id: clean(order?.created_by_id, 128),
     } : {}),
     product_name: clean(order?.product_name, 240),
+    product_id: Number.isSafeInteger(Number(order?.product_id)) ? Number(order.product_id) : null,
     quantity: Number(order?.quantity) || 1,
     total_amount: Number(order?.total_amount) || 0,
     amount_paid: Number(order?.amount_paid) || 0,

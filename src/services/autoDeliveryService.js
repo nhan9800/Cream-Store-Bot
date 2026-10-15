@@ -23,9 +23,10 @@ function deliveryItems(orderCode) {
 
 function deliveryRouting(order) {
   const product = db.prepare(`SELECT activation_method, service_type FROM product_catalog
-    WHERE guild_id IN ('WEB', ?) AND LOWER(TRIM(name)) = LOWER(TRIM(?))
-    ORDER BY CASE WHEN guild_id = 'WEB' THEN 0 ELSE 1 END, id LIMIT 1`)
-    .get(order.guild_id, order.product_name);
+    WHERE (id = ? AND ? IS NOT NULL)
+       OR (guild_id IN ('WEB', ?) AND LOWER(TRIM(name)) = LOWER(TRIM(?)))
+    ORDER BY CASE WHEN id = ? THEN 0 WHEN guild_id = 'WEB' THEN 1 ELSE 2 END, id LIMIT 1`)
+    .get(order.product_id ?? null, order.product_id ?? null, order.guild_id, order.product_name, order.product_id ?? null);
   const ai = String(product?.service_type || '').toLowerCase() === 'ai'
     || String(order.service_type || '').toLowerCase() === 'ai'
     || /chat\s*gpt|claude|gemini|adobe|capcut|office/i.test(stockName(order.product_name));

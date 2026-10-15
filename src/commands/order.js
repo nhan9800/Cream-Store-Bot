@@ -13,6 +13,7 @@ import {
 import { buildOrderLogContent, parseMoneyInput } from '../utils/formatters.js';
 import { config } from '../config.js';
 import { getCenarHub } from '../services/cenarHub.js';
+import { findCatalogProductForOrder } from '../services/productCatalogService.js';
 
 export const data = new SlashCommandBuilder()
   .setName('order')
@@ -53,6 +54,7 @@ export async function execute(interaction) {
 
     const customer = interaction.options.getUser('khach_hang', true);
     const productName = interaction.options.getString('san_pham', true);
+    const catalogProduct = findCatalogProductForOrder(interaction.guildId, productName);
     const quantity = interaction.options.getInteger('so_luong', true);
     const note = interaction.options.getString('ghi_chu');
     const amount = parseMoneyInput(interaction.options.getString('gia_tien')) ?? 0;
@@ -70,6 +72,10 @@ export async function execute(interaction) {
       : durationDays === null
         ? (selectedDurationMonths ?? config.defaultOrderDurationMonths)
         : 0;
+    const linkedDurationMonths = selectedDurationCount === 0 && catalogProduct
+      ? Number(catalogProduct.duration_months || 0) : durationMonths;
+    const linkedDurationDays = selectedDurationCount === 0 && catalogProduct
+      ? (catalogProduct.duration_days ?? null) : durationDays;
     const ticketChannel = interaction.options.getChannel('ticket') ?? interaction.channel;
 
     const ticket = getTicketByChannelId(ticketChannel.id);
@@ -91,12 +97,13 @@ export async function execute(interaction) {
         ticketId: ticket.id,
         ticketChannelId: ticket.channel_id,
         customerId: customer.id,
+        productId: catalogProduct?.id ?? null,
         productName,
         quantity,
         note,
         totalAmount: amount,
-        durationMonths,
-        durationDays,
+        durationMonths: linkedDurationMonths,
+        durationDays: linkedDurationDays,
         orderLogChannelId: guildConfig.order_log_channel_id,
         createdById: interaction.user.id,
       });
