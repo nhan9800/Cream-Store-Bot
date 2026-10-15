@@ -1162,6 +1162,36 @@ export function initDatabase() {
   ensureColumn('orders', 'payment_qr_text', 'TEXT');
   ensureColumn('orders', 'payment_status', "TEXT NOT NULL DEFAULT 'UNPAID'");
   ensureColumn('orders', 'fulfillment_mode', "TEXT NOT NULL DEFAULT 'LEGACY'");
+  // Keep a stable catalog relationship in addition to the display snapshot
+  // (product_name).  Older orders are backfilled only when the name + duration
+  // identifies one canonical WEB catalog row; ambiguous history stays null.
+  ensureColumn('orders', 'product_id', 'INTEGER');
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_orders_product_id ON orders (product_id);
+    UPDATE orders
+    SET product_id = (
+      SELECT MIN(pc.id)
+      FROM product_catalog pc
+      WHERE pc.guild_id = 'WEB'
+        AND LOWER(TRIM(pc.name)) = LOWER(TRIM(orders.product_name))
+        AND (COALESCE(pc.duration_months, 0) = COALESCE(orders.duration_months, 0)
+          OR (SELECT COUNT(*) FROM product_catalog same_name
+              WHERE same_name.guild_id = 'WEB'
+                AND LOWER(TRIM(same_name.name)) = LOWER(TRIM(orders.product_name))) = 1)
+      ORDER BY CASE WHEN COALESCE(pc.duration_months, 0) = COALESCE(orders.duration_months, 0) THEN 0 ELSE 1 END, pc.id
+      LIMIT 1
+    )
+    WHERE product_id IS NULL
+      AND EXISTS (
+        SELECT 1 FROM product_catalog pc
+        WHERE pc.guild_id = 'WEB'
+          AND LOWER(TRIM(pc.name)) = LOWER(TRIM(orders.product_name))
+          AND (COALESCE(pc.duration_months, 0) = COALESCE(orders.duration_months, 0)
+            OR (SELECT COUNT(*) FROM product_catalog same_name
+                WHERE same_name.guild_id = 'WEB'
+                  AND LOWER(TRIM(same_name.name)) = LOWER(TRIM(orders.product_name))) = 1)
+      );
+  `);
   ensureColumn('orders', 'payment_message_id', 'TEXT');
   ensureColumn('orders', 'completion_channel_id', 'TEXT');
   ensureColumn('orders', 'completion_message_id', 'TEXT');
@@ -1368,6 +1398,23 @@ export function initDatabase() {
   // Seed product catalog data
   try {
     seedProductCatalog(db);
+    // Seed may create the canonical rows after the additive orders migration;
+    // run the same conservative backfill once more for fresh databases.
+    db.exec(`
+      UPDATE orders
+      SET product_id = (
+        SELECT pc.id FROM product_catalog pc
+        WHERE pc.guild_id = 'WEB'
+          AND LOWER(TRIM(pc.name)) = LOWER(TRIM(orders.product_name))
+          AND (COALESCE(pc.duration_months, 0) = COALESCE(orders.duration_months, 0)
+            OR (SELECT COUNT(*) FROM product_catalog same_name
+                WHERE same_name.guild_id = 'WEB'
+                  AND LOWER(TRIM(same_name.name)) = LOWER(TRIM(orders.product_name))) = 1)
+        ORDER BY CASE WHEN COALESCE(pc.duration_months, 0) = COALESCE(orders.duration_months, 0) THEN 0 ELSE 1 END, pc.id
+        LIMIT 1
+      )
+      WHERE product_id IS NULL;
+    `);
   } catch (err) {
     console.error('❌ Failed to seed products:', err.message);
   }

@@ -23,11 +23,15 @@ function createOrderStmt() {
   return db.prepare(`
     INSERT INTO orders (
       order_code, guild_id, ticket_id, ticket_channel_id, customer_id,
-      product_name, quantity, note, total_amount, amount_paid, payment_provider,
+      product_id, product_name, quantity, note, total_amount, amount_paid, payment_provider,
       payment_code, payos_order_code, payment_status, status, status_changed_at,
       queue_group, priority_rank, duration_months, duration_days, order_log_channel_id, created_by_id, created_at, updated_at, service_type,
       discord_sku_id, discord_product_url, discord_original_price, discord_nitro_eligible
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (
+      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+      ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+    )
   `);
 }
 function orderCodeExistsStmt(){return db.prepare('SELECT 1 FROM orders WHERE order_code=? LIMIT 1');}
@@ -125,7 +129,7 @@ function scheduleCtvOrderLogSync(order) {
   });
 }
 
-export function createOrder({ guildId, ticketId, ticketChannelId, customerId, productName, serviceType = null, quantity, note, totalAmount = 0, durationMonths = config.defaultOrderDurationMonths, durationDays = null, orderLogChannelId, createdById, orderCode, discordSkuId = null, discordProductUrl = null, discordOriginalPrice = null, discordNitroEligible = false }) {
+export function createOrder({ guildId, ticketId, ticketChannelId, customerId, productId = null, productName, serviceType = null, quantity, note, totalAmount = 0, durationMonths = config.defaultOrderDurationMonths, durationDays = null, orderLogChannelId, createdById, orderCode, discordSkuId = null, discordProductUrl = null, discordOriginalPrice = null, discordNitroEligible = false }) {
   const timestamp = nowIso();
   const safeAmount = ensureAmountValue(totalAmount);
   const finalOrderCode = orderCode || generateUniqueOrderCode();
@@ -142,10 +146,30 @@ export function createOrder({ guildId, ticketId, ticketChannelId, customerId, pr
   const safeDurationDays = normalizedDuration.durationDays;
   const safeDurationMonths = normalizedDuration.durationMonths;
   const normalizedServiceType = detectServiceType(productName, serviceType);
+  // Prefer the explicitly selected catalog row. For legacy/manual commands,
+  // recover the WEB catalog row from the immutable name + duration snapshot.
+  // Discord collectibles use discord_sku_id and intentionally have no catalog
+  // row, so they remain null here.
+  const explicitProductId = Number(productId);
+  let linkedProductId = Number.isSafeInteger(explicitProductId) && explicitProductId > 0
+    ? db.prepare(`SELECT id FROM product_catalog WHERE id = ? AND guild_id IN ('WEB', ?)
+        ORDER BY CASE WHEN guild_id = 'WEB' THEN 0 ELSE 1 END, id LIMIT 1`).get(explicitProductId, guildId)?.id ?? null
+    : null;
+  if (!linkedProductId && productName) {
+    linkedProductId = db.prepare(`SELECT pc.id FROM product_catalog pc
+      WHERE pc.guild_id = 'WEB'
+        AND LOWER(TRIM(pc.name)) = LOWER(TRIM(?))
+        AND (COALESCE(pc.duration_months, 0) = COALESCE(?, 0)
+          OR (SELECT COUNT(*) FROM product_catalog same_name
+              WHERE same_name.guild_id = 'WEB'
+                AND LOWER(TRIM(same_name.name)) = LOWER(TRIM(?))) = 1)
+      ORDER BY CASE WHEN COALESCE(pc.duration_months, 0) = COALESCE(?, 0) THEN 0 ELSE 1 END, pc.id
+      LIMIT 1`).get(productName, safeDurationMonths, productName, safeDurationMonths)?.id ?? null;
+  }
 
   let resultId;
   const transaction = db.transaction(() => {
-    const result = createOrderStmt().run(finalOrderCode,guildId,ticketId,ticketChannelId,customerId,productName,quantity,note ?? null,safeAmount,safeAmount > 0 ? 0 : safeAmount,config.paymentProvider,paymentCode,payosOrderCode,paymentStatus,status,timestamp,queueGroup,priorityRank,safeDurationMonths,safeDurationDays,orderLogChannelId,createdById,timestamp,timestamp,normalizedServiceType,discordSkuId,discordProductUrl,discordOriginalPrice,discordNitroEligible ? 1 : 0);
+    const result = createOrderStmt().run(finalOrderCode,guildId,ticketId,ticketChannelId,customerId,linkedProductId,productName,quantity,note ?? null,safeAmount,safeAmount > 0 ? 0 : safeAmount,config.paymentProvider,paymentCode,payosOrderCode,paymentStatus,status,timestamp,queueGroup,priorityRank,safeDurationMonths,safeDurationDays,orderLogChannelId,createdById,timestamp,timestamp,normalizedServiceType,discordSkuId,discordProductUrl,discordOriginalPrice,discordNitroEligible ? 1 : 0);
     resultId = result.lastInsertRowid;
     syncCustomerStats(guildId, customerId);
   });
