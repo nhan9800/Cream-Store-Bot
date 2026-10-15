@@ -36,7 +36,10 @@ const warrantyGuideSlots = new Map();
 const orderConfirmationLocks = new Set();
 
 const PRODUCT_HINT_GROUPS = Object.freeze([
-  ['youtube', ['youtube', 'yt premium', 'yout']],
+  // Customers commonly shorten YouTube to "ytb" in Discord. Keep the
+  // shorthand here so a price/advice question still reaches the commerce
+  // resolver instead of falling through to a generic support reply.
+  ['youtube', ['youtube', 'yt premium', 'ytb', 'yout']],
   ['netflix', ['netflix', 'net']],
   ['spotify', ['spotify', 'spot']],
   ['discord', ['discord', 'nitro', 'boost server']],
@@ -102,7 +105,13 @@ export function classifyCustomerIntent(content) {
   const warrantySignal = /bao hanh|mat premium|bi out|out fam|het han som|sai (pass|mat khau)|khong dang nhap|tai khoan (loi|die|hong)|bi khoa/.test(text)
     || (productMentioned && /loi|hong|khong dung duoc|khong vao duoc|mat quyen/.test(text));
   if (warrantySignal) return 'WARRANTY';
-  if (/\b(chot|dat mua|xac nhan mua|ok lay|oke lay|mua ngay|mua luon|lay goi|lay cai|len don|tao don|lam luon|dong y)\b/.test(text)) return 'PURCHASE_CONFIRM';
+  // A customer can mention a confirmation word while explicitly saying they
+  // have not decided yet (for example, "chưa chốt thời hạn"). Treat that as
+  // an open purchase conversation so the bot asks one useful follow-up
+  // question instead of creating a confirmation step too early.
+  const confirmationSignal = /\b(chot|dat mua|xac nhan mua|ok lay|oke lay|mua ngay|mua luon|lay goi|lay cai|len don|tao don|lam luon|dong y)\b/.test(text);
+  const unresolvedConfirmation = /\bchua\s+(?:chot|xac nhan|dong y)\b/.test(text);
+  if (confirmationSignal && !unresolvedConfirmation) return 'PURCHASE_CONFIRM';
   if (/\b(muon mua|can mua|mua goi|dat hang|dat giup|lay giup)\b/.test(text)
     || (productMentioned && /\bcho minh\b/.test(text) && !/\bcho minh hoi\b/.test(text))) return 'PURCHASE';
   if (/gia bao nhieu|bao nhieu tien|con hang|tu van|goi nao|san pham nao|bang gia/.test(text)

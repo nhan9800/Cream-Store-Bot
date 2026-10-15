@@ -14,7 +14,7 @@ import {
   shouldAiReplyInTicket,
 } from '../src/services/aiSupportAutomationService.js';
 import { canTicketAiRespond } from '../src/services/ticketService.js';
-import { getConfiguredAiProviders } from '../src/services/aiService.js';
+import { buildAiConversationHistory, getConfiguredAiProviders } from '../src/services/aiService.js';
 
 const GUILD_ID = '1282637033340403754';
 
@@ -28,6 +28,13 @@ describe('AI support automation safety', () => {
     expect(hasExplicitPurchaseConfirmation('Ok lấy gói này')).toBe(true);
     expect(classifyCustomerIntent('Lên đơn YouTube 3 tháng cho mình nhé')).toBe('PURCHASE_CONFIRM');
     expect(classifyCustomerIntent('Cho mình Netflix 1 tháng')).toBe('PURCHASE');
+  });
+
+  it('understands natural Vietnamese shorthand and keeps ambiguous requests in advice mode', () => {
+    expect(classifyCustomerIntent('Shop ơi, mình đang phân vân YouTube 1 hay 3 tháng, tư vấn giúp mình với')).toBe('PRODUCT_ADVICE');
+    expect(classifyCustomerIntent('ytb 3 tháng giá sao shop?')).toBe('PRODUCT_ADVICE');
+    expect(classifyCustomerIntent('Mình muốn mua gói này, nhưng chưa chốt thời hạn')).toBe('PURCHASE');
+    expect(classifyCustomerIntent('Mình đã chuyển khoản rồi, kiểm tra giúp mình với')).toBe('SUPPORT');
   });
 
   it('extracts only supported Cenar order codes', () => {
@@ -166,5 +173,17 @@ describe('AI support automation safety', () => {
       groqApiKey: 'groq-key',
       geminiApiKeys: ['key-a'],
     })).toEqual(['groq', 'gemini']);
+  });
+
+  it('keeps the first context and latest messages while bounding model history', () => {
+    const messages = Array.from({ length: 20 }, (_, index) => ({
+      author: { id: index % 2 ? 'bot' : `customer-${index}`, bot: index % 2 === 1 },
+      content: `message-${index} ${'x'.repeat(1_100)}`,
+    }));
+    const history = buildAiConversationHistory(messages, 'bot', { limit: 6, maxChars: 240 });
+    expect(history).toHaveLength(6);
+    expect(history[0].content).toContain('message-0');
+    expect(history.at(-1).content).toContain('message-19');
+    expect(history.every((item) => item.content.length <= 260)).toBe(true);
   });
 });

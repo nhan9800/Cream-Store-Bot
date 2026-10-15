@@ -70,6 +70,15 @@ describe('AI commerce understanding', () => {
     expect(result.confidentProduct).toBeNull();
   });
 
+  it('does not silently choose the first duration when the customer compares two plans', () => {
+    const result = rankCatalogProducts(products, {
+      content: 'Shop ơi YouTube 1 tháng hay 3 tháng thì hợp hơn?',
+    });
+
+    expect(result.products.map((product) => product.id).sort()).toEqual([1, 2]);
+    expect(result.confidentProduct).toBeNull();
+  });
+
   it('extracts quantities and Vietnamese durations without letting values exceed the order limit', () => {
     expect(extractRequestedQuantity('Cho mình 3 gói Spotify 6 tháng')).toBe(3);
     expect(extractRequestedQuantity('sl 99')).toBe(10);
