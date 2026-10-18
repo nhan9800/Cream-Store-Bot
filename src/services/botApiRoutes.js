@@ -500,6 +500,7 @@ export function registerBotApiRoutes(app) {
                     ready: status.ready,
                     ffmpegAvailable: status.ffmpegAvailable,
                     ytDlpAvailable: status.ytDlpAvailable,
+                    youtubeStreamMode: status.youtubeStreamMode,
                     daveAvailable: status.daveAvailable,
                     daveProtocolVersion: status.daveProtocolVersion,
                 };

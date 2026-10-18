@@ -22,6 +22,7 @@ import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { accentFor } from '../utils/uiKit.js';
 import { configureCleanMusicDispatcher, createFrameAlignedMusicPcm, createMusicOpusStream } from './musicAudioPipeline.js';
 import { loadYoutubeMix, normalizeYoutubeMixUrl } from './youtubeMixSource.js';
+import { createResilientYoutubePcmStream } from './youtubeDirectPcmStream.js';
 import { attachMusicSoundEffects, getMusicSoundState, updateMusicSound } from './musicSoundService.js';
 
 const YOUTUBE_HOSTS = new Set([
@@ -180,6 +181,29 @@ export async function waitForDaveVoiceReady(queue, {
     await new Promise((resolve) => setTimeout(resolve, pollMs));
   }
   throw new Error(`Discord DAVE/MLS chưa sẵn sàng sau ${Math.round(DAVE_HANDSHAKE_TIMEOUT_MS / 1000)} giây; đã chặn phát sớm để tránh mất bài.`);
+}
+
+async function waitForMusicPcmReadable(stream, timeoutMs = MUSIC_SOURCE_TIMEOUT_MS) {
+  if (stream.readableLength > 0) return;
+  let timer;
+  await new Promise((resolve, reject) => {
+    const cleanup = () => {
+      clearTimeout(timer);
+      stream.removeListener('readable', onReadable);
+      stream.removeListener('error', onError);
+      stream.removeListener('end', onEnd);
+    };
+    const onReadable = () => { cleanup(); resolve(); };
+    const onError = (error) => { cleanup(); reject(error); };
+    const onEnd = () => { cleanup(); reject(new Error('YouTube chưa trả frame âm thanh đầu tiên.')); };
+    timer = setTimeout(() => {
+      cleanup();
+      reject(new Error('YouTube chưa trả frame âm thanh trong thời gian cho phép.'));
+    }, timeoutMs);
+    stream.once('readable', onReadable);
+    stream.once('error', onError);
+    stream.once('end', onEnd);
+  });
 }
 
 function readSettings(guildId) {
@@ -354,6 +378,9 @@ export function getMusicRuntimeStatus() {
     audioProfile: '48 kHz stereo · Opus music · bitrate theo phòng thoại',
     ffmpegAvailable: Boolean(ffmpegPath && fs.existsSync(ffmpegPath)),
     ytDlpAvailable,
+    youtubeStreamMode: String(process.env.MUSIC_YOUTUBE_STREAM_MODE || 'direct').toLowerCase() === 'extractor'
+      ? 'extractor'
+      : 'direct-with-extractor-fallback',
     daveAvailable: Number.isInteger(daveProtocolVersion),
     daveProtocolVersion,
     error: runtimeError ? String(runtimeError.message || runtimeError) : null,
@@ -603,7 +630,28 @@ export function musicQueueOptions(settings, textChannelId, requestedByLabel) {
       metadata: { textChannelId, requestedByLabel },
       onBeforeCreateStream: async (track, _queryType, queue) => {
         extractingTracks.set(queue, track);
-        return null;
+        // Resolve a fresh direct YouTube audio URL first. This avoids relying
+        // on the extractor's long-lived stream process and lets FFmpeg
+        // reconnect HTTP fragments. MUSIC_YOUTUBE_STREAM_MODE=extractor keeps
+        // the legacy extractor path for a bounded rollback switch.
+        if (String(process.env.MUSIC_YOUTUBE_STREAM_MODE || 'direct').toLowerCase() === 'extractor') return null;
+        // A queue without a live dispatcher is a metadata/unit-test harness;
+        // let Discord Player's normal extractor path handle that case.
+        if (!queue?.dispatcher?.voiceConnection) return null;
+        const waitedMs = await waitForDaveVoiceReady(queue);
+        console.log(`[MUSIC] DAVE ready in ${waitedMs}ms; resolving direct YouTube audio for ${track?.title || track?.url || 'track'}`);
+        // The direct source is already 48 kHz s16le PCM. Return the same
+        // demuxable shape as the extractor so Discord Player honours
+        // skipFFmpeg and does not run a second FFmpeg pass over PCM.
+        const source = createResilientYoutubePcmStream(track.url);
+        const aligned = createFrameAlignedMusicPcm(source);
+        try {
+          await waitForMusicPcmReadable(aligned);
+          return { $fmt: 'raw', stream: aligned };
+        } catch (error) {
+          aligned.destroy();
+          throw error;
+        }
       },
       // discord-player 7.2.0 may start consuming the audio resource before
       // Discord has processed the initial DAVE MLS commit. The stream then
