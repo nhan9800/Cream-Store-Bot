@@ -22,6 +22,7 @@ import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { accentFor } from '../utils/uiKit.js';
 import { configureCleanMusicDispatcher, createFrameAlignedMusicPcm, createMusicOpusStream } from './musicAudioPipeline.js';
 import { loadYoutubeMix, normalizeYoutubeMixUrl } from './youtubeMixSource.js';
+import { createResilientYoutubePcmStream } from './youtubeDirectPcmStream.js';
 import { attachMusicSoundEffects, getMusicSoundState, updateMusicSound } from './musicSoundService.js';
 
 const YOUTUBE_HOSTS = new Set([
@@ -354,6 +355,9 @@ export function getMusicRuntimeStatus() {
     audioProfile: '48 kHz stereo · Opus music · bitrate theo phòng thoại',
     ffmpegAvailable: Boolean(ffmpegPath && fs.existsSync(ffmpegPath)),
     ytDlpAvailable,
+    youtubeStreamMode: String(process.env.MUSIC_YOUTUBE_STREAM_MODE || 'direct').toLowerCase() === 'extractor'
+      ? 'extractor'
+      : 'direct-with-extractor-fallback',
     daveAvailable: Number.isInteger(daveProtocolVersion),
     daveProtocolVersion,
     error: runtimeError ? String(runtimeError.message || runtimeError) : null,
@@ -603,7 +607,21 @@ export function musicQueueOptions(settings, textChannelId, requestedByLabel) {
       metadata: { textChannelId, requestedByLabel },
       onBeforeCreateStream: async (track, _queryType, queue) => {
         extractingTracks.set(queue, track);
-        return null;
+        // Resolve a fresh direct YouTube audio URL first. This avoids relying
+        // on the extractor's long-lived stream process and lets FFmpeg
+        // reconnect HTTP fragments. MUSIC_YOUTUBE_STREAM_MODE=extractor keeps
+        // the legacy extractor path for a bounded rollback switch.
+        if (String(process.env.MUSIC_YOUTUBE_STREAM_MODE || 'direct').toLowerCase() === 'extractor') return null;
+        // A queue without a live dispatcher is a metadata/unit-test harness;
+        // let Discord Player's normal extractor path handle that case.
+        if (!queue?.dispatcher?.voiceConnection) return null;
+        const waitedMs = await waitForDaveVoiceReady(queue);
+        console.log(`[MUSIC] DAVE ready in ${waitedMs}ms; resolving direct YouTube audio for ${track?.title || track?.url || 'track'}`);
+        // The direct source is already 48 kHz s16le PCM. Return the same
+        // demuxable shape as the extractor so Discord Player honours
+        // skipFFmpeg and does not run a second FFmpeg pass over PCM.
+        const source = createResilientYoutubePcmStream(track.url);
+        return { $fmt: 'raw', stream: createFrameAlignedMusicPcm(source) };
       },
       // discord-player 7.2.0 may start consuming the audio resource before
       // Discord has processed the initial DAVE MLS commit. The stream then
