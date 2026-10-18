@@ -34,7 +34,13 @@ const YOUTUBE_HOSTS = new Set([
   'www.youtube-nocookie.com',
 ]);
 const VOLUME_STEPS = ['20', '40', '60', '80', '100'];
-const DAVE_HANDSHAKE_TIMEOUT_MS = 8_000;
+// Voice gateway/DAVE negotiation can take longer on a busy hosting node.
+// Keep playback guarded, but allow the same 20s budget as the voice connect
+// instead of skipping a healthy track after the old 8s window.
+const DAVE_HANDSHAKE_TIMEOUT_MS = Math.min(
+  30_000,
+  Math.max(8_000, Number(process.env.MUSIC_DAVE_HANDSHAKE_TIMEOUT_MS) || 20_000),
+);
 const VOLUME_RAMP_DURATION_MS = 360;
 const VOLUME_RAMP_STEP_MS = 20;
 const MUSIC_SOURCE_TIMEOUT_MS = 20_000;
@@ -173,7 +179,7 @@ export async function waitForDaveVoiceReady(queue, {
     if (isDaveVoiceReady(queue)) return Date.now() - startedAt;
     await new Promise((resolve) => setTimeout(resolve, pollMs));
   }
-  throw new Error('Discord DAVE/MLS chưa sẵn sàng sau 8 giây; đã chặn phát sớm để tránh mất bài.');
+  throw new Error(`Discord DAVE/MLS chưa sẵn sàng sau ${Math.round(DAVE_HANDSHAKE_TIMEOUT_MS / 1000)} giây; đã chặn phát sớm để tránh mất bài.`);
 }
 
 function readSettings(guildId) {
