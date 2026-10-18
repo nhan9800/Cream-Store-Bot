@@ -67,6 +67,7 @@ import {
     submitYoutubeWarrantyGmail,
 } from './youtubeWarrantyClaimService.js';
 import { buildPublicFeedbackView } from './publicFeedbackView.js';
+import { getMusicRuntimeStatus } from './musicPlayerService.js';
 
 let storeInviteCache = { url: '', expiresAt: 0 };
 const websiteSupportProvisioning = new Map();
@@ -491,6 +492,18 @@ export function registerBotApiRoutes(app) {
             service: 'cenar-store-bot',
             commitSha: runtimeCommitSha,
             discordReady,
+            // Aggregate-only media readiness; never expose extractor paths,
+            // subprocess output, cookies or proxy credentials on public health.
+            music: (() => {
+                const status = getMusicRuntimeStatus();
+                return {
+                    ready: status.ready,
+                    ffmpegAvailable: status.ffmpegAvailable,
+                    ytDlpAvailable: status.ytDlpAvailable,
+                    daveAvailable: status.daveAvailable,
+                    daveProtocolVersion: status.daveProtocolVersion,
+                };
+            })(),
             youtubeWarrantySync: getYoutubeWarrantySyncState(),
             customerRoleSync: getCustomerRoleSyncState(),
             membershipPresentation: getMembershipPresentationStatus(req.app.locals.discordClient),
