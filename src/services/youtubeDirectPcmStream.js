@@ -57,7 +57,6 @@ function spawnYtDlpDirect(url, options = {}) {
       windowsHide: true,
     });
     options.onProcess?.(child);
-    options.onProcess?.(child);
     let stdout = '';
     let stderr = '';
     const timer = setTimeout(() => {
@@ -88,6 +87,9 @@ function directOptions() {
   return {
     proxyUri: String(process.env.YOUTUBE_PROXY_URL || '').trim(),
     cookiesFile: String(process.env.YOUTUBE_COOKIES_FILE || '').trim(),
+    // Never inspect the host user's browser profile implicitly. A cookies
+    // file is used only when the operator explicitly configured one.
+    autoCookiesFromBrowser: false,
   };
 }
 
@@ -161,7 +163,7 @@ export function createResilientYoutubePcmStream(videoUrl, { fallback = true } = 
           void start();
           return;
         }
-        close(error);
+        close(new Error(cleanError(error?.message || error)));
       });
       child.once('close', (code) => {
         clearTimeout(startupTimer);
@@ -183,7 +185,7 @@ export function createResilientYoutubePcmStream(videoUrl, { fallback = true } = 
           try {
             const extractor = createPCMStream(videoUrl, { agent: directOptions() });
             active = extractor;
-            extractor.on('error', (error) => close(error));
+            extractor.on('error', (error) => close(new Error(cleanError(error?.message || error))));
             extractor.once('end', () => close());
             extractor.pipe(exposed, { end: false });
             return;
@@ -203,12 +205,12 @@ export function createResilientYoutubePcmStream(videoUrl, { fallback = true } = 
         try {
           const extractor = createPCMStream(videoUrl, { agent: directOptions() });
           active = extractor;
-          extractor.on('error', (fallbackError) => close(fallbackError));
+          extractor.on('error', (fallbackError) => close(new Error(cleanError(fallbackError?.message || fallbackError))));
           extractor.once('end', () => close());
           extractor.pipe(exposed, { end: false });
           return;
         } catch (fallbackError) {
-          close(fallbackError);
+          close(new Error(cleanError(fallbackError?.message || fallbackError)));
           return;
         }
       }
