@@ -183,6 +183,29 @@ export async function waitForDaveVoiceReady(queue, {
   throw new Error(`Discord DAVE/MLS chưa sẵn sàng sau ${Math.round(DAVE_HANDSHAKE_TIMEOUT_MS / 1000)} giây; đã chặn phát sớm để tránh mất bài.`);
 }
 
+async function waitForMusicPcmReadable(stream, timeoutMs = MUSIC_SOURCE_TIMEOUT_MS) {
+  if (stream.readableLength > 0) return;
+  let timer;
+  await new Promise((resolve, reject) => {
+    const cleanup = () => {
+      clearTimeout(timer);
+      stream.removeListener('readable', onReadable);
+      stream.removeListener('error', onError);
+      stream.removeListener('end', onEnd);
+    };
+    const onReadable = () => { cleanup(); resolve(); };
+    const onError = (error) => { cleanup(); reject(error); };
+    const onEnd = () => { cleanup(); reject(new Error('YouTube chưa trả frame âm thanh đầu tiên.')); };
+    timer = setTimeout(() => {
+      cleanup();
+      reject(new Error('YouTube chưa trả frame âm thanh trong thời gian cho phép.'));
+    }, timeoutMs);
+    stream.once('readable', onReadable);
+    stream.once('error', onError);
+    stream.once('end', onEnd);
+  });
+}
+
 function readSettings(guildId) {
   db.prepare(`
     INSERT INTO music_guild_settings (guild_id)
@@ -621,7 +644,14 @@ export function musicQueueOptions(settings, textChannelId, requestedByLabel) {
         // demuxable shape as the extractor so Discord Player honours
         // skipFFmpeg and does not run a second FFmpeg pass over PCM.
         const source = createResilientYoutubePcmStream(track.url);
-        return { $fmt: 'raw', stream: createFrameAlignedMusicPcm(source) };
+        const aligned = createFrameAlignedMusicPcm(source);
+        try {
+          await waitForMusicPcmReadable(aligned);
+          return { $fmt: 'raw', stream: aligned };
+        } catch (error) {
+          aligned.destroy();
+          throw error;
+        }
       },
       // discord-player 7.2.0 may start consuming the audio resource before
       // Discord has processed the initial DAVE MLS commit. The stream then
