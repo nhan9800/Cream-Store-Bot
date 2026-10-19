@@ -56,7 +56,7 @@ export function backfillCustomerRoleSync(guildId = config.guildId) {
   return lastBackfill;
 }
 
-export async function syncCustomerRolesNow(client, guildId, customerId) {
+export async function syncCustomerRolesNow(client, guildId, customerId, { notify = true } = {}) {
   const key = `${guildId}:${customerId}`;
   if (inFlight.has(key)) return inFlight.get(key);
   const run = async () => {
@@ -68,7 +68,7 @@ export async function syncCustomerRolesNow(client, guildId, customerId) {
       const guild = client?.guilds?.cache?.get(guildId) || await client?.guilds?.fetch?.(guildId);
       if (!guild) throw Object.assign(new Error('Guild unavailable'), { code: 'GUILD_UNAVAILABLE' });
       const { applyCustomerRoles } = await import('./roleService.js');
-      result = await applyCustomerRoles(guild, customerId, { retryOnFailure: false });
+      result = await applyCustomerRoles(guild, customerId, { retryOnFailure: false, notify });
     } catch (error) {
       result = { synced: false, error: String(error.code || 'DISCORD_UNAVAILABLE') };
     }
@@ -95,7 +95,7 @@ export async function processPendingCustomerRoles(client, { guildId = config.gui
     .all(guildId, nowIso(), Math.min(100, Math.max(1, Number(limit) || 25)));
   const report = { scanned: jobs.length, synced: 0, pending: 0 };
   for (const job of jobs) {
-    const result = await syncCustomerRolesNow(client, job.guild_id, job.customer_id);
+    const result = await syncCustomerRolesNow(client, job.guild_id, job.customer_id, { notify: false });
     if (result.synced) report.synced++;
     else report.pending++;
   }

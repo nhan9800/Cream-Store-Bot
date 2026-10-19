@@ -130,7 +130,7 @@ describe('paid website purchaser role synchronization', () => {
     expect(getCustomerPurchaseSummary(guildId, customerId).paidOrders).toBe(0);
   });
 
-  it('keeps role failures pending and does not announce success until Discord grants the role', async () => {
+  it('keeps role failures pending and never DMs during a background retry', async () => {
     paidOrder();
     const { client, member } = mockDiscord();
     member.roles.add.mockRejectedValueOnce(Object.assign(new Error('Missing permissions'), { code: 50013 }));
@@ -142,7 +142,7 @@ describe('paid website purchaser role synchronization', () => {
     expect(await processPendingCustomerRoles(client)).toMatchObject({ scanned: 0 });
     db.prepare('UPDATE customer_role_sync_jobs SET retry_at = ?').run(nowIso());
     expect(await processPendingCustomerRoles(client)).toMatchObject({ scanned: 1, synced: 1, pending: 0 });
-    expect(member.send).toHaveBeenCalledOnce();
+    expect(member.send).not.toHaveBeenCalled();
   });
 
   it('uses Store 1 canonical fallback but never applies Store 1 IDs to another guild', () => {

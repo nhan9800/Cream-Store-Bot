@@ -110,7 +110,7 @@ export function resolveCustomerRoleTiers(guild, guildConfig = {}) {
   return tiers;
 }
 
-export async function applyCustomerRoles(guild, customerId, { retryOnFailure = true } = {}) {
+export async function applyCustomerRoles(guild, customerId, { retryOnFailure = true, notify = true } = {}) {
   const fail = (error) => {
     if (retryOnFailure) queueCustomerRoleSync(guild.id, customerId, { preservePending: true });
     return { synced: false, applied: [], removed: [], error };
@@ -185,7 +185,10 @@ export async function applyCustomerRoles(guild, customerId, { retryOnFailure = t
   const newlyAssignedRoles = tiers.filter((tier) => applied.includes(tier.id));
 
   // Trigger Notification to Customer
-  if (newlyAssignedRoles.length > 0 && !isBlacklist) {
+  // Background reconciliation can touch hundreds of historical customers.
+  // Keep the role changes, but never DM every customer during a backfill or
+  // retry loop; only interactive/payment flows should notify the buyer.
+  if (notify && newlyAssignedRoles.length > 0 && !isBlacklist) {
       // Find the highest tier they just qualified for (since arrays are highest->lowest)
       const highestTier = newlyAssignedRoles.find(r => r.minSpent > 0) || newlyAssignedRoles[0];
       
