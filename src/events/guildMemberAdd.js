@@ -10,6 +10,7 @@ import { handleMemberAdd } from '../services/inviteTrackerService.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { brandForGuild, isInternationalGuild } from '../utils/locale.js';
 import { queueCustomerRoleSync, syncCustomerRolesNow } from '../services/customerRoleSyncService.js';
+import { memberHasVerificationRole, resolveVerificationRole } from '../services/verificationRoleService.js';
 
 export const name = Events.GuildMemberAdd;
 export const once = false;
@@ -38,6 +39,11 @@ function shouldThrottle(userId) {
     }
   }
   return false;
+}
+
+export function shouldSkipRepeatWelcome(member) {
+  const verificationRole = resolveVerificationRole(member?.guild);
+  return memberHasVerificationRole(member, verificationRole);
 }
 
 export function buildWelcomeChatV2({
@@ -73,15 +79,26 @@ export function buildWelcomeChatV2({
 export async function execute(member) {
   // A website buyer can pay before joining Discord, or return after leaving.
   // Restore earned roles even if welcome/invite tracking later fails.
+  let roleSyncResult = null;
   try {
     queueCustomerRoleSync(member.guild.id, member.id);
-    await syncCustomerRolesNow(member.client || member.guild.client, member.guild.id, member.id);
+    roleSyncResult = await syncCustomerRolesNow(member.client || member.guild.client, member.guild.id, member.id, { notify: false });
   } catch (error) {
     console.error('[CUSTOMER-ROLES] Member join sync deferred:', error.code || error.name);
   }
   try {
     const guild       = member.guild;
     const user        = member.user;
+    // A verified member can leave and rejoin. Restore roles above, but do not
+    // emit another welcome-channel post, discussion post, and DM on every
+    // rejoin; repeated automated messages are noisy and can look abusive to
+    // Discord's anti-spam systems.
+    const verificationRole = resolveVerificationRole(guild);
+    const roleWasRestored = Boolean(verificationRole?.id && roleSyncResult?.applied?.includes(verificationRole.id));
+    if (shouldSkipRepeatWelcome(member) || roleWasRestored) {
+      console.log(`[WELCOME] Skipping repeat welcome for verified member ${user.id}.`);
+      return;
+    }
     const memberCount = guild.memberCount;
     const isServer1   = guild.id === SERVER1_ID;
     const international = isInternationalGuild(guild.id);
