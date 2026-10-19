@@ -27,10 +27,32 @@ export function isOAuthApiKeyAuthorized(req) {
   return safeKeyMatch(req?.headers?.['x-bot-api-key'] || req?.headers?.['X-Bot-Api-Key']);
 }
 
+function preventOAuthCaching(res) {
+  res.setHeader('Cache-Control', 'no-store, max-age=0');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+}
+
+function currentOAuthStore() {
+  return String(process.env.ENV_FILE || '').includes('store2') ? 'store2' : 'store1';
+}
+
+async function discordOAuthJson(url, options = {}) {
+  // The signal covers headers AND body consumption; never retain authorization
+  // codes or raw Discord response bodies in logs/errors.
+  const response = await fetch(url, { ...options, signal: AbortSignal.timeout(12_000) });
+  if (!response.ok) {
+    await response.body?.cancel();
+    throw new Error(`Discord OAuth HTTP ${response.status}`);
+  }
+  return response.json();
+}
+
 export function registerOauthRoutes(app) {
   
   // 1. Route redirect to Discord OAuth2 page
   app.get('/oauth/login', async (req, res) => {
+    preventOAuthCaching(res);
     const guildId = String(req.query.guild_id || config.guildId || '').trim();
     const clientId = config.clientId;
     
@@ -57,14 +79,17 @@ export function registerOauthRoutes(app) {
 
     const host = req.get('host');
     const protocol = req.secure || req.headers['x-forwarded-proto'] === 'https' ? 'https' : 'http';
-    const baseUrl = config.publicBaseUrl || `${protocol}://${host}`;
+    const baseUrl = String(config.publicBaseUrl || `${protocol}://${host}`).replace(/\/+$/, '');
     const redirectUri = `${baseUrl}/oauth/callback`;
-    const state = createOAuthState(guildId);
+    const state = createOAuthState(guildId, Date.now(), {
+      clientId,
+      store: currentOAuthStore(),
+    });
     const cookieName = oauthStateCookieName(clientId);
     const secureCookie = baseUrl.startsWith('https://') ? '; Secure' : '';
     const cookiePath = new URL(redirectUri).pathname;
     res.setHeader('Set-Cookie', `${cookieName}=${encodeURIComponent(state)}; Max-Age=${Math.floor(OAUTH_STATE_TTL_MS / 1000)}; Path=${cookiePath}; HttpOnly; SameSite=Lax${secureCookie}`);
-    const authorizeUrl = `https://discord.com/api/oauth2/authorize?${new URLSearchParams({
+    const authorizeUrl = `https://discord.com/oauth2/authorize?${new URLSearchParams({
       client_id: clientId,
       redirect_uri: redirectUri,
       response_type: 'code',
@@ -77,30 +102,45 @@ export function registerOauthRoutes(app) {
 
   // 2. Route OAuth2 Callback
   app.get('/oauth/callback', async (req, res) => {
+    preventOAuthCaching(res);
     const { code, state } = req.query;
-
-    if (!code) {
-      return res.status(400).send(buildErrorPage('Thiếu mã xác minh', 'Không tìm thấy mã xác minh từ Discord. Vui lòng thử lại.'));
-    }
 
     const clientSecret = process.env.CLIENT_SECRET;
     const clientId = config.clientId;
 
     const host = req.get('host');
     const protocol = req.secure || req.headers['x-forwarded-proto'] === 'https' ? 'https' : 'http';
-    const baseUrl = config.publicBaseUrl || `${protocol}://${host}`;
+    const baseUrl = String(config.publicBaseUrl || `${protocol}://${host}`).replace(/\/+$/, '');
     const redirectUri = `${baseUrl}/oauth/callback`;
     const cookieName = oauthStateCookieName(clientId);
     const cookies = parseCookieHeader(req.headers.cookie);
     let guildId;
     try {
-      guildId = verifyOAuthState(state, cookies[cookieName]).guildId;
+      const verifiedState = verifyOAuthState(state, cookies[cookieName]);
+      if (verifiedState.clientId && verifiedState.clientId !== clientId) {
+        throw new Error('Phiên xác minh thuộc ứng dụng Discord khác. Vui lòng mở lại nút xác minh tại đúng server.');
+      }
+      if (verifiedState.store && verifiedState.store !== currentOAuthStore()) {
+        throw new Error('Phiên xác minh thuộc shop khác. Vui lòng mở lại nút xác minh tại đúng server.');
+      }
+      guildId = verifiedState.guildId;
     } catch (error) {
       return res.status(400).send(buildErrorPage('Phiên xác minh không hợp lệ', error.message));
     }
     const secureCookie = baseUrl.startsWith('https://') ? '; Secure' : '';
     const cookiePath = new URL(redirectUri).pathname;
     res.setHeader('Set-Cookie', `${cookieName}=; Max-Age=0; Path=${cookiePath}; HttpOnly; SameSite=Lax${secureCookie}`);
+    if (req.query.error) {
+      return res.status(400).send(buildErrorPage(
+        'Discord chưa cấp quyền xác minh',
+        req.query.error === 'access_denied'
+          ? 'Bạn đã hủy hoặc từ chối ủy quyền. Vai trò chưa được cấp; hãy quay lại server và thử khi bạn sẵn sàng.'
+          : 'Discord chưa cho phép hoàn tất ủy quyền. Nếu Discord báo bot bị hạn chế chống spam, hãy báo Owner để yêu cầu Discord xem xét. Không cần bấm thử liên tục.',
+      ));
+    }
+    if (typeof code !== 'string' || !code || code.length > 4096) {
+      return res.status(400).send(buildErrorPage('Thiếu mã xác minh', 'Không tìm thấy mã xác minh hợp lệ từ Discord. Vui lòng mở lại nút xác minh.'));
+    }
     if (!String(clientSecret || '').trim() || !String(process.env.ENCRYPTION_KEY || '').trim()) {
       return res.status(503).send(buildErrorPage(
         'Recovery đang chờ cấu hình',
@@ -110,7 +150,7 @@ export function registerOauthRoutes(app) {
 
     try {
       // Exchange code for token
-      const tokenResponse = await fetch('https://discord.com/api/oauth2/token', {
+      const tokenData = await discordOAuthJson('https://discord.com/api/oauth2/token', {
         method: 'POST',
         body: new URLSearchParams({
           client_id: clientId,
@@ -122,33 +162,29 @@ export function registerOauthRoutes(app) {
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
       });
 
-      if (!tokenResponse.ok) {
-        const errText = await tokenResponse.text();
-        throw new Error(`Token exchange failed: ${errText}`);
-      }
-
-      const tokenData = await tokenResponse.json();
       const accessToken = tokenData.access_token;
       const refreshToken = tokenData.refresh_token;
       const scopes = String(tokenData.scope || '').trim();
-      if (!accessToken || !refreshToken || !scopes.split(/\s+/).includes('guilds.join')) {
+      if (typeof accessToken !== 'string' || !accessToken || typeof refreshToken !== 'string' || !refreshToken
+        || !scopes.split(/\s+/).includes('identify') || !scopes.split(/\s+/).includes('guilds.join')) {
         throw new Error('Discord không cấp đủ quyền recovery bắt buộc.');
       }
-      const expiresIn = tokenData.expires_in || 604800; // 7 ngày mặc định
+      const expiresIn = Number(tokenData.expires_in);
+      if (!Number.isFinite(expiresIn) || expiresIn <= 0 || expiresIn > 31_536_000) {
+        throw new Error('Discord không trả thời hạn token hợp lệ.');
+      }
       const tokenExpiresAt = new Date(Date.now() + expiresIn * 1000).toISOString();
 
       // Fetch user profile
-      const userResponse = await fetch('https://discord.com/api/users/@me', {
+      const userProfile = await discordOAuthJson('https://discord.com/api/users/@me', {
         headers: { Authorization: `Bearer ${accessToken}` }
       });
 
-      if (!userResponse.ok) {
-        throw new Error('Failed to fetch user profile.');
+      if (!/^\d{17,20}$/.test(String(userProfile?.id || '')) || typeof userProfile.username !== 'string' || userProfile.bot) {
+        throw new Error('Discord không trả danh tính thành viên hợp lệ.');
       }
-
-      const userProfile = await userResponse.json();
       const discordId = userProfile.id;
-      const username = `${userProfile.username}${userProfile.discriminator !== '0' ? '#' + userProfile.discriminator : ''}`;
+      const username = `${userProfile.username}${userProfile.discriminator && userProfile.discriminator !== '0' ? '#' + userProfile.discriminator : ''}`;
       const email = userProfile.email || null;
       const avatar = userProfile.avatar || null;
       const resolvedGuildId = guildId;
@@ -215,8 +251,9 @@ export function registerOauthRoutes(app) {
               const role = resolveVerificationRole(guild);
               
               if (role) {
+                const alreadyHadRole = member.roles.cache.has(role.id);
                 // Check if already has the role
-                if (!member.roles.cache.has(role.id)) {
+                if (!alreadyHadRole) {
                   await member.roles.add(role);
                   roleGranted = true;
                   assignedRoleName = role.name;
@@ -230,6 +267,7 @@ export function registerOauthRoutes(app) {
 
                 // ─── Gửi DM chào mừng sau khi verify thành công ───
                 try {
+                  if (!alreadyHadRole) {
                   await member.send(buildVerificationSuccessDmV2({
                     guildId,
                     guildName: guild.name,
@@ -238,6 +276,7 @@ export function registerOauthRoutes(app) {
                     // DM có thể bị tắt — không phải lỗi nghiêm trọng
                     console.log(`[OAuth Verify] DM disabled for ${username}, skipping.`);
                   });
+                  }
                 } catch (dmErr) {
                   console.warn('[OAuth Verify] DM send failed:', dmErr.message);
                 }
@@ -271,10 +310,16 @@ export function registerOauthRoutes(app) {
       res.send(buildSuccessPage(username, roleGranted, assignedRoleName, errorMsg, guildName));
 
     } catch (err) {
-      console.error('[OAuth Verify] Callback Error:', err);
-      res.status(500).send(buildErrorPage(
+      const timedOut = err?.name === 'TimeoutError' || err?.name === 'AbortError';
+      const safeFailure = /^Discord OAuth HTTP \d{3}$/.test(String(err?.message || ''))
+        ? err.message
+        : (timedOut ? 'Discord request timeout' : 'OAuth verification incomplete');
+      console.error('[OAuth Verify] Callback failed:', safeFailure);
+      res.status(timedOut ? 504 : 502).send(buildErrorPage(
         'Xác Minh Thất Bại',
-        'Phiên kết nối chưa hoàn tất. Vui lòng thử lại; nếu lỗi lặp lại, hãy mở ticket hỗ trợ.',
+        timedOut
+          ? 'Discord phản hồi quá thời gian chờ. Chưa hoàn tất xác minh; hãy quay lại server và mở một phiên xác minh mới.'
+          : 'Phiên kết nối Discord chưa hoàn tất. Vui lòng mở lại nút xác minh; nếu lỗi lặp lại, hãy mở ticket hỗ trợ.',
       ));
     }
   });

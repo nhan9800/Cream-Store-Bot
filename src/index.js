@@ -6,6 +6,7 @@ import { timingSafeEqual } from 'node:crypto';
 import { resolveLauncherPorts } from './utils/ports.js';
 import { acquireProcessLock } from './utils/processLock.js';
 import { watchLauncherConnection } from './utils/launcherConnection.js';
+import { resolveOAuthCallbackStore } from './utils/oauthCallbackRouting.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -240,6 +241,10 @@ if (process.env.IS_CHILD_BOT === 'true') {
     if (req.url.startsWith('/store2/')) {
       targetPort = STORE2_PORT;
       targetUrl = req.url.slice(7); // Remove '/store2'
+    } else if (req.method === 'GET' && resolveOAuthCallbackStore(req.url) === 'store2') {
+      // Shared registered OAuth callback: the signed state carries a routing
+      // hint; Store 2 must still authenticate that state before any side effect.
+      targetPort = STORE2_PORT;
     } else if (req.url.startsWith('/webhooks/payos-store2')) {
       targetPort = STORE2_PORT;
     } else if (
