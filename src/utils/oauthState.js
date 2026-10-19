@@ -27,9 +27,16 @@ function safeEqual(a, b) {
   return crypto.timingSafeEqual(left, right);
 }
 
-export function createOAuthState(guildId, now = Date.now()) {
+export function createOAuthState(guildId, now = Date.now(), options = {}) {
   if (!/^\d{17,20}$/.test(String(guildId || ''))) {
     throw new Error('Guild ID OAuth không hợp lệ.');
+  }
+  const { clientId, store } = options;
+  if (clientId !== undefined && !/^\d{17,20}$/.test(String(clientId || ''))) {
+    throw new Error('Client ID OAuth không hợp lệ.');
+  }
+  if (store !== undefined && !['store1', 'store2'].includes(store)) {
+    throw new Error('Store OAuth không hợp lệ.');
   }
 
   const payload = {
@@ -38,6 +45,8 @@ export function createOAuthState(guildId, now = Date.now()) {
     nonce: crypto.randomBytes(24).toString('base64url'),
     iat: now,
     exp: now + STATE_TTL_MS,
+    ...(clientId !== undefined ? { clientId: String(clientId) } : {}),
+    ...(store !== undefined ? { store } : {}),
   };
   const encodedPayload = Buffer.from(JSON.stringify(payload), 'utf8').toString('base64url');
   return `${encodedPayload}.${sign(encodedPayload)}`;
@@ -62,6 +71,8 @@ export function verifyOAuthState(state, cookieState, now = Date.now()) {
   if (
     payload?.v !== STATE_VERSION
     || !/^\d{17,20}$/.test(String(payload?.guildId || ''))
+    || (payload?.clientId !== undefined && (typeof payload.clientId !== 'string' || !/^\d{17,20}$/.test(payload.clientId)))
+    || (payload?.store !== undefined && !['store1', 'store2'].includes(payload.store))
     || typeof payload?.nonce !== 'string'
     || payload.nonce.length < 20
     || !Number.isFinite(payload?.iat)
@@ -84,9 +95,15 @@ export function parseCookieHeader(header = '') {
     .reduce((cookies, part) => {
       const separator = part.indexOf('=');
       if (separator < 1) return cookies;
-      const key = decodeURIComponent(part.slice(0, separator).trim());
-      const value = decodeURIComponent(part.slice(separator + 1).trim());
-      cookies[key] = value;
+      try {
+        const key = decodeURIComponent(part.slice(0, separator).trim());
+        const value = decodeURIComponent(part.slice(separator + 1).trim());
+        // Cookie names are untrusted; never let them mutate the object prototype.
+        Object.defineProperty(cookies, key, { value, enumerable: true, configurable: true, writable: true });
+      } catch {
+        // Ignore malformed unrelated cookies. A malformed state cookie remains
+        // absent and is rejected by verifyOAuthState without crashing callback.
+      }
       return cookies;
     }, {});
 }
