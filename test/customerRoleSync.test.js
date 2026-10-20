@@ -72,7 +72,8 @@ describe('paid website purchaser role synchronization', () => {
     db.exec(`DELETE FROM order_delivery_items; DELETE FROM order_fulfillments; DELETE FROM checkout_requests;
       DELETE FROM payment_events; DELETE FROM staff_logs; DELETE FROM wallet_transactions; DELETE FROM orders;
       DELETE FROM customer_role_sync_jobs; DELETE FROM customer_profiles; DELETE FROM product_catalog;
-      DELETE FROM viotp_orders; DELETE FROM card_charging_orders; DELETE FROM card_buy_orders; DELETE FROM guild_settings;`);
+      DELETE FROM viotp_orders; DELETE FROM card_charging_orders; DELETE FROM card_buy_orders; DELETE FROM guild_settings;
+      DELETE FROM system_settings WHERE key LIKE 'customer-role-sync-policy:%';`);
     upsertGuildConfig({ guild_id: guildId, customer_role_id: patronId, vip_role_id: vipId,
       ticket_category_id: '444444444444444444', order_log_channel_id: '555555555555555555', feedback_channel_id: '666666666666666666' });
   });
@@ -183,9 +184,72 @@ describe('paid website purchaser role synchronization', () => {
     db.exec('DELETE FROM customer_role_sync_jobs');
     expect(backfillCustomerRoleSync()).toMatchObject({ scanned: 1, queued: 1 });
     const revision = job().revision;
-    backfillCustomerRoleSync();
+    expect(backfillCustomerRoleSync()).toMatchObject({ queued: 0, pending: 1 });
     expect(job().revision).toBe(revision);
     expect(await processPendingCustomerRoles(mockDiscord().client)).toMatchObject({ synced: 1 });
+  });
+
+  it('keeps recent successes across a fresh service instance and repairs stale roles after 24 hours', async () => {
+    paidOrder();
+    backfillCustomerRoleSync();
+    const { client, guild, member } = mockDiscord();
+    await processPendingCustomerRoles(client);
+    const successfulJob = job();
+    const restarted = await import('../src/services/customerRoleSyncService.js?restart');
+    expect(restarted.backfillCustomerRoleSync()).toMatchObject({ queued: 0, unchanged: 1, policyChanged: false });
+    expect(job()).toEqual(successfulJob);
+    expect(await restarted.processPendingCustomerRoles(client)).toMatchObject({ scanned: 0 });
+    expect(guild.members.fetch).toHaveBeenCalledOnce();
+
+    member.roles.cache.clear(); // Drift outside the payment/rejoin event paths.
+    db.prepare('UPDATE customer_role_sync_jobs SET updated_at = ?').run(new Date(Date.now() - 25 * 60 * 60_000).toISOString());
+    expect(restarted.backfillCustomerRoleSync()).toMatchObject({ queued: 1, unchanged: 0 });
+    expect(await restarted.processPendingCustomerRoles(client)).toMatchObject({ synced: 1 });
+    expect(member.roles.cache.has(patronId)).toBe(true);
+    expect(member.send).not.toHaveBeenCalled();
+  });
+
+  it('does not delay a new paid milestone, refund or member rejoin after skipping a recent success', async () => {
+    paidOrder();
+    backfillCustomerRoleSync();
+    const { client, member } = mockDiscord();
+    await processPendingCustomerRoles(client);
+    expect(backfillCustomerRoleSync()).toMatchObject({ queued: 0, unchanged: 1 });
+    const upgrade = paidOrder(1_000_000);
+    expect(job().status).toBe('PENDING');
+    expect(await syncCustomerRolesNow(client, guildId, customerId, { notify: false })).toMatchObject({ synced: true });
+    expect(member.roles.cache.has(vipId)).toBe(true);
+
+    db.prepare("UPDATE orders SET status = 'REFUNDED' WHERE id = ?").run(upgrade.id);
+    expect(await processPendingCustomerRoles(client)).toMatchObject({ synced: 1 });
+    expect(member.roles.cache.has(vipId)).toBe(false);
+    member.roles.cache.clear();
+    expect(queueCustomerRoleSync(guildId, customerId)).toBe(true);
+    expect(await syncCustomerRolesNow(client, guildId, customerId, { notify: false })).toMatchObject({ synced: true });
+    expect([...member.roles.cache.keys()]).toEqual([patronId]);
+    expect(member.send).not.toHaveBeenCalled();
+  });
+
+  it('invalidates recent success when role policy changes and preserves pending retry backoff', async () => {
+    paidOrder(1_000_000);
+    backfillCustomerRoleSync();
+    const { client, guild, member } = mockDiscord();
+    await processPendingCustomerRoles(client);
+    const absent = '888888888888888888';
+    queueCustomerRoleSync(guildId, absent);
+    db.prepare(`UPDATE customer_role_sync_jobs SET attempts = 4, retry_at = '2099-01-01T00:00:00.000Z',
+      last_error = 'MEMBER_NOT_FOUND' WHERE customer_id = ?`).run(absent);
+    const before = db.prepare('SELECT * FROM customer_role_sync_jobs WHERE customer_id = ?').get(absent);
+    const newVip = '999999999999999999';
+    guild.roles.cache.set(newVip, { id: newVip });
+    upsertGuildConfig({ guild_id: guildId, vip_role_id: newVip, ticket_category_id: '444444444444444444' });
+    expect(backfillCustomerRoleSync()).toMatchObject({ queued: 1, pending: 1, policyChanged: true });
+    expect(db.prepare('SELECT * FROM customer_role_sync_jobs WHERE customer_id = ?').get(absent))
+      .toEqual({ ...before, revision: before.revision + 1 });
+    expect(await processPendingCustomerRoles(client)).toMatchObject({ scanned: 1, synced: 1 });
+    expect(member.roles.cache.has(newVip)).toBe(true);
+    expect(member.send).not.toHaveBeenCalled();
+    expect(backfillCustomerRoleSync()).toMatchObject({ queued: 0, pending: 1, unchanged: 1, policyChanged: false });
   });
 
   it('rescans historical refunds and stale synced jobs without changing money or unrelated roles', async () => {
@@ -203,7 +267,7 @@ describe('paid website purchaser role synchronization', () => {
     expect(db.prepare('SELECT status, payment_status, total_amount, amount_paid FROM orders WHERE id = ?').get(order.id)).toEqual(financialBefore);
 
     db.prepare('DELETE FROM orders WHERE id = ?').run(order.id);
-    expect(backfillCustomerRoleSync()).toMatchObject({ scanned: 1, queued: 1 });
+    expect(backfillCustomerRoleSync(guildId, { force: true })).toMatchObject({ scanned: 1, queued: 1 });
     expect(job().status).toBe('PENDING'); // The historical job is still reconciled.
   });
 
@@ -217,8 +281,8 @@ describe('paid website purchaser role synchronization', () => {
     db.prepare("UPDATE customer_role_sync_jobs SET attempts = 4, retry_at = ?, last_error = 'MEMBER_NOT_FOUND' WHERE guild_id = ?")
       .run('2099-01-01T00:00:00.000Z', guildId);
     const before = job();
-    expect(backfillCustomerRoleSync()).toMatchObject({ scanned: 1, queued: 1, skipped: 1 });
-    expect(job()).toEqual(before);
+    expect(backfillCustomerRoleSync()).toMatchObject({ scanned: 1, queued: 0, pending: 1, skipped: 1 });
+    expect(job()).toEqual({ ...before, revision: before.revision + 1 });
     expect(db.prepare('SELECT COUNT(*) AS n FROM customer_role_sync_jobs').get().n).toBe(2);
     expect(JSON.stringify(getCustomerRoleSyncState())).not.toContain(customerId);
   });
