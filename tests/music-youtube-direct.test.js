@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createMusicSourcePreloader } from '../src/services/musicSourcePreloader.js';
 
 const mocks = {
   spawn: vi.fn(),
@@ -134,6 +135,132 @@ describe('direct YouTube PCM fallback', () => {
     const received = await readAll(output);
     expect(received.length).toBe(pcm.length);
     expect(received.equals(pcm)).toBe(true);
+    expect(mocks.fallback).not.toHaveBeenCalled();
+  });
+
+  it('starts a prepared URL without spawning yt-dlp and preserves buffered PCM continuity', async () => {
+    const cancel = vi.fn();
+    const preparedUrl = 'https://googlevideo.invalid/prepared';
+    const output = createOutput({ preparedSource: { promise: Promise.resolve(preparedUrl), cancel } });
+    await flush();
+    expect(mocks.runtime).not.toHaveBeenCalled();
+    expect(mocks.spawn).toHaveBeenCalledTimes(1);
+    expect(mocks.spawn.mock.calls[0][1]).toEqual(buildFfmpegDirectArgs(preparedUrl));
+    const pcm = Buffer.alloc(8 * 1024 * 1024);
+    for (let i = 0; i < pcm.length; i++) pcm[i] = (i * 17 + (i >>> 7)) % 256;
+    children[0].stdout.end(pcm);
+    children[0].emit('close', 0);
+    await flush();
+    expect(output.readableFlowing).not.toBe(true);
+    const received = await readAll(output);
+    expect(received.length).toBe(pcm.length);
+    expect(received.equals(pcm)).toBe(true);
+    expect(mocks.fallback).not.toHaveBeenCalled();
+    expect(cancel).toHaveBeenCalled();
+  });
+
+  it('retries a revoked prepared URL with both fresh client attempts still available', async () => {
+    const output = createOutput({
+      preparedSource: { promise: Promise.resolve('https://googlevideo.invalid/revoked'), cancel: vi.fn() },
+    });
+    await flush();
+    const cachedFfmpeg = children[0];
+    cachedFfmpeg.stderr.write('HTTP error 403 Forbidden');
+    cachedFfmpeg.emit('close', 1);
+    await flush();
+    // Cached failure is not one of the two normal resolution attempts.
+    expect(mocks.spawn.mock.calls[1][1]).not.toContain('--extractor-args');
+    resolveUrl(children[1]);
+    await flush();
+    children[2].stderr.write('HTTP error 403 Forbidden');
+    children[2].emit('close', 1);
+    await flush();
+    expect(mocks.spawn.mock.calls[3][1]).toEqual(expect.arrayContaining([
+      '--extractor-args', 'youtube:player_client=android,web',
+    ]));
+    expect(mocks.fallback).not.toHaveBeenCalled();
+    resolveUrl(children[3]);
+    await flush();
+    const result = readAll(output);
+    children[4].stdout.end(Buffer.from([7, 3, 9, 1]));
+    children[4].emit('close', 0);
+    expect(await result).toEqual(Buffer.from([7, 3, 9, 1]));
+    expect(mocks.runtime).toHaveBeenCalledTimes(2);
+    expect(mocks.fallback).not.toHaveBeenCalled();
+  });
+
+  it.each(['failed', 'expired'])('uses the normal fresh resolver after %s source preparation', async (mode) => {
+    const track = { id: 'example', url: 'https://www.youtube.com/watch?v=example' };
+    const queue = {};
+    const resolver = mode === 'failed'
+      ? () => Promise.reject(new Error('prefetch source unavailable'))
+      : () => 'https://googlevideo.invalid/audio?expire=1';
+    const preloader = createMusicSourcePreloader(resolver);
+    preloader.prepare(queue, track);
+    // Take before resolution settles to exercise the in-flight ownership path.
+    const preparedSource = preloader.take(queue, track);
+    const output = createOutput({ preparedSource });
+    await flush();
+    expect(mocks.runtime).toHaveBeenCalledTimes(1);
+    expect(mocks.spawn.mock.calls[0][0]).toBe('mock-yt-dlp');
+    expect(mocks.spawn.mock.calls[0][1]).not.toContain('--extractor-args');
+    resolveUrl(children[0]);
+    await flush();
+    const result = readAll(output);
+    children[1].stdout.end(Buffer.from([1, 4, 7, 9]));
+    children[1].emit('close', 0);
+    expect(await result).toEqual(Buffer.from([1, 4, 7, 9]));
+    expect(mocks.fallback).not.toHaveBeenCalled();
+  });
+
+  it('treats a rejected prepared promise as a cache miss without spending the normal client attempt', async () => {
+    const output = createOutput({
+      preparedSource: { promise: Promise.reject(new Error('preparation rejected')), cancel: vi.fn() },
+    });
+    await flush();
+    expect(mocks.runtime).toHaveBeenCalledTimes(1);
+    expect(mocks.spawn.mock.calls[0][1]).not.toContain('--extractor-args');
+    resolveUrl(children[0]);
+    await flush();
+    const result = readAll(output);
+    children[1].stdout.end(Buffer.from([1, 2, 5, 7]));
+    children[1].emit('close', 0);
+    expect(await result).toEqual(Buffer.from([1, 2, 5, 7]));
+    expect(mocks.fallback).not.toHaveBeenCalled();
+  });
+
+  it('aborts a consumed in-flight preparation if playback stops before it resolves', async () => {
+    let resolvePrepared;
+    let signal;
+    const track = { id: 'example', url: 'https://www.youtube.com/watch?v=example' };
+    const preloader = createMusicSourcePreloader((_url, options) => {
+      signal = options.signal;
+      return new Promise(resolve => { resolvePrepared = resolve; });
+    });
+    const queue = {};
+    preloader.prepare(queue, track);
+    await flush();
+    const output = createOutput({ preparedSource: preloader.take(queue, track) });
+    output.destroy();
+    await flush();
+    expect(signal.aborted).toBe(true);
+    resolvePrepared('https://googlevideo.invalid/late');
+    await flush();
+    expect(mocks.spawn).not.toHaveBeenCalled();
+    expect(mocks.fallback).not.toHaveBeenCalled();
+  });
+
+  it('keeps the total startup deadline while awaiting a stuck prepared source', async () => {
+    const cancel = vi.fn();
+    const output = createOutput({
+      preparedSource: { promise: new Promise(() => {}), cancel },
+    });
+    const error = new Promise(resolve => output.once('error', resolve));
+    await vi.advanceTimersByTimeAsync(YOUTUBE_DIRECT_STARTUP_TIMEOUT_MS);
+    expect((await error).message).toContain('45 giây');
+    expect(cancel).toHaveBeenCalled();
+    expect(output.destroyed).toBe(true);
+    expect(mocks.spawn).not.toHaveBeenCalled();
     expect(mocks.fallback).not.toHaveBeenCalled();
   });
 

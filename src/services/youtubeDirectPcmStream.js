@@ -99,6 +99,10 @@ function directOptions() {
   };
 }
 
+export function prepareYoutubeAudioUrl(videoUrl, { signal } = {}) {
+  return spawnYtDlpDirect(videoUrl, { ...directOptions(), signal });
+}
+
 /**
  * Resolve a fresh YouTube audio URL and let FFmpeg reconnect the HTTP stream.
  * If the direct path cannot start, fall back to the installed extractor stream
@@ -109,12 +113,15 @@ export function createResilientYoutubePcmStream(videoUrl, {
   spawnProcess = spawn,
   resolveRuntime = ensureYtDlpRuntime,
   createFallback = createPCMStream,
+  preparedSource = null,
 } = {}) {
   let active = null;
   let closed = false;
   let started = false;
   let attempt = 0;
   let startupTimer = null;
+  let usedPreparedSource = false;
+  let preparedAttempt = false;
   const lifetime = new AbortController();
   // Observe bytes inside the transform, never via a `data` listener. A data
   // listener would put the public stream in flowing mode before Player owns it.
@@ -150,6 +157,7 @@ export function createResilientYoutubePcmStream(videoUrl, {
   const cleanup = () => {
     clearTimeout(totalTimer);
     lifetime.abort();
+    preparedSource?.cancel();
     cleanupActive();
   };
   const close = (error = null) => {
@@ -184,6 +192,14 @@ export function createResilientYoutubePcmStream(videoUrl, {
   const failed = (error) => {
     if (closed) return;
     cleanupActive();
+    // A prefetched signed URL may be revoked before use. Retry the normal
+    // fresh resolver without spending either normal client attempt.
+    if (!started && preparedAttempt) {
+      preparedAttempt = false;
+      attempt -= 1;
+      void start();
+      return;
+    }
     if (!started && fallback) {
       if (attempt < MAX_START_ATTEMPTS) void start();
       else startFallback();
@@ -193,7 +209,14 @@ export function createResilientYoutubePcmStream(videoUrl, {
     if (closed) return;
     attempt += 1;
     try {
-      const directUrl = await spawnYtDlpDirect(videoUrl, {
+      let directUrl = null;
+      if (!usedPreparedSource && preparedSource) {
+        usedPreparedSource = true;
+        directUrl = await Promise.resolve(preparedSource.promise).catch(() => null);
+        preparedAttempt = Boolean(directUrl);
+      }
+      if (closed) return;
+      directUrl ||= await spawnYtDlpDirect(videoUrl, {
         ...directOptions(),
         // Keep the normal yt-dlp client first for the best available audio;
         // retry once with a public client when YouTube rejects that URL.

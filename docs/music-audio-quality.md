@@ -8,7 +8,7 @@ YouTube `bestaudio` → FFmpeg một lần → PCM 48 kHz stereo → gom frame 2
 - Giữ nguyên bài đang phát, playlist, thứ tự và âm lượng mặc định của máy chủ. Nút âm lượng áp dụng vào PCM; không khuếch đại quá 100%.
 - Chế độ Nguyên bản giữ PCM nguyên vẹn, không EQ/vang/bass. Hiệu ứng được chọn xử lý trong bộ DSP riêng; không bật hiệu ứng mặc định của Discord Player. Không giải mã/mã hóa Opus hai lần và không chạy FFmpeg lần hai.
 - Gom đủ 3.840 byte/frame trước DSP để không mất mẫu khi nguồn chia chunk nhỏ hoặc chia giữa sample. Phần dư cuối bài được đệm tối đa một frame.
-- Hủy nguồn nếu không có frame đầu sau 20 giây. Khi đã nhận frame đầu, tạm dừng hoặc backpressure không kích hoạt deadline này. Thiếu âm thanh ngắn được chịu tối đa 25 frame (500 ms) trước khi player kết thúc bài.
+- YouTube trực tiếp có tổng ngân sách 45 giây để lấy URL và thử nguồn; tầng chờ PCM dùng 46 giây để không cắt lần thử bên trong sớm. Hàm gom frame độc lập mặc định 20 giây; thông báo lỗi luôn hiển thị thời hạn thực mà bên gọi truyền vào. Khi đã nhận frame đầu, tạm dừng hoặc backpressure không kích hoạt deadline này. Thiếu âm thanh ngắn được chịu tối đa 25 frame (500 ms) trước khi player kết thúc bài.
 - DAVE thất bại, stop, disconnect và lỗi pipeline đóng ngược đến nguồn FFmpeg/yt-dlp; không giữ child process mồ côi.
 
 Nguồn YouTube và cấu hình phòng thoại vẫn giới hạn chất lượng. Không thể phục hồi chi tiết nguồn đã mất hoặc hứa âm thanh lossless. Có thể tăng bitrate phòng nhạc trong Discord trong mức máy chủ cho phép; bot dùng mức đó cho bài tiếp theo.
@@ -43,5 +43,7 @@ Generic `@discord-player/opus` 7.2.0 bỏ chunk nhỏ hơn một frame, và wrap
 ## Kiểm thử
 
 Native synthetic PCM kiểm tra số frame/byte, odd chunk boundaries, decodable stereo, bitrate 64/96/128/256/384 kbps, cleanup và deadline. Kiểm tra qua StreamDispatcher/FiltersChain thật xác nhận tỷ lệ RMS của volume 80%/20% khoảng 4 lần và không có compressor/reverb hay encoder thứ hai. Các kiểm tra này không thay thế nghe thực tế trong phòng thoại.
+
+Kiểm tra native encoder ngày 20/10/2026: tín hiệu stereo 2 giây, dải 440/880 Hz và 12/16 kHz, giữ đủ 100 frame ở 64/128/384 kbps. Biên độ dải cao sau giải mã 4.888–5.011 so với 5.000 đầu vào; nhiễu sang kênh kia 1–3 so với 7.000 đầu vào. Chi phí mã hóa đo trên máy phát triển khoảng 40–62 ms cho 2 giây âm thanh. Đây là phép thử kỹ thuật về đường truyền tín hiệu, không phải điểm đánh giá cảm nhận hay cam kết tốc độ hosting. Giữ preset khách đã chọn; không tự tăng bass, vang, âm lượng hoặc thay đổi bitrate phòng để giả lập nâng chất lượng.
 
 Tham chiếu: [Discord voice format](https://github.com/discord/discord-api-docs/blob/main/developers/topics/voice-connections.mdx), [Opus encoder controls](https://opus-codec.org/docs/html_api-1.0.3/group__opus__encoderctls.html), [Node stream pipeline](https://nodejs.org/api/stream.html#streampipelinesource-transforms-destination-callback).

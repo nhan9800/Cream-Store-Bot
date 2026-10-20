@@ -43,7 +43,7 @@ class MusicFrameTransform extends Transform {
     this.pending = Buffer.alloc(0);
     this.encodeFrame = encode;
     this.startupTimer = startupTimeoutMs > 0 ? setTimeout(() => {
-      this.destroy(new Error('YouTube chưa trả âm thanh sau 20 giây; đã đóng nguồn. Hãy kiểm tra lại hoặc chuyển bài.'));
+      this.destroy(new Error(`YouTube chưa trả âm thanh sau ${Math.ceil(startupTimeoutMs / 1000)} giây; đã đóng nguồn. Hãy kiểm tra lại hoặc chuyển bài.`));
     }, startupTimeoutMs) : null;
     this.startupTimer?.unref();
   }
