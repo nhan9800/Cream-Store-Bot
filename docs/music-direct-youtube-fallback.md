@@ -30,6 +30,14 @@ The YouTube source remains authoritative for metadata, videos and playlists. Coo
 
 Set `MUSIC_YOUTUBE_STREAM_MODE=extractor` in the bot runtime to return to the previous extractor-owned stream without changing catalog or queue data. The public health response exposes only the aggregate `youtubeStreamMode` (`direct-with-extractor-fallback` or `extractor`).
 
+## Next-track preparation — 2026-10-20
+
+- While a song plays, resolve only the next queued video's audio URL. Keep one entry per queue in memory for at most five minutes, shortened by the signed URL's expiry. No audio file or speculative FFmpeg process is retained.
+- Consume that entry once at the next source start, including an already-running resolver. Queue changes, Stop, disconnect and queue deletion cancel obsolete preparation. Dynamic shuffle uses ordinary resolution because its next selection is not known yet.
+- A failed/expired preparation falls back to normal fresh resolution. A rejected cached URL gets a fresh default-client attempt before the existing alternate client/extractor fallback, within the same 45-second total budget.
+- DAVE negotiation and PCM preparation overlap, but the hook returns audio only when both are ready. Cancelling a pending start tears down its source.
+- Local owner-link probe: a prepared URL produced the first encoded frame in485ms and continued10.5seconds with541frames/RMS7295; preparation itself took6482ms before playback. Earlier uncached probe took8571ms to first frame. These observations are not a universal latency guarantee; measure hosting source-ready logs after deployment.
+
 ## Verification
 
 - Direct owner-link probe emitted PCM locally from `https://youtu.be/J-P69SaDPXE`.

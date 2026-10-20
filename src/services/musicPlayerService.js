@@ -22,7 +22,8 @@ import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { accentFor } from '../utils/uiKit.js';
 import { configureCleanMusicDispatcher, createFrameAlignedMusicPcm, createMusicOpusStream } from './musicAudioPipeline.js';
 import { loadYoutubeMix, normalizeYoutubeMixUrl } from './youtubeMixSource.js';
-import { createResilientYoutubePcmStream, YOUTUBE_DIRECT_STARTUP_TIMEOUT_MS } from './youtubeDirectPcmStream.js';
+import { createResilientYoutubePcmStream, prepareYoutubeAudioUrl, YOUTUBE_DIRECT_STARTUP_TIMEOUT_MS } from './youtubeDirectPcmStream.js';
+import { createMusicSourcePreloader } from './musicSourcePreloader.js';
 import { attachMusicSoundEffects, getMusicSoundState, updateMusicSound } from './musicSoundService.js';
 import {
   clearMusicRecovery, getMusicRecovery, getMusicRecoveryChannel, ignoreMusicPlaybackFinish,
@@ -59,6 +60,25 @@ const volumeRamps = new Map();
 const queueMutations = new Map();
 const extractingTracks = new WeakMap();
 const audioProfiles = new WeakMap();
+const pendingSources = new WeakMap();
+const sourcePreloader = createMusicSourcePreloader(prepareYoutubeAudioUrl);
+
+function cancelPendingMusicSource(queue) {
+  pendingSources.get(queue)?.destroy();
+  pendingSources.delete(queue);
+}
+
+function prepareNextMusicSource(queue) {
+  if (!queue?.dispatcher?.voiceConnection || !queue.currentTrack || queue.isShuffling
+    || getMusicRecovery(queue).blocked
+    || String(process.env.MUSIC_YOUTUBE_STREAM_MODE || 'direct').toLowerCase() === 'extractor') {
+    sourcePreloader.cancel(queue);
+    return;
+  }
+  // Dynamic shuffle picks its track at dispatch time; never guess or change
+  // its ordering merely to prefetch. The ordinary next item remains exact.
+  sourcePreloader.prepare(queue, queue.tracks?.at?.(0));
+}
 
 let musicPlayer = null;
 let initializePromise = null;
@@ -175,9 +195,11 @@ export function isDaveVoiceReady(queue) {
 export async function waitForDaveVoiceReady(queue, {
   timeoutMs = DAVE_HANDSHAKE_TIMEOUT_MS,
   pollMs = 50,
+  signal,
 } = {}) {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
+    if (signal?.aborted) throw new Error('Đã hủy khởi động nguồn nhạc.');
     const { voiceStatus } = resolveDaveState(queue);
     if (voiceStatus === 'destroyed' || voiceStatus === 'disconnected') {
       throw new Error('Kết nối phòng thoại đã đóng trước khi phiên mã hoá DAVE sẵn sàng.');
@@ -509,12 +531,14 @@ export function wirePlayerEvents(player) {
     noteMusicPlaybackStart(queue, track);
     if (extractingTracks.get(queue)?.id === track?.id) extractingTracks.delete(queue);
     saveTrackStart(queue, track);
+    prepareNextMusicSource(queue);
     // Bitrate is configured on a fresh native encoder before playback;
     // never mutate an already-ended PlayerStart resource.
     schedulePanelRefresh(queue.guild.id);
   });
   player.events.on(GuildQueueEvent.PlayerFinish, (queue, track) => {
     const endedEarly = noteMusicPlaybackFinish(queue, track);
+    if (getMusicRecovery(queue).blocked) sourcePreloader.cancel(queue);
     closeTrackHistory(queue, track, endedEarly ? 'ERROR' : 'COMPLETED',
       endedEarly ? 'Nguồn âm thanh kết thúc trước khi phát ổn định.' : null);
     schedulePanelRefresh(queue.guild.id);
@@ -523,6 +547,7 @@ export function wirePlayerEvents(player) {
     // Manual skips are not failed extraction attempts.
     if (reason === 'ERR_NO_STREAM') {
       noteMusicPlaybackFailure(queue, track, description || reason);
+      if (getMusicRecovery(queue).blocked) sourcePreloader.cancel(queue);
     }
     if (extractingTracks.get(queue)?.id === track?.id) extractingTracks.delete(queue);
     closeTrackHistory(queue, track, 'SKIPPED');
@@ -534,6 +559,7 @@ export function wirePlayerEvents(player) {
   });
   player.events.on(GuildQueueEvent.PlayerError, (queue, error, track) => {
     noteMusicPlaybackFailure(queue, track, error);
+    if (getMusicRecovery(queue).blocked) sourcePreloader.cancel(queue);
     if (extractingTracks.get(queue)?.id === track?.id) extractingTracks.delete(queue);
     closeTrackHistory(queue, track, 'ERROR', error?.message);
     console.error(`[MUSIC] Playback error in ${queue.guild.name}:`, error);
@@ -548,14 +574,21 @@ export function wirePlayerEvents(player) {
     GuildQueueEvent.PlayerResume,
     GuildQueueEvent.VolumeChange,
     GuildQueueEvent.Disconnect,
+    GuildQueueEvent.QueueDelete,
   ]) {
     player.events.on(event, (queue) => {
-      if (event === GuildQueueEvent.Disconnect || event === GuildQueueEvent.EmptyQueue) extractingTracks.delete(queue);
+      if ([GuildQueueEvent.Disconnect, GuildQueueEvent.EmptyQueue, GuildQueueEvent.QueueDelete].includes(event)) {
+        extractingTracks.delete(queue);
+        sourcePreloader.cancel(queue);
+        cancelPendingMusicSource(queue);
+      }
+      else if ([GuildQueueEvent.AudioTrackAdd, GuildQueueEvent.AudioTracksAdd, GuildQueueEvent.AudioTrackRemove].includes(event)) prepareNextMusicSource(queue);
       schedulePanelRefresh(queue.guild.id);
     });
   }
   player.events.on(GuildQueueEvent.Error, (queue, error) => {
     noteMusicPlaybackFailure(queue, error?.resource?.metadata || queue.currentTrack, error);
+    if (getMusicRecovery(queue).blocked) sourcePreloader.cancel(queue);
     // Native AudioPlayer errors use this event, followed by PlayerFinish.
     // Preserve ERROR history instead of turning a failed stream into COMPLETED.
     if (error?.code !== 'ERR_STREAM_PREMATURE_CLOSE') {
@@ -666,20 +699,33 @@ export function musicQueueOptions(settings, textChannelId, requestedByLabel) {
         // A queue without a live dispatcher is a metadata/unit-test harness;
         // let Discord Player's normal extractor path handle that case.
         if (!queue?.dispatcher?.voiceConnection) return null;
-        const waitedMs = await waitForDaveVoiceReady(queue);
-        console.log(`[MUSIC] DAVE ready in ${waitedMs}ms; resolving direct YouTube audio for ${track?.title || track?.url || 'track'}`);
+        cancelPendingMusicSource(queue);
         // The direct source is already 48 kHz s16le PCM. Return the same
         // demuxable shape as the extractor so Discord Player honours
         // skipFFmpeg and does not run a second FFmpeg pass over PCM.
-        const source = createResilientYoutubePcmStream(track.url);
+        const startedAt = Date.now();
+        const preparedSource = sourcePreloader.take(queue, track);
+        const source = createResilientYoutubePcmStream(track.url, { preparedSource });
         const startupTimeoutMs = YOUTUBE_DIRECT_STARTUP_TIMEOUT_MS + 1_000;
         const aligned = createFrameAlignedMusicPcm(source, { startupTimeoutMs });
+        const startup = new AbortController();
+        aligned.once('close', () => startup.abort());
+        pendingSources.set(queue, aligned);
         try {
-          await waitForMusicPcmReadable(aligned, startupTimeoutMs);
+          // Source preparation can overlap DAVE negotiation; PCM stays
+          // backpressured and is never handed to Player before DAVE is ready.
+          const [waitedMs] = await Promise.all([
+            waitForDaveVoiceReady(queue, { signal: startup.signal }),
+            waitForMusicPcmReadable(aligned, startupTimeoutMs),
+          ]);
+          if (aligned.destroyed || aligned.readableEnded) throw new Error('Đã hủy khởi động nguồn nhạc.');
+          console.log(`[MUSIC] Source ready in ${Date.now() - startedAt}ms; prepared=${Boolean(preparedSource)}; DAVE=${waitedMs}ms; ${track?.title || 'track'}`);
           return { $fmt: 'raw', stream: aligned };
         } catch (error) {
           aligned.destroy();
           throw error;
+        } finally {
+          if (pendingSources.get(queue) === aligned) pendingSources.delete(queue);
         }
       },
       // discord-player 7.2.0 may start consuming the audio resource before
@@ -875,17 +921,22 @@ export async function controlMusic(guildId, action, value = null) {
       if (!queue.node.skip()) throw new Error('Không có bài kế tiếp để chuyển.');
       break;
     case 'stop':
+      sourcePreloader.cancel(queue);
+      cancelPendingMusicSource(queue);
       clearMusicRecovery(queue);
       extractingTracks.delete(queue);
       queue.node.stop(true);
       break;
     case 'disconnect':
+      sourcePreloader.cancel(queue);
+      cancelPendingMusicSource(queue);
       clearMusicRecovery(queue);
       extractingTracks.delete(queue);
       queue.delete();
       break;
     case 'shuffle':
       queue.toggleShuffle(true);
+      prepareNextMusicSource(queue);
       break;
     case 'loop': {
       const next = queue.repeatMode === QueueRepeatMode.OFF
