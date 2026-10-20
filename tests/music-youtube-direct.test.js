@@ -1,4 +1,4 @@
-import { EventEmitter } from 'node:events';
+import { EventEmitter, once } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMusicSourcePreloader } from '../src/services/musicSourcePreloader.js';
@@ -135,6 +135,76 @@ describe('direct YouTube PCM fallback', () => {
     const received = await readAll(output);
     expect(received.length).toBe(pcm.length);
     expect(received.equals(pcm)).toBe(true);
+    expect(mocks.fallback).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    [undefined, 4 * 1024 * 1024],
+    [256 * 1024, 256 * 1024],
+    [0, 64 * 1024],
+    [-1, 64 * 1024],
+    [32 * 1024 * 1024, 4 * 1024 * 1024],
+    [NaN, 4 * 1024 * 1024],
+    [Infinity, 4 * 1024 * 1024],
+  ])('bounds decoder buffering for requested size %s', (bufferedBytes, expected) => {
+    const output = createOutput({ bufferedBytes });
+    expect(output.readableHighWaterMark).toBe(expected);
+    expect(output.writableHighWaterMark).toBe(expected);
+  });
+
+  it.each(['direct', 'fallback'])('warms %s PCM with bounded buffering and preserves all bytes after handoff', async (mode) => {
+    const bufferedBytes = 256 * 1024;
+    let output, producer, child;
+    if (mode === 'direct') {
+      ({ output, child } = await startFfmpeg({ bufferedBytes }));
+      producer = child.stdout;
+    } else {
+      mocks.runtime.mockRejectedValue(new Error('direct resolver unavailable'));
+      output = createOutput({ bufferedBytes });
+      await flush();
+      producer = fallbackStreams[0];
+      expect(producer).toBeDefined();
+    }
+    const pcm = Buffer.alloc(2 * 1024 * 1024);
+    for (let i = 0; i < pcm.length; i++) pcm[i] = (i * 23 + (i >>> 5)) % 256;
+    let written = 0;
+    const producing = (async () => {
+      while (written < pcm.length) {
+        const next = pcm.subarray(written, written + 16 * 1024);
+        written += next.length;
+        if (!producer.write(next)) await once(producer, 'drain');
+      }
+      producer.end();
+      child?.emit('close', 0);
+    })();
+    await flush();
+    expect(output.readableFlowing).not.toBe(true);
+    expect(output.readableLength).toBeLessThanOrEqual(bufferedBytes);
+    expect(output.writableLength).toBeLessThanOrEqual(bufferedBytes);
+    // Include the upstream PassThrough's readable/writable thresholds; a
+    // real child also has a bounded OS pipe and its own decoder allocations.
+    expect(written).toBeLessThanOrEqual(bufferedBytes * 2 + producer.readableHighWaterMark + producer.writableHighWaterMark);
+    const pausedAt = written;
+    await vi.advanceTimersByTimeAsync(YOUTUBE_DIRECT_STARTUP_TIMEOUT_MS * 2);
+    expect(written).toBe(pausedAt);
+    expect(output.destroyed).toBe(false);
+    const received = await readAll(output);
+    await producing;
+    expect(received.length).toBe(pcm.length);
+    expect(received.equals(pcm)).toBe(true);
+  });
+
+  it('kills a decoder held by the warm buffer immediately when the queued track is cancelled', async () => {
+    const { output, child } = await startFfmpeg({ bufferedBytes: 256 * 1024 });
+    child.stdout.write(Buffer.alloc(1024 * 1024, 17));
+    await flush();
+    expect(child.stdout.readableFlowing).toBe(false);
+    output.destroy();
+    await flush();
+    expect(child.kill).toHaveBeenCalledWith('SIGKILL');
+    expect(output.destroyed).toBe(true);
+    await vi.advanceTimersByTimeAsync(YOUTUBE_DIRECT_STARTUP_TIMEOUT_MS * 2);
+    expect(children).toHaveLength(2);
     expect(mocks.fallback).not.toHaveBeenCalled();
   });
 

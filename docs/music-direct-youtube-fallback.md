@@ -32,11 +32,12 @@ Set `MUSIC_YOUTUBE_STREAM_MODE=extractor` in the bot runtime to return to the pr
 
 ## Next-track preparation — 2026-10-20
 
-- While a song plays, resolve only the next queued video's audio URL. Keep one entry per queue in memory for at most five minutes, shortened by the signed URL's expiry. No audio file or speculative FFmpeg process is retained.
-- Consume that entry once at the next source start, including an already-running resolver. Queue changes, Stop, disconnect and queue deletion cancel obsolete preparation. Dynamic shuffle uses ordinary resolution because its next selection is not known yet.
-- A failed/expired preparation falls back to normal fresh resolution. A rejected cached URL gets a fresh default-client attempt before the existing alternate client/extractor fallback, within the same 45-second total budget.
+- The first URL-only implementation still took19210ms on hosting (`prepared=true`), despite485ms locally. A resolved signed URL does not prove its audio is usable.
+- While a song plays, prepare one real next PCM source with the normal YouTube retries. Hold it paused/backpressured for at most five minutes. The Transform uses256KiB per side (~1.37seconds of stereo PCM); FFmpeg/OS buffers have separate bounded allocations. At most one extra decoder per active queue, no extra Opus encoder or audio file.
+- Consume that exact stream once at the next source start, including an in-flight preparation. Buffered bytes remain intact. Queue changes, Stop, disconnect and queue deletion destroy obsolete sources; TTL destroys unused sources. Dynamic shuffle uses ordinary resolution because its next selection is not known yet.
+- A failed/expired preparation falls back to normal fresh resolution when selected. Background failures do not skip a song or start retry loops. An error after ownership transfers follows ordinary playback recovery.
 - DAVE negotiation and PCM preparation overlap, but the hook returns audio only when both are ready. Cancelling a pending start tears down its source.
-- Local owner-link probe: a prepared URL produced the first encoded frame in485ms and continued10.5seconds with541frames/RMS7295; preparation itself took6482ms before playback. Earlier uncached probe took8571ms to first frame. These observations are not a universal latency guarantee; measure hosting source-ready logs after deployment.
+- Source-ready logs include `prepared` (reused stream) and `buffered` (PCM already available when selected). Measure hosting transitions; a cold first song, expired source or immediate repeated skip can still wait for YouTube.
 
 ## Verification
 
