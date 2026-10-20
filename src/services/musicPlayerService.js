@@ -22,8 +22,13 @@ import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { accentFor } from '../utils/uiKit.js';
 import { configureCleanMusicDispatcher, createFrameAlignedMusicPcm, createMusicOpusStream } from './musicAudioPipeline.js';
 import { loadYoutubeMix, normalizeYoutubeMixUrl } from './youtubeMixSource.js';
-import { createResilientYoutubePcmStream } from './youtubeDirectPcmStream.js';
+import { createResilientYoutubePcmStream, YOUTUBE_DIRECT_STARTUP_TIMEOUT_MS } from './youtubeDirectPcmStream.js';
 import { attachMusicSoundEffects, getMusicSoundState, updateMusicSound } from './musicSoundService.js';
+import {
+  clearMusicRecovery, getMusicRecovery, getMusicRecoveryChannel, ignoreMusicPlaybackFinish,
+  noteMusicPlaybackFailure, noteMusicPlaybackFinish, noteMusicPlaybackStart,
+  removeHeldMusicTrack, restoreMusicQueue,
+} from './musicPlaybackRecovery.js';
 
 const YOUTUBE_HOSTS = new Set([
   'youtube.com',
@@ -183,7 +188,8 @@ export async function waitForDaveVoiceReady(queue, {
   throw new Error(`Discord DAVE/MLS chưa sẵn sàng sau ${Math.round(DAVE_HANDSHAKE_TIMEOUT_MS / 1000)} giây; đã chặn phát sớm để tránh mất bài.`);
 }
 
-async function waitForMusicPcmReadable(stream, timeoutMs = MUSIC_SOURCE_TIMEOUT_MS) {
+export async function waitForMusicPcmReadable(stream, timeoutMs = MUSIC_SOURCE_TIMEOUT_MS) {
+  if (stream.destroyed || stream.readableEnded) throw new Error('Nguồn âm thanh đã đóng trước khi phát.');
   if (stream.readableLength > 0) return;
   let timer;
   await new Promise((resolve, reject) => {
@@ -192,17 +198,22 @@ async function waitForMusicPcmReadable(stream, timeoutMs = MUSIC_SOURCE_TIMEOUT_
       stream.removeListener('readable', onReadable);
       stream.removeListener('error', onError);
       stream.removeListener('end', onEnd);
+      stream.removeListener('close', onEnd);
     };
-    const onReadable = () => { cleanup(); resolve(); };
+    const onReadable = () => {
+      if (stream.readableLength > 0) { cleanup(); resolve(); }
+    };
     const onError = (error) => { cleanup(); reject(error); };
     const onEnd = () => { cleanup(); reject(new Error('YouTube chưa trả frame âm thanh đầu tiên.')); };
     timer = setTimeout(() => {
       cleanup();
       reject(new Error('YouTube chưa trả frame âm thanh trong thời gian cho phép.'));
     }, timeoutMs);
-    stream.once('readable', onReadable);
+    stream.on('readable', onReadable);
     stream.once('error', onError);
     stream.once('end', onEnd);
+    stream.once('close', onEnd);
+    onReadable();
   });
 }
 
@@ -389,6 +400,7 @@ export function getMusicRuntimeStatus() {
 
 export function getMusicState(guildId) {
   const queue = musicPlayer?.nodes.get(String(guildId));
+  const recovery = getMusicRecovery(queue);
   const timestamp = queue?.node.getTimestamp() || null;
   const channel = queue?.channel || null;
   const members = channel?.members
@@ -396,6 +408,12 @@ export function getMusicState(guildId) {
     : [];
   return {
     runtime: getMusicRuntimeStatus(),
+    recovery: {
+      blocked: recovery.blocked,
+      consecutiveFailures: recovery.consecutiveFailures,
+      message: recovery.message,
+      retainedTracks: recovery.tracks.length,
+    },
     audio: queue ? audioProfiles.get(queue) || null : null,
     sound: getMusicSoundState(guildId, queue),
     settings: readSettings(guildId),
@@ -417,7 +435,8 @@ export function getMusicState(guildId) {
       currentLabel: timestamp?.current?.label || '0:00',
       totalLabel: timestamp?.total?.label || queue?.currentTrack?.duration || '0:00',
     },
-    queue: queue?.tracks.toArray().map((track, index) => serializeTrack(track, index + 1)) || [],
+    queue: (recovery.blocked ? recovery.tracks : queue?.tracks.toArray() || [])
+      .map((track, index) => serializeTrack(track, index + 1)),
     history: recentHistory(guildId),
   };
 }
@@ -487,6 +506,7 @@ export function wirePlayerEvents(player) {
     }
   });
   player.events.on(GuildQueueEvent.PlayerStart, (queue, track) => {
+    noteMusicPlaybackStart(queue, track);
     if (extractingTracks.get(queue)?.id === track?.id) extractingTracks.delete(queue);
     saveTrackStart(queue, track);
     // Bitrate is configured on a fresh native encoder before playback;
@@ -494,10 +514,16 @@ export function wirePlayerEvents(player) {
     schedulePanelRefresh(queue.guild.id);
   });
   player.events.on(GuildQueueEvent.PlayerFinish, (queue, track) => {
-    closeTrackHistory(queue, track, 'COMPLETED');
+    const endedEarly = noteMusicPlaybackFinish(queue, track);
+    closeTrackHistory(queue, track, endedEarly ? 'ERROR' : 'COMPLETED',
+      endedEarly ? 'Nguồn âm thanh kết thúc trước khi phát ổn định.' : null);
     schedulePanelRefresh(queue.guild.id);
   });
   player.events.on(GuildQueueEvent.PlayerSkip, (queue, track, reason, description) => {
+    // Manual skips are not failed extraction attempts.
+    if (reason === 'ERR_NO_STREAM') {
+      noteMusicPlaybackFailure(queue, track, description || reason);
+    }
     if (extractingTracks.get(queue)?.id === track?.id) extractingTracks.delete(queue);
     closeTrackHistory(queue, track, 'SKIPPED');
     console.warn(
@@ -507,6 +533,7 @@ export function wirePlayerEvents(player) {
     schedulePanelRefresh(queue.guild.id);
   });
   player.events.on(GuildQueueEvent.PlayerError, (queue, error, track) => {
+    noteMusicPlaybackFailure(queue, track, error);
     if (extractingTracks.get(queue)?.id === track?.id) extractingTracks.delete(queue);
     closeTrackHistory(queue, track, 'ERROR', error?.message);
     console.error(`[MUSIC] Playback error in ${queue.guild.name}:`, error);
@@ -528,6 +555,7 @@ export function wirePlayerEvents(player) {
     });
   }
   player.events.on(GuildQueueEvent.Error, (queue, error) => {
+    noteMusicPlaybackFailure(queue, error?.resource?.metadata || queue.currentTrack, error);
     // Native AudioPlayer errors use this event, followed by PlayerFinish.
     // Preserve ERROR history instead of turning a failed stream into COMPLETED.
     if (error?.code !== 'ERR_STREAM_PREMATURE_CLOSE') {
@@ -644,9 +672,10 @@ export function musicQueueOptions(settings, textChannelId, requestedByLabel) {
         // demuxable shape as the extractor so Discord Player honours
         // skipFFmpeg and does not run a second FFmpeg pass over PCM.
         const source = createResilientYoutubePcmStream(track.url);
-        const aligned = createFrameAlignedMusicPcm(source);
+        const startupTimeoutMs = YOUTUBE_DIRECT_STARTUP_TIMEOUT_MS + 1_000;
+        const aligned = createFrameAlignedMusicPcm(source, { startupTimeoutMs });
         try {
-          await waitForMusicPcmReadable(aligned);
+          await waitForMusicPcmReadable(aligned, startupTimeoutMs);
           return { $fmt: 'raw', stream: aligned };
         } catch (error) {
           aligned.destroy();
@@ -700,6 +729,9 @@ export async function enqueueYoutubeSource({
   return withQueueMutation(guild.id, async () => {
     const settings = getSettings();
     const existing = player.nodes.get(guild.id);
+    if (getMusicRecovery(existing).blocked) {
+      throw new Error('Hàng đợi đã được giữ lại sau lỗi phát nhạc. Nhấn Thử phát lại trên bảng điều khiển, hoặc Dừng để tạo phiên mới; chưa thêm bài trùng.');
+    }
     if (existing?.channel && existing.channel.id !== voiceChannel.id) {
       throw new Error(`Bot đang ở #${existing.channel.name}. Hãy vào cùng phòng thoại hoặc cho bot rời phòng trước.`);
     }
@@ -809,6 +841,25 @@ export async function controlMusic(guildId, action, value = null) {
     return getMusicState(guildId);
   }
   if (!queue) throw new Error('Hiện chưa có phiên phát nhạc trong máy chủ.');
+  const recovery = getMusicRecovery(queue);
+  if (recovery.blocked && ['toggle', 'resume'].includes(String(action || '').toLowerCase())) {
+    return withQueueMutation(guildId, async () => {
+      if (!queue.dispatcher?.voiceConnection) {
+        const channel = getMusicRecoveryChannel(queue);
+        if (!channel) throw new Error('Phòng thoại không còn khả dụng. Hãy dừng phiên rồi thêm bài lại.');
+        await queue.connect(channel, {
+          daveEncryption: true, timeout: 20_000,
+          audioPlayer: createAudioPlayer({ behaviors: { maxMissedFrames: 25 } }),
+        });
+      }
+      if (restoreMusicQueue(queue)) await queue.node.play(null);
+      schedulePanelRefresh(guildId);
+      return getMusicState(guildId);
+    });
+  }
+  if (recovery.blocked && ['pause', 'skip', 'shuffle', 'loop'].includes(String(action || '').toLowerCase())) {
+    throw new Error('Hàng đợi đang được giữ lại sau lỗi nguồn phát. Nhấn Thử phát lại hoặc Dừng.');
+  }
   switch (String(action || '').toLowerCase()) {
     case 'toggle':
       queue.node.setPaused(!queue.node.isPaused());
@@ -820,13 +871,16 @@ export async function controlMusic(guildId, action, value = null) {
       queue.node.resume();
       break;
     case 'skip':
+      ignoreMusicPlaybackFinish(queue);
       if (!queue.node.skip()) throw new Error('Không có bài kế tiếp để chuyển.');
       break;
     case 'stop':
+      clearMusicRecovery(queue);
       extractingTracks.delete(queue);
       queue.node.stop(true);
       break;
     case 'disconnect':
+      clearMusicRecovery(queue);
       extractingTracks.delete(queue);
       queue.delete();
       break;
@@ -847,6 +901,10 @@ export async function controlMusic(guildId, action, value = null) {
       break;
     case 'remove': {
       const index = Number(value) - 1;
+      if (recovery.blocked) {
+        if (!removeHeldMusicTrack(queue, index)) throw new Error('Bài hát không còn trong hàng đợi.');
+        break;
+      }
       const track = queue.tracks.at(index);
       if (!track) throw new Error('Bài hát không còn trong hàng đợi.');
       queue.removeTrack(track);
@@ -884,6 +942,7 @@ export function buildMusicPanelPayload(guildId, { notice = null } = {}) {
     `# ${E('music_wave')} CENAR MUSIC · CONTROL DECK`,
     `> ${E('cenar_verified')} YouTube Engine · 48 kHz Stereo · bitrate tự động theo phòng thoại`,
     notice ? `> ${notice}` : '',
+    state.recovery.blocked ? `> **Đã giữ lại ${state.recovery.retainedTracks} bài.** ${state.recovery.message}` : '',
     '',
     current
       ? `## ${E('music_now')} [${plain(current.title)}](${current.url})`
@@ -893,7 +952,7 @@ export function buildMusicPanelPayload(guildId, { notice = null } = {}) {
       ? `\`${state.progress.currentLabel}\` ${queueProgress(state.progress.percent)} \`${state.progress.totalLabel}\``
       : `Kết nối vào phòng thoại, nhấn **Thêm bài / playlist / Mix** rồi dán link YouTube.`,
     '',
-    `**Trạng thái:** ${state.paused ? 'Tạm dừng' : state.playing ? 'Đang phát' : state.buffering ? 'Đang tải âm thanh' : 'Sẵn sàng'} · **Âm lượng:** ${state.volume}% · **${repeatLabel}** · **Shuffle:** ${state.shuffle ? 'Bật' : 'Tắt'}`,
+    `**Trạng thái:** ${state.recovery.blocked ? 'Chờ thử phát lại' : state.paused ? 'Tạm dừng' : state.playing ? 'Đang phát' : state.buffering ? 'Đang tải âm thanh' : 'Sẵn sàng'} · **Âm lượng:** ${state.volume}% · **${repeatLabel}** · **Shuffle:** ${state.shuffle ? 'Bật' : 'Tắt'}`,
     `**Âm thanh:** ${plain(soundName)} · ${state.sound.live ? 'Áp dụng live' : 'Sẵn sàng cho bài tiếp theo'}`,
     `**Phòng thoại:** ${state.voiceChannel ? `🔊 ${plain(state.voiceChannel.name)}` : 'Chưa kết nối'} · **Người nghe:** ${state.listeners.length} · **Ping:** ${state.ping}ms`,
     '',
@@ -909,8 +968,8 @@ export function buildMusicPanelPayload(guildId, { notice = null } = {}) {
     E.component('music_add'),
   );
   const toggle = setButtonEmoji(
-    new ButtonBuilder().setCustomId('music:toggle').setLabel(state.paused ? 'Tiếp tục' : 'Tạm dừng').setStyle(ButtonStyle.Primary).setDisabled(!current),
-    E.component(state.paused ? 'music_play' : 'music_pause'),
+    new ButtonBuilder().setCustomId('music:toggle').setLabel(state.recovery.blocked ? 'Thử phát lại' : state.paused ? 'Tiếp tục' : 'Tạm dừng').setStyle(ButtonStyle.Primary).setDisabled(!current && !state.recovery.blocked),
+    E.component(state.paused || state.recovery.blocked ? 'music_play' : 'music_pause'),
   );
   const skip = setButtonEmoji(
     new ButtonBuilder().setCustomId('music:skip').setLabel('Chuyển bài').setStyle(ButtonStyle.Secondary).setDisabled(!current),
@@ -921,7 +980,7 @@ export function buildMusicPanelPayload(guildId, { notice = null } = {}) {
     E.component('music_loop'),
   );
   const stop = setButtonEmoji(
-    new ButtonBuilder().setCustomId('music:stop').setLabel('Dừng').setStyle(ButtonStyle.Danger).setDisabled(!current),
+    new ButtonBuilder().setCustomId('music:stop').setLabel('Dừng').setStyle(ButtonStyle.Danger).setDisabled(!current && !state.recovery.blocked),
     E.component('music_stop'),
   );
   container.addActionRowComponents(new ActionRowBuilder().addComponents(add, toggle, skip, loop, stop));
@@ -983,7 +1042,8 @@ function memberCanControl(interaction) {
   const settings = readSettings(interaction.guildId);
   if (settings.djRoleId && member?.roles?.cache?.has(settings.djRoleId)) return true;
   if (!settings.allowMemberControl) return false;
-  return Boolean(member?.voice?.channelId && (!queue?.channel || member.voice.channelId === queue.channel.id));
+  const voiceChannel = queue && (queue.channel || getMusicRecoveryChannel(queue));
+  return Boolean(member?.voice?.channelId && (!voiceChannel || member.voice.channelId === voiceChannel.id));
 }
 
 function memberVoiceChannel(interaction) {
