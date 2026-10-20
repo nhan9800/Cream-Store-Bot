@@ -22,8 +22,8 @@ import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { accentFor } from '../utils/uiKit.js';
 import { configureCleanMusicDispatcher, createFrameAlignedMusicPcm, createMusicOpusStream } from './musicAudioPipeline.js';
 import { loadYoutubeMix, normalizeYoutubeMixUrl } from './youtubeMixSource.js';
-import { createResilientYoutubePcmStream, prepareYoutubeAudioUrl, YOUTUBE_DIRECT_STARTUP_TIMEOUT_MS } from './youtubeDirectPcmStream.js';
-import { createMusicSourcePreloader } from './musicSourcePreloader.js';
+import { createResilientYoutubePcmStream, YOUTUBE_DIRECT_STARTUP_TIMEOUT_MS } from './youtubeDirectPcmStream.js';
+import { createMusicStreamPreloader } from './musicStreamPreloader.js';
 import { attachMusicSoundEffects, getMusicSoundState, updateMusicSound } from './musicSoundService.js';
 import {
   clearMusicRecovery, getMusicRecovery, getMusicRecoveryChannel, ignoreMusicPlaybackFinish,
@@ -61,7 +61,10 @@ const queueMutations = new Map();
 const extractingTracks = new WeakMap();
 const audioProfiles = new WeakMap();
 const pendingSources = new WeakMap();
-const sourcePreloader = createMusicSourcePreloader(prepareYoutubeAudioUrl);
+// One real, paused source absorbs YouTube resolution/retries before the skip.
+// 256 KiB per stream side is ~1.37 seconds of 48 kHz stereo PCM, not a file cache.
+const sourcePreloader = createMusicStreamPreloader(url =>
+  createResilientYoutubePcmStream(url, { bufferedBytes: 256 * 1024 }));
 
 function cancelPendingMusicSource(queue) {
   pendingSources.get(queue)?.destroy();
@@ -705,7 +708,11 @@ export function musicQueueOptions(settings, textChannelId, requestedByLabel) {
         // skipFFmpeg and does not run a second FFmpeg pass over PCM.
         const startedAt = Date.now();
         const preparedSource = sourcePreloader.take(queue, track);
-        const source = createResilientYoutubePcmStream(track.url, { preparedSource });
+        const preparedStream = preparedSource?.stream;
+        const usePrepared = preparedStream && !preparedStream.destroyed && !preparedStream.readableEnded;
+        if (!usePrepared) preparedSource?.cancel();
+        const buffered = Boolean(usePrepared && preparedStream.readableLength > 0);
+        const source = usePrepared ? preparedStream : createResilientYoutubePcmStream(track.url);
         const startupTimeoutMs = YOUTUBE_DIRECT_STARTUP_TIMEOUT_MS + 1_000;
         const aligned = createFrameAlignedMusicPcm(source, { startupTimeoutMs });
         const startup = new AbortController();
@@ -719,7 +726,7 @@ export function musicQueueOptions(settings, textChannelId, requestedByLabel) {
             waitForMusicPcmReadable(aligned, startupTimeoutMs),
           ]);
           if (aligned.destroyed || aligned.readableEnded) throw new Error('Đã hủy khởi động nguồn nhạc.');
-          console.log(`[MUSIC] Source ready in ${Date.now() - startedAt}ms; prepared=${Boolean(preparedSource)}; DAVE=${waitedMs}ms; ${track?.title || 'track'}`);
+          console.log(`[MUSIC] Source ready in ${Date.now() - startedAt}ms; prepared=${Boolean(usePrepared)}; buffered=${buffered}; DAVE=${waitedMs}ms; ${track?.title || 'track'}`);
           return { $fmt: 'raw', stream: aligned };
         } catch (error) {
           aligned.destroy();

@@ -7,6 +7,8 @@ import { ensureYtDlpRuntime } from '../utils/ytDlpRuntime.js';
 const DIRECT_RESOLVE_TIMEOUT_MS = 15_000;
 const DIRECT_START_TIMEOUT_MS = 20_000;
 const MAX_START_ATTEMPTS = 2;
+const MIN_BUFFERED_BYTES = 64 * 1024;
+const MAX_BUFFERED_BYTES = 4 * 1024 * 1024;
 // Shared by the caller's first-frame wait: retries do not reset this budget.
 export const YOUTUBE_DIRECT_STARTUP_TIMEOUT_MS = 45_000;
 
@@ -114,6 +116,7 @@ export function createResilientYoutubePcmStream(videoUrl, {
   resolveRuntime = ensureYtDlpRuntime,
   createFallback = createPCMStream,
   preparedSource = null,
+  bufferedBytes = MAX_BUFFERED_BYTES,
 } = {}) {
   let active = null;
   let closed = false;
@@ -123,11 +126,17 @@ export function createResilientYoutubePcmStream(videoUrl, {
   let usedPreparedSource = false;
   let preparedAttempt = false;
   const lifetime = new AbortController();
+  // A warmed next track uses a smaller high-water mark on both transform
+  // sides. Pipe backpressure then pauses its decoder without dropping PCM.
+  // These are stream thresholds, not a cap on FFmpeg/OS process memory.
+  const highWaterMark = Number.isFinite(bufferedBytes)
+    ? Math.floor(Math.min(MAX_BUFFERED_BYTES, Math.max(MIN_BUFFERED_BYTES, bufferedBytes)))
+    : MAX_BUFFERED_BYTES;
   // Observe bytes inside the transform, never via a `data` listener. A data
   // listener would put the public stream in flowing mode before Player owns it.
   const exposed = new Transform({
     allowHalfOpen: false,
-    highWaterMark: 4 * 1024 * 1024,
+    highWaterMark,
     transform(chunk, encoding, callback) {
       if (chunk.length && !started) {
         started = true;
