@@ -1,21 +1,7 @@
-import fs from 'node:fs';
-import path from 'node:path';
 import { runDeepNotifications, runSubscriptionNotifications } from './deepNotificationService.js';
 import { backupDatabase } from './backupService.js';
-import {
-  getDueAutoCloseTickets,
-  closeTicket,
-  getFeedbackAutoCloseState,
-  scheduleMissingFeedbackTicketAutoCloses,
-  scheduleTicketAutoClose,
-  unscheduleTicketAutoClose,
-} from './ticketService.js';
 import { config } from '../config.js';
-import { archiveTicketConversation } from './ticketClosureService.js';
-import { getLatestTicketTranscriptMetadata } from './transcriptService.js';
-import { updateOrderLogMessage } from './notificationService.js';
-import { emitStaffLog } from './staffLogService.js';
-import { setOrderStatus } from './orderService.js';
+import { startFeedbackTicketAutoClose, stopFeedbackTicketAutoClose } from './feedbackTicketAutoCloseService.js';
 import { runAutoVinhDanh } from './vinhDanhService.js';
 import { processPendingPaymentTickets, processCompletedFeedbackTickets } from './ticketAutoCloseService.js';
 import { autoUpdateDiscountBoard } from './cardSwapService.js';
@@ -53,6 +39,10 @@ async function autoBackupDatabase() {
 
 export function startScheduler(client) {
   if (schedulerHandle) return;
+
+  // A two-minute feedback deadline cannot wait for the five-minute maintenance
+  // cycle or its payment/reminder network calls.
+  startFeedbackTicketAutoClose(client);
 
   const intervalMinutes = Number(process.env.DEEP_NOTIFICATION_INTERVAL_MINUTES ?? 5);
 
@@ -170,97 +160,6 @@ export function startScheduler(client) {
       }
     }
 
-    try {
-      const repairedTickets = scheduleMissingFeedbackTicketAutoCloses(config.guildId);
-      if (repairedTickets.length > 0) {
-        console.warn(`[SCHEDULER] Đã khôi phục lịch tự đóng cho ${repairedTickets.length} ticket đã feedback.`);
-      }
-
-      const dueTickets = getDueAutoCloseTickets(config.guildId, 20);
-      for (const ticket of dueTickets) {
-        try {
-          const initialCloseState = getFeedbackAutoCloseState(ticket);
-          if (!initialCloseState.eligible) {
-            unscheduleTicketAutoClose(ticket.id);
-            console.warn(`[SCHEDULER] Giữ ticket ${ticket.ticket_code}: còn ${initialCloseState.blockingOrders.length} đơn đang xử lý hoặc chưa feedback.`);
-            continue;
-          }
-          const channel = await client.channels.fetch(ticket.channel_id).catch(() => null);
-          if (!channel) {
-            const archived = getLatestTicketTranscriptMetadata({ ticketId: ticket.id, ticketCode: ticket.ticket_code });
-            if (archived) {
-              closeTicket(ticket.id, client.user.id);
-            } else {
-              scheduleTicketAutoClose(ticket.id, 1);
-              console.error(`[SCHEDULER] Không thể đóng ${ticket.ticket_code}: kênh và transcript đều không khả dụng.`);
-            }
-            continue;
-          }
-          
-          const guild = channel.guild;
-          const archiveResult = await archiveTicketConversation({
-            guild,
-            ticket,
-            channel,
-            closedById: client.user.id,
-          });
-          if (!archiveResult.archived) {
-            scheduleTicketAutoClose(ticket.id, 1);
-            console.error(`[SCHEDULER] Chưa lưu được transcript ${ticket.ticket_code}; giữ kênh và thử lại sau 1 phút.`);
-            continue;
-          }
-
-          // A new order can be created during the close delay or transcript
-          // export. Recheck immediately before touching the Discord channel.
-          const finalCloseState = getFeedbackAutoCloseState(ticket);
-          if (!finalCloseState.eligible) {
-            unscheduleTicketAutoClose(ticket.id);
-            console.warn(`[SCHEDULER] Huỷ đóng ticket ${ticket.ticket_code}: trạng thái đơn đã thay đổi trong lúc chờ.`);
-            continue;
-          }
-
-          let channelClosed = false;
-          try {
-            await channel.delete(`Tự động đóng Ticket ${ticket.ticket_code} sau khi feedback`);
-            channelClosed = true;
-          } catch (deleteError) {
-            if (channel.isThread?.()) {
-              channelClosed = await channel
-                .setArchived(true, `Tự động đóng Ticket ${ticket.ticket_code} sau khi feedback`)
-                .then(() => true)
-                .catch(() => false);
-            }
-            if (!channelClosed) {
-              scheduleTicketAutoClose(ticket.id, 1);
-              console.error(`[SCHEDULER] Discord chưa đóng được ticket ${ticket.ticket_code}; sẽ thử lại sau 1 phút:`, deleteError);
-              continue;
-            }
-          }
-
-          closeTicket(ticket.id, client.user.id);
-
-          await emitStaffLog(client, {
-            guildId: ticket.guild_id,
-            actorId: client.user.id,
-            targetId: ticket.customer_id,
-            action: 'TICKET_CLOSE',
-            detail: `Auto-close ticket sau thời gian feedback`,
-            relatedTicketCode: ticket.ticket_code,
-            relatedOrderCode: ticket.related_order_code ?? null,
-          });
-
-          if (ticket.ticket_type === 'WARRANTY' && ticket.related_order_code) {
-            const order = setOrderStatus(ticket.related_order_code, 'COMPLETED');
-            if (order) await updateOrderLogMessage(guild, order);
-          }
-
-        } catch (e) {
-          console.error(`[SCHEDULER] Lỗi auto close ticket ${ticket.id}:`, e);
-        }
-      }
-    } catch (error) {
-      console.error('[SCHEDULER] Lỗi auto-close tickets:', error);
-    }
   };
 
   if (!bootstrapped) {
@@ -341,6 +240,7 @@ export function startScheduler(client) {
 }
 
 export function stopScheduler() {
+  stopFeedbackTicketAutoClose();
   if (customerRoleHandle) clearTimeout(customerRoleHandle);
   customerRoleHandle = null;
   if (schedulerHandle && typeof schedulerHandle !== 'boolean') {

@@ -221,9 +221,18 @@ export function getFeedbackAutoCloseState(ticketOrId) {
     blockingOrders,
   };
 }
-export function scheduleMissingFeedbackTicketAutoCloses(guildId, limit=100) {
+export function scheduleMissingFeedbackTicketAutoCloses(guildId, limit=100, minutes=2) {
   const tickets = getFeedbackedTicketsMissingAutoCloseStmt().all(String(guildId), Number(limit));
-  return tickets.map((ticket) => scheduleTicketAutoClose(ticket.id, 0));
+  const delayMs = Math.max(0, Number(minutes) || 0) * 60_000;
+  return tickets.map((ticket) => {
+    const dates = getFeedbackAutoCloseState(ticket).feedbackedOrders
+      .map((order) => Date.parse(order.feedback_submitted_at)).filter(Number.isFinite);
+    // Recover the original deadline after restart without closing a recent
+    // feedback immediately or restarting a full countdown for an overdue one.
+    const latestFeedback = dates.length ? Math.max(...dates) : Date.now();
+    scheduleAutoCloseStmt().run(new Date(Math.max(Date.now(), latestFeedback + delayMs)).toISOString(), ticket.id);
+    return getTicketById(ticket.id);
+  });
 }
 export function updateTicketAiStatus(ticketId, status, pausedUntil = null){
   updateTicketAiStatusStmt().run(status, pausedUntil, ticketId);
