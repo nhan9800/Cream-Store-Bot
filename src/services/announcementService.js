@@ -208,7 +208,7 @@ export function buildAnnouncementMessageV2({
   };
 }
 
-export async function publishAnnouncement({ guild, channelId, ...messageOptions }) {
+export async function publishAnnouncement({ guild, channelId, nonce, onSend, ...messageOptions }) {
   const normalizedImage = normalizeAnnouncementImage(messageOptions.image);
   const channel = await guild.channels.fetch(channelId).catch((error) => {
     throw new Error(`Không thể tải kênh ${channelId}: ${error.message}`, { cause: error });
@@ -239,6 +239,11 @@ export async function publishAnnouncement({ guild, channelId, ...messageOptions 
     ...messageOptions,
     image: normalizedImage,
   });
+  if (nonce) {
+    payload.nonce = String(nonce);
+    payload.enforceNonce = true;
+  }
+  onSend?.();
   const message = await channel.send(payload);
   if (!message?.id) throw new Error('Discord không trả về tin nhắn sau khi gửi.');
 

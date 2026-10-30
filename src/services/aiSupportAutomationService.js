@@ -28,6 +28,7 @@ import { buildOrderCreatedV2, buildQueuePositionV2 } from '../utils/embeds.js';
 import { buildOrderLogContent } from '../utils/formatters.js';
 import { emitStaffLog } from './staffLogService.js';
 import { emitAutomationLog } from './automationLogService.js';
+import { hasPurchaseNegation, isCommerceFollowup, isContextualPurchaseConfirmation } from './aiCommerceUnderstandingService.js';
 
 export const AI_SUPPORT_PREFIX = 'ai:support:';
 const ORDER_CODE_PATTERN = /\b(?:CN|CR)_\d{6}\b/i;
@@ -102,19 +103,24 @@ export function classifyCustomerIntent(content) {
   const text = normalize(content);
   if (!text.trim()) return 'GENERAL';
   const productMentioned = PRODUCT_HINT_GROUPS.some(([, hints]) => hints.some((hint) => text.includes(hint)));
-  const warrantySignal = /bao hanh|mat premium|bi out|out fam|het han som|sai (pass|mat khau)|khong dang nhap|tai khoan (loi|die|hong)|bi khoa/.test(text)
-    || (productMentioned && /loi|hong|khong dung duoc|khong vao duoc|mat quyen/.test(text));
+  const warrantyPolicyQuestion = /\b(?:bao hanh|bh)\b/.test(text)
+    && /chinh sach|bao lau|the nao|ra sao|may (ngay|thang)|co (?:duoc )?bao hanh|full bh|khong bh|(?:bao hanh|bh)\s+\d+\s+(?:ngay|thang)/.test(text);
+  const actualFault = /mat premium|bi out|out fam|het han som|sai (pass|mat khau)|khong dang nhap|tai khoan (loi|die|hong)|bi khoa/.test(text)
+    || (productMentioned && /\bloi\b|\bhong\b|khong dung duoc|khong vao duoc|mat quyen/.test(text.replace(/\bquyen loi\b/g, ' ')));
+  const warrantySignal = (!warrantyPolicyQuestion && /bao hanh/.test(text)) || actualFault;
   if (warrantySignal) return 'WARRANTY';
   // A customer can mention a confirmation word while explicitly saying they
   // have not decided yet (for example, "chưa chốt thời hạn"). Treat that as
   // an open purchase conversation so the bot asks one useful follow-up
   // question instead of creating a confirmation step too early.
   const confirmationSignal = /\b(chot|dat mua|xac nhan mua|ok lay|oke lay|mua ngay|mua luon|lay goi|lay cai|len don|tao don|lam luon|dong y)\b/.test(text);
-  const unresolvedConfirmation = /\bchua\s+(?:chot|xac nhan|dong y)\b/.test(text);
+  const unresolvedConfirmation = hasPurchaseNegation(content);
   if (confirmationSignal && !unresolvedConfirmation) return 'PURCHASE_CONFIRM';
+  if (unresolvedConfirmation && !/\b(?:muon mua|can mua)\b/.test(text)) return productMentioned ? 'PRODUCT_ADVICE' : 'SUPPORT';
   if (/\b(muon mua|can mua|mua goi|dat hang|dat giup|lay giup)\b/.test(text)
     || (productMentioned && /\bcho minh\b/.test(text) && !/\bcho minh hoi\b/.test(text))) return 'PURCHASE';
-  if (/gia bao nhieu|bao nhieu tien|con hang|tu van|goi nao|san pham nao|bang gia/.test(text)
+  if (warrantyPolicyQuestion || /gia bao nhieu|bao nhieu tien|con hang|goi nao|san pham nao|bang gia/.test(text)
+    || /tu van/.test(text)
     || (productMentioned && /gia|mua|thang|goi|bao nhieu/.test(text))) return 'PRODUCT_ADVICE';
   if (/shop oi|ho tro|giup|minh hoi|cho hoi|lam sao|the nao|tai sao|khong biet/.test(text) || /\?$/.test(text.trim())) return 'SUPPORT';
   return 'GENERAL';
@@ -128,8 +134,8 @@ export function sanitizeCustomerTextForAi(content) {
   return String(content || '')
     .replace(/https?:\/\/\S+/gi, '[LIÊN KẾT ĐÃ ẨN]')
     .replace(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi, '[EMAIL ĐÃ ẨN]')
-    .replace(/\b(?:password|pass|mật khẩu|mat khau)\s*[:=]\s*\S+/gi, '$1: [ĐÃ ẨN]')
-    .replace(/\b(?:otp|mã otp|ma otp|2fa)\s*[:=]?\s*\d{4,8}\b/gi, '$1: [ĐÃ ẨN]')
+    .replace(/\b(password|pass|mật khẩu|mat khau)\s*[:=]\s*\S+/gi, '$1: [ĐÃ ẨN]')
+    .replace(/\b(otp|mã otp|ma otp|2fa)\s*[:=]?\s*\d{4,8}\b/gi, '$1: [ĐÃ ẨN]')
     .replace(/(?<![A-Z_])\b\d{9,16}\b(?!_\d)/gi, '[SỐ NHẠY CẢM ĐÃ ẨN]')
     .replace(/\b[A-Za-z\d_-]{20,}\.[A-Za-z\d_-]{6,}\.[A-Za-z\d_-]{20,}\b/g, '[TOKEN ĐÃ ẨN]')
     .slice(0, 1800);
@@ -164,6 +170,8 @@ export function shouldAiReplyInTicket(message, ticket) {
   const intent = classifyCustomerIntent(message.content);
   return message.mentions?.has?.(message.client.user)
     || intent !== 'GENERAL'
+    || isCommerceFollowup(message.content)
+    || isContextualPurchaseConfirmation(message.content)
     || /\?/.test(String(message.content || ''));
 }
 

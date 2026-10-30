@@ -8,6 +8,7 @@ import {
   updateTicketAiStatus,
 } from '../services/ticketService.js';
 import { processAiMessage } from '../services/aiService.js';
+import { isAiResponseRunning, runAiResponseTask } from '../services/aiResponseQueue.js';
 import {
   claimAiResponseSlot,
   shouldAiReplyInPublic,
@@ -45,7 +46,6 @@ export const once = false;
 // ═══════════════════════════════════════════════
 // Message Processing Queue & Cache
 // ═══════════════════════════════════════════════
-const processingChannels = new Set();
 const sentGmailGuides = new Set();
 
 function nextOwnerPingPenaltyLabel(penaltyLevel) {
@@ -170,16 +170,6 @@ async function enforceProtectedOwnerPing(message, E, isStaff) {
     ],
   });
   return true;
-}
-
-async function withChannelLock(channelId, fn) {
-  if (processingChannels.has(channelId)) return; // skip nếu đang xử lý
-  processingChannels.add(channelId);
-  try {
-    await fn();
-  } finally {
-    processingChannels.delete(channelId);
-  }
 }
 
 export async function execute(message) {
@@ -425,7 +415,7 @@ export async function execute(message) {
         if (ticket.ai_status === 'PAUSED') {
           updateTicketAiStatus(ticket.id, 'ACTIVE');
         }
-        await withChannelLock(message.channel.id, () => processAiMessage(message, true, true));
+        await runAiResponseTask(message.channel.id, () => processAiMessage(message, true, true), { coalesce: true });
         return;
       } else {
         // Staff tiếp quản tạm thời. AI tự quay lại sau khoảng nghỉ cấu hình để
@@ -445,9 +435,15 @@ export async function execute(message) {
 
       if (
         shouldAiReplyInTicket(message, ticket)
-        && claimAiResponseSlot(`ticket:${message.channel.id}:${message.author.id}`, config.aiTicketCooldownSeconds)
+        && (isAiResponseRunning(message.channel.id)
+          || claimAiResponseSlot(`ticket:${message.channel.id}:${message.author.id}`, config.aiTicketCooldownSeconds))
       ) {
-        await withChannelLock(message.channel.id, () => processAiMessage(message, true, false));
+        await runAiResponseTask(message.channel.id, () => {
+          // Staff may have taken over while this follow-up was waiting.
+          const current = getTicketByChannelId(message.channel.id);
+          if (current?.customer_id !== message.author.id || !canTicketAiRespond(current)) return;
+          return processAiMessage(message, true, false);
+        }, { coalesce: true });
       }
     }
     return;
@@ -469,6 +465,6 @@ export async function execute(message) {
       `public:${message.channel.id}:${message.author.id}`,
       config.aiPublicCooldownSeconds,
     )) return;
-    await withChannelLock(message.channel.id, () => processAiMessage(message, false, isStaff));
+    await runAiResponseTask(message.channel.id, () => processAiMessage(message, false, isStaff));
   }
 }

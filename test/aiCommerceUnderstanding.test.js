@@ -128,4 +128,39 @@ describe('AI commerce understanding', () => {
     expect(result.products).toEqual([]);
     expect(result.confidentProduct).toBeNull();
   });
+
+  it('understands duration-only follow-ups and preserves a later quantity before confirmation', () => {
+    const followup = rankCatalogProducts(products, { content: '3t nhé', contextMessages: ['Mình cần mua YouTube'] });
+    expect(followup.usedContext).toBe(true);
+    expect(followup.confidentProduct?.id).toBe(2);
+    const confirm = rankCatalogProducts(products, { content: 'Ok chốt',
+      contextMessages: ['Mình cần mua YouTube', '3 tháng nhé', 'số lượng 2'] });
+    expect(confirm.confidentProduct?.id).toBe(2);
+    expect(confirm.quantity).toBe(2);
+  });
+
+  it('keeps implicit comparisons ambiguous until an explicit duration is chosen', () => {
+    const compare = rankCatalogProducts([...products, { ...products[0], id: 9, duration_months: 6 }], { content: 'YouTube 1 hay 3 tháng' });
+    expect(compare.confidentProduct).toBeNull();
+    expect(compare.products.map(product => product.id).sort()).toEqual([1, 2]);
+    const unclear = rankCatalogProducts(products, { content: 'Ok lấy nhé', contextMessages: ['YouTube 1 hay 3 tháng'] });
+    expect(unclear.confidentProduct).toBeNull();
+    const chosen = rankCatalogProducts(products, { content: '3 tháng nhé', contextMessages: ['YouTube 1 hay 3 tháng'] });
+    expect(chosen.confidentProduct?.id).toBe(2);
+  });
+
+  it('never prepares a different duration when the requested plan is unavailable', () => {
+    const result = rankCatalogProducts([products[0]], { content: 'Chốt YouTube 12 tháng' });
+    expect(result.confidentProduct).toBeNull();
+    expect(result.requestedDuration.months).toBe(12);
+  });
+
+  it('does not mistake refusal for confirmation or infer a subscription from warranty months', () => {
+    for (const text of ['Không chốt gói này', 'Đừng tạo đơn nhé', 'Chưa mua gói đó', 'Khoan lên đơn']) {
+      expect(isContextualPurchaseConfirmation(text)).toBe(false);
+    }
+    expect(extractRequestedDuration('YouTube bảo hành 3 tháng gói 1 tháng')).toEqual({ days: null, months: 1 });
+    const result = rankCatalogProducts(products, { content: 'Ok lấy nhé', contextMessages: ['YouTube 3 tháng', 'Không mua nữa'] });
+    expect(result.confidentProduct).toBeNull();
+  });
 });
