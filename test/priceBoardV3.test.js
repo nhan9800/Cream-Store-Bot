@@ -320,7 +320,7 @@ describe('Cenar price board V3', () => {
     const chatgptProducts = products.filter((product) => /chat\s*gpt/i.test(product.name));
     const adobeProducts = products.filter((product) => /adobe/i.test(product.name));
 
-    expect(chatgptProducts).toHaveLength(11);
+    expect(chatgptProducts).toHaveLength(12);
     expect(chatgptProducts.map((product) => product.product_key)).toEqual(expect.arrayContaining([
       AI_CREATIVE_PRICING_UPDATE.productKeys.chatgptNoWarranty,
       AI_CREATIVE_PRICING_UPDATE.productKeys.chatgptAccount,
@@ -398,7 +398,7 @@ describe('Cenar price board V3', () => {
     ));
     const geminiProducts = products.filter((product) => /gemini/i.test(product.name));
 
-    expect(claudePro?.price).toBe(530000);
+    expect(claudePro?.price).toBe(520000);
     expect(claudePro?.original_price).toBe(0);
     expect(geminiProducts).toHaveLength(2);
     expect(geminiProducts.map((product) => [product.product_key, product.price])).toEqual(expect.arrayContaining([
@@ -417,7 +417,7 @@ describe('Cenar price board V3', () => {
     const announcement = buildAiCreativePricingAnnouncement(GUILD_ID, products);
     expect(announcement).toContain('CLAUDE PRO');
     expect(announcement).toContain('GEMINI PRO + 5 TB GOOGLE ONE · 2 LỰA CHỌN MỚI');
-    expect(announcement).toContain('530.000');
+    expect(announcement).toContain('520.000');
     expect(announcement).toContain('250.000');
     expect(announcement).toContain('280.000');
     expect(announcement).not.toContain('69.000');

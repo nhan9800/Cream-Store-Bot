@@ -104,7 +104,7 @@ export function classifyCustomerIntent(content) {
   if (!text.trim()) return 'GENERAL';
   const productMentioned = PRODUCT_HINT_GROUPS.some(([, hints]) => hints.some((hint) => text.includes(hint)));
   const warrantyPolicyQuestion = /\b(?:bao hanh|bh)\b/.test(text)
-    && /chinh sach|bao lau|the nao|ra sao|may (ngay|thang)|co (?:duoc )?bao hanh|full bh|khong bh|(?:bao hanh|bh)\s+\d+\s+(?:ngay|thang)/.test(text);
+    && /chinh sach|bao lau|the nao|ra sao|may (ngay|thang|gio|tieng)|co (?:duoc )?bao hanh|full bh|khong bh|(?:bao hanh|bh)\s+\d+\s+(?:ngay|thang|gio|tieng)/.test(text);
   const actualFault = /mat premium|bi out|out fam|het han som|sai (pass|mat khau)|khong dang nhap|tai khoan (loi|die|hong)|bi khoa/.test(text)
     || (productMentioned && /\bloi\b|\bhong\b|khong dung duoc|khong vao duoc|mat quyen/.test(text.replace(/\bquyen loi\b/g, ' ')));
   const warrantySignal = (!warrantyPolicyQuestion && /bao hanh/.test(text)) || actualFault;

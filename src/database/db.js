@@ -1890,7 +1890,19 @@ export const DEFAULT_PRODUCT_CATALOG = [
       is_featured: 1,
       virtual_purchase_count: 0,
     },
-    { product_key: 'claude-pro-1-month', name: 'Claude Pro 1 Tháng (Full BH)', aliases: ['Claude Pro Add Team 1 Tháng (Full BH)'], description: 'Claude Pro trong 1 tháng, bảo hành trọn gói tại Cenar Store.', warranty_policy: 'Full 1 tháng', price: 530000, duration_months: 1, service_type: 'AI', emoji: 'brand_claude', original_price: 0, is_featured: 1, virtual_purchase_count: 126 },
+    { product_key: 'claude-pro-1-month', name: 'Claude Pro Chính Chủ 1 Tháng (Full BH · Trừ Khóa Acc)', aliases: ['Claude Pro 1 Tháng (Full BH)', 'Claude Pro Add Team 1 Tháng (Full BH)'], description: 'Nâng cấp Claude Pro trên tài khoản chính chủ của khách trong 1 tháng. Bảo hành full gói trong 1 tháng; không bảo hành nếu tài khoản bị khóa.', warranty_policy: 'Full 1 tháng · không bảo hành nếu tài khoản bị khóa', price: 520000, duration_months: 1, service_type: 'AI', emoji: 'brand_claude', original_price: 0, activation_method: 'OWN_ACCOUNT', is_featured: 1, virtual_purchase_count: 126 },
+    {
+      product_key: 'claude-pro-x5-own-account-1-month-7-day-warranty',
+      name: 'Claude Pro x5 Chính Chủ 1 Tháng (BH 7 Ngày)',
+      description: 'Claude Pro x5 trên tài khoản chính chủ của khách trong 1 tháng, bảo hành 7 ngày. Thanh toán ban đầu 2.000.000đ; shop giữ lại phần API 100 USD và hoàn lại cho khách 700.000đ, chi phí sau hoàn là 1.300.000đ. Phần API 100 USD thuộc shop, không nằm trong quyền lợi khách nhận.',
+      warranty_policy: 'Bảo hành 7 ngày',
+      price: 2000000,
+      duration_months: 1,
+      service_type: 'AI',
+      emoji: 'brand_claude',
+      original_price: 0,
+      activation_method: 'OWN_ACCOUNT',
+    },
     {
       product_key: 'claude-pro-x5-account-1-month-no-warranty',
       name: 'Claude Pro x5 1 Tháng (Cấp Tài Khoản · Không BH)',
@@ -2050,6 +2062,18 @@ export const DEFAULT_PRODUCT_CATALOG = [
       description: 'Cenar cấp tài khoản ChatGPT với thời hạn gói danh nghĩa 1 tháng và bảo hành 2 ngày. Bảo hành ngắn để phản ánh rủi ro thực tế; thời gian sử dụng có thể lâu hơn tùy cách sử dụng, không cam kết tài khoản duy trì đủ tháng. Xác nhận loại gói với shop trước khi mua.',
       warranty_policy: 'Bảo hành 2 ngày · thời hạn gói danh nghĩa 1 tháng, không cam kết tài khoản duy trì đủ tháng',
       price: 120000,
+      duration_months: 1,
+      service_type: 'AI',
+      emoji: 'brand_chatgpt',
+      original_price: 0,
+      activation_method: 'ACCOUNT',
+    },
+    {
+      product_key: 'chatgpt-plus-upi-account-1-month-12-hour-warranty',
+      name: 'ChatGPT Plus UPI Pay 1 Tháng (Cấp Tài Khoản · BH 12 Giờ)',
+      description: 'Cenar cấp tài khoản ChatGPT Plus UPI Pay với thời hạn gói danh nghĩa 1 tháng, bảo hành 12 giờ. Theo ghi nhận của shop, đa số tài khoản dùng được từ 2 tuần trở lên; đây là ghi nhận thực tế, phạm vi bảo hành vẫn là 12 giờ.',
+      warranty_policy: 'Bảo hành 12 giờ',
+      price: 130000,
       duration_months: 1,
       service_type: 'AI',
       emoji: 'brand_chatgpt',
@@ -2236,7 +2260,8 @@ export function seedProductCatalog(dbInstance) {
             'chatgpt-pro-500-own-account-1-month',
             'chatgpt-pro-100-account-1-month-no-warranty',
             'chatgpt-pro-100-account-1-month-full-warranty',
-            'chatgpt-account-1-month-2-day-warranty'
+            'chatgpt-account-1-month-2-day-warranty',
+            'chatgpt-plus-upi-account-1-month-12-hour-warranty'
           )
         )
         OR (

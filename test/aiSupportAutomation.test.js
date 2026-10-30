@@ -22,6 +22,7 @@ describe('AI support automation safety', () => {
   it('distinguishes warranty policy questions from faults and refuses negated checkout', () => {
     expect(classifyCustomerIntent('YouTube bảo hành bao lâu?')).toBe('PRODUCT_ADVICE');
     expect(classifyCustomerIntent('YouTube có bảo hành không?')).toBe('PRODUCT_ADVICE');
+    expect(classifyCustomerIntent('Mình muốn mua ChatGPT Plus UPI Pay 1 tháng bảo hành 12 giờ')).toBe('PURCHASE');
     expect(classifyCustomerIntent('YouTube có quyền lợi gì, có bảo hành không?')).toBe('PRODUCT_ADVICE');
     expect(classifyCustomerIntent('YouTube bị out fam, có bảo hành không?')).toBe('WARRANTY');
     for (const text of ['Không chốt YouTube nhé', 'Đừng tạo đơn', 'Khoan lên đơn', 'Chưa xác nhận mua']) {

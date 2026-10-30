@@ -75,7 +75,7 @@ export function buildAiCreativePricingAnnouncement(guildId, products) {
     '',
     `### ${E('brand_claude')} CLAUDE PRO`,
     `> ${E('payment_money')} **Giá:** ${formatCurrency(selected.claudePro.price)} / 1 tháng`,
-    `> ${E('warranty_shield')} **Bảo hành:** Full trong suốt thời gian sử dụng`,
+    `> ${E('warranty_shield')} **Bảo hành:** ${selected.claudePro.warranty_policy}`,
     '',
     `### ${E('brand_gemini')} GEMINI PRO + 5 TB GOOGLE ONE · 2 LỰA CHỌN MỚI`,
     `**01 · Gói 12 tháng · Full bảo hành**`,
