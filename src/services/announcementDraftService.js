@@ -47,7 +47,7 @@ export function buildAnnouncementPreview(draft, notice = '') {
   const tags = [...draft.roles.map(id => `<@&${id}>`),
     ...(draft.tagEveryone ? ['@everyone'] : []), ...(draft.tagHere ? ['@here'] : [])];
   const embed = new EmbedBuilder().setTitle('Xác nhận thông báo').setColor(0x3498db)
-    .setDescription(draft.content)
+    .setDescription(draft.content || 'Chưa có nội dung. Bấm Sửa nội dung trước khi đăng.')
     .addFields({ name: 'Các role sẽ tag', value: tags.join(', ') || 'Không có' })
     .setFooter({ text: 'Chọn role rồi bấm Đăng thông báo. Bản nháp hết hạn sau 15 phút.' });
   if (draft.image) embed.setImage(draft.image.url).addFields({ name: 'Ảnh đính kèm', value: draft.image.name });
