@@ -15,7 +15,6 @@ import {
   TextInputBuilder,
   TextInputStyle,
   EmbedBuilder,
-  RoleSelectMenuBuilder,
   StringSelectMenuBuilder,
   MessageFlags,
 } from 'discord.js';
@@ -99,11 +98,7 @@ import { buildVerificationPromptV2, buildVerificationUnavailableV2 } from '../se
 import { getRecoveryStatus } from '../services/guildRecoveryService.js';
 import { memberHasVerificationRole, resolveVerificationRole } from '../services/verificationRoleService.js';
 import { refreshAllShopPanels } from '../services/shopPanelService.js';
-import {
-  consumeAnnouncementDraftImage,
-  publishAnnouncement,
-  setAnnouncementDraftImage,
-} from '../services/announcementService.js';
+import { handleAnnouncementDraftInteraction } from '../services/announcementDraftService.js';
 import {
   FEEDBACK_TEXT_INPUT_ID,
   WARRANTY_ORDER_INPUT_ID,
@@ -111,9 +106,6 @@ import {
   CHAR_TO_SLOT,
   EMOJI_REGEX,
   resolvePayloadEmojis,
-  announcementCache,
-  ANNOUNCEMENT_CACHE_TTL_MS,
-  announcementCacheSet,
   activeTicketCreations,
   activeTicketCloses,
   safeReply,
@@ -331,6 +323,10 @@ export function registerInteractionHandler(client, commands) {
           interaction.channel.send = wrappedChannelSend;
         }
       }
+
+      // Announcement controls acknowledge before slow work and use a per-draft
+      // publication lock instead of the generic button cooldown.
+      if (await handleAnnouncementDraftInteraction(interaction)) return;
 
       // ── Autocomplete handler ──
       if (interaction.isAutocomplete()) {
@@ -1052,170 +1048,6 @@ export function registerInteractionHandler(client, commands) {
             }).catch(() => null);
           });
         });
-        return;
-      }
-
-      if (interaction.isModalSubmit() && interaction.customId === 'announcement:modal') {
-        const content = interaction.fields.getTextInputValue('announcement_content');
-        const image = consumeAnnouncementDraftImage(interaction);
-        
-        const roleSelect = new RoleSelectMenuBuilder()
-          .setCustomId('announcement:roleselect')
-          .setPlaceholder('Gõ phím để tìm role (Discord mặc định chỉ hiện 25 Role)...')
-          .setMinValues(0)
-          .setMaxValues(10);
-          
-        const everyoneBtn = new ButtonBuilder()
-          .setCustomId('announcement:toggle_everyone')
-          .setLabel('Không Tag @everyone')
-          .setStyle(ButtonStyle.Secondary);
-
-        const hereBtn = new ButtonBuilder()
-          .setCustomId('announcement:toggle_here')
-          .setLabel('Không Tag @here')
-          .setStyle(ButtonStyle.Secondary);
-
-        const confirmBtn = new ButtonBuilder()
-          .setCustomId('announcement:confirm')
-          .setLabel('Xác nhận gửi')
-          .setStyle(ButtonStyle.Success);
-
-        const editBtn = new ButtonBuilder()
-          .setCustomId('announcement:edit')
-          .setLabel('Sửa nội dung')
-          .setStyle(ButtonStyle.Primary);
-
-        const cancelBtn = new ButtonBuilder()
-          .setCustomId('announcement:cancel')
-          .setLabel('Hủy')
-          .setStyle(ButtonStyle.Danger);
-
-        const embed = new EmbedBuilder()
-          .setTitle('Xác nhận thông báo')
-          .setDescription(`**Nội dung sẽ gửi:**\n\n${content.substring(0, 4000)}`)
-          .setColor(0x3498db)
-          .setFields([
-            { name: 'Các Role sẽ tag', value: 'Không có (chỉ gửi tin nhắn thường)', inline: false }
-          ])
-          .setFooter({ text: 'Chọn role bên dưới nếu muốn tag, sau đó bấm Xác nhận gửi.' });
-
-        if (image) {
-          embed
-            .setImage(image.url)
-            .addFields({ name: 'Ảnh đính kèm', value: image.name, inline: false });
-        }
-          
-        const reply = await interaction.reply({
-          embeds: [embed],
-          components: [
-            new ActionRowBuilder().addComponents(roleSelect),
-            new ActionRowBuilder().addComponents(everyoneBtn, hereBtn),
-            new ActionRowBuilder().addComponents(confirmBtn, editBtn, cancelBtn)
-          ],
-          ephemeral: true,
-          fetchReply: true
-        });
-        
-        announcementCacheSet(reply.id, {
-          content,
-          roles: [],
-          tagEveryone: false,
-          tagHere: false,
-          channelId: interaction.channelId,
-          image,
-        });
-        return;
-      }
-
-      if (interaction.isButton() && interaction.customId === 'announcement:edit') {
-        const cacheData = announcementCache.get(interaction.message.id);
-        if (!cacheData) {
-          await safeReply(interaction, { content: 'Phiên bản này đã hết hạn. Vui lòng gõ lại lệnh.', ephemeral: true });
-          return;
-        }
-
-        const modal = new ModalBuilder()
-          .setCustomId('announcement:modal')
-          .setTitle('Sửa nội dung thông báo');
-
-        const contentInput = new TextInputBuilder()
-          .setCustomId('announcement_content')
-          .setLabel('Nội dung bạn muốn thông báo')
-          .setStyle(TextInputStyle.Paragraph)
-          .setRequired(true)
-          .setValue(cacheData.content)
-          .setMaxLength(3000);
-
-        modal.addComponents(new ActionRowBuilder().addComponents(contentInput));
-        if (cacheData.image) setAnnouncementDraftImage(interaction, cacheData.image);
-        await interaction.showModal(modal);
-        return;
-      }
-
-      if (interaction.isAnySelectMenu() && interaction.customId === 'announcement:roleselect') {
-        const cacheData = announcementCache.get(interaction.message.id);
-        if (!cacheData) {
-          await safeReply(interaction, { content: 'Phiên bản này đã hết hạn. Vui lòng gõ lại lệnh.', ephemeral: true });
-          return;
-        }
-        cacheData.roles = interaction.values;
-        
-        // Cập nhật Embed hiển thị danh sách các role được tag
-        const embed = EmbedBuilder.from(interaction.message.embeds[0]);
-        const roleMentions = cacheData.roles.map(r => `<@&${r}>`).join(', ') || 'Không có';
-        
-        const tags = [];
-        if (cacheData.tagEveryone) tags.push('@everyone');
-        if (cacheData.tagHere) tags.push('@here');
-        const tagSuffix = tags.length > 0 ? ` + ${tags.join(', ')}` : '';
-
-        embed.setFields([
-          { name: '🏷️ Các Role sẽ tag', value: `${roleMentions}${tagSuffix}`, inline: false }
-        ]);
-
-        const roleSelect = new RoleSelectMenuBuilder()
-          .setCustomId('announcement:roleselect')
-          .setPlaceholder('Gõ phím để tìm role (Discord mặc định chỉ hiện 25 Role)...')
-          .setMinValues(0)
-          .setMaxValues(10);
-        
-        if (cacheData.roles && cacheData.roles.length > 0) {
-          roleSelect.setDefaultRoles(...cacheData.roles);
-        }
-
-        const everyoneBtn = new ButtonBuilder()
-          .setCustomId('announcement:toggle_everyone')
-          .setLabel(cacheData.tagEveryone ? 'Đang Tag @everyone' : 'Không Tag @everyone')
-          .setStyle(cacheData.tagEveryone ? ButtonStyle.Success : ButtonStyle.Secondary);
-
-        const hereBtn = new ButtonBuilder()
-          .setCustomId('announcement:toggle_here')
-          .setLabel(cacheData.tagHere ? 'Đang Tag @here' : 'Không Tag @here')
-          .setStyle(cacheData.tagHere ? ButtonStyle.Success : ButtonStyle.Secondary);
-
-        const confirmBtn = new ButtonBuilder()
-          .setCustomId('announcement:confirm')
-          .setLabel('Xác Nhận Gửi')
-          .setStyle(ButtonStyle.Success);
-
-        const editBtn = new ButtonBuilder()
-          .setCustomId('announcement:edit')
-          .setLabel('Sửa nội dung')
-          .setStyle(ButtonStyle.Primary);
-
-        const cancelBtn = new ButtonBuilder()
-          .setCustomId('announcement:cancel')
-          .setLabel('Huy')
-          .setStyle(ButtonStyle.Danger);
-
-        await interaction.update({
-          embeds: [embed],
-          components: [
-            new ActionRowBuilder().addComponents(roleSelect),
-            new ActionRowBuilder().addComponents(everyoneBtn, hereBtn),
-            new ActionRowBuilder().addComponents(confirmBtn, editBtn, cancelBtn)
-          ]
-        }).catch(() => null);
         return;
       }
 
@@ -2201,75 +2033,6 @@ export function registerInteractionHandler(client, commands) {
         return;
       }
 
-      if (interaction.customId === 'announcement:toggle_everyone' || interaction.customId === 'announcement:toggle_here') {
-          const cacheData = announcementCache.get(interaction.message.id);
-          if (!cacheData) {
-              await interaction.update({ content: 'Phien thao tac da het han.', embeds: [], components: [] }).catch(() => null);
-              return;
-          }
-          const isEveryone = interaction.customId === 'announcement:toggle_everyone';
-          if (isEveryone) cacheData.tagEveryone = !cacheData.tagEveryone;
-          else cacheData.tagHere = !cacheData.tagHere;
-          
-          // Cập nhật Embed hiển thị danh sách các role được tag
-          const embed = EmbedBuilder.from(interaction.message.embeds[0]);
-          const roleMentions = cacheData.roles.map(r => `<@&${r}>`).join(', ') || 'Không có';
-
-          const tags = [];
-          if (cacheData.tagEveryone) tags.push('@everyone');
-          if (cacheData.tagHere) tags.push('@here');
-          const tagSuffix = tags.length > 0 ? ` + ${tags.join(', ')}` : '';
-
-          embed.setFields([
-            { name: 'Các Role sẽ tag', value: `${roleMentions}${tagSuffix}`, inline: false }
-          ]);
-
-          const roleSelect = new RoleSelectMenuBuilder()
-            .setCustomId('announcement:roleselect')
-            .setPlaceholder('Gõ phím để tìm role (Discord mặc định chỉ hiện 25 Role)...')
-            .setMinValues(0)
-            .setMaxValues(10);
-
-          if (cacheData.roles && cacheData.roles.length > 0) {
-            roleSelect.setDefaultRoles(...cacheData.roles);
-          }
-
-          const everyoneBtn = new ButtonBuilder()
-            .setCustomId('announcement:toggle_everyone')
-            .setLabel(cacheData.tagEveryone ? 'Đang Tag @everyone' : 'Không Tag @everyone')
-            .setStyle(cacheData.tagEveryone ? ButtonStyle.Success : ButtonStyle.Secondary);
-
-          const hereBtn = new ButtonBuilder()
-            .setCustomId('announcement:toggle_here')
-            .setLabel(cacheData.tagHere ? 'Đang Tag @here' : 'Không Tag @here')
-            .setStyle(cacheData.tagHere ? ButtonStyle.Success : ButtonStyle.Secondary);
-
-          const confirmBtn = new ButtonBuilder()
-            .setCustomId('announcement:confirm')
-            .setLabel('Xác Nhận Gửi')
-            .setStyle(ButtonStyle.Success);
-
-          const editBtn = new ButtonBuilder()
-            .setCustomId('announcement:edit')
-            .setLabel('Sửa nội dung')
-            .setStyle(ButtonStyle.Primary);
-            
-          const cancelBtn = new ButtonBuilder()
-            .setCustomId('announcement:cancel')
-            .setLabel('Hủy')
-            .setStyle(ButtonStyle.Danger);
-
-          await interaction.update({
-            embeds: [embed],
-            components: [
-              new ActionRowBuilder().addComponents(roleSelect),
-              new ActionRowBuilder().addComponents(everyoneBtn, hereBtn),
-              new ActionRowBuilder().addComponents(confirmBtn, editBtn, cancelBtn)
-            ]
-          }).catch(() => null);
-          return;
-      }
-
       ensureRateLimit({ guildId: interaction.guildId, userId: interaction.user.id, action: `BUTTON_${interaction.customId.split(':')[0]}`, limit: 1, windowSeconds: config.buttonCooldownSeconds, message: 'Bạn bấm nút quá nhanh, vui lòng chờ vài giây.' });
 
       if (interaction.customId === 'oauth:verify:button') {
@@ -2341,73 +2104,6 @@ export function registerInteractionHandler(client, commands) {
           });
         }
         return;
-      }
-
-      if (interaction.customId === 'announcement:cancel') {
-         announcementCache.delete(interaction.message.id);
-         await interaction.update({ content: 'Đã huỷ đăng thông báo.', embeds: [], components: [] }).catch(() => null);
-         return;
-      }
-
-      if (interaction.customId === 'announcement:confirm') {
-         const cacheData = announcementCache.get(interaction.message.id);
-         if (!cacheData) {
-           await interaction.update({ content: 'Phiên thao tác này đã hết hạn. Vui lòng gõ lại lệnh `/thongbao`.', embeds: [], components: [] }).catch(() => null);
-           return;
-         }
-
-         if (cacheData.publishing) {
-           await interaction.deferUpdate().catch(() => null);
-           return;
-         }
-         cacheData.publishing = true;
-
-         // ACK ngay để tránh timeout 3 giây Discord
-         await interaction.deferUpdate();
-
-         try {
-           const result = await publishAnnouncement({
-             guild: interaction.guild,
-             channelId: cacheData.channelId,
-             content: cacheData.content,
-             roleIds: cacheData.roles,
-              tagEveryone: cacheData.tagEveryone,
-              tagHere: cacheData.tagHere,
-              image: cacheData.image,
-            });
-
-           announcementCache.delete(interaction.message.id);
-           const E = createEmojiResolver(interaction.guildId);
-           const priceBoardLine = result.pricingRelated
-             ? (result.priceBoard?.status === 'published' || result.priceBoard?.status === 'current'
-               ? `\n${E('status_check')} Bảng giá đã được đồng bộ tại <#${result.priceBoard.channelId}>.`
-               : `\n${E('status_warn')} Thông báo đã lên, nhưng bảng giá chưa thể đồng bộ (${result.priceBoard?.error || result.priceBoard?.status || 'không rõ lỗi'}).`)
-             : '';
-           await interaction.editReply({
-             content: `${E('status_check')} Đã đăng thông báo thành công tại <#${result.channel.id}>.${priceBoardLine}`,
-             embeds: [],
-             components: [],
-           });
-         } catch (err) {
-           cacheData.publishing = false;
-           console.error('[ANNOUNCEMENT_CONFIRM] Không thể đăng thông báo:', {
-             guildId: interaction.guildId,
-             channelId: cacheData.channelId,
-             userId: interaction.user.id,
-             code: err?.code,
-             message: err?.message,
-             stack: err?.stack,
-           });
-           const E = createEmojiResolver(interaction.guildId);
-           await interaction.editReply({
-             content: `${E('status_cross')} Không thể đăng thông báo: ${err.message}\nBạn có thể bấm **Xác nhận gửi** để thử lại sau khi khắc phục.`,
-             embeds: [],
-             components: interaction.message.components,
-           }).catch((replyError) => {
-             console.error('[ANNOUNCEMENT_CONFIRM] Không thể trả lỗi cho người dùng:', replyError);
-           });
-         }
-         return;
       }
 
       // Close ticket confirmation flow

@@ -14,11 +14,32 @@ import {
   shouldAiReplyInTicket,
 } from '../src/services/aiSupportAutomationService.js';
 import { canTicketAiRespond } from '../src/services/ticketService.js';
-import { buildAiConversationHistory, getConfiguredAiProviders } from '../src/services/aiService.js';
+import { buildAiConversationHistory, buildAiMessageContext, getConfiguredAiProviders } from '../src/services/aiService.js';
 
 const GUILD_ID = '1282637033340403754';
 
 describe('AI support automation safety', () => {
+  it('distinguishes warranty policy questions from faults and refuses negated checkout', () => {
+    expect(classifyCustomerIntent('YouTube bảo hành bao lâu?')).toBe('PRODUCT_ADVICE');
+    expect(classifyCustomerIntent('YouTube bị out fam, có bảo hành không?')).toBe('WARRANTY');
+    for (const text of ['Không chốt YouTube nhé', 'Đừng tạo đơn', 'Khoan lên đơn', 'Chưa xác nhận mua']) {
+      expect(hasExplicitPurchaseConfirmation(text)).toBe(false);
+    }
+  });
+
+  it('responds to short ticket follow-ups and scopes history to the triggering customer and time', () => {
+    const current = { id: '100', author: { id: 'customer' }, content: '3 tháng nhé',
+      client: { user: { id: 'bot' } }, mentions: { has: () => false } };
+    expect(shouldAiReplyInTicket(current, { status: 'OPEN', customer_id: 'customer' })).toBe(true);
+    const prior = { id: '90', author: { id: 'customer' }, content: 'YouTube giá sao?' };
+    const other = { id: '91', author: { id: 'someone-else' }, content: 'Netflix' };
+    const future = { id: '110', author: { id: 'customer' }, content: '1 tháng' };
+    const context = buildAiMessageContext(current, new Map([prior, other, future].map(m => [m.id, m])), 'customer');
+    expect(context.map(m => m.id)).toEqual(['90', '100']);
+    const history = buildAiConversationHistory([other, ...context], 'bot', { customerId: 'customer' });
+    expect(history).toHaveLength(2);
+    expect(history.at(-1).content).toContain('3 tháng');
+  });
   it('classifies warranty, product advice and explicit checkout separately', () => {
     expect(classifyCustomerIntent('Netflix của mình bị lỗi, mất premium rồi')).toBe('WARRANTY');
     expect(classifyCustomerIntent('Shop tư vấn giúp gói YouTube 3 tháng giá bao nhiêu?')).toBe('PRODUCT_ADVICE');

@@ -71,8 +71,7 @@ export function extractRequestedQuantity(content) {
 
 export function extractRequestedDuration(content) {
   // Warranty periods are independent of the subscription duration.
-  const text = normalizeCommerceText(content)
-    .replace(/\b(?:bh|bao hanh)\s+(?:trong\s+)?\d{1,3}\s*(?:ngay|day|days)\b/g, ' ');
+  const text = durationText(content);
   const day = text.match(/\b(\d{1,3})\s*(?:ngay|day|days)\b/);
   if (day) return { days: Number(day[1]), months: null };
   const year = text.match(/\b(\d{1,2})\s*(?:nam|year|years)\b/);
@@ -83,8 +82,7 @@ export function extractRequestedDuration(content) {
 }
 
 function extractRequestedDurations(content) {
-  const text = normalizeCommerceText(content)
-    .replace(/\b(?:bh|bao hanh)\s+(?:trong\s+)?\d{1,3}\s*(?:ngay|day|days)\b/g, ' ');
+  const text = durationText(content);
   const values = [];
   for (const match of text.matchAll(/\b(\d{1,3})\s*(ngay|day|days|thang|month|months|nam|year|years)\b/g)) {
     const amount = Number(match[1]);
@@ -97,10 +95,30 @@ function extractRequestedDurations(content) {
   return [...new Set(values)];
 }
 
+function durationText(content) {
+  return normalizeCommerceText(content)
+    .replace(/\b(\d{1,2})\s*t\b/g, '$1 thang')
+    .replace(/\b(\d{1,2})\s*(?:y|yr)\b/g, '$1 nam')
+    .replace(/\b(?:bh|bao hanh)\s+(?:trong\s+)?\d{1,3}\s*(?:ngay|day|days|thang|month|months|nam|year|years)\b/g, ' ')
+    .replace(/\b(\d{1,3})\s+(?:hay|hoac)\s+(\d{1,3})\s+(ngay|thang|nam|months?|years?|days?)\b/g, '$1 $3 hay $2 $3');
+}
+
+export function isCommerceFollowup(content) {
+  const text = normalizeCommerceText(content);
+  return Boolean(extractRequestedDurations(text).length || extractExplicitRequestedQuantity(text))
+    || /\b(?:goi nay|goi do|cai nay|cai do|nhu tren|chinh chu|cap acc|cap tai khoan|bao hanh|khong bh|full bh)\b/.test(text);
+}
+
 export function isContextualPurchaseConfirmation(content) {
   const text = normalizeCommerceText(content);
+  if (hasPurchaseNegation(text)) return false;
   return /^(?:(?:ok|oke|okay)(?: chot| lay)?|duoc|dong y|chot|lay|lay goi nay|chot goi nay|mua luon|lam luon|len don|tao don)(?:(?: nha| nhe| a| di| luon))*$/.test(text)
     || /\b(?:chot|lay|mua luon|len don|tao don)\s+(?:goi|cai)?\s*(?:nay|do)\b/.test(text);
+}
+
+export function hasPurchaseNegation(content) {
+  return /\b(?:khong|chua|dung|khoan|chua muon)\s+(?:voi\s+)?(?:chot|mua|lay|dat|xac nhan|dong y|len don|tao don)\b/.test(normalizeCommerceText(content))
+    || /\b(?:huy don|huy mua|chi hoi|chi tham khao)\b/.test(normalizeCommerceText(content));
 }
 
 function usefulTokens(value) {
@@ -133,6 +151,7 @@ export function rankCatalogProducts(products, { content, contextMessages = [], l
   const currentDurationOptions = extractRequestedDurations(current);
   const canUseContext = currentGroups.length === 0 && (
     isContextualPurchaseConfirmation(current)
+    || isCommerceFollowup(current)
     || /\b(?:goi nay|cai nay|goi do|cai do|nhu tren)\b/.test(current)
   );
 
@@ -141,16 +160,21 @@ export function rankCatalogProducts(products, { content, contextMessages = [], l
   let contextDuration = { days: null, months: null };
   let contextQuantity = null;
   let contextCredit = null;
+  let contextDurationOptions = [];
   if (canUseContext) {
     for (const item of [...contextMessages].reverse().slice(0, 8)) {
       const normalized = normalizeCommerceText(item);
+      if (hasPurchaseNegation(normalized)) break;
       if (contextQuantity === null) contextQuantity = extractExplicitRequestedQuantity(normalized);
+      if (!contextDurationOptions.length) {
+        contextDurationOptions = extractRequestedDurations(normalized);
+        contextDuration = extractRequestedDuration(normalized);
+      }
       const groups = signaledGroups(normalized);
       if (!groups.length) continue;
       context = normalized;
       contextCredit = requestedApiCredit(item);
       contextGroups = groups;
-      contextDuration = extractRequestedDuration(normalized);
       break;
     }
   }
@@ -186,10 +210,18 @@ export function rankCatalogProducts(products, { content, contextMessages = [], l
   // the first duration would make the assistant appear decisive while
   // silently choosing the wrong plan. Keep both candidates and require an
   // explicit selection instead.
-  const hasConflictingDuration = currentDurationOptions.length > 1;
+  const hasConflictingDuration = currentDurationOptions.length > 1
+    || (!currentDurationOptions.length && contextDurationOptions.length > 1);
+  let requestedDurationAvailable = true;
+  if (hasConflictingDuration) {
+    const options = currentDurationOptions.length ? currentDurationOptions : contextDurationOptions;
+    ranked = ranked.filter(({ product }) => options.includes(product.duration_days
+      ? `d:${Number(product.duration_days)}` : `m:${Number(product.duration_months ?? 1)}`));
+  }
   if ((duration.days || duration.months) && !hasConflictingDuration) {
     const exactDuration = ranked.filter(({ product }) => productDurationMatches(product, duration));
     if (exactDuration.length) ranked = exactDuration;
+    else requestedDurationAvailable = false;
   }
   if (groups.includes('api_credit') && credit !== null) {
     ranked = ranked.filter(({ product }) => Number(product.quota_value) === credit);
@@ -203,7 +235,7 @@ export function rankCatalogProducts(products, { content, contextMessages = [], l
   const selected = ranked.slice(0, Math.max(1, Math.min(10, Number(limit) || 5)));
   const first = selected[0];
   const second = selected[1];
-  const confident = !hasConflictingDuration
+  const confident = !hasConflictingDuration && requestedDurationAvailable
     && Boolean(first && first.score >= 100 && (!second || first.score - second.score >= 40));
   return {
     products: selected.map(({ product }) => product),

@@ -1,55 +1,19 @@
-import { createEmojiResolver } from '../utils/emojiHelper.js';
-import {
-  clearAnnouncementDraftImage,
-  setAnnouncementDraftImage,
-} from '../services/announcementService.js';
-import {
-  ActionRowBuilder,
-  ModalBuilder,
-  PermissionFlagsBits,
-  SlashCommandBuilder,
-  TextInputBuilder,
-  TextInputStyle,
-} from 'discord.js';
+import { MessageFlags, PermissionFlagsBits, SlashCommandBuilder } from 'discord.js';
+import { buildAnnouncementModal, createAnnouncementDraft } from '../services/announcementDraftService.js';
 
 export const data = new SlashCommandBuilder()
   .setName('thongbao')
   .setDescription('Gửi thông báo và tag các role tùy chọn.')
-  .addAttachmentOption((option) => option
-    .setName('anh')
-    .setDescription('Ảnh đính kèm thông báo (PNG, JPG, WEBP hoặc GIF).')
-    .setRequired(false))
+  .addAttachmentOption(option => option.setName('anh')
+    .setDescription('Ảnh đính kèm thông báo (PNG, JPG, WEBP hoặc GIF).').setRequired(false))
   .setDefaultMemberPermissions(PermissionFlagsBits.ManageMessages);
 
 export async function execute(interaction) {
-  const E = createEmojiResolver(interaction?.guildId);
-  const image = interaction.options.getAttachment('anh');
-
-  try {
-    if (image) setAnnouncementDraftImage(interaction, image);
-    else clearAnnouncementDraftImage(interaction);
-  } catch (error) {
-    await interaction.reply({
-      content: `${E('status_cross')} ${error.message}`,
-      ephemeral: true,
-    });
+  let draft;
+  try { draft = createAnnouncementDraft(interaction, interaction.options.getAttachment('anh')); }
+  catch (error) {
+    await interaction.reply({ content: error.message, flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } });
     return;
   }
-
-  // Show a Modal to get the announcement content
-  const modal = new ModalBuilder()
-    .setCustomId('announcement:modal')
-    .setTitle('Nội dung thông báo');
-
-  const contentInput = new TextInputBuilder()
-    .setCustomId('announcement_content')
-    .setLabel('Nội dung bạn muốn thông báo')
-    .setStyle(TextInputStyle.Paragraph)
-    .setRequired(true)
-    .setPlaceholder('Nhập nội dung vào đây. Hỗ trợ nhiều dòng...')
-    .setMaxLength(3000);
-
-  modal.addComponents(new ActionRowBuilder().addComponents(contentInput));
-
-  await interaction.showModal(modal);
+  await interaction.showModal(buildAnnouncementModal(draft));
 }

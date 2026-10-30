@@ -15,6 +15,7 @@ import {
 } from './aiSupportAutomationService.js';
 import {
   isContextualPurchaseConfirmation,
+  hasPurchaseNegation,
   resolveCatalogProductsForRequest,
 } from './aiCommerceUnderstandingService.js';
 import { emitAutomationLog } from './automationLogService.js';
@@ -47,11 +48,12 @@ export function findCatalogProductsForMessage(guildId, content, limit = 5, conte
  * Preserve the first customer context and the newest messages; all text is
  * redacted before it leaves the bot.
  */
-export function buildAiConversationHistory(messages, botUserId, { limit = 14, maxChars = 900 } = {}) {
+export function buildAiConversationHistory(messages, botUserId, { limit = 14, maxChars = 900, customerId = null } = {}) {
   const safeLimit = Math.max(4, Math.min(24, Number(limit) || 14));
   const safeMaxChars = Math.max(240, Math.min(1_800, Number(maxChars) || 900));
   const entries = (Array.isArray(messages) ? messages : [])
     .filter((item) => item?.author?.id && (!item.author.bot || String(item.author.id) === String(botUserId)))
+    .filter((item) => !customerId || String(item.author.id) === String(customerId) || String(item.author.id) === String(botUserId))
     .map((item) => {
       const assistant = String(item.author.id) === String(botUserId);
       const content = sanitizeCustomerTextForAi(item.content).slice(0, safeMaxChars).trim();
@@ -83,6 +85,7 @@ function buildCurrentAiHint({ intent, resolution, isTicket }) {
 
 async function tryDeterministicCommerceFlow(message, isTicket, isStaff, contextMessages = []) {
   if (!isTicket || isStaff) return false;
+  if (hasPurchaseNegation(message.content)) return false;
   const ticket = getTicketByChannelId(message.channel.id);
   if (ticket?.ticket_type !== 'ORDER' || ticket.customer_id !== message.author.id) return false;
   const intent = classifyCustomerIntent(message.content);
@@ -159,7 +162,9 @@ export async function generateSystemPrompt(guild, isStaff, contextHint = '') {
   const knowledge = getAiKnowledge(guild.id);
   const productKnowledge = generateProductKnowledgeText(guild.id);
   const guildConfig = getGuildConfig(guild.id);
-  const channels = await guild.channels.fetch();
+  // Guild channels already arrive through the Gateway. Do not fetch every
+  // channel again for each customer question or block replies on this read.
+  const channels = [...(guild.channels.cache?.values() || [])];
   const channelList = publicChannelList(guild, channels);
 
   let prompt = config.aiSystemPrompt || 'Bạn là trợ lý chăm sóc khách hàng của Cenar Store.';
@@ -270,7 +275,7 @@ function toGeminiDeclarations(tools) {
   }));
 }
 
-async function requestGroq({ systemPrompt, history, tools }) {
+async function requestGroq({ systemPrompt, history, tools, signal = AbortSignal.timeout(10_000) }) {
   const body = {
     model: config.aiModel || 'llama-3.3-70b-versatile',
     messages: [{ role: 'system', content: systemPrompt }, ...history],
@@ -285,12 +290,11 @@ async function requestGroq({ systemPrompt, history, tools }) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify(body),
-    signal: AbortSignal.timeout(20_000),
+    signal,
   });
   if (!response.ok) {
-    const errText = await response.text();
-    console.error('[GROQ API ERROR]', response.status, errText.slice(0, 500));
-    throw new Error(`Groq API Error: ${response.status}`);
+    await response.body?.cancel().catch(() => null);
+    throw Object.assign(new Error('AI_PROVIDER_REJECTED'), { status: response.status });
   }
 
   const data = await response.json();
@@ -313,20 +317,22 @@ function canRotateGeminiKey(error) {
     || /API[_ ]?KEY|QUOTA|RESOURCE_EXHAUSTED|RATE.?LIMIT|UNAVAILABLE|DEADLINE/.test(message);
 }
 
-async function requestGemini({ systemPrompt, history, tools }) {
+async function requestGemini({ systemPrompt, history, tools, signal = AbortSignal.timeout(10_000) }) {
   const keys = config.geminiApiKeys || [];
   const attempts = Math.min(2, keys.length);
   let lastError = null;
 
   for (let attempt = 0; attempt < attempts; attempt += 1) {
+    signal.throwIfAborted();
     const key = keys[geminiKeyCursor % keys.length];
     geminiKeyCursor += 1;
     try {
-      const client = new GoogleGenAI({ apiKey: key, httpOptions: { timeout: 20_000 } });
+      const client = new GoogleGenAI({ apiKey: key, httpOptions: { timeout: 10_000 } });
       const response = await client.models.generateContent({
         model: config.aiGeminiModel || 'gemini-2.5-flash',
         contents: toGeminiHistory(history),
         config: {
+          abortSignal: signal,
           systemInstruction: systemPrompt,
           temperature: 0.25,
           maxOutputTokens: 650,
@@ -340,21 +346,27 @@ async function requestGemini({ systemPrompt, history, tools }) {
       };
     } catch (error) {
       lastError = error;
+      if (signal.aborted) throw error;
       if (!canRotateGeminiKey(error)) break;
     }
   }
   throw lastError || new Error('Gemini chưa được cấu hình.');
 }
 
-async function requestAiCompletion(input) {
+export async function requestAiCompletion(input, { timeoutMs = 20_000 } = {}) {
   const providers = getConfiguredAiProviders();
+  const deadline = Date.now() + timeoutMs;
   let lastError = null;
   for (const provider of providers) {
+    if (Date.now() >= deadline) break;
+    const signal = AbortSignal.timeout(Math.max(1, Math.min(10_000, deadline - Date.now())));
     try {
-      return provider === 'groq' ? await requestGroq(input) : await requestGemini(input);
+      const result = provider === 'groq' ? await requestGroq({ ...input, signal }) : await requestGemini({ ...input, signal });
+      if (!String(result.content || '').trim() && !result.toolCall) throw new Error('EMPTY_AI_RESPONSE');
+      return result;
     } catch (error) {
       lastError = error;
-      console.error(`[AI ${provider.toUpperCase()}]`, error?.message || error);
+      console.error(`[AI ${provider.toUpperCase()}]`, { code: error?.status || error?.name || 'REQUEST_FAILED' });
     }
   }
   throw lastError || new Error('Chưa cấu hình nhà cung cấp AI.');
@@ -430,13 +442,31 @@ async function escalateToStaff(message, ticket, args) {
   return safeReply(message, 'Mình đã chuyển nội dung cần xác minh sang staff. Bạn cứ để lại thông tin không nhạy cảm trong ticket; shop sẽ tiếp tục xử lý tại đây.');
 }
 
+export function buildAiMessageContext(message, fetchedMessages, customerId = null) {
+  const botId = message.client.user.id;
+  const messages = new Map([...fetchedMessages.values()].map(item => [item.id, item]));
+  messages.set(message.id, message);
+  return [...messages.values()]
+    .filter(item => !customerId || item.author?.id === customerId || item.author?.id === botId)
+    .filter(item => {
+      if (/^\d+$/.test(item.id) && /^\d+$/.test(message.id)) return BigInt(item.id) <= BigInt(message.id);
+      return !item.createdTimestamp || !message.createdTimestamp || item.createdTimestamp <= message.createdTimestamp;
+    })
+    .sort((a, b) => {
+      if (/^\d+$/.test(a.id) && /^\d+$/.test(b.id)) return BigInt(a.id) < BigInt(b.id) ? -1 : a.id === b.id ? 0 : 1;
+      return (a.createdTimestamp || 0) - (b.createdTimestamp || 0);
+    });
+}
+
 export async function processAiMessage(message, isTicket, isStaff = false) {
   const E = createEmojiResolver(message.guildId);
   const ticket = isTicket ? getTicketByChannelId(message.channel.id) : null;
-  const fetchedMessages = isTicket
-    ? await message.channel.messages.fetch({ limit: 24 }).catch(() => new Map([[message.id, message]]))
-    : new Map([[message.id, message]]);
-  const chronologicalMessages = [...fetchedMessages.values()].reverse();
+  let historyTimer;
+  const fetchedMessages = isTicket ? await Promise.race([
+    message.channel.messages.fetch({ limit: 24 }).catch(() => new Map()),
+    new Promise(resolve => { historyTimer = setTimeout(() => resolve(new Map()), 3_000); }),
+  ]).finally(() => clearTimeout(historyTimer)) : new Map();
+  const chronologicalMessages = buildAiMessageContext(message, fetchedMessages, isStaff ? null : ticket?.customer_id);
   const customerContextMessages = chronologicalMessages
     .filter((item) => !item.author.bot && (!ticket || item.author.id === ticket.customer_id))
     .map((item) => item.content)
@@ -467,12 +497,14 @@ export async function processAiMessage(message, isTicket, isStaff = false) {
       isStaff,
       buildCurrentAiHint({ intent, resolution: currentResolution, isTicket }),
     );
-    const history = buildAiConversationHistory(chronologicalMessages, message.client.user.id);
+    const history = buildAiConversationHistory(chronologicalMessages, message.client.user.id,
+      { customerId: isStaff ? null : ticket?.customer_id });
     if (
       isTicket
       && !isStaff
       && ticket?.ticket_type === 'ORDER'
       && ['PURCHASE', 'PURCHASE_CONFIRM'].includes(intent)
+      && !hasPurchaseNegation(message.content)
       && currentResolution.confidentProduct
     ) {
       tools.push(prepareOrderToolDeclaration);
@@ -496,7 +528,7 @@ export async function processAiMessage(message, isTicket, isStaff = false) {
 
     return result.content ? safeReply(message, result.content) : false;
   } catch (error) {
-    console.error('[AI SERVICE] Error processing message:', error);
+    console.error('[AI SERVICE]', { code: error?.status || error?.name || 'REQUEST_FAILED' });
     if (await tryDeterministicCommerceFlow(message, isTicket, isStaff, customerContextMessages).catch(() => false)) return true;
     const fallback = buildDeterministicFallback(message, isTicket, customerContextMessages);
     await safeReply(message, `${E('status_warn')} ${fallback}`).catch(() => null);

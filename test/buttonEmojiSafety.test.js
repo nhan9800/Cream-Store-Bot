@@ -247,6 +247,7 @@ describe('safe custom emoji components', () => {
       guild,
       channelId: '123456789012345679',
       content: 'Lịch hoạt động cuối tuần',
+      nonce: '123456789012345688',
       image: {
         id: '123456789012345680',
         name: 'weekend.png',
@@ -256,6 +257,8 @@ describe('safe custom emoji components', () => {
     });
 
     expect(sentPayload.files[0].name).toBe('weekend-12345680.png');
+    expect(sentPayload.nonce).toBe('123456789012345688');
+    expect(sentPayload.enforceNonce).toBe(true);
     expect(JSON.stringify(sentPayload.components.map((component) => component.toJSON())))
       .toContain('attachment://weekend-12345680.png');
   });
