@@ -3,7 +3,7 @@ import { API_CREDIT_PRODUCTS, API_CREDIT_DURATION } from '../config/apiCreditCat
 // that module opens SQLite. These public prices contain no customer data.
 // SALE means the owner supplied this campaign price, not an inferred discount.
 // Source: original sale board at 3f7bb80 plus catalog at 755910a (2026-10-02).
-export const PROMOTION_CATALOG_VERSION = 'CENAR-PROMOTION-CATALOG-20261007-API-CREDIT';
+export const PROMOTION_CATALOG_VERSION = 'CENAR-PROMOTION-CATALOG-20261030-AI';
 
 export const PROMOTION_CATALOG_SECTIONS = Object.freeze([
   { key: 'connection', title: 'Kết nối có gu', subtitle: 'Nitro, nâng cấp máy chủ và gói xem phim.' },
@@ -180,8 +180,16 @@ export const PROMOTION_CATALOG_ROWS = Object.freeze([
   sale('ai_supplied', 'sale-claude-pro-x5-account-full-warranty', 'Claude Pro x5', 2500000, {
     catalogKey: 'claude-pro-x5-account-1-month-full-warranty', duration: '1 tháng', account: 'Shop cấp tài khoản', warranty: 'Full BH 1 tháng (FBH/BHF)',
   }),
-  catalog('ai_supplied', 'claude-pro-1-month', 'Claude Pro', 530000, {
-    duration: '1 tháng', warranty: 'Full BH 1 tháng',
+  catalog('ai_own', 'claude-pro-1-month', 'Claude Pro chính chủ', 520000, {
+    duration: '1 tháng', account: 'Chính chủ', warranty: 'Full BH 1 tháng · không bảo hành nếu tài khoản bị khóa',
+  }),
+  catalog('ai_own', 'claude-pro-x5-own-account-1-month-7-day-warranty', 'Claude Pro x5 chính chủ', 2000000, {
+    duration: '1 tháng', account: 'Chính chủ', warranty: 'BH 7 ngày',
+    notes: ['Thu ban đầu 2.000.000đ; shop giữ phần API 100 USD và hoàn 700.000đ; chi phí sau hoàn 1.300.000đ. API 100 USD không thuộc quyền lợi khách nhận.'],
+  }),
+  catalog('ai_supplied', 'chatgpt-plus-upi-account-1-month-12-hour-warranty', 'ChatGPT Plus UPI Pay', 130000, {
+    duration: '1 tháng danh nghĩa', account: 'Shop cấp tài khoản', warranty: 'BH 12 giờ',
+    notes: ['Theo ghi nhận của shop, đa số tài khoản dùng từ 2 tuần trở lên; phạm vi bảo hành vẫn là 12 giờ.'],
   }),
   ...API_CREDIT_PRODUCTS.map((product) => catalog('ai_supplied', product.product_key, product.name, product.price, {
     duration: API_CREDIT_DURATION, account: 'Token/API riêng', warranty: product.warranty_policy,

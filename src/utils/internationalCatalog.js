@@ -6,9 +6,9 @@ const GROUP_COPY = Object.freeze({
   decor_nitro: ['Discord Profile Decor · Nitro Accounts', 'Profile decorations for accounts that already have Nitro.'],
   decor_no_nitro: ['Discord Profile Decor · Non-Nitro Accounts', 'Packages designed for accounts without an active Nitro subscription.'],
   decor_gift: ['Discord Profile Decor · Gift & Combo', 'Delivered as a gift or combo without requesting your password.'],
-  chatgpt: ['ChatGPT Plus, Pro & Business', 'Compare personal-account and supplied-account plans. Subscription-only coverage excludes the account; no-warranty and two-day coverage do not guarantee a full month of account access.'],
+  chatgpt: ['ChatGPT Plus, Pro & Business', 'Compare personal-account and supplied-account plans. UPI Pay has 12 hours of warranty; subscription duration and warranty coverage are listed separately.'],
   gemini: ['Gemini & Google One', 'Gemini Advanced/Pro plans with the listed Google One storage.'],
-  claude: ['Claude Pro & Codex/Claude API', 'Claude Pro x5 supplied accounts last one month with no warranty or full coverage. API packs have no day limit and end when credit is used up; x5 is the shop package name.'],
+  claude: ['Claude Pro & Codex/Claude API', 'Personal Claude Pro excludes locked accounts. The personal x5 plan has 7 days of warranty and separate refund terms. API packs end when credit is used up; x5 is the shop package name.'],
   adobe: ['Adobe Creative Cloud', 'All Apps, trial duration and device limits are shown per package.'],
   creative_tools: ['CapCut Pro & Microsoft 365', 'Video, productivity and cloud storage tools.'],
   spotify: ['Spotify Premium', 'Ad-free high-quality music and offline playback for the selected duration.'],
@@ -41,6 +41,8 @@ export function translateProductName(value) {
     .replace(/Không\s*BH\s*Acc/gi, 'No Account Warranty')
     .replace(/BH\s*Gói/gi, 'Subscription Warranty')
     .replace(/BH\s*(\d+)\s*Ngày/gi, (_, count) => `${count} Days of Warranty`)
+    .replace(/BH\s*(\d+)\s*Giờ/gi, (_, count) => `${count} Hours of Warranty`)
+    .replace(/Trừ Khóa Acc/gi, 'Locked Accounts Excluded')
     .replace(/Full\s*BH/gi, 'Full Warranty')
     .replace(/Không\s*BH/gi, 'No Warranty')
     .replace(/bảo\s*hành/gi, 'Warranty')
@@ -62,6 +64,9 @@ export function translateProductName(value) {
 
 export function translateProductWarranty(value) {
   return String(value || '')
+    .replace(/Full (\d+) tháng · không bảo hành nếu tài khoản bị khóa/gi, 'Full $1-month subscription warranty; locked accounts are excluded')
+    .replace(/^Bảo hành (\d+) giờ$/gi, '$1 hours of warranty')
+    .replace(/^Bảo hành (\d+) ngày$/gi, '$1 days of warranty')
     .replace(/Bảo hành gói 1 tháng · không bảo hành tài khoản/gi, 'Subscription coverage for 1 month; the account is excluded')
     .replace(/Không bảo hành \(KBH\) · không cam kết tài khoản duy trì đủ tháng/gi, 'No warranty; a full month of account access is not guaranteed')
     .replace(/Bảo hành 2 ngày · thời hạn gói danh nghĩa 1 tháng, không cam kết tài khoản duy trì đủ tháng/gi, '2 days of warranty; nominal subscription period is 1 month, with no guarantee of a full month of account access')
@@ -70,6 +75,12 @@ export function translateProductWarranty(value) {
 
 export function translateProductDescription(value) {
   return String(value || '')
+    .replace(/Claude Pro x5 trên tài khoản chính chủ của khách trong 1 tháng, bảo hành 7 ngày\./g, 'Claude Pro x5 on your own account for 1 month, with 7 days of warranty.')
+    .replace(/Thanh toán ban đầu ([\d.]+)đ; shop giữ lại phần API (\d+) USD và hoàn lại cho khách ([\d.]+)đ, chi phí sau hoàn là ([\d.]+)đ\./g,
+      'Initial payment: $1 VND; the shop retains the $2 USD API allocation and refunds $3 VND to the customer. Net cost after refund: $4 VND.')
+    .replace(/Phần API (\d+) USD thuộc shop, không nằm trong quyền lợi khách nhận\./g, 'The $1 USD API allocation belongs to the shop and is excluded from customer benefits.')
+    .replace(/Cenar cấp tài khoản ChatGPT Plus UPI Pay với thời hạn gói danh nghĩa 1 tháng, bảo hành 12 giờ\./g, 'Cenar supplies a ChatGPT Plus UPI Pay account with a nominal 1-month subscription and 12 hours of warranty.')
+    .replace(/Theo ghi nhận của shop, đa số tài khoản dùng được từ 2 tuần trở lên; đây là ghi nhận thực tế, phạm vi bảo hành vẫn là 12 giờ\./g, 'The shop reports that most accounts last 2 weeks or longer; this is shop-reported experience, and warranty coverage remains 12 hours.')
     .replace(/<a?:[A-Za-z0-9_]+:\d+>/g, '')
     .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, '')
     .replace(/Vui lòng gửi tài khoản, mật khẩu và 4-5 mã dự phòng khi mua/gi, 'Please provide the account credentials and 4–5 backup codes after ordering')

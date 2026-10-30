@@ -17,12 +17,12 @@ import { formatCurrency } from '../utils/formatters.js';
 import { fmt, subtext } from '../utils/embedHelpers.js';
 import { config } from '../config.js';
 import { isInternationalGuild } from '../utils/locale.js';
-import { formatInternationalPrice, translateCatalogGroup, translateProductName, translateProductWarranty } from '../utils/internationalCatalog.js';
+import { formatInternationalPrice, translateCatalogGroup, translateProductName, translateProductWarranty, translateProductDescription } from '../utils/internationalCatalog.js';
 import { getNitroTrialEligibility, isNitroTrialProduct } from '../constants/nitroTrial.js';
 import { API_CREDIT_DURATION, isApiCreditProduct } from '../config/apiCreditCatalog.js';
 import { AUTOMATIC_PRICE_BOARD_PAUSED } from '../config/marketingAutomationPolicy.js';
 
-export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.22';
+export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.23';
 const publicationStates = new Map();
 export function getPriceBoardPublicationState(guildId) {
   return publicationStates.get(String(guildId)) || { status: 'not_started' };
@@ -63,7 +63,7 @@ export const PRICE_GROUPS = [
   },
   {
     key: 'chatgpt', titleSlot: 'brand_chatgpt', title: 'ChatGPT Plus, Pro & Business', accent: 0x10A37F,
-    note: 'Chọn đúng hình thức chính chủ hoặc cấp tài khoản. BH gói không bao gồm BH tài khoản; KBH và BH 2 ngày không cam kết tài khoản duy trì đủ tháng. Đọc phạm vi bảo hành riêng của từng gói.',
+    note: 'Chọn đúng hình thức chính chủ hoặc cấp tài khoản. UPI Pay bảo hành 12 giờ; các gói khác có điều kiện bảo hành riêng. Thời hạn gói và thời hạn bảo hành được ghi riêng.',
     match: (p) => p.service_type === 'AI' && /chat\s*gpt/i.test(p.name),
   },
   {
@@ -73,7 +73,7 @@ export const PRICE_GROUPS = [
   },
   {
     key: 'claude', titleSlot: 'brand_claude', title: 'Claude Pro & Claude API', accent: 0xD97757,
-    note: 'Claude Pro x5 cấp tài khoản 1 tháng có hai lựa chọn KBH hoặc full bảo hành. API Codex/Claude dùng đến hết credit, không giới hạn ngày; x5 là tên gói của shop.',
+    note: 'Claude Pro chính chủ không bảo hành khi tài khoản bị khóa. Gói x5 chính chủ bảo hành 7 ngày và có điều kiện hoàn tiền riêng. API Codex/Claude dùng đến hết credit; x5 là tên gói của shop.',
     match: (p) => p.service_type === 'AI' && /claude/i.test(p.name),
   },
   {
@@ -197,7 +197,6 @@ const FULL_WARRANTY_PRODUCT_KEYS = new Set([
   'chatgpt-business-workspace-1-month-full-warranty',
   'chatgpt-plus-direct-payment-1-month-full-warranty',
   'chatgpt-pro-100-account-1-month-full-warranty',
-  'claude-pro-1-month',
   'claude-pro-x5-account-1-month-full-warranty',
   'gemini-pro-google-one-5tb-12-months-full-warranty',
   'gemini-pro-google-one-5tb-18-months-full-warranty',
@@ -357,6 +356,9 @@ export function buildPriceGroupPayload(guildId, group, products) {
           `> ${E('warranty_shield')} **${international ? 'Warranty' : 'Bảo hành'}:** ${international ? 'Full coverage for the entire service period' : 'Full trong suốt thời gian sử dụng'}`,
         ] : warrantyPolicy ? [
           `> ${E('warranty_shield')} **${international ? 'Warranty' : 'Bảo hành'}:** ${international ? translateProductWarranty(warrantyPolicy) : warrantyPolicy}`,
+        ] : []),
+        ...(['chatgpt-plus-upi-account-1-month-12-hour-warranty', 'claude-pro-x5-own-account-1-month-7-day-warranty'].includes(product.product_key) ? [
+          `> ${E('status_info')} **${international ? 'Terms' : 'Điều kiện'}:** ${international ? translateProductDescription(product.description) : product.description}`,
         ] : []),
       ].join('\n'))
     );
