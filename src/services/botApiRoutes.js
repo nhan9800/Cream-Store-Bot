@@ -27,6 +27,7 @@ import { getCustomerDiscordRoleSnapshot, getCustomerMembershipProgress } from '.
 import { getMembershipPresentationStatus } from './membershipPresentationService.js';
 import { getCustomerActivitySummary, getCustomerRecentActivities } from './customerActivityService.js';
 import { getCustomerRoleSyncState } from './customerRoleSyncService.js';
+import { getFeedbackTicketAutoCloseStatus } from './feedbackTicketAutoCloseService.js';
 import { getDiscordNitroEligibility } from '../utils/discordNitro.js';
 import { isInternationalGuild } from '../utils/locale.js';
 import { internationalizeProduct } from '../utils/internationalCatalog.js';
@@ -507,6 +508,7 @@ export function registerBotApiRoutes(app) {
             })(),
             youtubeWarrantySync: getYoutubeWarrantySyncState(),
             customerRoleSync: getCustomerRoleSyncState(),
+            feedbackTicketAutoClose: getFeedbackTicketAutoCloseStatus(),
             membershipPresentation: getMembershipPresentationStatus(req.app.locals.discordClient),
             marketingAutomation: { ...getMarketingPauseStatus(), priceBoardResendPaused: AUTOMATIC_PRICE_BOARD_PAUSED },
             uptime: Math.floor(process.uptime()),
