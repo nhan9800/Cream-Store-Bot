@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import { describe, expect, it } from 'vitest';
 import { API_CREDIT_PRODUCTS } from '../src/config/apiCreditCatalog.js';
+import { GEMINI_PRO_CDK_PRODUCT } from '../src/config/geminiProCdk202611.js';
 import {
   PROMOTION_CATALOG_ROWS,
   PROMOTION_CATALOG_SECTIONS,
@@ -57,7 +58,7 @@ const ownerPrices = {
 function seedProducts() {
   const source = fs.readFileSync(new URL('../src/database/db.js', import.meta.url), 'utf8');
   const literal = `${source.split('export const DEFAULT_PRODUCT_CATALOG = ')[1].split('\n];')[0]}\n]`;
-  return Function('API_CREDIT_PRODUCTS', `return ${literal}`)(API_CREDIT_PRODUCTS);
+  return Function('API_CREDIT_PRODUCTS', 'GEMINI_PRO_CDK_PRODUCT', `return ${literal}`)(API_CREDIT_PRODUCTS, GEMINI_PRO_CDK_PRODUCT);
 }
 
 function keyOf(product) {
@@ -81,7 +82,7 @@ describe('Complete October promotion data', () => {
     const linked = PROMOTION_CATALOG_ROWS.map((row) => row.catalogKey).filter(Boolean);
     expect(new Set(linked).size).toBe(linked.length);
     expect([...linked].sort()).toEqual([...byProductKey.keys()].sort());
-    expect(catalogRows).toHaveLength(51);
+    expect(catalogRows).toHaveLength(52);
     for (const row of catalogRows) {
       expect(row.price, row.key).toBe(byProductKey.get(row.catalogKey)?.price);
     }
@@ -138,8 +139,8 @@ describe('Complete October promotion data', () => {
   it('keeps catalog listings distinct from owner campaign prices with eight complete groups', () => {
     expect(PROMOTION_PRICE_SOURCE_LABELS.CATALOG).toBe('Giá niêm yết hiện hành');
     expect(PROMOTION_CATALOG_SECTIONS).toHaveLength(8);
-    expect(getPromotionCatalogGroups().flatMap((group) => group.rows)).toHaveLength(90);
-    expect(new Set(PROMOTION_CATALOG_ROWS.map((row) => row.key)).size).toBe(90);
+    expect(getPromotionCatalogGroups().flatMap((group) => group.rows)).toHaveLength(91);
+    expect(new Set(PROMOTION_CATALOG_ROWS.map((row) => row.key)).size).toBe(91);
     for (const row of PROMOTION_CATALOG_ROWS) {
       expect(Number.isSafeInteger(row.price)).toBe(true);
       expect(row.price).toBeGreaterThan(0);

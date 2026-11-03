@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import { API_CREDIT_PRODUCTS } from '../config/apiCreditCatalog.js';
+import { GEMINI_PRO_CDK_PRODUCT } from '../config/geminiProCdk202611.js';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { fileURLToPath } from 'node:url';
@@ -1857,6 +1858,7 @@ export const DEFAULT_PRODUCT_CATALOG = [
     { name: 'Decor Discord Combo Gift - Gói 180k', description: 'Trang trí hồ sơ dạng Combo Gift (bấm nhận ngay). Tiết kiệm tối đa.', price: 180000, duration_months: 1, service_type: 'decor', emoji: '🎁', original_price: 220000 },
 
     // AI & Phần Mềm
+    GEMINI_PRO_CDK_PRODUCT,
     {
       product_key: 'gemini-pro-google-one-5tb-12-months-full-warranty',
       name: 'Gemini Pro + 5 TB Google One 12 Tháng (Full BH)',
@@ -2277,6 +2279,7 @@ export function seedProductCatalog(dbInstance) {
         OR (
           LOWER(REPLACE(name, ' ', '')) LIKE '%gemini%'
           AND COALESCE(product_key, '') NOT IN (
+            'gemini-pro-cdk-6-months-activation-warranty',
             'gemini-pro-google-one-5tb-12-months-full-warranty',
             'gemini-pro-google-one-5tb-18-months-full-warranty'
           )

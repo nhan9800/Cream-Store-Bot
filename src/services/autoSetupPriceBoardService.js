@@ -21,8 +21,9 @@ import { formatInternationalPrice, translateCatalogGroup, translateProductName, 
 import { getNitroTrialEligibility, isNitroTrialProduct } from '../constants/nitroTrial.js';
 import { API_CREDIT_DURATION, isApiCreditProduct } from '../config/apiCreditCatalog.js';
 import { AUTOMATIC_PRICE_BOARD_PAUSED } from '../config/marketingAutomationPolicy.js';
+import { GEMINI_PRO_CDK_KEY } from '../config/geminiProCdk202611.js';
 
-export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.23';
+export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.24';
 const publicationStates = new Map();
 export function getPriceBoardPublicationState(guildId) {
   return publicationStates.get(String(guildId)) || { status: 'not_started' };
@@ -68,7 +69,7 @@ export const PRICE_GROUPS = [
   },
   {
     key: 'gemini', titleSlot: 'brand_gemini', title: 'Gemini & Google One', accent: 0x4285F4,
-    note: 'Chỉ mở bán nguồn triển khai mới, gồm gói 12 và 18 tháng với bảo hành full toàn thời gian.',
+    note: 'CDK 6 tháng chỉ bảo hành kích hoạt thành công. Gói 12 và 18 tháng có điều kiện bảo hành riêng; xem đúng gói trước khi mua.',
     match: (p) => p.service_type === 'AI' && /gemini/i.test(p.name),
   },
   {
@@ -357,7 +358,7 @@ export function buildPriceGroupPayload(guildId, group, products) {
         ] : warrantyPolicy ? [
           `> ${E('warranty_shield')} **${international ? 'Warranty' : 'Bảo hành'}:** ${international ? translateProductWarranty(warrantyPolicy) : warrantyPolicy}`,
         ] : []),
-        ...(['chatgpt-plus-upi-account-1-month-12-hour-warranty', 'claude-pro-x5-own-account-1-month-7-day-warranty'].includes(product.product_key) ? [
+        ...(['chatgpt-plus-upi-account-1-month-12-hour-warranty', 'claude-pro-x5-own-account-1-month-7-day-warranty', GEMINI_PRO_CDK_KEY].includes(product.product_key) ? [
           `> ${E('status_info')} **${international ? 'Terms' : 'Điều kiện'}:** ${international ? translateProductDescription(product.description) : product.description}`,
         ] : []),
       ].join('\n'))
