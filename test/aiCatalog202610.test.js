@@ -17,6 +17,8 @@ import { getActiveProducts, generateProductKnowledgeText } from '../src/services
 import { rankCatalogProducts, extractRequestedDuration } from '../src/services/aiCommerceUnderstandingService.js';
 import { buildPriceBoardPayloads, groupPriceProducts, PRICE_BOARD_VERSION } from '../src/services/autoSetupPriceBoardService.js';
 import { CORE_UI_EMOJI_ASSETS } from '../src/config/coreEmojiPack2026.js';
+import { GEMINI_PRO_CDK_KEY } from '../src/config/geminiProCdk202611.js';
+import { AUTOMATIC_MARKETING_PAUSED, AUTOMATIC_PRICE_BOARD_PAUSED } from '../src/config/marketingAutomationPolicy.js';
 
 const GUILD_ID = '1282637033340403754';
 const previousClient = global.discordClient;
@@ -67,6 +69,72 @@ function collectComponents(payload) {
   for (const component of payload.components) visit(component.toJSON());
   return components;
 }
+
+describe('Gemini Pro CDK November 2026 launch', () => {
+  it('keeps six-month duration distinct from activation-only coverage and optional YouTube Lite', () => {
+    const product = getActiveProducts(GUILD_ID).find(p => p.product_key === GEMINI_PRO_CDK_KEY);
+    expect(product).toMatchObject({ price: 190000, original_price: 0, duration_months: 6, activation_method: 'OWN_ACCOUNT', login_required: 0, is_active: 1 });
+    expect(product.warranty_policy).toBe('Chỉ bảo hành kích hoạt thành công · không bảo hành sau kích hoạt');
+    expect(product.description).toContain('lỗi CDK');
+    expect(product.description).toContain('https://payments.google.com/');
+    expect(product.description).toContain('rời nhóm gia đình Google');
+    expect(product.description).toContain('không cam kết đi kèm');
+    expect(product.description).toContain('vẫn có thể có quảng cáo');
+    expect(product.description).toContain('không phải không giới hạn');
+    for (const model of ['Gemini 4 Argon', 'Claude Opus 5.5', 'Claude Sonnet 5.5']) expect(product.description).toContain(model);
+    expect(product.quota_value).toBeNull();
+    expect(product.virtual_purchase_count).toBe(0);
+    const knowledge = generateProductKnowledgeText(GUILD_ID);
+    expect(knowledge).toContain(product.description);
+    expect(extractRequestedDuration(product.name)).toEqual({ days: null, months: 6 });
+    expect(AUTOMATIC_MARKETING_PAUSED).toBe(true);
+    expect(AUTOMATIC_PRICE_BOARD_PAUSED).toBe(true);
+  });
+
+  it('adds one stable SKU on repeated migrations and preserves existing products and order snapshots', () => {
+    const database = new Database(':memory:');
+    try {
+      database.exec(db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'product_catalog'").get().sql);
+      seedProductCatalog(database);
+      database.prepare('DELETE FROM product_catalog WHERE product_key = ?').run(GEMINI_PRO_CDK_KEY);
+      const before = database.prepare('SELECT id, product_key, name, price, description, duration_months, warranty_policy, is_active FROM product_catalog ORDER BY id').all();
+      database.exec('CREATE TABLE order_snapshot (product_id INTEGER, duration_months INTEGER, warranty TEXT)');
+      database.prepare('INSERT INTO order_snapshot VALUES (?, 12, ?)').run(before[0].id, 'Original warranty');
+      const order = database.prepare('SELECT * FROM order_snapshot').get();
+      seedProductCatalog(database);
+      const product = database.prepare('SELECT * FROM product_catalog WHERE product_key = ?').get(GEMINI_PRO_CDK_KEY);
+      seedProductCatalog(database);
+      expect(database.prepare('SELECT id FROM product_catalog WHERE product_key = ?').all(GEMINI_PRO_CDK_KEY)).toEqual([{ id: product.id }]);
+      expect(database.prepare('SELECT COUNT(*) AS n FROM product_catalog').get().n).toBe(before.length + 1);
+      expect(database.prepare('SELECT id, product_key, name, price, description, duration_months, warranty_policy, is_active FROM product_catalog WHERE product_key != ? ORDER BY id').all(GEMINI_PRO_CDK_KEY)).toEqual(before);
+      expect(database.prepare('SELECT * FROM order_snapshot').get()).toEqual(order);
+      expect(database.prepare('SELECT is_active FROM product_catalog WHERE product_key = ?').get(GEMINI_PRO_CDK_KEY).is_active).toBe(1);
+    } finally { database.close(); }
+  });
+
+  it('renders limited warranty and mandatory preparation in both locales within Discord limits', () => {
+    const products = getActiveProducts(GUILD_ID);
+    const product = products.find(p => p.product_key === GEMINI_PRO_CDK_KEY);
+    for (const guildId of [GUILD_ID, '1070676180103086132']) {
+      const payloads = buildPriceBoardPayloads(guildId, {}, products);
+      const components = payloads.flatMap(collectComponents);
+      const block = components.find(c => c.type === 10 && c.content.startsWith('### ') && c.content.includes('Gemini Pro 6'));
+      expect(block.content).toMatch(/190[.,]000/);
+      expect(block.content).toMatch(/kích hoạt thành công|Successful activation only/);
+      expect(block.content).toMatch(/không bảo hành sau kích hoạt|no post-activation warranty/);
+      expect(block.content).toContain('https://payments.google.com/');
+      expect(block.content).toMatch(/không cam kết đi kèm|inclusion is not guaranteed/);
+      expect(block.content).not.toMatch(/Full trong suốt thời gian sử dụng|Full coverage for the entire service period/);
+      expect(components.filter(c => c.type === 3).flatMap(c => c.options).filter(o => o.value === String(product.id))).toHaveLength(1);
+      for (const payload of payloads) {
+        const panel = collectComponents(payload);
+        expect(panel.reduce((sum, c) => sum + (c.content?.length || 0), 0)).toBeLessThanOrEqual(3800);
+        expect(panel.length).toBeLessThanOrEqual(38);
+        expect(payload.allowedMentions).toEqual({ parse: [] });
+      }
+    }
+  });
+});
 
 describe('October 2026 AI catalog additions', () => {
   it('lists the owner-confirmed UPI and own-account Claude offers without treating a refund as checkout price', () => {

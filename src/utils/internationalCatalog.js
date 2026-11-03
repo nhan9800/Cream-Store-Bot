@@ -1,4 +1,5 @@
 import { config } from '../config.js';
+import { GEMINI_PRO_CDK_DESCRIPTION, GEMINI_PRO_CDK_DESCRIPTION_EN, GEMINI_PRO_CDK_WARRANTY, GEMINI_PRO_CDK_WARRANTY_EN } from '../config/geminiProCdk202611.js';
 
 const GROUP_COPY = Object.freeze({
   nitro: ['Discord Nitro', 'Boost, login and trial packages currently available.'],
@@ -7,7 +8,7 @@ const GROUP_COPY = Object.freeze({
   decor_no_nitro: ['Discord Profile Decor · Non-Nitro Accounts', 'Packages designed for accounts without an active Nitro subscription.'],
   decor_gift: ['Discord Profile Decor · Gift & Combo', 'Delivered as a gift or combo without requesting your password.'],
   chatgpt: ['ChatGPT Plus, Pro & Business', 'Compare personal-account and supplied-account plans. UPI Pay has 12 hours of warranty; subscription duration and warranty coverage are listed separately.'],
-  gemini: ['Gemini & Google One', 'Gemini Advanced/Pro plans with the listed Google One storage.'],
+  gemini: ['Gemini & Google One', 'The 6-month CDK plan covers successful activation only. The 12- and 18-month plans have separate warranty terms; check the selected package.'],
   claude: ['Claude Pro & Codex/Claude API', 'Personal Claude Pro excludes locked accounts. The personal x5 plan has 7 days of warranty and separate refund terms. API packs end when credit is used up; x5 is the shop package name.'],
   adobe: ['Adobe Creative Cloud', 'All Apps, trial duration and device limits are shown per package.'],
   creative_tools: ['CapCut Pro & Microsoft 365', 'Video, productivity and cloud storage tools.'],
@@ -26,6 +27,7 @@ export function translateCatalogGroup(group) {
 
 export function translateProductName(value) {
   return String(value || '')
+    .replace(/BH Kích Hoạt/gi, 'Activation Warranty')
     .replace(/<a?:[A-Za-z0-9_]+:\d+>/g, '')
     .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}]/gu, '')
     .replace(/Gia\s*Hạn\s*Đều/gi, 'Continuous Renewal')
@@ -63,6 +65,7 @@ export function translateProductName(value) {
 }
 
 export function translateProductWarranty(value) {
+  if (value === GEMINI_PRO_CDK_WARRANTY) return GEMINI_PRO_CDK_WARRANTY_EN;
   return String(value || '')
     .replace(/Full (\d+) tháng · không bảo hành nếu tài khoản bị khóa/gi, 'Full $1-month subscription warranty; locked accounts are excluded')
     .replace(/^Bảo hành (\d+) giờ$/gi, '$1 hours of warranty')
@@ -74,6 +77,7 @@ export function translateProductWarranty(value) {
 }
 
 export function translateProductDescription(value) {
+  if (value === GEMINI_PRO_CDK_DESCRIPTION) return GEMINI_PRO_CDK_DESCRIPTION_EN;
   return String(value || '')
     .replace(/Claude Pro x5 trên tài khoản chính chủ của khách trong 1 tháng, bảo hành 7 ngày\./g, 'Claude Pro x5 on your own account for 1 month, with 7 days of warranty.')
     .replace(/Thanh toán ban đầu ([\d.]+)đ; shop giữ lại phần API (\d+) USD và hoàn lại cho khách ([\d.]+)đ, chi phí sau hoàn là ([\d.]+)đ\./g,
