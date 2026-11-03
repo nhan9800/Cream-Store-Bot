@@ -1,9 +1,10 @@
 import { API_CREDIT_PRODUCTS, API_CREDIT_DURATION } from '../config/apiCreditCatalog.js';
+import { GEMINI_PRO_CDK_KEY, GEMINI_PRO_CDK_WARRANTY } from '../config/geminiProCdk202611.js';
 // Data-only publication manifest. Never import database/db.js here: importing
 // that module opens SQLite. These public prices contain no customer data.
 // SALE means the owner supplied this campaign price, not an inferred discount.
 // Source: original sale board at 3f7bb80 plus catalog at 755910a (2026-10-02).
-export const PROMOTION_CATALOG_VERSION = 'CENAR-PROMOTION-CATALOG-20261030-AI';
+export const PROMOTION_CATALOG_VERSION = 'CENAR-PROMOTION-CATALOG-20261103-GEMINI';
 
 export const PROMOTION_CATALOG_SECTIONS = Object.freeze([
   { key: 'connection', title: 'Kết nối có gu', subtitle: 'Nitro, nâng cấp máy chủ và gói xem phim.' },
@@ -211,6 +212,10 @@ export const PROMOTION_CATALOG_ROWS = Object.freeze([
   }),
   catalog('creation', 'adobe-creative-cloud-12-months-4000-ai-credits', 'Adobe Creative Cloud · 4.000 AI credits/tháng', 3800000, {
     duration: '1 năm', account: 'Shop cấp tài khoản', warranty: 'Full BH 12 tháng', notes: ['4.000 credits reset mỗi tháng.'],
+  }),
+  catalog('creation', GEMINI_PRO_CDK_KEY, 'Gemini Pro · CDK', 190000, {
+    duration: '6 tháng', account: 'Tài khoản chính chủ · Kích hoạt CDK', warranty: GEMINI_PRO_CDK_WARRANTY,
+    notes: ['Đóng hồ sơ Google Payments tại https://payments.google.com/ và rời Google Family trước kích hoạt. Lỗi CDK liên hệ Admin; không bảo hành sau kích hoạt thành công. YouTube Premium Lite có thể có hoặc không, vẫn có thể có quảng cáo.'],
   }),
   sale('creation', 'sale-gemini-pro-google-one-5tb-12-months', 'Gemini Pro + Google One 5 TB', 120000, {
     catalogKey: 'gemini-pro-google-one-5tb-12-months-full-warranty', duration: '12 tháng', notes: ['Có thể thêm 5 thành viên. Shop xác nhận điều kiện gói và bảo hành trước khi mua.'],

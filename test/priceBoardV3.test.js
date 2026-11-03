@@ -391,7 +391,7 @@ describe('Cenar price board V3', () => {
     expect(announcement).toContain(AI_CREATIVE_PRICING_UPDATE.marker);
   });
 
-  it('synchronizes Claude Pro and the two new full-warranty Gemini packages', () => {
+  it('keeps the full-warranty Gemini packages distinct from the activation-only CDK offer', () => {
     const products = getActiveProducts(GUILD_ID);
     const claudePro = products.find((product) => (
       product.product_key === AI_CREATIVE_PRICING_UPDATE.productKeys.claudePro
@@ -400,12 +400,20 @@ describe('Cenar price board V3', () => {
 
     expect(claudePro?.price).toBe(520000);
     expect(claudePro?.original_price).toBe(0);
-    expect(geminiProducts).toHaveLength(2);
+    expect(geminiProducts).toHaveLength(3);
     expect(geminiProducts.map((product) => [product.product_key, product.price])).toEqual(expect.arrayContaining([
       [AI_CREATIVE_PRICING_UPDATE.productKeys.gemini12Months, 250000],
       [AI_CREATIVE_PRICING_UPDATE.productKeys.gemini18Months, 280000],
     ]));
-    expect(geminiProducts.every((product) => /Full/.test(product.warranty_policy))).toBe(true);
+    const fullWarrantyGemini = geminiProducts.filter((product) => [
+      AI_CREATIVE_PRICING_UPDATE.productKeys.gemini12Months,
+      AI_CREATIVE_PRICING_UPDATE.productKeys.gemini18Months,
+    ].includes(product.product_key));
+    expect(fullWarrantyGemini).toHaveLength(2);
+    expect(fullWarrantyGemini.every((product) => /Full/.test(product.warranty_policy))).toBe(true);
+    const cdk = geminiProducts.find((product) => product.duration_months === 6);
+    expect(cdk.price).toBe(190000);
+    expect(cdk.warranty_policy).toContain('không bảo hành sau kích hoạt');
 
     const payloadJson = buildPriceBoardPayloads(GUILD_ID, {}, products).map(serialize).join('\n');
     expect(payloadJson).toContain('530.000');
