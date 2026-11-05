@@ -104,7 +104,6 @@ export function verifyPayOSWebhookSignature(data, signature) {
   );
   if (!matched) {
     console.error('[PAYOS-SIGNATURE] Sai chữ ký PayOS!', {
-      orderCode: data?.orderCode ?? null,
       signatureFormatValid: isValidHex,
     });
   }
