@@ -23,6 +23,18 @@ import { db } from '../database/db.js';
 let httpServer = null;
 let appInstance = null;
 
+const callbackErrorCodes = new Set(['SQLITE_BUSY', 'SQLITE_LOCKED', 'SQLITE_CONSTRAINT', 'ECONNREFUSED', 'ECONNRESET', 'ETIMEDOUT', 'UND_ERR_CONNECT_TIMEOUT']);
+
+function logCallbackFailure(provider, error) {
+  const code = error?.code ?? error?.cause?.code;
+  const status = error?.status ?? error?.statusCode;
+  console.error(`[${provider}] Lỗi xử lý callback thanh toán`, {
+    code: callbackErrorCodes.has(code) ? code : undefined,
+    status: Number.isInteger(status) && status >= 400 && status <= 599 ? status : undefined,
+  });
+}
+
+
 function getBaseUrl() {
   return String(process.env.PUBLIC_BASE_URL ?? '').trim().replace(/\/$/, '');
 }
@@ -129,10 +141,10 @@ export function registerPaymentRoutes(app) {
       });
       return res.status(result.status ?? 200).json(result.body ?? { ok: true });
     } catch (error) {
-      console.error('[WEBHOOK] Lỗi xử lý PayOS webhook:', error);
+      logCallbackFailure('PAYOS', error);
       return res.status(500).json({
         error: 1,
-        message: error.message || 'Webhook processing failed',
+        message: 'Webhook processing failed',
       });
     }
   });
@@ -145,7 +157,7 @@ export function registerPaymentRoutes(app) {
       await handleCardSwapCallback(req.query, req.app.locals.discordClient);
       return res.status(200).send('OK');
     } catch (e) {
-      console.error('[CARDSWAP WEBHOOK] Lỗi xử lý callback:', e.message);
+      logCallbackFailure('CARDSWAP', e);
       return res.status(400).send('ERROR');
     }
   });
@@ -164,7 +176,7 @@ export function registerPaymentRoutes(app) {
       });
       return res.status(result.status ?? 200).json(result.body);
     } catch (error) {
-      console.error('[BINANCE-PAY] Webhook processing failed:', error.message);
+      logCallbackFailure('BINANCE-PAY', error);
       return res.status(500).json({ returnCode: 'FAIL', returnMessage: 'Internal processing error' });
     }
   });

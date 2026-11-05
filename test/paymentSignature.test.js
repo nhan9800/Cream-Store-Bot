@@ -59,8 +59,10 @@ describe('PayOS webhook signature verification', () => {
 
     expect(verifyPayOSWebhookSignature(payload, `${signature.slice(0, -1)}0`)).toBe(false);
     expect(verifyPayOSWebhookSignature(payload, 'not-a-signature')).toBe(false);
+    expect(verifyPayOSWebhookSignature({ ...payload, orderCode: { raw: 'private-order-payload' } }, 'invalid')).toBe(false);
 
-    const logged = errorSpy.mock.calls.flat().map((value) => String(value)).join(' ');
+    const logged = JSON.stringify(errorSpy.mock.calls);
+    expect(logged).not.toContain('private-order-payload');
     expect(logged).not.toContain(signature);
     expect(logged).not.toContain(process.env.PAYOS_CHECKSUM_KEY);
     expect(logged).not.toContain('amount=125000');
