@@ -153,22 +153,35 @@ function buildPayOSRequestPayload(order) {
 }
 
 async function callPayOSApi(method, path, body = undefined) {
-  const response = await fetch(`${PAYOS_API_BASE}${path}`, {
-    method,
-    headers: {
-      'Content-Type': 'application/json',
-      'x-client-id': config.payosClientId,
-      'x-api-key': config.payosApiKey,
-    },
-    body: body === undefined ? undefined : JSON.stringify(body),
-  });
+  const controller = new AbortController();
+  const deadline = setTimeout(() => controller.abort(), 12_000);
+  try {
+    const response = await fetch(`${PAYOS_API_BASE}${path}`, {
+      method,
+      headers: {
+        'Content-Type': 'application/json',
+        'x-client-id': config.payosClientId,
+        'x-api-key': config.payosApiKey,
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: controller.signal,
+    });
 
-  const payload = await response.json().catch(() => null);
-  if (!response.ok || payload?.code && payload.code !== '00') {
-    throw new Error(payload?.desc || `PayOS API trả về HTTP ${response.status}`);
+    const payload = await response.json().catch(() => null);
+    // An aborted body is an uncertain result, never an empty successful reply.
+    controller.signal.throwIfAborted();
+    if (!response.ok || payload?.code && payload.code !== '00') {
+      throw new Error(payload?.desc || `PayOS API trả về HTTP ${response.status}`);
+    }
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) {
+      throw new Error('PayOS trả về dữ liệu không hợp lệ. Vui lòng thử lại.');
+    }
+
+    return payload.data ?? payload;
+  } finally {
+    clearTimeout(deadline);
+    controller.abort();
   }
-
-  return payload?.data ?? payload;
 }
 
 function buildCheckoutUrlFromLinkId(paymentLinkId) {
@@ -306,9 +319,17 @@ export async function sendVietQRPayment({ guild, orderCode }) {
     accountName: bankInfo.accountName,
   });
 
-  const response = await fetch(vietqrUrl);
-  if (!response.ok) throw new Error(`VietQR API lỗi: ${response.status}`);
-  const imageBuffer = Buffer.from(await response.arrayBuffer());
+  const controller = new AbortController();
+  const deadline = setTimeout(() => controller.abort(), 8_000);
+  let imageBuffer;
+  try {
+    const response = await fetch(vietqrUrl, { signal: controller.signal });
+    if (!response.ok) throw new Error(`VietQR API lỗi: ${response.status}`);
+    imageBuffer = Buffer.from(await response.arrayBuffer());
+  } finally {
+    clearTimeout(deadline);
+    controller.abort();
+  }
 
   const ticketChannel = await guild.channels.fetch(order.ticket_channel_id).catch(() => null);
   if (!ticketChannel?.isTextBased()) throw new Error('Ticket của đơn hàng không còn khả dụng.');
