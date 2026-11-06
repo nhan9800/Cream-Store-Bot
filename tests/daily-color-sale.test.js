@@ -26,32 +26,23 @@ describe('Daily Color sale campaign', () => {
   it('keeps the supplied prices and products', () => {
     const content = Object.values(buildDailyColorSaleSections({ E: emojiResolver, customEmojis })).join('\n');
     for (const price of [
-      '85.000đ', '99.000đ', '120.000đ', '250.000đ', '350.000đ', '450.000đ',
-      '680.000đ', '830.000đ', '65.000đ', '110.000đ', '280.000đ', '75.000đ',
-      '190.000đ', '200.000đ', '485.000đ', '500.000đ', '2.650.000đ', '4.800.000đ',
-      '12.700.000đ', '1.900.000đ', '2.300.000đ', '2.500.000đ',
-      '55.000đ', '290.000đ', '180.000đ', '58.000đ', '185.000đ', '295.000đ', '530.000đ',
-      '130.000đ', '390.000đ', '79.000đ/slot', '150.000đ/slot',
+      '90.000đ', '115.000đ', '140.000đ', '880.000đ', '110.000đ', '280.000đ',
+      '75.000đ', '190.000đ', '200.000đ', '250.000đ', '400.000đ', '530.000đ',
+      '2.650.000đ', '4.500.000đ', '12.800.000đ', '550.000đ', '55.000đ', '290.000đ',
     ]) expect(content).toContain(price);
 
     for (const product of [
-      'NITRO BOOST LOGIN', 'BOOST SERVER', 'NETFLIX PREMIUM', 'GEMINI PRO',
-      'OFFICE 365', 'CHATGPT PLUS CHÍNH CHỦ', 'CLAUDE PRO x5',
-      'CAPCUT PRO', 'SPOTIFY PREMIUM', 'YOUTUBE PREMIUM',
-      'ADOBE', 'LOCKET', 'GEARUP', 'BOT CUSTOM', 'API CODEX/CLAUDE',
-    ]) expect(content.toLocaleLowerCase('vi')).toContain(product.toLocaleLowerCase('vi'));
-    expect(content).toContain('Mail bất tử');
+      'Nitro Boost Login', 'Boost Server', 'Netflix Premium', 'Gemini Pro',
+      'Office 365', 'ChatGPT Plus chính chủ', 'Claude Pro chính chủ',
+      'CapCut Pro', 'Spotify Premium', 'YouTube Premium', 'Adobe', 'Locket', 'GearUP', 'Bot Custom',
+    ]) expect(content.toLowerCase()).toContain(product.toLowerCase());
     expect(content).toContain('Có thể thêm 5 thành viên');
-    expect(content).toContain('Không BH acc');
-    expect(content).toContain('**ChatGPT · Cấp acc** · **120.000đ**');
-    expect(content).toContain('BH 2 ngày');
-    for (const restoredTerm of ['BH 60 phút', 'Ghép Team', 'File JSON', 'MoMo Pay']) expect(content).toContain(restoredTerm);
-    expect(content.toLocaleLowerCase('vi')).not.toContain('canva pro');
+    expect(content).not.toMatch(/API Codex\/Claude|MoMo Pay|Claude Pro x5|Trial Boost|18 tháng/i);
   });
 
   it('keeps every price-board part silent while retaining Components V2 and custom artwork', () => {
     const messages = buildDailyColorSaleMessages({ E: emojiResolver, customEmojis, now: new Date('2026-10-02T02:00:00Z') });
-    expect(messages).toHaveLength(9);
+    expect(messages).toHaveLength(7);
     messages.forEach((payload, index) => {
       expect(payload.flags & MessageFlags.IsComponentsV2).toBeTruthy();
       expect(payload.allowedMentions.parse).toEqual([]);
