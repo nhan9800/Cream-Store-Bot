@@ -1,10 +1,7 @@
 import { ChannelType, PermissionFlagsBits, ActionRowBuilder, AttachmentBuilder } from 'discord.js';
 import { db } from '../database/db.js';
-import { API_CREDIT_BANNER, getApiCreditProducts } from '../config/apiCreditCatalog.js';
-import { buildApiCreditPanel, buildApiCreditPricingReply, buildApiCreditDetails } from './apiCreditPanel.js';
 import { buildLocketProductPanel, buildLocketDetails, LOCKET_PANEL_IMAGE } from './locketProductPanel.js';
-import { handleProductSelect } from '../events/productHandlers.js';
-import { getActiveProducts, getProductByName } from './productCatalogService.js';
+import { getProductByName } from './productCatalogService.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { getWalletBalance } from './walletService.js';
 import { getGuildConfig } from './guildConfigService.js';
@@ -29,7 +26,6 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const botRoot = path.resolve(__dirname, '..', '..');
 const PREMIUM_CATEGORY_NAME = STORE_ONE_CHANNEL_NAMES.premiumCategory;
-const CLAUDE_CHANNEL_NAME = STORE_ONE_CHANNEL_NAMES.claudeApi;
 const LOCKET_CHANNEL_NAME = STORE_ONE_CHANNEL_NAMES.locketGold;
 
 // Helper to ensure column exists
@@ -49,9 +45,7 @@ export async function setupPremiumProducts(interaction) {
   const guild = interaction.guild;
   
   ensureGuildSettingColumn('premium_category_id');
-  ensureGuildSettingColumn('claude_channel_id');
   ensureGuildSettingColumn('locket_channel_id');
-  ensureGuildSettingColumn('claude_product_message_id');
   ensureGuildSettingColumn('locket_product_message_id');
 
   let settings = db.prepare('SELECT * FROM guild_settings WHERE guild_id = ?').get(guild.id);
@@ -84,16 +78,6 @@ export async function setupPremiumProducts(interaction) {
   }
 
   // 2. Channels
-  let claudeChannel = settings.claude_channel_id ? guild.channels.cache.get(settings.claude_channel_id) : null;
-  if (!claudeChannel) {
-    claudeChannel = await guild.channels.create({
-      name: CLAUDE_CHANNEL_NAME,
-      type: ChannelType.GuildText,
-      parent: category.id,
-    });
-    db.prepare('UPDATE guild_settings SET claude_channel_id = ? WHERE guild_id = ?').run(claudeChannel.id, guild.id);
-  }
-
   let locketChannel = settings.locket_channel_id ? guild.channels.cache.get(settings.locket_channel_id) : null;
   if (!locketChannel) {
     locketChannel = await guild.channels.create({
@@ -105,16 +89,8 @@ export async function setupPremiumProducts(interaction) {
   }
 
   // 3. Auto xóa tin cũ của bot và republish giao diện mới nhất
-  const autoFakeInteraction = {
-    guild,
-    guildId: guild.id,
-    deferReply: async () => {},
-    editReply: async (msg) => console.log('[AUTO-PUBLISH]', typeof msg === 'string' ? msg : 'Payload sent'),
-    isChatInputCommand: () => false,
-  };
-
-  // Xóa tất cả tin cũ của bot trong 2 kênh
-  for (const ch of [claudeChannel, locketChannel]) {
+  // Xóa tin cũ của bot trong kênh Locket
+  for (const ch of [locketChannel]) {
     if (!ch) continue;
     const msgs = await ch.messages.fetch({ limit: 20 }).catch(() => null);
     if (msgs) {
@@ -126,7 +102,7 @@ export async function setupPremiumProducts(interaction) {
   }
 
   // Reset message IDs để buộc gửi mới
-  db.prepare('UPDATE guild_settings SET claude_product_message_id = NULL, locket_product_message_id = NULL WHERE guild_id = ?').run(guild.id);
+  db.prepare('UPDATE guild_settings SET locket_product_message_id = NULL WHERE guild_id = ?').run(guild.id);
 
   // Republish giao diện mới nhất
   await publishPremiumProductsForGuild(guild);
@@ -139,19 +115,18 @@ export async function publishPremiumProducts(interaction) {
 
   // Xóa tin cũ của bot trước khi publish lại
   const settings = db.prepare('SELECT * FROM guild_settings WHERE guild_id = ?').get(guild.id);
-  if (!settings?.claude_channel_id || !settings?.locket_channel_id) {
+  if (!settings?.locket_channel_id) {
     return interaction.editReply('❌ Vui lòng chạy `/product setup` trước!');
   }
 
-  const claudeChannel = guild.channels.cache.get(settings.claude_channel_id);
   const locketChannel = guild.channels.cache.get(settings.locket_channel_id);
 
-  if (!claudeChannel || !locketChannel) {
+  if (!locketChannel) {
     return interaction.editReply('❌ Không tìm thấy channel, vui lòng chạy `/product repair`.');
   }
 
   // Xóa tin cũ
-  for (const ch of [claudeChannel, locketChannel]) {
+  for (const ch of [locketChannel]) {
     const msgs = await ch.messages.fetch({ limit: 20 }).catch(() => null);
     if (msgs) {
       for (const m of msgs.filter(m => m.author.id === guild.members.me.id).values()) {
@@ -160,7 +135,7 @@ export async function publishPremiumProducts(interaction) {
       }
     }
   }
-  db.prepare('UPDATE guild_settings SET claude_product_message_id = NULL, locket_product_message_id = NULL WHERE guild_id = ?').run(guild.id);
+  db.prepare('UPDATE guild_settings SET locket_product_message_id = NULL WHERE guild_id = ?').run(guild.id);
 
   await publishPremiumProductsForGuild(guild);
   await interaction.editReply('✅ Đã xóa tin cũ và publish lại giao diện mới nhất!');
@@ -171,43 +146,16 @@ export async function publishPremiumProductsForGuild(guild, settingOverrides = {
 
   const storedSettings = db.prepare('SELECT * FROM guild_settings WHERE guild_id = ?').get(guild.id) || {};
   const settings = { ...storedSettings, ...settingOverrides };
-  if (!settings?.claude_channel_id || !settings?.locket_channel_id) {
+  if (!settings?.locket_channel_id) {
     console.log(`[PUBLISH-PREMIUM] Guild ${guild.name} chưa setup channels, bỏ qua.`);
     return;
   }
 
-  const claudeChannel = guild.channels.cache.get(settings.claude_channel_id) || await guild.channels.fetch(settings.claude_channel_id).catch(() => null);
   const locketChannel = guild.channels.cache.get(settings.locket_channel_id) || await guild.channels.fetch(settings.locket_channel_id).catch(() => null);
 
-  if (!claudeChannel || !locketChannel) {
+  if (!locketChannel) {
     console.log(`[PUBLISH-PREMIUM] Không tìm thấy channels cho guild ${guild.name}, bỏ qua.`);
     return;
-  }
-
-  // ══════════════════════════════════════════
-  // CLAUDE API — Component V2
-  // ══════════════════════════════════════════
-  const creditProducts = getApiCreditProducts(getActiveProducts(guild.id));
-  if (creditProducts.length) {
-    const claudeBannerPath = path.join(botRoot, 'assets/products/claude', API_CREDIT_BANNER);
-    const claudeHasBanner = fs.existsSync(claudeBannerPath);
-    const claudePayload = {
-      ...buildApiCreditPanel(guild.id, creditProducts, claudeHasBanner),
-      files: claudeHasBanner ? [new AttachmentBuilder(claudeBannerPath)] : [],
-    };
-
-    if (settings.claude_product_message_id) {
-      try {
-        const msg = await claudeChannel.messages.fetch(settings.claude_product_message_id);
-        await msg.edit({ ...claudePayload, attachments: [] });
-      } catch (e) {
-        const msg = await claudeChannel.send(claudePayload);
-        db.prepare('UPDATE guild_settings SET claude_product_message_id = ? WHERE guild_id = ?').run(msg.id, guild.id);
-      }
-    } else {
-      const msg = await claudeChannel.send(claudePayload);
-      db.prepare('UPDATE guild_settings SET claude_product_message_id = ? WHERE guild_id = ?').run(msg.id, guild.id);
-    }
   }
 
   // ══════════════════════════════════════════
@@ -245,16 +193,12 @@ import { ModalBuilder, TextInputBuilder, TextInputStyle } from 'discord.js';
 export async function handlePremiumProductInteraction(interaction) {
   const { customId } = interaction;
 
-  if (customId === 'product:claude:credit_select') {
-    const products = getApiCreditProducts(getActiveProducts(interaction.guildId));
-    const selected = products.find((product) => String(product.id) === interaction.values?.[0]);
-    if (!selected) return interaction.reply({ content: `${createEmojiResolver(interaction.guildId)('status_warn')} Gói đã thay đổi hoặc ngừng bán. Vui lòng mở bảng giá mới.`, flags: 64, allowedMentions: { parse: [] } });
-    return handleProductSelect(interaction);
-  }
-
-  if (customId === 'product:claude:buy' || customId === 'product:claude:modal_buy' || customId === 'product:claude:pricing') {
-    const products = getApiCreditProducts(getActiveProducts(interaction.guildId));
-    return interaction.reply(buildApiCreditPricingReply(interaction.guildId, products));
+  if (customId.startsWith('product:claude:')) {
+    return interaction.reply({
+      content: 'Cenar API Gateway và các gói API credit đã ngừng bán. Vui lòng mở ticket nếu cần hỗ trợ đơn đã mua.',
+      flags: 64,
+      allowedMentions: { parse: [] },
+    });
   }
 
   if (customId === 'product:locket:buy') {
@@ -275,10 +219,6 @@ export async function handlePremiumProductInteraction(interaction) {
 
     await interaction.showModal(modal);
     return;
-  }
-
-  if (customId === 'product:claude:models' || customId === 'product:claude:policy') {
-    return interaction.reply(buildApiCreditDetails(interaction.guildId, customId.split(':').at(-1)));
   }
 
   if (customId === 'product:locket:features' || customId === 'product:locket:policy') {
@@ -476,9 +416,7 @@ async function handlePremiumBuyOrder(interaction, productName, quantity, totalPr
 export async function autoSetupAndPublishPremiumProducts(guild) {
   try {
     ensureGuildSettingColumn('premium_category_id');
-    ensureGuildSettingColumn('claude_channel_id');
     ensureGuildSettingColumn('locket_channel_id');
-    ensureGuildSettingColumn('claude_product_message_id');
     ensureGuildSettingColumn('locket_product_message_id');
 
     let settings = db.prepare('SELECT * FROM guild_settings WHERE guild_id = ?').get(guild.id);
@@ -513,18 +451,6 @@ export async function autoSetupAndPublishPremiumProducts(guild) {
     }
 
     // 2. Channels
-    let claudeChannel = settings.claude_channel_id ? guild.channels.cache.get(settings.claude_channel_id) : null;
-    if (!claudeChannel) {
-      claudeChannel = await guild.channels.create({
-        name: CLAUDE_CHANNEL_NAME,
-        type: ChannelType.GuildText,
-        parent: category.id,
-      });
-      db.prepare('UPDATE guild_settings SET claude_channel_id = ? WHERE guild_id = ?').run(claudeChannel.id, guild.id);
-    } else if (claudeChannel.name !== CLAUDE_CHANNEL_NAME) {
-      await claudeChannel.setName(CLAUDE_CHANNEL_NAME).catch(() => {});
-    }
-
     let locketChannel = settings.locket_channel_id ? guild.channels.cache.get(settings.locket_channel_id) : null;
     if (!locketChannel) {
       locketChannel = await guild.channels.create({
@@ -538,9 +464,8 @@ export async function autoSetupAndPublishPremiumProducts(guild) {
     }
 
     // Kiểm tra nếu kênh đã có tin nhắn rồi thì bỏ qua không tạo lại panel
-    const claudeMsgs = claudeChannel ? await claudeChannel.messages.fetch({ limit: 5 }).catch(() => null) : null;
     const locketMsgs = locketChannel ? await locketChannel.messages.fetch({ limit: 5 }).catch(() => null) : null;
-    if ((claudeMsgs && claudeMsgs.size > 0) || (locketMsgs && locketMsgs.size > 0)) {
+    if (locketMsgs && locketMsgs.size > 0) {
       console.log(`[AUTO-SETUP-PREMIUM] Guild ${guild.name} đã có panel Premium, bỏ qua.`);
       return;
     }

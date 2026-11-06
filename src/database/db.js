@@ -1,5 +1,4 @@
 import fs from 'node:fs';
-import { API_CREDIT_PRODUCTS } from '../config/apiCreditCatalog.js';
 import { GEMINI_PRO_CDK_PRODUCT } from '../config/geminiProCdk202611.js';
 import path from 'node:path';
 import Database from 'better-sqlite3';
@@ -1812,17 +1811,10 @@ export function getDatabasePath() {
 
 export const DEFAULT_PRODUCT_CATALOG = [
     // Discord Nitro Boost Log
-    { name: 'Discord Nitro Boost 1 Tháng (Login)', description: 'Đăng nhập gia hạn. Vui lòng gửi tài khoản, mật khẩu và 4-5 mã dự phòng khi mua.', price: 90000, ctv_price: 85000, duration_months: 1, service_type: 'GAME', emoji: 'brand_nitro', original_price: 0 },
+    { name: 'Discord Nitro Boost 1 Tháng (Login)', description: 'Nitro Boost Login trong 1 tháng. Mở ticket riêng để xác nhận điều kiện và cách kích hoạt.', price: 90000, ctv_price: 85000, duration_months: 1, service_type: 'GAME', emoji: 'brand_nitro', original_price: 0 },
     { product_key: 'discord-nitro-boost-2-months-login-keep-mail-7-days', name: 'Discord Nitro Boost 2 Tháng (Login · Giữ Mail 7 Ngày)', aliases: ['Discord Nitro Boost 2 Tháng (Login)'], description: 'Gói login Nitro Boost 2 tháng. Khách hàng cần giữ mail tối thiểu 7 ngày, đăng nhập sớm và kiểm tra mail trong 10-30 phút sau khi nhận.', price: 115000, ctv_price: 95000, duration_months: 2, service_type: 'GAME', emoji: 'brand_nitro', original_price: 0 },
     { product_key: 'discord-nitro-boost-2-months-login-mail-guaranteed', name: 'Discord Nitro Boost 2 Tháng (Login · Mail Bao Sống)', description: 'Gói login Nitro Boost 2 tháng kèm mail bao sống. Đăng nhập sớm và kiểm tra mail trong 10-30 phút sau khi nhận; xác minh số điện thoại nếu hệ thống yêu cầu.', price: 140000, ctv_price: 95000, duration_months: 2, service_type: 'GAME', emoji: 'brand_nitro', original_price: 0 },
-    { name: 'Discord Nitro Boost 4 Tháng (Login)', description: 'Đăng nhập gia hạn. Vui lòng gửi tài khoản, mật khẩu và 4-5 mã dự phòng khi mua. Gia hạn 2 tháng 1 lần.', price: 280000, ctv_price: 185000, duration_months: 4, service_type: 'GAME', emoji: 'brand_nitro', original_price: 0 },
-    { name: 'Discord Nitro Boost 6 Tháng (Login)', description: 'Đăng nhập gia hạn. Vui lòng gửi tài khoản, mật khẩu và 4-5 mã dự phòng khi mua. Gia hạn 2 tháng 1 lần.', price: 380000, ctv_price: 365000, duration_months: 6, service_type: 'GAME', emoji: 'brand_nitro', original_price: 0 },
-    { name: 'Discord Nitro Boost 8 Tháng (Login)', description: 'Đăng nhập gia hạn. Vui lòng gửi tài khoản, mật khẩu và 4-5 mã dự phòng khi mua. Gia hạn 2 tháng 1 lần.', price: 480000, ctv_price: 460000, duration_months: 8, service_type: 'GAME', emoji: 'brand_nitro', original_price: 0 },
-    { name: 'Discord Nitro Boost 12 Tháng (Login)', description: 'Đăng nhập gia hạn. Vui lòng gửi tài khoản, mật khẩu và 4-5 mã dự phòng khi mua. Gia hạn 2 tháng 1 lần.', price: 680000, ctv_price: 580000, duration_months: 12, service_type: 'GAME', emoji: 'brand_nitro', original_price: 0 },
-    { name: 'Discord Nitro Boost 1 Năm (Login)', description: 'Đăng nhập gia hạn. Vui lòng gửi tài khoản, mật khẩu và 4-5 mã dự phòng khi mua.', price: 880000, ctv_price: 795000, duration_months: 12, service_type: 'GAME', emoji: 'brand_nitro', original_price: 0 },
-    { name: 'Gia hạn Discord Nitro Boost 2 Tháng', description: 'Dành cho khách hàng cũ đã từng mua Nitro 2 tháng tại shop. (Gia hạn chỉ 95k). Vui lòng gửi tài khoản, mật khẩu và 4-5 mã dự phòng khi mua.', price: 99000, ctv_price: 95000, duration_months: 2, service_type: 'GAME', emoji: 'brand_nitro', original_price: 0 },
-    // Discord Nitro Boost Trial
-    { product_key: 'discord-nitro-boost-trial-3-months-first-offer', name: 'Discord Nitro Boost Trial 3 Tháng (Ưu Đãi Lần Đầu)', aliases: ['Discord Nitro Boost 3 Tháng (Trail)'], description: 'Đối tượng áp dụng: tài khoản được tạo trên 1 tháng và chưa từng sử dụng Nitro; hoặc tài khoản đã từng sử dụng Nitro nhưng không dùng lại Nitro trong ít nhất 12 tháng liên tục. Vui lòng gửi tài khoản, mật khẩu và 4-5 mã dự phòng khi mua.', price: 50000, ctv_price: 45000, duration_months: 3, service_type: 'GAME', emoji: 'brand_nitro', original_price: 0 },
+    { product_key: 'discord-nitro-boost-1-nam-login', name: 'Discord Nitro Boost 12 Tháng (Login · Chính Chủ)', aliases: ['Discord Nitro Boost 1 Năm (Login)'], description: 'Kích hoạt trọn 12 tháng trong một lần trên tài khoản Discord chính chủ. Mở ticket riêng để xác nhận cách kích hoạt.', price: 880000, ctv_price: 795000, duration_months: 12, service_type: 'GAME', emoji: 'brand_nitro', original_price: 0, activation_method: 'OWN_ACCOUNT' },
 
     // Boost Server · chỉ giữ hai gói 14 Boosts chính thức
     { product_key: 'discord-server-boost-14-1-month', name: 'Discord Server Boost 14 Boosts (1 Tháng)', aliases: ['Discord Server Boost Level 3 (1 Tháng)', '14 Nâng Cấp Server Boost Level 3 (1 Tháng)'], description: 'Loại có liền: nâng cấp máy chủ bằng 14 Boosts trong 1 tháng.', price: 120000, ctv_price: 90000, duration_months: 1, service_type: 'GAME', emoji: 'brand_boost', original_price: 0, is_featured: 1, virtual_purchase_count: 0 },
@@ -1860,6 +1852,18 @@ export const DEFAULT_PRODUCT_CATALOG = [
     // AI & Phần Mềm
     GEMINI_PRO_CDK_PRODUCT,
     {
+      product_key: 'gemini-pro-antigravity-24-months',
+      name: 'Gemini Pro 2 Năm (Antigravity · BH 12 Tháng)',
+      description: 'Gói Gemini Pro 24 tháng, bảo hành 12 tháng. Các model shop xác nhận hỗ trợ trong Antigravity gồm Gemini 4 Argon, Claude Opus 5.5 và Claude Sonnet 5.5. Quyền truy cập và hạn mức thực tế phụ thuộc nền tảng.',
+      warranty_policy: 'Bảo hành 12 tháng',
+      price: 250000,
+      duration_months: 24,
+      service_type: 'AI',
+      emoji: 'brand_gemini',
+      original_price: 0,
+      is_featured: 1,
+    },
+    {
       product_key: 'gemini-pro-google-one-5tb-12-months-full-warranty',
       name: 'Gemini Pro + 5 TB Google One 12 Tháng (Full BH)',
       aliases: [
@@ -1878,124 +1882,20 @@ export const DEFAULT_PRODUCT_CATALOG = [
       is_featured: 1,
       virtual_purchase_count: 0,
     },
-    {
-      product_key: 'gemini-pro-google-one-5tb-18-months-full-warranty',
-      name: 'Gemini Pro + 5 TB Google One 18 Tháng (Full BH)',
-      description: 'Gemini Pro kèm 5 TB Google One trong 18 tháng theo nguồn triển khai mới, bảo hành full suốt thời gian sử dụng.',
-      warranty_policy: 'Full 18 tháng',
-      price: 280000,
-      ctv_price: 280000,
-      duration_months: 18,
-      service_type: 'AI',
-      emoji: 'brand_gemini',
-      original_price: 0,
-      is_featured: 1,
-      virtual_purchase_count: 0,
-    },
-    { product_key: 'claude-pro-1-month', name: 'Claude Pro Chính Chủ 1 Tháng (Full BH · Trừ Khóa Acc)', aliases: ['Claude Pro 1 Tháng (Full BH)', 'Claude Pro Add Team 1 Tháng (Full BH)'], description: 'Nâng cấp Claude Pro trên tài khoản chính chủ của khách trong 1 tháng. Bảo hành full gói trong 1 tháng; không bảo hành nếu tài khoản bị khóa.', warranty_policy: 'Full 1 tháng · không bảo hành nếu tài khoản bị khóa', price: 520000, duration_months: 1, service_type: 'AI', emoji: 'brand_claude', original_price: 0, activation_method: 'OWN_ACCOUNT', is_featured: 1, virtual_purchase_count: 126 },
-    {
-      product_key: 'claude-pro-x5-own-account-1-month-7-day-warranty',
-      name: 'Claude Pro x5 Chính Chủ 1 Tháng (BH 7 Ngày)',
-      description: 'Claude Pro x5 trên tài khoản chính chủ của khách trong 1 tháng, bảo hành 7 ngày. Thanh toán ban đầu 2.000.000đ; shop giữ lại phần API 100 USD và hoàn lại cho khách 700.000đ, chi phí sau hoàn là 1.300.000đ. Phần API 100 USD thuộc shop, không nằm trong quyền lợi khách nhận.',
-      warranty_policy: 'Bảo hành 7 ngày',
-      price: 2000000,
-      duration_months: 1,
-      service_type: 'AI',
-      emoji: 'brand_claude',
-      original_price: 0,
-      activation_method: 'OWN_ACCOUNT',
-    },
-    {
-      product_key: 'claude-pro-x5-account-1-month-no-warranty',
-      name: 'Claude Pro x5 1 Tháng (Cấp Tài Khoản · Không BH)',
-      description: 'Cenar cấp tài khoản Claude Pro x5 với thời hạn gói 1 tháng. Không bảo hành tài khoản hoặc gói; không cam kết tài khoản duy trì đủ tháng.',
-      warranty_policy: 'Không bảo hành (KBH) · không cam kết tài khoản duy trì đủ tháng',
-      price: 1900000,
-      duration_months: 1,
-      service_type: 'AI',
-      emoji: 'brand_claude',
-      original_price: 0,
-      activation_method: 'ACCOUNT',
-    },
-    {
-      product_key: 'claude-pro-x5-account-1-month-full-warranty',
-      name: 'Claude Pro x5 1 Tháng (Cấp Tài Khoản · Full BH)',
-      description: 'Cenar cấp tài khoản Claude Pro x5 với thời hạn 1 tháng, bảo hành full trong toàn bộ 1 tháng sử dụng.',
-      warranty_policy: 'Full 1 tháng (BHF)',
-      price: 2500000,
-      duration_months: 1,
-      service_type: 'AI',
-      emoji: 'brand_claude',
-      original_price: 0,
-      activation_method: 'ACCOUNT',
-    },
-    {
-      product_key: 'chatgpt-plus-account-1-month-no-warranty',
-      name: 'ChatGPT Plus 1 Tháng (Cấp Tài Khoản · Không BH)',
-      aliases: ['ChatGPT Plus Cấp Acc 1 Tháng Không Bảo Hành'],
-      description: 'Gói cấp tài khoản có thời hạn danh nghĩa 1 tháng nhưng không bảo hành. Tài khoản có thể mất sau 1–2 tuần hoặc duy trì lâu hơn; đây là lựa chọn thử vận may và không cam kết sống đủ tháng.',
-      warranty_policy: 'Không bảo hành · có thể mất sau 1–2 tuần hoặc lâu hơn; không cam kết đủ tháng',
-      price: 180000,
-      duration_months: 1,
-      service_type: 'AI',
-      emoji: 'brand_chatgpt',
-      original_price: 0,
-      is_featured: 0,
-      virtual_purchase_count: 0,
-    },
-    {
-      product_key: 'chatgpt-plus-account-1-month-full-warranty',
-      name: 'ChatGPT Plus 1 Tháng (Cấp Tài Khoản · Full BH)',
-      aliases: ['ChatGPT Plus 1 Tháng (Cấp Tài Khoản)', 'Chat GPT Plus Cấp Acc FULL bảo Hành 1 tháng'],
-      description: 'Cấp tài khoản ChatGPT Plus đã kích hoạt sẵn trong 1 tháng, bảo hành full trong suốt thời gian sử dụng.',
-      warranty_policy: 'Full 1 tháng',
-      price: 350000,
-      duration_months: 1,
-      service_type: 'AI',
-      emoji: 'brand_chatgpt',
-      original_price: 0,
-      is_featured: 1,
-      virtual_purchase_count: 0,
-    },
-    {
-      product_key: 'chatgpt-business-workspace-1-month-full-warranty',
-      name: 'ChatGPT Business 1 Tháng (Add Workspace · Chính Chủ · Full BH)',
-      aliases: ['ChatGPT Plus 1 Tháng (Chính Chủ - Full BH)', 'ChatGPT Add Team Business 1 Tháng (Chính Chủ)'],
-      description: 'Thêm tài khoản chính chủ của khách vào workspace ChatGPT Business, hỗ trợ gia hạn đều và bảo hành full trong suốt 1 tháng sử dụng.',
-      warranty_policy: 'Full 1 tháng',
-      price: 450000,
-      duration_months: 1,
-      service_type: 'AI',
-      emoji: 'brand_chatgpt',
-      original_price: 0,
-      is_featured: 1,
-      virtual_purchase_count: 0,
-    },
+    { product_key: 'claude-pro-1-month', name: 'Claude Pro Chính Chủ 1 Tháng (Full BH · Trừ Khóa Acc)', aliases: ['Claude Pro 1 Tháng (Full BH)', 'Claude Pro Add Team 1 Tháng (Full BH)'], description: 'Nâng cấp Claude Pro trên tài khoản chính chủ của khách trong 1 tháng. Bảo hành full gói trong 1 tháng; không bảo hành nếu tài khoản bị khóa.', warranty_policy: 'Full 1 tháng · không bảo hành nếu tài khoản bị khóa', price: 550000, duration_months: 1, service_type: 'AI', emoji: 'brand_claude', original_price: 0, activation_method: 'OWN_ACCOUNT', is_featured: 1, virtual_purchase_count: 126 },
     {
       product_key: 'chatgpt-plus-direct-payment-1-month-full-warranty',
       name: 'ChatGPT Plus Chính Chủ 1 Tháng (Thanh Toán Trực Tiếp · Full BH)',
       aliases: ['ChatGPT Plus Chính Chủ Pay Thẳng Trên Acc 1 Tháng'],
       description: 'Thanh toán ChatGPT Plus trực tiếp trên chính tài khoản của khách, không tham gia workspace hoặc team; bảo hành full trong suốt 1 tháng sử dụng.',
       warranty_policy: 'Full 1 tháng',
-      price: 500000,
+      price: 530000,
       duration_months: 1,
       service_type: 'AI',
       emoji: 'brand_chatgpt',
       original_price: 0,
       is_featured: 1,
       virtual_purchase_count: 0,
-      activation_method: 'OWN_ACCOUNT',
-    },
-    {
-      product_key: 'chatgpt-plus-own-account-1-month-package-warranty',
-      name: 'ChatGPT Plus Chính Chủ 1 Tháng (BH Gói · Không BH Acc)',
-      description: 'Nâng cấp ChatGPT Plus trên tài khoản chính chủ của khách trong 1 tháng. Chỉ bảo hành gói đăng ký; không bảo hành tài khoản của khách.',
-      warranty_policy: 'Bảo hành gói 1 tháng · không bảo hành tài khoản',
-      price: 485000,
-      duration_months: 1,
-      service_type: 'AI',
-      emoji: 'brand_chatgpt',
-      original_price: 0,
       activation_method: 'OWN_ACCOUNT',
     },
     {
@@ -2015,7 +1915,7 @@ export const DEFAULT_PRODUCT_CATALOG = [
       name: 'ChatGPT Pro 200 Chính Chủ 1 Tháng',
       description: 'Nâng cấp gói ChatGPT Pro 200 trên tài khoản chính chủ của khách trong 1 tháng. Vui lòng xác nhận phạm vi bảo hành với shop trước khi mua.',
       warranty_policy: 'Xác nhận phạm vi bảo hành với shop trước khi mua',
-      price: 4800000,
+      price: 4500000,
       duration_months: 1,
       service_type: 'AI',
       emoji: 'brand_chatgpt',
@@ -2027,60 +1927,12 @@ export const DEFAULT_PRODUCT_CATALOG = [
       name: 'ChatGPT Pro 500 Chính Chủ 1 Tháng',
       description: 'Nâng cấp gói ChatGPT Pro 500 trên tài khoản chính chủ của khách trong 1 tháng. Vui lòng xác nhận phạm vi bảo hành với shop trước khi mua.',
       warranty_policy: 'Xác nhận phạm vi bảo hành với shop trước khi mua',
-      price: 12700000,
+      price: 12800000,
       duration_months: 1,
       service_type: 'AI',
       emoji: 'brand_chatgpt',
       original_price: 0,
       activation_method: 'OWN_ACCOUNT',
-    },
-    {
-      product_key: 'chatgpt-pro-100-account-1-month-no-warranty',
-      name: 'ChatGPT Pro 100 1 Tháng (Cấp Tài Khoản · Không BH)',
-      description: 'Cenar cấp tài khoản ChatGPT Pro 100 với thời hạn gói 1 tháng. Không bảo hành tài khoản hoặc gói; không cam kết tài khoản duy trì đủ tháng.',
-      warranty_policy: 'Không bảo hành (KBH) · không cam kết tài khoản duy trì đủ tháng',
-      price: 1900000,
-      duration_months: 1,
-      service_type: 'AI',
-      emoji: 'brand_chatgpt',
-      original_price: 0,
-      activation_method: 'ACCOUNT',
-    },
-    {
-      product_key: 'chatgpt-pro-100-account-1-month-full-warranty',
-      name: 'ChatGPT Pro 100 1 Tháng (Cấp Tài Khoản · Full BH)',
-      description: 'Cenar cấp tài khoản ChatGPT Pro 100 với thời hạn 1 tháng, bảo hành full trong toàn bộ 1 tháng sử dụng.',
-      warranty_policy: 'Full 1 tháng (BHF)',
-      price: 2300000,
-      duration_months: 1,
-      service_type: 'AI',
-      emoji: 'brand_chatgpt',
-      original_price: 0,
-      activation_method: 'ACCOUNT',
-    },
-    {
-      product_key: 'chatgpt-account-1-month-2-day-warranty',
-      name: 'ChatGPT 1 Tháng (Cấp Tài Khoản · BH 2 Ngày)',
-      description: 'Cenar cấp tài khoản ChatGPT với thời hạn gói danh nghĩa 1 tháng và bảo hành 2 ngày. Bảo hành ngắn để phản ánh rủi ro thực tế; thời gian sử dụng có thể lâu hơn tùy cách sử dụng, không cam kết tài khoản duy trì đủ tháng. Xác nhận loại gói với shop trước khi mua.',
-      warranty_policy: 'Bảo hành 2 ngày · thời hạn gói danh nghĩa 1 tháng, không cam kết tài khoản duy trì đủ tháng',
-      price: 120000,
-      duration_months: 1,
-      service_type: 'AI',
-      emoji: 'brand_chatgpt',
-      original_price: 0,
-      activation_method: 'ACCOUNT',
-    },
-    {
-      product_key: 'chatgpt-plus-upi-account-1-month-12-hour-warranty',
-      name: 'ChatGPT Plus UPI Pay 1 Tháng (Cấp Tài Khoản · BH 12 Giờ)',
-      description: 'Cenar cấp tài khoản ChatGPT Plus UPI Pay với thời hạn gói danh nghĩa 1 tháng, bảo hành 12 giờ. Theo ghi nhận của shop, đa số tài khoản dùng được từ 2 tuần trở lên; đây là ghi nhận thực tế, phạm vi bảo hành vẫn là 12 giờ.',
-      warranty_policy: 'Bảo hành 12 giờ',
-      price: 130000,
-      duration_months: 1,
-      service_type: 'AI',
-      emoji: 'brand_chatgpt',
-      original_price: 0,
-      activation_method: 'ACCOUNT',
     },
     {
       product_key: 'adobe-creative-cloud-1-month',
@@ -2184,15 +2036,12 @@ export const DEFAULT_PRODUCT_CATALOG = [
     { name: 'Gearup Booster 12 Tháng (1 Năm)', description: 'Gói Gearup Booster giảm giật lag chơi game 12 tháng (1 năm).', price: 460000, duration_months: 12, service_type: 'gearup', emoji: 'brand_gearup', original_price: 0 },
 
     // Spotify Premium · bảng giá chính thức
-    { product_key: 'spotify-premium-3-months', name: 'Spotify Premium 3 Tháng', description: 'Spotify Premium không quảng cáo, nghe nhạc chất lượng cao và hỗ trợ tải nhạc để nghe offline trong 3 tháng.', price: 100000, ctv_price: 80000, duration_months: 3, service_type: 'spotify', emoji: 'brand_spotify', original_price: 0, is_featured: 1, virtual_purchase_count: 0 },
     { product_key: 'spotify-premium-6-months', name: 'Spotify Premium 6 Tháng', description: 'Spotify Premium không quảng cáo, nghe nhạc chất lượng cao và hỗ trợ tải nhạc để nghe offline trong 6 tháng.', price: 200000, ctv_price: 160000, duration_months: 6, service_type: 'spotify', emoji: 'brand_spotify', original_price: 0, is_featured: 1, virtual_purchase_count: 0 },
     { product_key: 'spotify-premium-12-months', name: 'Spotify Premium 12 Tháng', description: 'Spotify Premium không quảng cáo, nghe nhạc chất lượng cao và hỗ trợ tải nhạc để nghe offline trong 12 tháng.', price: 290000, ctv_price: 260000, duration_months: 12, service_type: 'spotify', emoji: 'brand_spotify', original_price: 0, is_featured: 1, virtual_purchase_count: 0 },
 
     // YouTube Premium · dòng ổn định cao duy nhất đang mở bán
-    { product_key: 'youtube-premium-continuous-1-month', name: 'YouTube Premium 1 Tháng (Ổn Định Cao)', aliases: ['YouTube Premium 1 Tháng (Gia Hạn Liên Tục)'], description: 'Dòng ổn định cao, không vận hành bằng cơ chế đổi Family mỗi tháng; hạn chế tối đa tình trạng mất Premium và bảo hành full trong toàn bộ 1 tháng sử dụng.', warranty_policy: 'Full 1 tháng', price: 60000, ctv_price: 55000, duration_months: 1, service_type: 'STREAMING', emoji: 'brand_youtube', original_price: 0 },
-    { product_key: 'youtube-premium-continuous-3-months', name: 'YouTube Premium 3 Tháng (Ổn Định Cao)', aliases: ['YouTube Premium 3 Tháng (Gia Hạn Liên Tục)', 'YouTube Premium 3 Tháng (Gia Hạn Đều)'], description: 'Dòng ổn định cao, không vận hành bằng cơ chế đổi Family mỗi tháng; hạn chế tối đa tình trạng mất Premium và bảo hành full trong toàn bộ 3 tháng sử dụng.', warranty_policy: 'Full 3 tháng', price: 195000, ctv_price: 180000, duration_months: 3, service_type: 'STREAMING', emoji: 'brand_youtube', original_price: 0 },
-    { product_key: 'youtube-premium-continuous-6-months', name: 'YouTube Premium 6 Tháng (Ổn Định Cao)', aliases: ['YouTube Premium 6 Tháng (Gia Hạn Liên Tục)', 'YouTube Premium 6 Tháng (Gia Hạn Đều)'], description: 'Dòng ổn định cao, không vận hành bằng cơ chế đổi Family mỗi tháng; hạn chế tối đa tình trạng mất Premium và bảo hành full trong toàn bộ 6 tháng sử dụng.', warranty_policy: 'Full 6 tháng', price: 320000, ctv_price: 300000, duration_months: 6, service_type: 'STREAMING', emoji: 'brand_youtube', original_price: 0 },
-    { product_key: 'youtube-premium-continuous-12-months', name: 'YouTube Premium 12 Tháng (Ổn Định Cao)', aliases: ['YouTube Premium 12 Tháng (Gia Hạn Liên Tục)', 'YouTube Premium 12 Tháng (Gia Hạn Đều)'], description: 'Dòng ổn định cao, không vận hành bằng cơ chế đổi Family mỗi tháng; hạn chế tối đa tình trạng mất Premium và bảo hành full trong toàn bộ 12 tháng sử dụng.', warranty_policy: 'Full 12 tháng', price: 580000, ctv_price: 520000, duration_months: 12, service_type: 'STREAMING', emoji: 'brand_youtube', original_price: 0 },
+    { product_key: 'youtube-premium-continuous-6-months', name: 'YouTube Premium 6 Tháng (Ổn Định Cao)', aliases: ['YouTube Premium 6 Tháng (Gia Hạn Liên Tục)', 'YouTube Premium 6 Tháng (Gia Hạn Đều)'], description: 'Dòng ổn định cao, không vận hành bằng cơ chế đổi Family mỗi tháng; hạn chế tối đa tình trạng mất Premium và bảo hành full trong toàn bộ 6 tháng sử dụng.', warranty_policy: 'Full 6 tháng', price: 250000, ctv_price: 250000, duration_months: 6, service_type: 'STREAMING', emoji: 'brand_youtube', original_price: 0 },
+    { product_key: 'youtube-premium-continuous-12-months', name: 'YouTube Premium 12 Tháng (Ổn Định Cao)', aliases: ['YouTube Premium 12 Tháng (Gia Hạn Liên Tục)', 'YouTube Premium 12 Tháng (Gia Hạn Đều)'], description: 'Dòng ổn định cao, không vận hành bằng cơ chế đổi Family mỗi tháng; hạn chế tối đa tình trạng mất Premium và bảo hành full trong toàn bộ 12 tháng sử dụng.', warranty_policy: 'Full 12 tháng', price: 400000, ctv_price: 400000, duration_months: 12, service_type: 'STREAMING', emoji: 'brand_youtube', original_price: 0 },
 
     // Netflix · chỉ giữ dòng Slot ổn định 75k
     { product_key: 'netflix-extra-1-month-renewable', name: 'Netflix Slot 1 Tháng (Ổn Định · Có Gia Hạn)', aliases: ['Netflix Extra 1 Tháng (Ổn Định · Có Gia Hạn)', 'Netflix Extra Premium 1 Tháng (Cá Nhân)'], description: 'Netflix Slot ổn định trong 1 tháng, sử dụng chất lượng cao và hỗ trợ gia hạn tiếp trên tài khoản đã cấp.', price: 75000, duration_months: 1, service_type: 'netflix', emoji: 'brand_netflix', original_price: 0, is_featured: 1, virtual_purchase_count: 0 },
@@ -2203,8 +2052,7 @@ export const DEFAULT_PRODUCT_CATALOG = [
     { product_key: 'discord-store-fullstack-website', name: 'Discord Store + Bot Custom + Website Đồng Bộ', description: 'Giải pháp đầy đủ gồm setup Discord, bot custom và website đồng bộ catalog/đơn hàng; giao diện được thiết kế theo thương hiệu của store. Tặng hosting bot 3 tháng đầu.', price: 1000000, duration_months: 3, service_type: 'SERVICE', emoji: 'icon_store', original_price: 0, is_featured: 1, virtual_purchase_count: 0 },
     { product_key: 'discord-bot-rescue-ui', name: 'Fix Bot Lỗi & Nâng Cấp Giao Diện', description: 'Kiểm tra nguyên nhân bot lỗi, sửa luồng hoạt động và làm mới giao diện thân thiện bằng Components V2 cùng emoji custom. Giá 500.000đ là mức khởi điểm; báo giá cuối dựa trên tình trạng mã nguồn.', price: 500000, duration_months: 1, service_type: 'SERVICE', emoji: 'warranty_shield', original_price: 0, is_featured: 1, virtual_purchase_count: 0 },
     
-    // Nâng cấp: Claude API & Locket Gold
-    ...API_CREDIT_PRODUCTS,
+    // Locket Gold
     { name: 'Locket Gold — 1 năm', description: 'Nâng cấp trải nghiệm Locket với nhiều tính năng cá nhân hóa, kết nối bạn bè và chia sẻ khoảnh khắc tiện lợi hơn.', price: 150000, duration_months: 12, service_type: 'premium', emoji: 'locket_gold', original_price: 0, base_price: 150000, activation_method: 'USERNAME', username_required: 1, login_required: 0 }
 ];
 
@@ -2252,19 +2100,15 @@ export function seedProductCatalog(dbInstance) {
         (
           LOWER(REPLACE(name, ' ', '')) LIKE '%chatgpt%'
           AND COALESCE(product_key, '') NOT IN (
-            'chatgpt-plus-account-1-month-no-warranty',
-            'chatgpt-plus-account-1-month-full-warranty',
-            'chatgpt-business-workspace-1-month-full-warranty',
             'chatgpt-plus-direct-payment-1-month-full-warranty',
-            'chatgpt-plus-own-account-1-month-package-warranty',
             'chatgpt-pro-100-own-account-1-month-package-warranty',
             'chatgpt-pro-200-own-account-1-month',
-            'chatgpt-pro-500-own-account-1-month',
-            'chatgpt-pro-100-account-1-month-no-warranty',
-            'chatgpt-pro-100-account-1-month-full-warranty',
-            'chatgpt-account-1-month-2-day-warranty',
-            'chatgpt-plus-upi-account-1-month-12-hour-warranty'
+            'chatgpt-pro-500-own-account-1-month'
           )
+        )
+        OR (
+          LOWER(name) LIKE '%claude%'
+          AND COALESCE(product_key, '') != 'claude-pro-1-month'
         )
         OR (
           LOWER(name) LIKE '%adobe%'
@@ -2281,7 +2125,28 @@ export function seedProductCatalog(dbInstance) {
           AND COALESCE(product_key, '') NOT IN (
             'gemini-pro-cdk-6-months-activation-warranty',
             'gemini-pro-google-one-5tb-12-months-full-warranty',
-            'gemini-pro-google-one-5tb-18-months-full-warranty'
+            'gemini-pro-antigravity-24-months'
+          )
+        )
+      )
+  `);
+  const retireNitroAndApiCatalogStmt = dbInstance.prepare(`
+    UPDATE product_catalog
+    SET is_active = 0, updated_at = CURRENT_TIMESTAMP
+    WHERE is_active = 1
+      AND (
+        product_key LIKE 'api-codex-claude-credit-%'
+        OR product_key = 'claude-api-100m'
+        OR LOWER(name) LIKE '%claude%api%'
+        OR LOWER(name) LIKE '%api%claude%'
+        OR (
+          UPPER(service_type) = 'GAME'
+          AND LOWER(name) LIKE '%nitro%boost%'
+          AND COALESCE(product_key, '') NOT IN (
+            'discord-nitro-boost-1-thang-login',
+            'discord-nitro-boost-2-months-login-keep-mail-7-days',
+            'discord-nitro-boost-2-months-login-mail-guaranteed',
+            'discord-nitro-boost-1-nam-login'
           )
         )
       )
@@ -2295,8 +2160,6 @@ export function seedProductCatalog(dbInstance) {
         (
           LOWER(REPLACE(name, ' ', '')) LIKE '%youtubepremium%'
           AND COALESCE(product_key, '') NOT IN (
-            'youtube-premium-continuous-1-month',
-            'youtube-premium-continuous-3-months',
             'youtube-premium-continuous-6-months',
             'youtube-premium-continuous-12-months'
           )
@@ -2308,7 +2171,6 @@ export function seedProductCatalog(dbInstance) {
         OR (
           LOWER(name) LIKE '%spotify%'
           AND COALESCE(product_key, '') NOT IN (
-            'spotify-premium-3-months',
             'spotify-premium-6-months',
             'spotify-premium-12-months'
           )
@@ -2381,8 +2243,7 @@ export function seedProductCatalog(dbInstance) {
     // Giữ các gói hiện hành cùng các gói AI mới trong allowlist ở trên.
     // Các hàng lịch sử vẫn được giữ trong database để bảo toàn đơn cũ, nhưng
     // không còn xuất hiện trên bot, website hoặc bảng giá Discord.
-    dbInstance.prepare(`UPDATE product_catalog SET is_active = 0, updated_at = CURRENT_TIMESTAMP
-      WHERE product_key = 'claude-api-100m' OR LOWER(TRIM(name)) = 'claude api 100m'`).run();
+    retireNitroAndApiCatalogStmt.run();
     retireReplacedAiCatalogStmt.run();
     retireReplacedStreamingCatalogStmt.run();
     retireReplacedNetflixCatalogStmt.run();

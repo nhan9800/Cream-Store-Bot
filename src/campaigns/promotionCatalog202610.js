@@ -1,15 +1,14 @@
-import { API_CREDIT_PRODUCTS, API_CREDIT_DURATION } from '../config/apiCreditCatalog.js';
 import { GEMINI_PRO_CDK_KEY, GEMINI_PRO_CDK_WARRANTY } from '../config/geminiProCdk202611.js';
 // Data-only publication manifest. Never import database/db.js here: importing
 // that module opens SQLite. These public prices contain no customer data.
 // SALE means the owner supplied this campaign price, not an inferred discount.
 // Source: original sale board at 3f7bb80 plus catalog at 755910a (2026-10-02).
-export const PROMOTION_CATALOG_VERSION = 'CENAR-PROMOTION-CATALOG-20261103-GEMINI';
+export const PROMOTION_CATALOG_VERSION = 'CENAR-PROMOTION-CATALOG-20261106';
 
 export const PROMOTION_CATALOG_SECTIONS = Object.freeze([
   { key: 'connection', title: 'Kết nối có gu', subtitle: 'Nitro, nâng cấp máy chủ và gói xem phim.' },
   { key: 'ai_own', title: 'AI trên tài khoản của bạn', subtitle: 'Phân biệt chính chủ, cấp acc và tham gia Team/Workspace.' },
-  { key: 'ai_supplied', title: 'AI cấp acc, API credit & JSON', subtitle: 'Bảo hành và hình thức nhận được ghi riêng từng gói.' },
+  { key: 'ai_supplied', title: 'AI & công cụ nâng cấp', subtitle: 'Bảo hành và hình thức nhận được ghi riêng từng gói.' },
   { key: 'creation', title: 'Sáng tạo & lưu trữ', subtitle: 'Adobe, Gemini, Office và CapCut theo từng thời hạn.' },
   { key: 'entertainment', title: 'Khoảng nghỉ của riêng bạn', subtitle: 'Spotify, YouTube và Locket.' },
   { key: 'decor_account', title: 'Trang trí hồ sơ Discord', subtitle: 'Giá niêm yết cho tài khoản có Nitro hoặc chưa có Nitro.' },
@@ -26,7 +25,7 @@ export const PROMOTION_CATALOG_NOTES = Object.freeze([
   'Mở ticket để shop xác nhận đúng gói và giá chương trình trước khi thanh toán. Khi mua trên website, kiểm tra giá hiển thị tại bước đặt hàng.',
   'Những dòng ghi giá niêm yết hiện hành chưa có giá khuyến mãi riêng; không suy diễn phần trăm giảm hoặc giá gốc.',
   'KBH là không bảo hành; BHF/FBH là bảo hành full theo thời hạn ghi trên gói. BH gói không bao gồm BH tài khoản.',
-  'Pro 100/200/500 và x5 là tên gói shop niêm yết, không phải cam kết hạn mức sử dụng hoặc số lượng tài khoản.',
+  'Pro 100/200/500 là tên gói shop niêm yết, không phải cam kết hạn mức sử dụng hoặc số lượng tài khoản.',
 ]);
 
 const formatPrice = (price) => `${new Intl.NumberFormat('vi-VN').format(price)}đ`;
@@ -67,42 +66,14 @@ function row(section, source, key, label, price, metadata = {}) {
 const sale = (section, key, label, price, metadata) => row(section, 'SALE', key, label, price, metadata);
 const catalog = (section, key, label, price, metadata = {}) => row(section, 'CATALOG', key, label, price, { ...metadata, catalogKey: key });
 
-const suppliedRisk = 'Thời gian dùng thực tế có thể dài hơn tùy cách sử dụng; không cam kết tài khoản duy trì đủ tháng hoặc vượt thời hạn bảo hành.';
 const unknownWarranty = 'Xác nhận phạm vi bảo hành với shop trước khi mua';
-const jsonDuration = 'Xác nhận thời hạn với shop';
 
 export const PROMOTION_CATALOG_ROWS = Object.freeze([
-  // 01: Nine original Nitro campaign tiers, two Boost tiers and Netflix.
-  sale('connection', 'sale-nitro-boost-login-1-month', 'Nitro Boost Login', 85000, {
-    catalogKey: 'discord-nitro-boost-1-thang-login', duration: '1 tháng', account: 'Login',
-  }),
-  sale('connection', 'sale-nitro-boost-login-2-months', 'Nitro Boost Login · Có liền', 99000, {
-    catalogKey: 'discord-nitro-boost-2-months-login-keep-mail-7-days', duration: '2 tháng', account: 'Login',
-    notes: ['Shop xác nhận đúng loại tài khoản và điều kiện giữ mail tại ticket trước khi thanh toán.'],
-  }),
-  sale('connection', 'sale-nitro-boost-login-2-months-mail', 'Nitro Boost Login · Có liền · Mail bất tử', 120000, {
-    catalogKey: 'discord-nitro-boost-2-months-login-mail-guaranteed', duration: '2 tháng', account: 'Login',
-    notes: ['Shop xác nhận điều kiện bảo đảm mail thực tế trước khi thanh toán.'],
-  }),
-  sale('connection', 'sale-nitro-boost-login-4-months', 'Nitro Boost Login · Có liền', 250000, {
-    catalogKey: 'discord-nitro-boost-4-thang-login', duration: '4 tháng', account: 'Login',
-  }),
-  sale('connection', 'sale-nitro-boost-login-6-months', 'Nitro Boost Login · Có liền', 350000, {
-    catalogKey: 'discord-nitro-boost-6-thang-login', duration: '6 tháng', account: 'Login',
-  }),
-  sale('connection', 'sale-nitro-boost-login-8-months', 'Nitro Boost Login · Có liền', 450000, {
-    catalogKey: 'discord-nitro-boost-8-thang-login', duration: '8 tháng', account: 'Login',
-  }),
-  sale('connection', 'sale-nitro-boost-login-12-months-auto', 'Nitro Boost Login · Có liền · Gia hạn auto', 680000, {
-    catalogKey: 'discord-nitro-boost-12-thang-login', duration: '12 tháng', account: 'Login',
-  }),
-  sale('connection', 'sale-nitro-boost-login-1-year-direct', 'Nitro Boost Login · Mua thẳng 1 năm · Có liền', 830000, {
-    catalogKey: 'discord-nitro-boost-1-nam-login', duration: '1 năm', account: 'Login',
-  }),
-  sale('connection', 'sale-nitro-trial-3-months', 'Trial Boost', 65000, {
-    catalogKey: 'discord-nitro-boost-trial-3-months-first-offer', duration: '3 tháng',
-    notes: ['Shop kiểm tra tài khoản có đủ điều kiện Trial trước khi chốt đơn.'],
-  }),
+  // 01: Only the active Nitro terms.
+  catalog('connection', 'discord-nitro-boost-1-thang-login', 'Nitro Boost Login', 90000, { duration: '1 tháng' }),
+  catalog('connection', 'discord-nitro-boost-2-months-login-keep-mail-7-days', 'Nitro Boost Login · Giữ mail 7 ngày', 115000, { duration: '2 tháng' }),
+  catalog('connection', 'discord-nitro-boost-2-months-login-mail-guaranteed', 'Nitro Boost Login · Mail bao sống', 140000, { duration: '2 tháng' }),
+  catalog('connection', 'discord-nitro-boost-1-nam-login', 'Nitro Boost Login · Chính chủ', 880000, { duration: '12 tháng', notes: ['Kích hoạt trọn 12 tháng một lần.'] }),
   sale('connection', 'sale-server-boost-1-month', 'Boost Server · Nâng cấp máy chủ', 110000, {
     catalogKey: 'discord-server-boost-14-1-month', duration: '1 tháng',
     notes: ['Shop xác nhận số lượng Boosts và máy chủ áp dụng tại ticket.'],
@@ -115,89 +86,13 @@ export const PROMOTION_CATALOG_ROWS = Object.freeze([
     catalogKey: 'netflix-extra-1-month-renewable', duration: '1 tháng',
     notes: ['Xác nhận đúng hình thức 4K Private và tài khoản được nhận tại ticket trước khi thanh toán.'],
   }),
-  catalog('connection', 'gia-han-discord-nitro-boost-2-thang', 'Gia hạn Nitro Boost · Khách hàng cũ', 99000, {
-    duration: '2 tháng', account: 'Login',
-  }),
+  catalog('ai_own', 'chatgpt-plus-direct-payment-1-month-full-warranty', 'ChatGPT Plus chính chủ', 530000, { duration: '1 tháng', warranty: 'Full BH 1 tháng' }),
+  catalog('ai_own', 'chatgpt-pro-100-own-account-1-month-package-warranty', 'ChatGPT Pro 100 chính chủ', 2650000, { duration: '1 tháng', warranty: 'BH gói · không BH tài khoản' }),
+  catalog('ai_own', 'chatgpt-pro-200-own-account-1-month', 'ChatGPT Pro 200 chính chủ', 4500000, { duration: '1 tháng', warranty: unknownWarranty }),
+  catalog('ai_own', 'chatgpt-pro-500-own-account-1-month', 'ChatGPT Pro 500 chính chủ', 12800000, { duration: '1 tháng', warranty: unknownWarranty }),
+  catalog('ai_own', 'claude-pro-1-month', 'Claude Pro chính chủ', 550000, { duration: '1 tháng', warranty: 'BH 1 tháng · trừ khóa tài khoản' }),
 
-  // 02: Five new own-account AI tiers, three other live GPT tiers and old Team.
-  sale('ai_own', 'sale-chatgpt-plus-own-account-package-warranty', 'ChatGPT Plus chính chủ', 485000, {
-    catalogKey: 'chatgpt-plus-own-account-1-month-package-warranty', duration: '1 tháng', account: 'Chính chủ',
-    warranty: 'BH gói 1 tháng · Không BH acc',
-  }),
-  sale('ai_own', 'sale-chatgpt-plus-own-account-full-warranty', 'ChatGPT Plus chính chủ', 500000, {
-    catalogKey: 'chatgpt-plus-direct-payment-1-month-full-warranty', duration: '1 tháng', account: 'Chính chủ', warranty: 'Full BH 1 tháng',
-  }),
-  sale('ai_own', 'sale-chatgpt-pro-100-own-account', 'ChatGPT Pro 100 chính chủ', 2650000, {
-    catalogKey: 'chatgpt-pro-100-own-account-1-month-package-warranty', duration: '1 tháng', account: 'Chính chủ',
-    warranty: 'BH gói 1 tháng · Không BH acc',
-  }),
-  sale('ai_own', 'sale-chatgpt-pro-200-own-account', 'ChatGPT Pro 200 chính chủ', 4800000, {
-    catalogKey: 'chatgpt-pro-200-own-account-1-month', duration: '1 tháng', account: 'Chính chủ', warranty: unknownWarranty,
-  }),
-  sale('ai_own', 'sale-chatgpt-pro-500-own-account', 'ChatGPT Pro 500 chính chủ', 12700000, {
-    catalogKey: 'chatgpt-pro-500-own-account-1-month', duration: '1 tháng', account: 'Chính chủ', warranty: unknownWarranty,
-  }),
-  catalog('ai_own', 'chatgpt-plus-account-1-month-no-warranty', 'ChatGPT Plus', 180000, {
-    duration: '1 tháng danh nghĩa', account: 'Shop cấp tài khoản', warranty: 'KBH', notes: [suppliedRisk],
-  }),
-  catalog('ai_own', 'chatgpt-plus-account-1-month-full-warranty', 'ChatGPT Plus', 350000, {
-    duration: '1 tháng', account: 'Shop cấp tài khoản', warranty: 'Full BH 1 tháng',
-  }),
-  catalog('ai_own', 'chatgpt-business-workspace-1-month-full-warranty', 'ChatGPT Business', 450000, {
-    duration: '1 tháng', account: 'Chính chủ · Add Workspace', warranty: 'Full BH 1 tháng',
-  }),
-  sale('ai_own', 'sale-chatgpt-add-team-own-account-1-month', 'ChatGPT · Add Team chính chủ', 390000, {
-    duration: '1 tháng', account: 'Chính chủ · Add Team', warranty: 'Full BH 1 tháng',
-    notes: ['Shop tư vấn đúng loại Team và hình thức tham gia trước khi thanh toán.'],
-  }),
-
-  // 03: Restore the old MoMo/JSON prices alongside the new supplied AI tiers.
-  sale('ai_supplied', 'sale-chatgpt-pro-100-account-no-warranty', 'ChatGPT Pro 100', 1900000, {
-    catalogKey: 'chatgpt-pro-100-account-1-month-no-warranty', duration: '1 tháng danh nghĩa', account: 'Shop cấp tài khoản', warranty: 'KBH', notes: [suppliedRisk],
-  }),
-  sale('ai_supplied', 'sale-chatgpt-pro-100-account-full-warranty', 'ChatGPT Pro 100', 2300000, {
-    catalogKey: 'chatgpt-pro-100-account-1-month-full-warranty', duration: '1 tháng', account: 'Shop cấp tài khoản', warranty: 'Full BH 1 tháng',
-  }),
-  sale('ai_supplied', 'sale-chatgpt-account-2-day-warranty', 'ChatGPT · Cấp acc', 120000, {
-    catalogKey: 'chatgpt-account-1-month-2-day-warranty', duration: '1 tháng danh nghĩa', account: 'Shop cấp tài khoản', warranty: 'BH 2 ngày',
-    notes: [suppliedRisk, 'Loại Plus/Pro chưa được xác nhận; shop xác nhận đúng gói trước khi mua.'],
-  }),
-  sale('ai_supplied', 'sale-chatgpt-momo-pay-1-month', 'ChatGPT · MoMo Pay', 130000, {
-    duration: '1 tháng danh nghĩa', warranty: 'BH 2 ngày',
-    notes: ['Giữ riêng với gói cấp acc 120k; shop xác nhận loại gói và hình thức tài khoản tại ticket.', suppliedRisk],
-  }),
-  sale('ai_supplied', 'sale-chatgpt-pro-5x-team-4-slots', 'ChatGPT Pro 5x · Ghép Team 4 slot', 79000, {
-    duration: jsonDuration, account: 'File JSON + hướng dẫn', priceUnit: 'slot',
-  }),
-  sale('ai_supplied', 'sale-chatgpt-pro-5x-team-2-slots', 'ChatGPT Pro 5x · Ghép Team 2 slot', 150000, {
-    duration: jsonDuration, account: 'File JSON + hướng dẫn', priceUnit: 'slot',
-  }),
-  sale('ai_supplied', 'sale-chatgpt-pro-5x-account-json', 'Acc ChatGPT Pro 5x', 250000, {
-    duration: jsonDuration, account: 'File JSON', warranty: 'BH 60 phút',
-  }),
-  sale('ai_supplied', 'sale-claude-pro-x5-account-no-warranty', 'Claude Pro x5', 1900000, {
-    catalogKey: 'claude-pro-x5-account-1-month-no-warranty', duration: '1 tháng danh nghĩa', account: 'Shop cấp tài khoản', warranty: 'KBH', notes: [suppliedRisk],
-  }),
-  sale('ai_supplied', 'sale-claude-pro-x5-account-full-warranty', 'Claude Pro x5', 2500000, {
-    catalogKey: 'claude-pro-x5-account-1-month-full-warranty', duration: '1 tháng', account: 'Shop cấp tài khoản', warranty: 'Full BH 1 tháng (FBH/BHF)',
-  }),
-  catalog('ai_own', 'claude-pro-1-month', 'Claude Pro chính chủ', 520000, {
-    duration: '1 tháng', account: 'Chính chủ', warranty: 'Full BH 1 tháng · không bảo hành nếu tài khoản bị khóa',
-  }),
-  catalog('ai_own', 'claude-pro-x5-own-account-1-month-7-day-warranty', 'Claude Pro x5 chính chủ', 2000000, {
-    duration: '1 tháng', account: 'Chính chủ', warranty: 'BH 7 ngày',
-    notes: ['Thu ban đầu 2.000.000đ; shop giữ phần API 100 USD và hoàn 700.000đ; chi phí sau hoàn 1.300.000đ. API 100 USD không thuộc quyền lợi khách nhận.'],
-  }),
-  catalog('ai_supplied', 'chatgpt-plus-upi-account-1-month-12-hour-warranty', 'ChatGPT Plus UPI Pay', 130000, {
-    duration: '1 tháng danh nghĩa', account: 'Shop cấp tài khoản', warranty: 'BH 12 giờ',
-    notes: ['Theo ghi nhận của shop, đa số tài khoản dùng từ 2 tuần trở lên; phạm vi bảo hành vẫn là 12 giờ.'],
-  }),
-  ...API_CREDIT_PRODUCTS.map((product) => catalog('ai_supplied', product.product_key, product.name, product.price, {
-    duration: API_CREDIT_DURATION, account: 'Token/API riêng', warranty: product.warranty_policy,
-    notes: ['Hạn mức credit API theo hệ thống nhà cung cấp; không tính phí theo ngày.'],
-  })),
-
-  // 04: Adobe is newly included at exact current catalog prices.
+  // 04: Creation tools.
   catalog('creation', 'adobe-creative-cloud-1-month', 'Adobe Creative Cloud · Không AI credits', 140000, {
     duration: '1 tháng', account: 'Shop cấp tài khoản', warranty: 'Full BH 1 tháng',
   }),
@@ -220,8 +115,9 @@ export const PROMOTION_CATALOG_ROWS = Object.freeze([
   sale('creation', 'sale-gemini-pro-google-one-5tb-12-months', 'Gemini Pro + Google One 5 TB', 120000, {
     catalogKey: 'gemini-pro-google-one-5tb-12-months-full-warranty', duration: '12 tháng', notes: ['Có thể thêm 5 thành viên. Shop xác nhận điều kiện gói và bảo hành trước khi mua.'],
   }),
-  sale('creation', 'sale-gemini-pro-google-one-5tb-18-months', 'Gemini Pro + Google One 5 TB', 190000, {
-    catalogKey: 'gemini-pro-google-one-5tb-18-months-full-warranty', duration: '18 tháng', notes: ['Có thể thêm 5 thành viên. Shop xác nhận điều kiện gói và bảo hành trước khi mua.'],
+  catalog('creation', 'gemini-pro-antigravity-24-months', 'Gemini Pro Antigravity', 250000, {
+    duration: '24 tháng', warranty: 'BH 12 tháng',
+    notes: ['Shop xác nhận hỗ trợ Gemini 4 Argon, Claude Opus 5.5 và Claude Sonnet 5.5.'],
   }),
   sale('creation', 'sale-office-365-onedrive-12-months', 'Office 365 + OneDrive 1 TB', 200000, {
     catalogKey: 'office-365-onedrive-12-months', duration: '12 tháng',
@@ -241,27 +137,14 @@ export const PROMOTION_CATALOG_ROWS = Object.freeze([
   }),
 
   // 05: Retain every original entertainment campaign price.
-  sale('entertainment', 'sale-spotify-premium-3-months', 'Spotify Premium', 110000, {
-    catalogKey: 'spotify-premium-3-months', duration: '3 tháng',
-  }),
   sale('entertainment', 'sale-spotify-premium-6-months', 'Spotify Premium', 180000, {
     catalogKey: 'spotify-premium-6-months', duration: '6 tháng',
   }),
   sale('entertainment', 'sale-spotify-premium-12-months', 'Spotify Premium', 280000, {
     catalogKey: 'spotify-premium-12-months', duration: '12 tháng',
   }),
-  sale('entertainment', 'sale-youtube-premium-stable-1-month', 'YouTube Premium · Ổn định', 58000, {
-    catalogKey: 'youtube-premium-continuous-1-month', duration: '1 tháng',
-  }),
-  sale('entertainment', 'sale-youtube-premium-stable-3-months', 'YouTube Premium · Ổn định', 185000, {
-    catalogKey: 'youtube-premium-continuous-3-months', duration: '3 tháng',
-  }),
-  sale('entertainment', 'sale-youtube-premium-stable-6-months', 'YouTube Premium · Ổn định', 295000, {
-    catalogKey: 'youtube-premium-continuous-6-months', duration: '6 tháng',
-  }),
-  sale('entertainment', 'sale-youtube-premium-stable-12-months', 'YouTube Premium · Ổn định', 530000, {
-    catalogKey: 'youtube-premium-continuous-12-months', duration: '12 tháng',
-  }),
+  catalog('entertainment', 'youtube-premium-continuous-6-months', 'YouTube Premium · Ổn định', 250000, { duration: '6 tháng' }),
+  catalog('entertainment', 'youtube-premium-continuous-12-months', 'YouTube Premium · Ổn định', 400000, { duration: '12 tháng' }),
   catalog('entertainment', 'locket-gold-1-nam', 'Locket Gold', 150000, {
     duration: '1 năm', account: 'Kích hoạt theo username',
   }),

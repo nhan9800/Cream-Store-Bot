@@ -31,16 +31,11 @@ const liveInventory = new Collection(liveNames.map((name, index) => {
   return [id, { id, name, animated: false }];
 }));
 const REQUESTED_PRICES = new Map([
-  ['chatgpt-plus-own-account-1-month-package-warranty', 485000],
-  ['chatgpt-plus-direct-payment-1-month-full-warranty', 500000],
+  ['chatgpt-plus-direct-payment-1-month-full-warranty', 530000],
   ['chatgpt-pro-100-own-account-1-month-package-warranty', 2650000],
-  ['chatgpt-pro-200-own-account-1-month', 4800000],
-  ['chatgpt-pro-500-own-account-1-month', 12700000],
-  ['chatgpt-pro-100-account-1-month-no-warranty', 1900000],
-  ['chatgpt-pro-100-account-1-month-full-warranty', 2300000],
-  ['chatgpt-account-1-month-2-day-warranty', 120000],
-  ['claude-pro-x5-account-1-month-no-warranty', 1900000],
-  ['claude-pro-x5-account-1-month-full-warranty', 2500000],
+  ['chatgpt-pro-200-own-account-1-month', 4500000],
+  ['chatgpt-pro-500-own-account-1-month', 12800000],
+  ['claude-pro-1-month', 550000],
 ]);
 
 beforeAll(() => {
@@ -136,111 +131,57 @@ describe('Gemini Pro CDK November 2026 launch', () => {
   });
 });
 
-describe('October 2026 AI catalog additions', () => {
-  it('lists the owner-confirmed UPI and own-account Claude offers without treating a refund as checkout price', () => {
+describe('November 6 catalog refresh', () => {
+  it('lists only the requested AI subscriptions with their existing account and warranty terms', () => {
     const products = getActiveProducts(GUILD_ID);
-    const upi = products.find(p => p.product_key === 'chatgpt-plus-upi-account-1-month-12-hour-warranty');
-    const claude = products.find(p => p.product_key === 'claude-pro-1-month');
-    const x5 = products.find(p => p.product_key === 'claude-pro-x5-own-account-1-month-7-day-warranty');
-    expect(upi).toMatchObject({ price: 130000, duration_months: 1, activation_method: 'ACCOUNT', warranty_policy: 'Bảo hành 12 giờ' });
-    expect(upi.description).toContain('Theo ghi nhận của shop');
-    expect(upi.description).toContain('từ 2 tuần trở lên');
-    expect(claude).toMatchObject({ price: 520000, duration_months: 1, activation_method: 'OWN_ACCOUNT' });
+    const ai = products.filter((row) => /^(ChatGPT|Claude)/i.test(row.name));
+    expect(new Map(ai.map(({ product_key, price }) => [product_key, price]))).toEqual(REQUESTED_PRICES);
+    for (const product of ai) {
+      expect(product).toMatchObject({ duration_months: 1, activation_method: 'OWN_ACCOUNT', quota_value: null });
+    }
+    const claude = ai.find((p) => p.product_key === 'claude-pro-1-month');
     expect(claude.warranty_policy).toBe('Full 1 tháng · không bảo hành nếu tài khoản bị khóa');
-    expect(x5).toMatchObject({ price: 2000000, original_price: 0, duration_months: 1, activation_method: 'OWN_ACCOUNT', warranty_policy: 'Bảo hành 7 ngày' });
-    expect(x5.description).toContain('700.000đ');
-    expect(x5.description).toContain('1.300.000đ');
-    expect(x5.description).toContain('API 100 USD thuộc shop');
-    expect(x5.quota_value).toBeNull();
-    expect(extractRequestedDuration(upi.name)).toEqual({ days: null, months: 1 });
-    expect(extractRequestedDuration(x5.name)).toEqual({ days: null, months: 1 });
-    const resolved = rankCatalogProducts(products, { content: `Mua ${x5.name}` });
-    expect(resolved.confidentProduct?.id).toBe(x5.id);
-    expect(resolved.quantity).toBe(1);
-    const knowledge = generateProductKnowledgeText(GUILD_ID);
-    expect(knowledge).toContain(upi.description);
-    expect(knowledge).toContain(x5.description);
+    for (const p of ai.filter((p) => /Pro (200|500)/.test(p.name))) {
+      expect(p.warranty_policy).toContain('Xác nhận');
+    }
+    const gemini = products.find((p) => p.product_key === 'gemini-pro-antigravity-24-months');
+    expect(gemini).toMatchObject({ price: 250000, duration_months: 24, warranty_policy: 'Bảo hành 12 tháng' });
+    expect(gemini.description).toMatch(/Gemini 4 Argon.*Claude Opus 5.5.*Claude Sonnet 5.5/);
+    expect(generateProductKnowledgeText(GUILD_ID)).toContain(gemini.description);
   });
 
-  it('migrates Claude Pro in place and adds exactly two rows without changing old order snapshots', () => {
+  it('retires legacy offers without dropping rows, order references or retained product IDs', () => {
     const database = new Database(':memory:');
     try {
+      database.pragma('foreign_keys = ON');
       database.exec(db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'product_catalog'").get().sql);
+      const insert = database.prepare("INSERT INTO product_catalog (guild_id, name, product_key, price, duration_months, service_type) VALUES ('WEB', ?, ?, ?, ?, ?)");
+      const oldProducts = [
+        ['Discord Nitro Boost 12 Tháng (Login)', 'discord-nitro-boost-12-thang-login', 680000, 12, 'GAME'],
+        ['Gemini Pro + 5 TB Google One 18 Tháng (Full BH)', 'gemini-pro-google-one-5tb-18-months-full-warranty', 280000, 18, 'AI'],
+        ['Spotify Premium 3 Tháng', 'spotify-premium-3-months', 100000, 3, 'spotify'],
+        ['YouTube Premium 1 Tháng (Ổn Định Cao)', 'youtube-premium-continuous-1-month', 60000, 1, 'STREAMING'],
+        ['YouTube Premium 3 Tháng (Ổn Định Cao)', 'youtube-premium-continuous-3-months', 195000, 3, 'STREAMING'],
+        ['ChatGPT Plus UPI Pay 1 Tháng', 'chatgpt-plus-upi-account-1-month-12-hour-warranty', 130000, 1, 'AI'],
+        ['Claude Pro x5 Chính Chủ 1 Tháng', 'claude-pro-x5-own-account-1-month-7-day-warranty', 2000000, 1, 'AI'],
+      ];
+      const oldIds = oldProducts.map((product) => insert.run(...product).lastInsertRowid);
+      const youtube = ['YouTube Premium 6 Tháng (Ổn Định Cao)', 'youtube-premium-continuous-6-months', 320000, 6, 'STREAMING'];
+      const retained = insert.run(...youtube).lastInsertRowid;
+      const duplicate = insert.run(...youtube).lastInsertRowid;
+      database.exec('CREATE TABLE historical_orders (product_id INTEGER REFERENCES product_catalog(id), amount INTEGER)');
+      database.prepare('INSERT INTO historical_orders VALUES (?, 680000)').run(oldIds[0]);
       seedProductCatalog(database);
-      const claude = database.prepare("SELECT * FROM product_catalog WHERE product_key = 'claude-pro-1-month'").get();
-      database.prepare("UPDATE product_catalog SET name = 'Claude Pro 1 Tháng (Full BH)', price = 530000, warranty_policy = 'Full 1 tháng', activation_method = NULL WHERE id = ?").run(claude.id);
-      database.exec("CREATE TABLE order_snapshot (product_id INTEGER, product_name TEXT, total_amount INTEGER, warranty TEXT)");
-      database.prepare('INSERT INTO order_snapshot VALUES (?, ?, ?, ?)').run(claude.id, 'Claude Pro 1 Tháng (Full BH)', 530000, 'Full 1 tháng');
-      const snapshot = database.prepare('SELECT * FROM order_snapshot').get();
-      const keys = ['chatgpt-plus-upi-account-1-month-12-hour-warranty', 'claude-pro-x5-own-account-1-month-7-day-warranty'];
-      for (const key of keys) database.prepare('DELETE FROM product_catalog WHERE product_key = ?').run(key);
-      const beforeCount = database.prepare('SELECT COUNT(*) AS n FROM product_catalog').get().n;
       seedProductCatalog(database);
-      seedProductCatalog(database);
-      expect(database.prepare('SELECT COUNT(*) AS n FROM product_catalog').get().n).toBe(beforeCount + 2);
-      expect(database.prepare("SELECT id, price, activation_method FROM product_catalog WHERE product_key = 'claude-pro-1-month'").get())
-        .toEqual({ id: claude.id, price: 520000, activation_method: 'OWN_ACCOUNT' });
-      expect(database.prepare('SELECT * FROM order_snapshot').get()).toEqual(snapshot);
-    } finally { database.close(); }
-  });
-
-  it('publishes exact limited warranty and refund terms in Vietnamese and English without a blanket full warranty', () => {
-    const products = getActiveProducts(GUILD_ID);
-    for (const guildId of [GUILD_ID, '1070676180103086132']) {
-      const components = buildPriceBoardPayloads(guildId, {}, products).flatMap(collectComponents);
-      const blocks = components.filter(c => c.type === 10 && c.content.startsWith('### '));
-      const x5 = blocks.find(c => c.content.includes('Claude Pro x5') && /Chính Chủ|Personal Account/.test(c.content));
-      const upi = blocks.find(c => c.content.includes('UPI Pay'));
-      const pro = blocks.find(c => c.content.includes('Claude Pro') && /Trừ Khóa Acc|Locked Accounts Excluded/.test(c.content));
-      expect(x5.content).toContain('2.000.000');
-      expect(x5.content).toContain('700.000');
-      expect(x5.content).toContain('1.300.000');
-      expect(x5.content).toContain('100 USD');
-      expect(x5.content).toMatch(/Bảo hành 7 ngày|7 days of warranty/);
-      expect(upi.content).toMatch(/Bảo hành 12 giờ|12 hours of warranty/);
-      expect(pro.content).toMatch(/tài khoản bị khóa|locked accounts are excluded/);
-      for (const block of [x5, upi, pro]) expect(block.content).not.toMatch(/Full trong suốt thời gian sử dụng|Full coverage for the entire service period/);
-      const options = components.filter(c => c.type === 3).flatMap(c => c.options);
-      for (const key of ['chatgpt-plus-upi-account-1-month-12-hour-warranty', 'claude-pro-x5-own-account-1-month-7-day-warranty']) {
-        const product = products.find(p => p.product_key === key);
-        expect(options.filter(option => option.value === String(product.id))).toHaveLength(1);
-      }
+      const find = database.prepare('SELECT price, is_active FROM product_catalog WHERE id = ?');
+      oldIds.forEach((id, i) => expect(find.get(id)).toEqual({ price: oldProducts[i][2], is_active: 0 }));
+      expect(find.get(retained)).toEqual({ price: 250000, is_active: 1 });
+      expect(find.get(duplicate)).toEqual({ price: 320000, is_active: 0 });
+      expect(database.prepare('SELECT * FROM historical_orders').get()).toEqual({ product_id: oldIds[0], amount: 680000 });
+      expect(database.pragma('foreign_key_check')).toEqual([]);
+    } finally {
+      database.close();
     }
-  });
-
-  it('publishes all ten requested prices with the confirmed one-month terms', () => {
-    const products = getActiveProducts(GUILD_ID);
-    for (const [key, price] of REQUESTED_PRICES) {
-      const product = products.find((row) => row.product_key === key);
-      expect(product, key).toMatchObject({ price, duration_months: 1, is_active: 1, service_type: 'AI' });
-      expect(product.quota_value, `${key} must not invent provider quotas`).toBeNull();
-      expect(product.activation_method).toBe(key.includes('own-account') || key.includes('direct-payment') ? 'OWN_ACCOUNT' : 'ACCOUNT');
-    }
-    expect(products.filter((row) => /chat\s*gpt/i.test(row.name))).toHaveLength(12);
-    expect(products.find((row) => row.product_key === 'claude-pro-1-month')?.price).toBe(520000);
-  });
-
-  it('separates package-only, full, absent and two-day warranty scopes', () => {
-    const products = new Map(getActiveProducts(GUILD_ID).map((row) => [row.product_key, row]));
-    for (const key of ['chatgpt-plus-own-account-1-month-package-warranty', 'chatgpt-pro-100-own-account-1-month-package-warranty']) {
-      expect(products.get(key)?.warranty_policy).toContain('không bảo hành tài khoản');
-      expect(products.get(key)?.warranty_policy).not.toContain('Full');
-    }
-    for (const key of ['chatgpt-pro-100-account-1-month-full-warranty', 'claude-pro-x5-account-1-month-full-warranty']) {
-      expect(products.get(key)?.warranty_policy).toContain('Full 1 tháng');
-    }
-    for (const key of ['chatgpt-pro-100-account-1-month-no-warranty', 'claude-pro-x5-account-1-month-no-warranty']) {
-      expect(products.get(key)?.warranty_policy).toContain('Không bảo hành');
-    }
-    for (const key of ['chatgpt-pro-200-own-account-1-month', 'chatgpt-pro-500-own-account-1-month']) {
-      expect(products.get(key)?.warranty_policy).not.toMatch(/Full|BHF/);
-      expect(products.get(key)?.warranty_policy).toContain('Xác nhận');
-    }
-    const shortWarranty = products.get('chatgpt-account-1-month-2-day-warranty');
-    expect(shortWarranty?.warranty_policy).toContain('Bảo hành 2 ngày');
-    expect(shortWarranty?.description).toContain('không cam kết tài khoản duy trì đủ tháng');
-    expect(shortWarranty?.description).toContain('tùy cách sử dụng');
-    expect(shortWarranty?.name).not.toMatch(/Plus|Pro/);
   });
 
   it('migrates the prior full Plus tier in place and preserves historical orders on repeated boots', () => {
@@ -251,7 +192,7 @@ describe('October 2026 AI catalog additions', () => {
       seedProductCatalog(database);
       const fullKey = 'chatgpt-plus-direct-payment-1-month-full-warranty';
       const original = database.prepare('SELECT * FROM product_catalog WHERE product_key = ?').get(fullKey);
-      database.prepare("UPDATE product_catalog SET price = 530000, image_url = 'https://example.com/preserved.webp', virtual_purchase_count = 17 WHERE id = ?").run(original.id);
+      database.prepare("UPDATE product_catalog SET price = 500000, image_url = 'https://example.com/preserved.webp', virtual_purchase_count = 17 WHERE id = ?").run(original.id);
       const addedKeys = [...REQUESTED_PRICES.keys()].filter((key) => key !== fullKey);
       for (const key of addedKeys) database.prepare('DELETE FROM product_catalog WHERE product_key = ?').run(key);
       database.exec(`CREATE TABLE historical_orders (id INTEGER PRIMARY KEY, product_id INTEGER NOT NULL REFERENCES product_catalog(id), product_name TEXT NOT NULL, total_amount INTEGER NOT NULL, warranty TEXT NOT NULL)`);
@@ -265,7 +206,7 @@ describe('October 2026 AI catalog additions', () => {
       expect(database.prepare('SELECT id, product_key, price, is_active FROM product_catalog ORDER BY id').all()).toEqual(firstPass);
       expect(database.prepare('SELECT * FROM historical_orders').get()).toEqual(oldOrder);
       expect(database.prepare('SELECT id, price, image_url, virtual_purchase_count FROM product_catalog WHERE product_key = ?').get(fullKey)).toEqual({
-        id: original.id, price: 500000, image_url: 'https://example.com/preserved.webp', virtual_purchase_count: 17,
+        id: original.id, price: 530000, image_url: 'https://example.com/preserved.webp', virtual_purchase_count: 17,
       });
       for (const product of previousProducts.filter((row) => row.product_key !== fullKey)) {
         expect(database.prepare('SELECT id, product_key, price, is_active FROM product_catalog WHERE id = ?').get(product.id)).toEqual(product);
@@ -286,18 +227,16 @@ describe('October 2026 AI catalog additions', () => {
     const panels = payloads.flatMap(collectComponents);
     const text = panels.filter((component) => component.type === 10).map((component) => component.content).join('\n');
     expect(text).toContain(PRICE_BOARD_VERSION);
-    expect(text).toContain('ChatGPT Plus, Pro & Business');
+    expect(text).toContain('ChatGPT Plus & Pro');
     const options = panels.filter((component) => component.type === 3).flatMap((component) => component.options);
     for (const key of REQUESTED_PRICES.keys()) {
       const product = products.find((row) => row.product_key === key);
       expect(text).toContain(product.name);
       expect(options.filter((option) => option.value === String(product.id))).toHaveLength(1);
     }
-    const shortWarrantyBlock = panels.find((component) => component.type === 10 && component.content.startsWith('### ') && component.content.includes('ChatGPT 1 Tháng (Cấp Tài Khoản · BH 2 Ngày)'));
-    expect(shortWarrantyBlock.content).toContain('**Thời hạn:** `1 tháng`');
-    expect(shortWarrantyBlock.content).toContain('Bảo hành 2 ngày');
+    expect(text).not.toMatch(/UPI Pay|Claude Pro x5|API Codex\/Claude|Spotify Premium 3 Tháng/);
     const groups = groupPriceProducts(products);
-    expect(payloads.length).toBeGreaterThan(groups.length + 1);
+    expect(payloads.length).toBeGreaterThanOrEqual(groups.length + 1);
     for (const payload of payloads) {
       const components = collectComponents(payload);
       expect(components.length).toBeLessThanOrEqual(38);
@@ -313,13 +252,10 @@ describe('October 2026 AI catalog additions', () => {
     const payloads = buildPriceBoardPayloads('1070676180103086132', {}, getActiveProducts(GUILD_ID));
     const components = payloads.flatMap(collectComponents);
     const text = components.filter((component) => component.type === 10).map((component) => component.content).join('\n');
-    expect(text).toContain('ChatGPT Plus, Pro & Business');
+    expect(text).toContain('ChatGPT Plus & Pro');
     expect(text).toContain('Subscription coverage for 1 month; the account is excluded');
-    expect(text).toContain('No warranty; a full month of account access is not guaranteed');
     expect(text).toContain('Confirm warranty coverage with the shop before buying');
-    const shortWarrantyBlock = components.find((component) => component.type === 10 && component.content.startsWith('### ') && component.content.includes('2 Days of Warranty'));
-    expect(shortWarrantyBlock.content).toContain('**Duration:** `1 month`');
-    expect(shortWarrantyBlock.content).toContain('2 days of warranty; nominal subscription period is 1 month');
+    expect(text).not.toMatch(/UPI Pay|Claude Pro x5|API Codex\/Claude/);
     for (const payload of payloads) {
       const panel = collectComponents(payload);
       expect(panel.reduce((sum, component) => sum + (component.content?.length || 0), 0)).toBeLessThanOrEqual(3800);
