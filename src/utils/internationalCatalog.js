@@ -2,14 +2,14 @@ import { config } from '../config.js';
 import { GEMINI_PRO_CDK_DESCRIPTION, GEMINI_PRO_CDK_DESCRIPTION_EN, GEMINI_PRO_CDK_WARRANTY, GEMINI_PRO_CDK_WARRANTY_EN } from '../config/geminiProCdk202611.js';
 
 const GROUP_COPY = Object.freeze({
-  nitro: ['Discord Nitro', 'Boost, login and trial packages currently available.'],
+  nitro: ['Discord Nitro', 'Login packages for 1 and 2 months, and a single 12-month activation on your own account.'],
   server_boost: ['Discord Server Boost', 'Level 2–3 upgrades with the exact duration shown for each package.'],
   decor_nitro: ['Discord Profile Decor · Nitro Accounts', 'Profile decorations for accounts that already have Nitro.'],
   decor_no_nitro: ['Discord Profile Decor · Non-Nitro Accounts', 'Packages designed for accounts without an active Nitro subscription.'],
   decor_gift: ['Discord Profile Decor · Gift & Combo', 'Delivered as a gift or combo without requesting your password.'],
-  chatgpt: ['ChatGPT Plus, Pro & Business', 'Compare personal-account and supplied-account plans. UPI Pay has 12 hours of warranty; subscription duration and warranty coverage are listed separately.'],
-  gemini: ['Gemini & Google One', 'The 6-month CDK plan covers successful activation only. The 12- and 18-month plans have separate warranty terms; check the selected package.'],
-  claude: ['Claude Pro & Codex/Claude API', 'Personal Claude Pro excludes locked accounts. The personal x5 plan has 7 days of warranty and separate refund terms. API packs end when credit is used up; x5 is the shop package name.'],
+  chatgpt: ['ChatGPT Plus & Pro', 'Four one-month subscriptions on your own account. Check the warranty terms for each plan.'],
+  gemini: ['Gemini & Google One', 'The 6-month CDK plan covers successful activation only. The 24-month Antigravity plan has 12 months of warranty.'],
+  claude: ['Claude Pro', 'One month on your own account, with one month of subscription warranty. Locked accounts are excluded.'],
   adobe: ['Adobe Creative Cloud', 'All Apps, trial duration and device limits are shown per package.'],
   creative_tools: ['CapCut Pro & Microsoft 365', 'Video, productivity and cloud storage tools.'],
   spotify: ['Spotify Premium', 'Ad-free high-quality music and offline playback for the selected duration.'],

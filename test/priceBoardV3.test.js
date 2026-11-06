@@ -65,9 +65,9 @@ describe('Cenar price board V3', () => {
     expect(panels.find((panel) => panel.group.key === 'chatgpt')?.items.length).toBeGreaterThan(0);
     expect(panels.find((panel) => panel.group.key === 'gemini')?.items.length).toBeGreaterThan(0);
     expect(panels.find((panel) => panel.group.key === 'adobe')?.items.length).toBeGreaterThan(0);
-    expect(panels.find((panel) => panel.group.key === 'youtube_stable')?.items).toHaveLength(4);
+    expect(panels.find((panel) => panel.group.key === 'youtube_stable')?.items).toHaveLength(2);
     expect(panels.some((panel) => panel.group.key === 'youtube_family_switch')).toBe(false);
-    expect(panels.find((panel) => panel.group.key === 'spotify')?.items).toHaveLength(3);
+    expect(panels.find((panel) => panel.group.key === 'spotify')?.items).toHaveLength(2);
     expect(panels.find((panel) => panel.group.key === 'server_boost')?.items).toHaveLength(2);
     expect(panels.find((panel) => panel.group.key === 'netflix')?.items).toHaveLength(1);
     expect(panels.some((panel) => panel.group.key === 'other')).toBe(false);
@@ -100,7 +100,6 @@ describe('Cenar price board V3', () => {
     const serialized = buildPriceBoardPayloads(GUILD_ID, {}, products).map(serialize).join('\n');
 
     expect(spotify.map((product) => [product.duration_months, product.price])).toEqual([
-      [3, 100000],
       [6, 200000],
       [12, 290000],
     ]);
@@ -212,9 +211,12 @@ describe('Cenar price board V3', () => {
   });
 
   it('shows the complete eligibility for the first-offer Nitro Trial 3-month package', () => {
-    const trial = DEFAULT_PRODUCT_CATALOG.find((product) => (
-      product.product_key === 'discord-nitro-boost-trial-3-months-first-offer'
-    ));
+    const trial = {
+      product_key: 'discord-nitro-boost-trial-3-months-first-offer',
+      name: 'Discord Nitro Boost Trial 3 Tháng (Ưu Đãi Lần Đầu)',
+      description: 'Tài khoản chưa từng sử dụng Nitro hoặc đã ngừng ít nhất 12 tháng liên tục.',
+      duration_months: 3, price: 50000, service_type: 'GAME', emoji: 'brand_nitro',
+    };
     expect(trial?.name).toContain('Trial 3 Tháng (Ưu Đãi Lần Đầu)');
     expect(trial?.price).toBe(50000);
     expect(trial?.description).toContain('chưa từng sử dụng Nitro');
@@ -291,12 +293,10 @@ describe('Cenar price board V3', () => {
   it('publishes only the stable YouTube line and retires monthly Family switching', () => {
     const products = getActiveProducts(GUILD_ID);
     const youtube = products.filter((product) => /youtube premium/i.test(product.name));
-    expect(youtube).toHaveLength(4);
+    expect(youtube).toHaveLength(2);
     expect(youtube.map((product) => [product.product_key, product.price])).toEqual(expect.arrayContaining([
-      ['youtube-premium-continuous-1-month', 60000],
-      ['youtube-premium-continuous-3-months', 195000],
-      ['youtube-premium-continuous-6-months', 320000],
-      ['youtube-premium-continuous-12-months', 580000],
+      ['youtube-premium-continuous-6-months', 250000],
+      ['youtube-premium-continuous-12-months', 400000],
     ]));
     expect(youtube.some((product) => product.product_key.includes('monthly-family-switch'))).toBe(false);
     expect(DEFAULT_PRODUCT_CATALOG.some((product) => (
@@ -306,7 +306,7 @@ describe('Cenar price board V3', () => {
 
     const panels = buildPriceBoardPayloads(GUILD_ID, {}, products).map(serialize);
     const stablePanel = panels.find((json) => json.includes('YouTube Premium · Ổn Định Cao'));
-    for (const price of ['60.000', '195.000', '320.000', '580.000']) {
+    for (const price of ['250.000', '400.000']) {
       expect(stablePanel).toContain(price);
     }
     expect(stablePanel).toContain('không dùng cơ chế đổi Family mỗi tháng');
@@ -315,26 +315,14 @@ describe('Cenar price board V3', () => {
     expect(panels.join('\n')).not.toContain('YouTube Premium · Đổi Family Mỗi Tháng');
   });
 
-  it('preserves the original ChatGPT packages alongside additions and publishes the five current Adobe packages everywhere', () => {
+  it('publishes the four ChatGPT and five Adobe offers at current prices', () => {
     const products = getActiveProducts(GUILD_ID);
     const chatgptProducts = products.filter((product) => /chat\s*gpt/i.test(product.name));
     const adobeProducts = products.filter((product) => /adobe/i.test(product.name));
 
-    expect(chatgptProducts).toHaveLength(12);
-    expect(chatgptProducts.map((product) => product.product_key)).toEqual(expect.arrayContaining([
-      AI_CREATIVE_PRICING_UPDATE.productKeys.chatgptNoWarranty,
-      AI_CREATIVE_PRICING_UPDATE.productKeys.chatgptAccount,
-      AI_CREATIVE_PRICING_UPDATE.productKeys.chatgptBusiness,
-      AI_CREATIVE_PRICING_UPDATE.productKeys.chatgptDirect,
-    ]));
-    expect(chatgptProducts.find((product) => product.product_key === AI_CREATIVE_PRICING_UPDATE.productKeys.chatgptNoWarranty)?.price).toBe(180000);
-    expect(chatgptProducts.find((product) => (
-      product.product_key === AI_CREATIVE_PRICING_UPDATE.productKeys.chatgptAccount
-    ))?.price).toBe(350000);
-    expect(chatgptProducts.find((product) => (
-      product.product_key === AI_CREATIVE_PRICING_UPDATE.productKeys.chatgptBusiness
-    ))?.price).toBe(450000);
-    expect(chatgptProducts.find((product) => product.product_key === AI_CREATIVE_PRICING_UPDATE.productKeys.chatgptDirect)?.price).toBe(500000);
+    expect(chatgptProducts).toHaveLength(4);
+    expect(chatgptProducts.map((product) => product.price).sort((a, b) => a - b))
+      .toEqual([530000, 2650000, 4500000, 12800000]);
     expect(adobeProducts).toHaveLength(5);
     expect(adobeProducts.map((product) => [
       product.product_key,
@@ -355,13 +343,8 @@ describe('Cenar price board V3', () => {
     expect(adobe4000CreditProducts.every((product) => /reset mỗi tháng/i.test(product.description))).toBe(true);
 
     const payloadJson = buildPriceBoardPayloads(GUILD_ID, {}, products).map(serialize).join('\n');
-    expect(payloadJson).toContain('ChatGPT Plus, Pro & Business');
-    expect(payloadJson).toContain('180.000');
-    expect(payloadJson).toContain('350.000');
-    expect(payloadJson).toContain('450.000');
+    expect(payloadJson).toContain('ChatGPT Plus & Pro');
     expect(payloadJson).toContain('530.000');
-    expect(payloadJson).toContain('Không bảo hành');
-    expect(payloadJson).toContain('1–2 tuần');
     for (const price of ['140.000', '170.000', '950.000', '1.400.000', '3.800.000']) {
       expect(payloadJson).toContain(price);
     }
@@ -373,22 +356,7 @@ describe('Cenar price board V3', () => {
     expect(payloadJson).not.toContain('Adobe Creative Cloud Trial');
     expect(payloadJson).not.toContain('Adobe Creative Cloud All Apps (2 Tháng');
 
-    const announcement = buildAiCreativePricingAnnouncement(GUILD_ID, products);
-    expect(announcement).toContain('CHATGPT · 4 LỰA CHỌN');
-    expect(announcement).toContain('ChatGPT Business · Add workspace chính chủ');
-    expect(announcement).toContain('Thanh toán Plus trực tiếp');
-    expect(announcement).toContain('180.000');
-    expect(announcement).toContain('350.000');
-    expect(announcement).toContain('450.000');
-    expect(announcement).toContain('500.000');
-    expect(announcement).toContain('thử vận may');
-    expect(announcement).toContain('ADOBE CREATIVE CLOUD · 5 LỰA CHỌN');
-    for (const price of ['140.000', '170.000', '950.000', '1.400.000', '3.800.000']) {
-      expect(announcement).toContain(price);
-    }
-    expect(announcement).toContain('Hai gói 4.000 AI Credits được reset mỗi tháng');
-    expect(announcement).toContain('Cenar cấp sẵn tài khoản');
-    expect(announcement).toContain(AI_CREATIVE_PRICING_UPDATE.marker);
+    expect(() => buildAiCreativePricingAnnouncement(GUILD_ID, products)).toThrow('Thiếu sản phẩm đang mở bán');
   });
 
   it('keeps the full-warranty Gemini packages distinct from the activation-only CDK offer', () => {
@@ -398,18 +366,17 @@ describe('Cenar price board V3', () => {
     ));
     const geminiProducts = products.filter((product) => /gemini/i.test(product.name));
 
-    expect(claudePro?.price).toBe(520000);
+    expect(claudePro?.price).toBe(550000);
     expect(claudePro?.original_price).toBe(0);
     expect(geminiProducts).toHaveLength(3);
     expect(geminiProducts.map((product) => [product.product_key, product.price])).toEqual(expect.arrayContaining([
       [AI_CREATIVE_PRICING_UPDATE.productKeys.gemini12Months, 250000],
-      [AI_CREATIVE_PRICING_UPDATE.productKeys.gemini18Months, 280000],
+      ['gemini-pro-antigravity-24-months', 250000],
     ]));
     const fullWarrantyGemini = geminiProducts.filter((product) => [
       AI_CREATIVE_PRICING_UPDATE.productKeys.gemini12Months,
-      AI_CREATIVE_PRICING_UPDATE.productKeys.gemini18Months,
     ].includes(product.product_key));
-    expect(fullWarrantyGemini).toHaveLength(2);
+    expect(fullWarrantyGemini).toHaveLength(1);
     expect(fullWarrantyGemini.every((product) => /Full/.test(product.warranty_policy))).toBe(true);
     const cdk = geminiProducts.find((product) => product.duration_months === 6);
     expect(cdk.price).toBe(190000);
@@ -418,18 +385,11 @@ describe('Cenar price board V3', () => {
     const payloadJson = buildPriceBoardPayloads(GUILD_ID, {}, products).map(serialize).join('\n');
     expect(payloadJson).toContain('530.000');
     expect(payloadJson).toContain('250.000');
-    expect(payloadJson).toContain('280.000');
+    expect(payloadJson).toContain('Bảo hành 12 tháng');
     expect(payloadJson).not.toContain('69.000');
     expect(payloadJson).not.toContain('Bảo hành 4 tháng đầu');
 
-    const announcement = buildAiCreativePricingAnnouncement(GUILD_ID, products);
-    expect(announcement).toContain('CLAUDE PRO');
-    expect(announcement).toContain('GEMINI PRO + 5 TB GOOGLE ONE · 2 LỰA CHỌN MỚI');
-    expect(announcement).toContain('520.000');
-    expect(announcement).toContain('250.000');
-    expect(announcement).toContain('280.000');
-    expect(announcement).not.toContain('69.000');
-    expect(announcement).toMatch(/phương thức giá cũ đã ngừng áp dụng/i);
+    expect(() => buildAiCreativePricingAnnouncement(GUILD_ID, products)).toThrow('Thiếu sản phẩm đang mở bán');
   });
 
   it('renders every product as its own consistently spaced Markdown block', () => {

@@ -124,7 +124,6 @@ export const STORE_ONE_CHANNEL_NAMES = Object.freeze({
   musicVoice: '🎹・Mua m',
   chillVoice: '🎷・Nem',
 
-  claudeApi: '🔮・claude-api',
   locketGold: '📿・locket-gold',
 
   staffLog: '📁・log-nhân-viên',
@@ -198,7 +197,6 @@ export const STORE_ONE_CHANNEL_DESIGN = Object.freeze({
   '1528767549972676658': STORE_ONE_CHANNEL_NAMES.publicVoice,
   '1535374962569781299': STORE_ONE_CHANNEL_NAMES.musicVoice,
   '1531203088222916740': STORE_ONE_CHANNEL_NAMES.chillVoice,
-  '1531297030767644925': STORE_ONE_CHANNEL_NAMES.claudeApi,
   '1531297033317777408': STORE_ONE_CHANNEL_NAMES.locketGold,
   '1514607029610877069': STORE_ONE_CHANNEL_NAMES.staffLog,
   '1514607032760799313': STORE_ONE_CHANNEL_NAMES.reminder,

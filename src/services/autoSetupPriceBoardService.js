@@ -12,7 +12,7 @@ import {
 } from 'discord.js';
 import { getActiveProducts } from './productCatalogService.js';
 import { getGuildConfig } from './guildConfigService.js';
-import { createEmojiResolver } from '../utils/emojiHelper.js';
+import { createEmojiResolver, normalizeButtonEmoji } from '../utils/emojiHelper.js';
 import { formatCurrency } from '../utils/formatters.js';
 import { fmt, subtext } from '../utils/embedHelpers.js';
 import { config } from '../config.js';
@@ -23,15 +23,30 @@ import { API_CREDIT_DURATION, isApiCreditProduct } from '../config/apiCreditCata
 import { AUTOMATIC_PRICE_BOARD_PAUSED } from '../config/marketingAutomationPolicy.js';
 import { GEMINI_PRO_CDK_KEY } from '../config/geminiProCdk202611.js';
 
-export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.24';
+export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.25';
 const publicationStates = new Map();
 export function getPriceBoardPublicationState(guildId) {
   return publicationStates.get(String(guildId)) || { status: 'not_started' };
 }
 const PRIMARY_GUILD_ID = '1282637033340403754';
 const PRIMARY_PRICE_CHANNEL_ID = '1514606995842273280';
+const PRICE_BOARD_EMOJI = {
+  icon_store: 'cenar_board26_mint',
+  icon_cart: 'cenar_board26_cart',
+  brand_nitro: 'cenar_board26_nitro',
+  brand_chatgpt: 'cenar_board26_gpt',
+  brand_gemini: 'cenar_board26_gemini',
+  brand_claude: 'cenar_board26_claude',
+  brand_netflix: 'cenar_board26_netflix',
+};
+
+function createPriceBoardEmojiResolver(guildId) {
+  const resolve = createEmojiResolver(guildId);
+  const emoji = (slot) => resolve(PRICE_BOARD_EMOJI[slot] || slot) || resolve(slot);
+  emoji.component = (slot) => normalizeButtonEmoji(emoji(slot), { guildId });
+  return emoji;
+}
 const OFFICIAL_SPOTIFY_PRODUCT_KEYS = new Set([
-  'spotify-premium-3-months',
   'spotify-premium-6-months',
   'spotify-premium-12-months',
 ]);
@@ -39,7 +54,7 @@ const OFFICIAL_SPOTIFY_PRODUCT_KEYS = new Set([
 export const PRICE_GROUPS = [
   {
     key: 'nitro', titleSlot: 'brand_nitro', title: 'Discord Nitro', accent: 0x5865F2,
-    note: 'Nitro Boost, gói login và gói trial đang mở bán.',
+    note: 'Nitro Boost Login 1 và 2 tháng, cùng gói chính chủ kích hoạt trọn 12 tháng.',
     match: (p) => p.service_type === 'GAME' && /nitro/i.test(p.name),
   },
   {
@@ -63,18 +78,18 @@ export const PRICE_GROUPS = [
     match: (p) => p.service_type === 'decor' && /gift/i.test(p.name),
   },
   {
-    key: 'chatgpt', titleSlot: 'brand_chatgpt', title: 'ChatGPT Plus, Pro & Business', accent: 0x10A37F,
-    note: 'Chọn đúng hình thức chính chủ hoặc cấp tài khoản. UPI Pay bảo hành 12 giờ; các gói khác có điều kiện bảo hành riêng. Thời hạn gói và thời hạn bảo hành được ghi riêng.',
+    key: 'chatgpt', titleSlot: 'brand_chatgpt', title: 'ChatGPT Plus & Pro', accent: 0x10A37F,
+    note: 'Bốn gói 1 tháng trên tài khoản chính chủ. Xem phạm vi bảo hành của từng gói.',
     match: (p) => p.service_type === 'AI' && /chat\s*gpt/i.test(p.name),
   },
   {
     key: 'gemini', titleSlot: 'brand_gemini', title: 'Gemini & Google One', accent: 0x4285F4,
-    note: 'CDK 6 tháng chỉ bảo hành kích hoạt thành công. Gói 12 và 18 tháng có điều kiện bảo hành riêng; xem đúng gói trước khi mua.',
+    note: 'CDK 6 tháng chỉ bảo hành kích hoạt thành công. Gói Antigravity 24 tháng bảo hành 12 tháng. Xem điều kiện từng gói.',
     match: (p) => p.service_type === 'AI' && /gemini/i.test(p.name),
   },
   {
-    key: 'claude', titleSlot: 'brand_claude', title: 'Claude Pro & Claude API', accent: 0xD97757,
-    note: 'Claude Pro chính chủ không bảo hành khi tài khoản bị khóa. Gói x5 chính chủ bảo hành 7 ngày và có điều kiện hoàn tiền riêng. API Codex/Claude dùng đến hết credit; x5 là tên gói của shop.',
+    key: 'claude', titleSlot: 'brand_claude', title: 'Claude Pro', accent: 0xD97757,
+    note: 'Gói chính chủ 1 tháng. Bảo hành gói trong 1 tháng, trừ trường hợp tài khoản bị khóa.',
     match: (p) => p.service_type === 'AI' && /claude/i.test(p.name),
   },
   {
@@ -194,20 +209,13 @@ function setButtonEmoji(button, E, slot) {
 }
 
 const FULL_WARRANTY_PRODUCT_KEYS = new Set([
-  'chatgpt-plus-account-1-month-full-warranty',
-  'chatgpt-business-workspace-1-month-full-warranty',
   'chatgpt-plus-direct-payment-1-month-full-warranty',
-  'chatgpt-pro-100-account-1-month-full-warranty',
-  'claude-pro-x5-account-1-month-full-warranty',
   'gemini-pro-google-one-5tb-12-months-full-warranty',
-  'gemini-pro-google-one-5tb-18-months-full-warranty',
   'adobe-creative-cloud-1-month',
   'adobe-creative-cloud-1-month-1000-ai-credits',
   'adobe-creative-cloud-12-months-no-ai-credits',
   'adobe-creative-cloud-4-months-4000-ai-credits',
   'adobe-creative-cloud-12-months-4000-ai-credits',
-  'youtube-premium-continuous-1-month',
-  'youtube-premium-continuous-3-months',
   'youtube-premium-continuous-6-months',
   'youtube-premium-continuous-12-months',
 ]);
@@ -217,7 +225,7 @@ function hasFullDurationWarranty(product) {
 }
 
 export function groupPriceProducts(products) {
-  // Bảng giá công khai chỉ nhận ba gói Spotify chính thức. Dữ liệu Spotify
+  // Bảng giá công khai chỉ nhận hai gói Spotify chính thức. Dữ liệu Spotify
   // thủ công cũ được giữ trong DB phục vụ lịch sử đơn hàng nhưng không xuất bản.
   const visibleProducts = products.filter((product) => {
     const key = String(product.product_key || '');
@@ -243,7 +251,7 @@ export function getPriceBoardProducts(products) {
 }
 
 export function buildPricePortalPayload(guildId, guildConfig, panels = []) {
-  const E = createEmojiResolver(guildId);
+  const E = createPriceBoardEmojiResolver(guildId);
   const international = isInternationalGuild(guildId);
   const container = new ContainerBuilder().setAccentColor(config.accentColorPrimary);
   container.addTextDisplayComponents(
@@ -309,7 +317,7 @@ export function buildPricePortalPayload(guildId, guildConfig, panels = []) {
 }
 
 export function buildPriceGroupPayload(guildId, group, products) {
-  const E = createEmojiResolver(guildId);
+  const E = createPriceBoardEmojiResolver(guildId);
   const international = isInternationalGuild(guildId);
   if (international) group = translateCatalogGroup(group);
   const container = new ContainerBuilder().setAccentColor(group.accent || config.accentColorPrimary);
@@ -358,7 +366,7 @@ export function buildPriceGroupPayload(guildId, group, products) {
         ] : warrantyPolicy ? [
           `> ${E('warranty_shield')} **${international ? 'Warranty' : 'Bảo hành'}:** ${international ? translateProductWarranty(warrantyPolicy) : warrantyPolicy}`,
         ] : []),
-        ...(['chatgpt-plus-upi-account-1-month-12-hour-warranty', 'claude-pro-x5-own-account-1-month-7-day-warranty', GEMINI_PRO_CDK_KEY].includes(product.product_key) ? [
+        ...([GEMINI_PRO_CDK_KEY, 'gemini-pro-antigravity-24-months'].includes(product.product_key) ? [
           `> ${E('status_info')} **${international ? 'Terms' : 'Điều kiện'}:** ${international ? translateProductDescription(product.description) : product.description}`,
         ] : []),
       ].join('\n'))

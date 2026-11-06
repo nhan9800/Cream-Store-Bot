@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 // Production stays paused; marketingPause.test.js covers its real default.
 vi.mock('../src/config/marketingAutomationPolicy.js', () => ({ AUTOMATIC_MARKETING_PAUSED: false }));
 import { Collection, MessageFlags, MessagePayload, PermissionFlagsBits } from 'discord.js';
+import { PROMOTION_CATALOG_ROWS } from '../src/campaigns/promotionCatalog202610.js';
 import { rebuildPromotionCampaign } from '../src/services/promotionRebuildService.js';
 import {
   DAILY_COLOR_SALE,
@@ -92,51 +93,20 @@ function campaignClient(messages = []) {
 }
 
 describe('Cenar daily Flash Sale story campaign', () => {
-  it('restores old sale rows alongside new AI tiers and the full catalog', () => {
+  it('renders current catalog prices and retains unaffected sale offers', () => {
     const sections = buildDailyColorSaleSections({ E: emojiResolver, customEmojis, now: new Date('2026-10-02T02:00:00Z') });
     const text = Object.values(sections).join('\n');
-    expect(text).toContain('**99.000đ**');
-    expect(text).toContain('Mail bất tử');
-    expect(text).toContain('**680.000đ**');
-    expect(text).toContain('Trial Boost');
-    expect(text).toContain('**65.000đ**');
-    expect(text).toContain('MoMo Pay');
-    expect(text).toContain('**130.000đ**');
-    expect(text).toContain('**390.000đ**');
-    expect(text).toContain('**79.000đ/slot**');
-    expect(text).toContain('**150.000đ/slot**');
-    expect(text).toContain('**250.000đ**');
-    expect(text).toContain('60 phút');
-    expect(text).toContain('Adobe');
-    expect(text).toContain('Locket');
-    expect(text).toContain('GearUP');
-    expect(text).toContain('Bot Custom');
-    expect(text).toContain('API Codex/Claude');
-    expect(text).toContain('**155.000đ**');
-    expect(text).toContain('Không giới hạn ngày');
-    expect(text).not.toContain('ngày đầu');
-    expect(text).toContain('**Từ 500.000đ**');
-    expect(text).toContain('Giá khuyến mãi shop đã công bố');
-    expect(text).toContain('Giá niêm yết hiện hành');
-    expect(text).not.toMatch(/\dđgói|\dđslot|\/slot\/slot|giảm \d+%|chỉ còn \d+|hết hôm nay/i);
-  });
-
-  it('keeps all ten new AI prices, account forms and separate warranty terms', () => {
-    const text = Object.values(buildDailyColorSaleSections({ E: emojiResolver, customEmojis })).join('\n');
-    for (const price of ['485.000đ', '500.000đ', '2.650.000đ', '4.800.000đ', '12.700.000đ', '1.900.000đ', '2.300.000đ', '120.000đ', '2.500.000đ']) {
+    for (const price of ['115.000đ', '140.000đ', '880.000đ', '250.000đ', '400.000đ', '530.000đ', '2.650.000đ', '4.500.000đ', '12.800.000đ', '550.000đ']) {
       expect(text).toContain(`**${price}**`);
     }
-    expect(text).toContain('Không BH acc');
-    expect(text).toContain('BH 2 ngày');
-    expect(text).toContain('Claude Pro x5');
-    expect(text).toContain('Xác nhận phạm vi bảo hành');
-    expect(text).toContain('Loại Plus/Pro chưa được xác nhận');
-    expect(text).toContain('không cam kết');
+    for (const label of ['Adobe', 'Locket', 'GearUP', 'Bot Custom', 'Xác nhận phạm vi bảo hành']) expect(text).toContain(label);
+    expect(text).not.toMatch(/API Codex\/Claude|MoMo Pay|Claude Pro x5|Trial Boost|18 tháng/i);
+    expect(text).not.toMatch(/\dđgói|\dđslot|\/slot\/slot|giảm \d+%|chỉ còn \d+|hết hôm nay/i);
   });
 
   it('renders complete rows across bounded dynamic board parts and uses the new artwork', () => {
     const payloads = buildDailyColorSaleMessages({ E: emojiResolver, customEmojis, now: new Date('2026-10-02T02:00:00Z') });
-    expect(payloads.length).toBeGreaterThanOrEqual(8);
+    expect(payloads.length).toBeGreaterThanOrEqual(5);
     for (const [index, payload] of payloads.entries()) {
       const json = payload.components.map((component) => component.toJSON());
       function flatten(components) { return components.flatMap((item) => [item, ...flatten(item.components || [])]); }
@@ -161,7 +131,7 @@ describe('Cenar daily Flash Sale story campaign', () => {
     const state = campaignClient();
     const guild = [...state.client.guilds.cache.values()][0];
     const prepared = await preparePromotionRebuild(guild, { now: new Date('2026-10-02T02:00:00Z') });
-    expect(prepared.saleData.rows).toHaveLength(91);
+    expect(prepared.saleData.rows).toHaveLength(PROMOTION_CATALOG_ROWS.length);
     expect(prepared.emojiNames).toEqual(DAILY_COLOR_SALE_EMOJIS.map((asset) => asset.name));
     expect(prepared.boardPayloads[0].files).toHaveLength(1);
     for (const payload of [...prepared.boardPayloads, prepared.buildDailyPayload('1531111111111111111')]) {

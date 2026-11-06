@@ -82,13 +82,12 @@ describe('read-only public catalog publication evidence', () => {
       });
       expect(catalogResponse.status).toBe(200);
       const catalog = (await catalogResponse.json()).data;
-      expect(catalog.find((product) => product.product_key === 'chatgpt-plus-own-account-1-month-package-warranty'))
-        .toMatchObject({ price: 485000, activation_method: 'OWN_ACCOUNT',
+      expect(catalog.find((product) => product.product_key === 'chatgpt-pro-100-own-account-1-month-package-warranty'))
+        .toMatchObject({ price: 2650000, activation_method: 'OWN_ACCOUNT',
           warranty_policy: 'Bảo hành gói 1 tháng · không bảo hành tài khoản', stock_count: 0 });
-      expect(catalog.find((product) => product.product_key === 'claude-pro-x5-account-1-month-full-warranty'))
-        .toMatchObject({ price: 2500000, activation_method: 'ACCOUNT', warranty_policy: 'Full 1 tháng (BHF)', stock_count: 1 });
-      expect(catalog.find((product) => product.product_key === 'claude-pro-x5-account-1-month-no-warranty'))
-        .toMatchObject({ stock_count: 0 });
+      expect(catalog.find((product) => product.product_key === 'claude-pro-1-month'))
+        .toMatchObject({ price: 550000, activation_method: 'OWN_ACCOUNT', stock_count: 0 });
+      expect(catalog.some((product) => product.product_key.startsWith('claude-pro-x5-'))).toBe(false);
       expect(JSON.stringify(catalog)).not.toContain('private-');
     } finally { await new Promise((resolve) => server.close(resolve)); }
   });

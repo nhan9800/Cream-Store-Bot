@@ -55,7 +55,14 @@ function fulfillment(orderCode) {
   return db.prepare('SELECT status, last_error FROM order_fulfillments WHERE order_code = ?').get(orderCode);
 }
 
-beforeAll(() => initDatabase());
+beforeAll(() => {
+  initDatabase();
+  const insert = db.prepare(`INSERT INTO product_catalog
+    (guild_id, product_key, name, price, duration_months, service_type, activation_method, is_active)
+    VALUES ('WEB', ?, ?, ?, 1, 'AI', 'ACCOUNT', 0)`);
+  insert.run(KBH_KEY, 'ChatGPT Pro 100 1 Tháng (Cấp Tài Khoản · Không BH)', 1900000);
+  insert.run(BHF_KEY, 'ChatGPT Pro 100 1 Tháng (Cấp Tài Khoản · Full BH)', 2300000);
+});
 beforeEach(() => {
   db.exec(`DELETE FROM order_delivery_items; DELETE FROM order_fulfillments;
     DELETE FROM payment_events; DELETE FROM account_stock; DELETE FROM orders;`);

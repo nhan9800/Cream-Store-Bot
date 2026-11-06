@@ -24,13 +24,9 @@ export const CTV_OFFICIAL_PANEL_MARKER = 'CENAR-CTV-PRICE-BOARD-V3';
 export const CTV_OFFICIAL_PRICE_CATALOG = Object.freeze({
   nitro: Object.freeze([
     { label: 'Nitro Boost Login 1 Tháng', price: 85_000 },
-    { label: 'Nitro Boost Login 2 Tháng', price: 95_000 },
-    { label: 'Nitro Boost Login 4 Tháng', price: 185_000 },
-    { label: 'Nitro Boost Login 6 Tháng', price: 365_000 },
-    { label: 'Nitro Boost Login 8 Tháng', price: 460_000 },
-    { label: 'Nitro Boost Login 12 Tháng · Gia hạn 2 tháng/lần (Auto)', price: 580_000 },
-    { label: 'Nitro Boost Login 12 Tháng · Nâng cấp một lần', price: 795_000 },
-    { label: 'Nitro Trial 3 Tháng · Ưu đãi lần đầu', price: 45_000 },
+    { label: 'Nitro Boost Login 2 Tháng · Giữ mail 7 ngày', price: 95_000 },
+    { label: 'Nitro Boost Login 2 Tháng · Mail bao sống', price: 95_000 },
+    { label: 'Nitro Boost Login 12 Tháng · Chính chủ, kích hoạt một lần', price: 795_000 },
   ]),
   boost: Object.freeze([
     { label: 'Boost Server 1 Tháng', price: 90_000 },
@@ -38,16 +34,13 @@ export const CTV_OFFICIAL_PRICE_CATALOG = Object.freeze({
   ]),
   gemini: Object.freeze([
     { label: 'Gemini Pro + 5 TB Google One 12 Tháng · Full bảo hành', price: 250_000 },
-    { label: 'Gemini Pro + 5 TB Google One 18 Tháng · Full bảo hành', price: 280_000 },
+    { label: 'Gemini Pro Antigravity 24 Tháng · Bảo hành 12 tháng', price: 250_000 },
   ]),
   youtubeStable: Object.freeze([
-    { label: 'YouTube Premium 1 Tháng · Ổn định cao', price: 55_000 },
-    { label: 'YouTube Premium 3 Tháng · Ổn định cao', price: 180_000 },
-    { label: 'YouTube Premium 6 Tháng · Ổn định cao', price: 300_000 },
-    { label: 'YouTube Premium 12 Tháng · Ổn định cao', price: 520_000 },
+    { label: 'YouTube Premium 6 Tháng · Ổn định cao', price: 250_000 },
+    { label: 'YouTube Premium 12 Tháng · Ổn định cao', price: 400_000 },
   ]),
   spotify: Object.freeze([
-    { label: 'Spotify Premium Add Family 3 Tháng', price: 80_000 },
     { label: 'Spotify Premium Add Family 6 Tháng', price: 160_000 },
     { label: 'Spotify Premium Add Family 12 Tháng', price: 260_000 },
   ]),
@@ -86,26 +79,20 @@ function buildOfficialCtvPricePanel(guildId) {
     `# ${E('ctv_crystal')} CENAR CTV · BẢNG GIÁ NỘI BỘ`,
     `${E('cenar_verified')} Bảng giá chính thức dành riêng cho CTV đã được duyệt tại **Cenar Store**.`,
     `${E('cenar_price')} Đây là **một số sản phẩm nổi bật**; shop còn nhiều mặt hàng khác, CTV cần giá cứ hỏi trực tiếp shop.`,
-    `-# ${CTV_OFFICIAL_PANEL_MARKER} · Cập nhật ngày 03/09/2026`,
+    `-# ${CTV_OFFICIAL_PANEL_MARKER} · Cập nhật ngày 06/11/2026`,
   ].join('\n')));
 
   const nitro = new ContainerBuilder().setAccentColor(accentFor('primary'));
   nitro.addTextDisplayComponents(new TextDisplayBuilder().setContent(`## ${E('brand_nitro')} Nitro Boost Login`));
   nitro.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
   nitro.addTextDisplayComponents(new TextDisplayBuilder().setContent(officialPriceLines(CTV_OFFICIAL_PRICE_CATALOG.nitro)));
-  nitro.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
-  nitro.addTextDisplayComponents(new TextDisplayBuilder().setContent([
-    `${E('status_warn')} **Điều kiện Nitro Trial 3 Tháng:**`,
-    `${E('cenar_verified')} Tài khoản được tạo trên **1 tháng** và **chưa từng sử dụng Nitro**;`,
-    `${E('cenar_verified')} Hoặc tài khoản đã từng dùng Nitro nhưng **không sử dụng lại trong ít nhất 12 tháng liên tục**.`,
-  ].join('\n')));
 
   const services = new ContainerBuilder().setAccentColor(accentFor('success'));
   services.addTextDisplayComponents(new TextDisplayBuilder().setContent([
     `## ${E('brand_boost')} Boost Server`,
     officialPriceLines(CTV_OFFICIAL_PRICE_CATALOG.boost),
     '',
-    `## ${E('brand_gemini')} Gemini Pro + 5 TB Google One`,
+    `## ${E('brand_gemini')} Gemini Pro`,
     officialPriceLines(CTV_OFFICIAL_PRICE_CATALOG.gemini),
   ].join('\n')));
 

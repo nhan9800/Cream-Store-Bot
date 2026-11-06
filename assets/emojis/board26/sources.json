@@ -1,0 +1,86 @@
+[
+  {
+    "name": "cenar_board26_cart",
+    "filename": "cenar_board26_cart.png",
+    "source": "https://emoji.gg/emoji/9851-shoppingcart",
+    "url": "https://cdn3.emoji.gg/emojis/9851-shoppingcart.png",
+    "license": "Emoji.gg Basic License",
+    "width": 512,
+    "height": 512,
+    "frames": 1,
+    "bytes": 128990,
+    "sha256": "7335a587c9e7b50d451b93c756de0e47bcb1f49337b49228a6319417cd8d610b"
+  },
+  {
+    "name": "cenar_board26_mint",
+    "filename": "cenar_board26_mint.gif",
+    "source": "https://emoji.gg/emoji/780000-mintsparklies",
+    "url": "https://cdn3.emoji.gg/emojis/780000-mintsparklies.gif",
+    "license": "Emoji.gg Basic License",
+    "width": 500,
+    "height": 500,
+    "frames": 50,
+    "bytes": 79862,
+    "sha256": "935cccd7bd29c6afba3957495f8c4a62fbafeaf21ea44136fd7ce49a9631c1a0"
+  },
+  {
+    "name": "cenar_board26_nitro",
+    "filename": "cenar_board26_nitro.gif",
+    "source": "https://emoji.gg/emoji/335420-nitro-boost-new-animated",
+    "url": "https://cdn3.emoji.gg/emojis/335420-nitro-boost-new-animated.gif",
+    "license": "Emoji.gg Basic License",
+    "width": 256,
+    "height": 256,
+    "frames": 2,
+    "bytes": 13163,
+    "sha256": "b1eb5bff9263dbb0881584434355f91d396ba050c1d412de88745a32452d13e7"
+  },
+  {
+    "name": "cenar_board26_gpt",
+    "filename": "cenar_board26_gpt.png",
+    "source": "https://emoji.gg/emoji/15945-newchatgptlogo",
+    "url": "https://cdn3.emoji.gg/emojis/15945-newchatgptlogo.png",
+    "license": "Emoji.gg Basic License",
+    "width": 1512,
+    "height": 1512,
+    "frames": 1,
+    "bytes": 81655,
+    "sha256": "647dd391d70ded0b4b2eb2e09f791f016dde6fc7a9caef3b89c6c84fe915b42a"
+  },
+  {
+    "name": "cenar_board26_netflix",
+    "filename": "cenar_board26_netflix.png",
+    "source": "https://emoji.gg/emoji/23383-netflix-logo",
+    "url": "https://cdn3.emoji.gg/emojis/23383-netflix-logo.png",
+    "license": "Emoji.gg Basic License",
+    "width": 1512,
+    "height": 1512,
+    "frames": 1,
+    "bytes": 69882,
+    "sha256": "4fc8d6b09e0b764ee23690d2bb6bf00283c2f303ff77f0f256b59a96c43dbdd5"
+  },
+  {
+    "name": "cenar_board26_claude",
+    "filename": "cenar_board26_claude.png",
+    "source": "https://emoji.gg/emoji/778366-claudeicon",
+    "url": "https://cdn3.emoji.gg/emojis/778366-claudeicon.png",
+    "license": "Emoji.gg Basic License",
+    "width": 960,
+    "height": 956,
+    "frames": 1,
+    "bytes": 56539,
+    "sha256": "c7432c4ee33557c67b638681aed8fb963f8161ae016bf2b3d9c7d3512992e4da"
+  },
+  {
+    "name": "cenar_board26_gemini",
+    "filename": "cenar_board26_gemini.png",
+    "source": "https://emoji.gg/emoji/411360-gemini-ai",
+    "url": "https://cdn3.emoji.gg/emojis/411360-gemini-ai.png",
+    "license": "Emoji.gg Basic License",
+    "width": 640,
+    "height": 640,
+    "frames": 1,
+    "bytes": 19333,
+    "sha256": "10c628f55d22a9725b9f9fccce7cf062b9fb68da5f7736e87010e0594d7ba6db"
+  }
+]
