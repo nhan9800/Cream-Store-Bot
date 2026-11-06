@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import { GEMINI_PRO_CDK_PRODUCT } from '../config/geminiProCdk202611.js';
 import { BOOST_PRODUCT_KEY, BOOST_PRICE_SETTING, parseBoostPrice } from '../config/boostCatalog.js';
+import { CAPCUT_PRODUCT_KEYS, capcutPriceSetting, parseCapcutPrice } from '../config/capcutCatalog.js';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { fileURLToPath } from 'node:url';
@@ -2053,7 +2054,7 @@ export const DEFAULT_PRODUCT_CATALOG = [
     { product_key: 'discord-bot-rescue-ui', name: 'Fix Bot Lỗi & Nâng Cấp Giao Diện', description: 'Kiểm tra nguyên nhân bot lỗi, sửa luồng hoạt động và làm mới giao diện thân thiện bằng Components V2 cùng emoji custom. Giá 500.000đ là mức khởi điểm; báo giá cuối dựa trên tình trạng mã nguồn.', price: 500000, duration_months: 1, service_type: 'SERVICE', emoji: 'warranty_shield', original_price: 0, is_featured: 1, virtual_purchase_count: 0 },
     
     // Locket Gold
-    { name: 'Locket Gold — 1 năm', description: 'Nâng cấp trải nghiệm Locket với nhiều tính năng cá nhân hóa, kết nối bạn bè và chia sẻ khoảnh khắc tiện lợi hơn.', price: 150000, duration_months: 12, service_type: 'premium', emoji: 'locket_gold', original_price: 0, base_price: 150000, activation_method: 'USERNAME', username_required: 1, login_required: 0 }
+    { name: 'Locket Gold — 1 năm', description: 'Nâng cấp trải nghiệm Locket với nhiều tính năng cá nhân hóa, kết nối bạn bè và chia sẻ khoảnh khắc tiện lợi hơn.', price: 80000, duration_months: 12, service_type: 'premium', emoji: 'locket_gold', original_price: 0, base_price: 80000, activation_method: 'USERNAME', username_required: 1, login_required: 0 }
 ];
 
 export function seedProductCatalog(dbInstance) {
@@ -2216,15 +2217,22 @@ export function seedProductCatalog(dbInstance) {
   `);
 
   let currentSort = 100;
-  const boostPriceOverride = dbInstance.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'system_settings'").get()
+  const hasPriceSettings = dbInstance.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'system_settings'").get();
+  const boostPriceOverride = hasPriceSettings
     ? dbInstance.prepare('SELECT value FROM system_settings WHERE key = ?').get(BOOST_PRICE_SETTING)?.value
     : null;
+  const capcutPriceOverrides = new Map(CAPCUT_PRODUCT_KEYS.map(key => [key,
+    hasPriceSettings
+      ? dbInstance.prepare('SELECT value FROM system_settings WHERE key = ?').get(capcutPriceSetting(key))?.value
+      : null]));
   
   dbInstance.transaction(() => {
     for (const p of products) {
       const key = productKey(p);
       const override = key === BOOST_PRODUCT_KEY ? boostPriceOverride : null;
-      const price = override == null ? p.price : parseBoostPrice(override);
+      const capcutOverride = capcutPriceOverrides.get(key);
+      const price = capcutOverride != null ? parseCapcutPrice(capcutOverride)
+        : override == null ? p.price : parseBoostPrice(override);
       const names = [p.name, ...(p.aliases || [])];
       const existing = findByKeyStmt.get(key)
         || names.map((name) => findByNameStmt.get(name, p.duration_months)).find(Boolean);
