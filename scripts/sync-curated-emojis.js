@@ -17,10 +17,13 @@ const assets = [
   ['cenar_verify_shield', 'cenar_verify_shield.png'],
   ['cenar_recovery_backup', 'cenar_recovery_backup.gif'],
   ['cenar_recovery_restore', 'cenar_recovery_restore.png'],
-  ['cenar_price_chatgpt', 'cenar_price_chatgpt.png'],
-  ['cenar_price_nitro', 'cenar_price_nitro.png'],
-  ['cenar_price_netflix', 'cenar_price_netflix.png'],
-  ['cenar_price_cart', 'cenar_price_cart.gif'],
+  ['cenar_board26_cart', 'board26/cenar_board26_cart.png'],
+  ['cenar_board26_mint', 'board26/cenar_board26_mint.gif'],
+  ['cenar_board26_nitro', 'board26/cenar_board26_nitro.gif'],
+  ['cenar_board26_gpt', 'board26/cenar_board26_gpt.png'],
+  ['cenar_board26_netflix', 'board26/cenar_board26_netflix.png'],
+  ['cenar_board26_claude', 'board26/cenar_board26_claude.png'],
+  ['cenar_board26_gemini', 'board26/cenar_board26_gemini.png'],
 ];
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });

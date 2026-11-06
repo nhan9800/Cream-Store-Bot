@@ -12,7 +12,7 @@ import {
 } from 'discord.js';
 import { getActiveProducts } from './productCatalogService.js';
 import { getGuildConfig } from './guildConfigService.js';
-import { createEmojiResolver } from '../utils/emojiHelper.js';
+import { createEmojiResolver, normalizeButtonEmoji } from '../utils/emojiHelper.js';
 import { formatCurrency } from '../utils/formatters.js';
 import { fmt, subtext } from '../utils/embedHelpers.js';
 import { config } from '../config.js';
@@ -30,6 +30,22 @@ export function getPriceBoardPublicationState(guildId) {
 }
 const PRIMARY_GUILD_ID = '1282637033340403754';
 const PRIMARY_PRICE_CHANNEL_ID = '1514606995842273280';
+const PRICE_BOARD_EMOJI = {
+  icon_store: 'cenar_board26_mint',
+  icon_cart: 'cenar_board26_cart',
+  brand_nitro: 'cenar_board26_nitro',
+  brand_chatgpt: 'cenar_board26_gpt',
+  brand_gemini: 'cenar_board26_gemini',
+  brand_claude: 'cenar_board26_claude',
+  brand_netflix: 'cenar_board26_netflix',
+};
+
+function createPriceBoardEmojiResolver(guildId) {
+  const resolve = createEmojiResolver(guildId);
+  const emoji = (slot) => resolve(PRICE_BOARD_EMOJI[slot] || slot) || resolve(slot);
+  emoji.component = (slot) => normalizeButtonEmoji(emoji(slot), { guildId });
+  return emoji;
+}
 const OFFICIAL_SPOTIFY_PRODUCT_KEYS = new Set([
   'spotify-premium-6-months',
   'spotify-premium-12-months',
@@ -235,7 +251,7 @@ export function getPriceBoardProducts(products) {
 }
 
 export function buildPricePortalPayload(guildId, guildConfig, panels = []) {
-  const E = createEmojiResolver(guildId);
+  const E = createPriceBoardEmojiResolver(guildId);
   const international = isInternationalGuild(guildId);
   const container = new ContainerBuilder().setAccentColor(config.accentColorPrimary);
   container.addTextDisplayComponents(
@@ -301,7 +317,7 @@ export function buildPricePortalPayload(guildId, guildConfig, panels = []) {
 }
 
 export function buildPriceGroupPayload(guildId, group, products) {
-  const E = createEmojiResolver(guildId);
+  const E = createPriceBoardEmojiResolver(guildId);
   const international = isInternationalGuild(guildId);
   if (international) group = translateCatalogGroup(group);
   const container = new ContainerBuilder().setAccentColor(group.accent || config.accentColorPrimary);
