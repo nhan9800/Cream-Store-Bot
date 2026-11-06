@@ -4,7 +4,7 @@ import { MessageFlags, PermissionFlagsBits } from 'discord.js';
 // legacy clearPromotionChannel(), which also restores commerce prices.
 export const PROMOTION_REBUILD_TARGET = Object.freeze({
   guildId: '1282637033340403754',
-  channelId: '1515008584549797979',
+  channelId: '1568256315669618708',
 });
 
 const SILENT_MENTIONS = Object.freeze({ parse: [], users: [], roles: [], repliedUser: false });
@@ -170,8 +170,8 @@ async function resolveTarget(client) {
   if (String(guild?.id) !== PROMOTION_REBUILD_TARGET.guildId) throw fail('PROMOTION_GUILD_MISMATCH');
   const channel = await guild.channels.fetch(PROMOTION_REBUILD_TARGET.channelId);
   if (String(channel?.id) !== PROMOTION_REBUILD_TARGET.channelId
-    || !channel.isTextBased?.() || channel.isThread?.() || !channel.messages
-    || !/khuyến-mãi|khuyen-mai/i.test(channel.name || '')) throw fail('PROMOTION_CHANNEL_MISMATCH');
+    || !channel.isTextBased?.() || !channel.messages
+    || !/khuyến[- ]mãi|khuyen[- ]mai/i.test(channel.name || '')) throw fail('PROMOTION_CHANNEL_MISMATCH');
   const member = guild.members.me || await guild.members.fetchMe();
   if (!channel.permissionsFor(member)?.has([
     PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages,

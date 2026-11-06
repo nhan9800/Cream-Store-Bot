@@ -1,4 +1,5 @@
 import { db, nowIso } from '../database/db.js';
+import { serviceChannelTarget, serviceMessageTarget } from '../config/storeServiceForum202611.js';
 
 function upsertGuildConfigStmt() {
   return db.prepare(`
@@ -194,7 +195,13 @@ export function upsertGuildConfig(payload) {
 }
 
 export function getGuildConfig(guildId) {
-  return getGuildConfigStmt().get(guildId) ?? null;
+  const row = getGuildConfigStmt().get(guildId) ?? null;
+  if (!row) return null;
+  for (const key of Object.keys(row)) {
+    if (key.endsWith('_channel_id')) row[key] = serviceChannelTarget(guildId, row[key]);
+    else if (key.endsWith('_message_id')) row[key] = serviceMessageTarget(guildId, row[key]);
+  }
+  return row;
 }
 
 export function hasBankConfig(guildConfig) {

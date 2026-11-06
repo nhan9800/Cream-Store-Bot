@@ -7,6 +7,7 @@ import { MEMBER_ROLES, MEMBERSHIP_REVISION } from '../config/membershipProgram.j
 import { roleColorsFor } from '../config/roleColors.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { STORE_ONE_GUILD_ID } from '../utils/locale.js';
+import { STORE_SERVICE_FORUM } from '../config/storeServiceForum202611.js';
 
 const states = new WeakMap();
 const assetPath = key => fileURLToPath(new URL(`../../assets/roles/member26_${key}.png`, import.meta.url));
@@ -110,7 +111,14 @@ export async function refreshMembershipPresentation(client,{guildId=config.guild
       }
       if(result.skipped) throw new Error('MEMBERSHIP_ROLE_NOT_EDITABLE');
       const channels=await guild.channels.fetch();
-      let channel=channels.get(ledger.channelId) || channels.find(item=>item.type===ChannelType.GuildText && /^(?:đặc-quyền-thành-viên|dac-quyen|đặc-quyền-role)$/i.test(item.name));
+      const forumTarget = guild.id === STORE_SERVICE_FORUM.guildId;
+      let channel=forumTarget
+        ? await guild.channels.fetch(STORE_SERVICE_FORUM.posts.membership)
+        : channels.get(ledger.channelId) || channels.find(item=>item.type===ChannelType.GuildText && /^(?:đặc-quyền-thành-viên|dac-quyen|đặc-quyền-role)$/i.test(item.name));
+      if (forumTarget) {
+        ledger.channelId = channel.id;
+        ledger.messageId = channel.id;
+      }
       if(!channel) {
         const price=channels.get('1514606995842273280');
         channel=await guild.channels.create({name:'đặc-quyền-thành-viên',type:ChannelType.GuildText,parent:price?.parentId || undefined,

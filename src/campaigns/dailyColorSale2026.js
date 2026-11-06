@@ -26,7 +26,7 @@ const campaignBannerPath = path.resolve(__dirname, '../../assets/campaigns', cam
 
 export const DAILY_COLOR_SALE = Object.freeze({
   guildId: '1282637033340403754',
-  promotionChannelId: '1515008584549797979',
+  promotionChannelId: '1568256315669618708',
   supportChannelId: '1514607020098191393',
   priceChannelId: '1514606995842273280',
   memberRoleId: '1282638730812854345',
@@ -482,8 +482,8 @@ async function publishDailyColorSaleInternal(client, { tagEveryone = false, tagM
     || await client.guilds.fetch(DAILY_COLOR_SALE.guildId);
   await Promise.all([guild.channels.fetch(), guild.roles.fetch()]);
   const channel = await guild.channels.fetch(DAILY_COLOR_SALE.promotionChannelId);
-  if (!channel?.isTextBased?.() || channel.isThread?.() || !channel.messages
-    || !/khuyến-mãi|khuyen-mai/i.test(channel.name)) {
+  if (!channel?.isTextBased?.() || !channel.messages
+    || !/khuyến[- ]mãi|khuyen[- ]mai/i.test(channel.name)) {
     throw new Error('Kênh khuyến mãi không hợp lệ hoặc không thể gửi tin nhắn.');
   }
   if (tagMember && !guild.roles.cache.has(DAILY_COLOR_SALE.memberRoleId)) {
@@ -670,8 +670,8 @@ async function publishDailyFlashSaleInternal(client, {
     || await client.guilds.fetch(DAILY_COLOR_SALE.guildId);
   await Promise.all([guild.channels.fetch(), guild.roles.fetch()]);
   const channel = await guild.channels.fetch(DAILY_COLOR_SALE.promotionChannelId);
-  if (!channel?.isTextBased?.() || channel.isThread?.() || !channel.messages
-    || !/khuyến-mãi|khuyen-mai/i.test(channel.name)) {
+  if (!channel?.isTextBased?.() || !channel.messages
+    || !/khuyến[- ]mãi|khuyen[- ]mai/i.test(channel.name)) {
     throw new Error('Kênh khuyến mãi không hợp lệ hoặc không thể gửi bài Flash Sale hằng ngày.');
   }
   const member = guild.members.me || await guild.members.fetchMe();

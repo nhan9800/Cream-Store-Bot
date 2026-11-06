@@ -96,7 +96,7 @@ describe('Cenar daily Flash Sale story campaign', () => {
   it('renders current catalog prices and retains unaffected sale offers', () => {
     const sections = buildDailyColorSaleSections({ E: emojiResolver, customEmojis, now: new Date('2026-10-02T02:00:00Z') });
     const text = Object.values(sections).join('\n');
-    for (const price of ['115.000đ', '140.000đ', '880.000đ', '250.000đ', '400.000đ', '530.000đ', '2.650.000đ', '4.500.000đ', '12.800.000đ', '550.000đ']) {
+    for (const price of ['115.000đ', '140.000đ', '850.000đ', '250.000đ', '400.000đ', '530.000đ', '2.650.000đ', '4.500.000đ', '12.800.000đ', '550.000đ']) {
       expect(text).toContain(`**${price}**`);
     }
     for (const label of ['Adobe', 'Locket', 'GearUP', 'Bot Custom', 'Xác nhận phạm vi bảo hành']) expect(text).toContain(label);

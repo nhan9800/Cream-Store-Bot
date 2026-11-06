@@ -65,6 +65,16 @@ describe('Current promotion catalog data', () => {
     }
   });
 
+  it('lists the direct twelve-month Nitro at the owner-confirmed 850k with immediate stock', () => {
+    const seed = seedProducts().find((product) => product.product_key === 'discord-nitro-boost-1-nam-login');
+    expect(seed).toMatchObject({ price: 850000, ctv_price: 795000, duration_months: 12, activation_method: 'OWN_ACCOUNT' });
+    expect(seed.description).toContain('Có hàng liền');
+    expect(seed.description).toContain('không gia hạn tự động');
+    const published = byKey('discord-nitro-boost-1-nam-login');
+    expect(published.price).toBe(850000);
+    expect(published.notes.join(' ')).toContain('Có hàng liền');
+  });
+
   it('makes every Decor level and monthly-reset Adobe tier visible', () => {
     expect(PROMOTION_CATALOG_ROWS.filter((row) => row.key.startsWith('decor-'))).toHaveLength(23);
     for (const key of ['adobe-creative-cloud-4-months-4000-ai-credits', 'adobe-creative-cloud-12-months-4000-ai-credits']) {

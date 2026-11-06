@@ -154,7 +154,7 @@ describe('Cenar price board V3', () => {
     expect(allJson).toContain('https://cenarstore.xyz');
     expect(allJson).toContain('Cenar Studio');
     expect(allJson).not.toContain('PUBG Trend Sale');
-    expect(allJson).toContain('<#1515008584549797979>');
+    expect(allJson).toContain('<#1568256315669618708>');
 
     for (const payload of payloads.slice(1)) {
       const row = payload.components.at(-1).toJSON();
