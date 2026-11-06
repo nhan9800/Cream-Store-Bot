@@ -167,16 +167,15 @@ export async function handleTicketCreate(interaction, ticketType = 'ORDER', gmai
     let ticket;
 
     if (normalizedType === 'APPEAL') {
-      // Tìm kênh hướng dẫn youtube để làm parent channel cho thread
-      let parentChannel = await interaction.guild.channels.fetch('1524057155022491679').catch(() => null);
-      if (!parentChannel) {
-        parentChannel = interaction.guild.channels.cache.find(
-          c => (c.name === 'hướng-dẫn-youtube' || c.name === 'huong-dan-youtube') && c.type === ChannelType.GuildText
-        );
+      // Forums contain public guide posts; private appeals belong under the
+      // existing support text channel, which supports private threads.
+      let parentChannel = guildConfig?.ticket_panel_channel_id
+        ? await interaction.guild.channels.fetch(guildConfig.ticket_panel_channel_id).catch(() => null)
+        : null;
+      if (parentChannel?.type !== ChannelType.GuildText) {
+        parentChannel = interaction.channel?.type === ChannelType.GuildText ? interaction.channel : null;
       }
-      if (!parentChannel) {
-        parentChannel = interaction.channel; // fallback
-      }
+      if (!parentChannel) throw new Error('Vui lòng mở yêu cầu riêng từ kênh hỗ-trợ.');
 
       ticket = createTicket({
         guildId: interaction.guildId,

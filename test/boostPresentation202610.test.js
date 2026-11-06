@@ -125,11 +125,11 @@ describe('Boost readable Components V2 presentation', () => {
     } finally { spy.mockRestore(); }
   });
 
-  it('keeps the official public panel prices and its four existing entry actions', () => {
+  it('keeps the official public panel prices and existing entry actions plus the Admin price control', () => {
     const panel = buildBoostPanelPayload(order.guild_id);
-    expect(text(panel)).toContain('120.000đ');
+    expect(text(panel)).not.toContain('120.000đ');
     expect(text(panel)).toContain('320.000đ');
-    expect(ids(panel)).toEqual(['boost:buy', 'boost:key', 'boost:check', 'boost:warranty']);
+    expect(ids(panel)).toEqual(['boost:buy', 'boost:key', 'boost:check', 'boost:warranty', 'boost:price:edit']);
     expect(buildBoostOrderDetailEmbed(order).toJSON().fields.find((field) => /Thanh toán/.test(field.name)).value).toContain('Chờ thanh toán');
   });
 

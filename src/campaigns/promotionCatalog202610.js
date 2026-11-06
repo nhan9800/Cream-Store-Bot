@@ -74,10 +74,6 @@ export const PROMOTION_CATALOG_ROWS = Object.freeze([
   catalog('connection', 'discord-nitro-boost-2-months-login-keep-mail-7-days', 'Nitro Boost Login · Giữ mail 7 ngày', 115000, { duration: '2 tháng' }),
   catalog('connection', 'discord-nitro-boost-2-months-login-mail-guaranteed', 'Nitro Boost Login · Mail bao sống', 140000, { duration: '2 tháng' }),
   catalog('connection', 'discord-nitro-boost-1-nam-login', 'Nitro Boost Login · Chính chủ', 880000, { duration: '12 tháng', notes: ['Kích hoạt trọn 12 tháng một lần.'] }),
-  sale('connection', 'sale-server-boost-1-month', 'Boost Server · Nâng cấp máy chủ', 110000, {
-    catalogKey: 'discord-server-boost-14-1-month', duration: '1 tháng',
-    notes: ['Shop xác nhận số lượng Boosts và máy chủ áp dụng tại ticket.'],
-  }),
   sale('connection', 'sale-server-boost-3-months', 'Boost Server · Nâng cấp máy chủ', 280000, {
     catalogKey: 'discord-server-boost-14-3-months', duration: '3 tháng',
     notes: ['Shop xác nhận số lượng Boosts và máy chủ áp dụng tại ticket.'],

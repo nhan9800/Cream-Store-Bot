@@ -14,7 +14,7 @@ import { createEmojiResolver, withButtonEmoji } from '../utils/emojiHelper.js';
 
 export const YOUTUBE_JOIN_FAM_GUIDE = Object.freeze({
   guildId: '1282637033340403754',
-  announcementChannelId: '1524057155022491679',
+  announcementChannelId: '1568246979128074280',
   marker: 'CENAR-YOUTUBE-JOIN-FAM-GUIDE-2026-08',
   screenshotAttachmentName: 'youtube-join-fam-address.png',
   paymentSettingsUrl: 'https://payments.google.com/gp/w/u/0/home/settings',

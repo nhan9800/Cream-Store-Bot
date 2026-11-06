@@ -11,7 +11,7 @@ describe('Store 1 channel aesthetic', () => {
     const names = Object.values(STORE_ONE_CHANNEL_DESIGN);
     const emojis = names.map(channelLeadingEmoji);
 
-    expect(names).toHaveLength(65);
+    expect(names).toHaveLength(61);
     expect(emojis.every(Boolean)).toBe(true);
     expect(new Set(emojis).size).toBe(emojis.length);
     for (const emoji of emojis) {

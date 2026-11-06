@@ -18,7 +18,8 @@ import {
 import { createEmojiResolver, withButtonEmoji } from '../utils/emojiHelper.js';
 import { getGuildConfig } from '../services/guildConfigService.js';
 import { getCustomerFlag } from '../services/blacklistService.js';
-import { isStaffMember } from '../utils/permissions.js';
+import { isStaffMember, isManager } from '../utils/permissions.js';
+import { getBoostPrice, updateBoostPrice } from '../services/boostPricingService.js';
 import { safeReply } from './shared.js';
 
 export async function handleBoostBuy(interaction) {
@@ -49,7 +50,7 @@ export async function handleBoostBuyPackage(interaction, packageKey) {
   }
 
   const modal = new ModalBuilder()
-    .setCustomId(`boost:buy:modal:${pkg.key}`)
+    .setCustomId(`boost:buy:modal:${pkg.key}:${pkg.price}`)
     .setTitle(`Đặt Boost Server ${pkg.months} Tháng`);
 
   modal.addComponents(
@@ -85,9 +86,11 @@ export async function handleBoostBuyPackage(interaction, packageKey) {
   await interaction.showModal(modal).catch(console.error);
 }
 
-export async function handleBoostBuyModal(interaction, packageKey = null) {
+export async function handleBoostBuyModal(interaction, packageKey = null, expectedPrice = null) {
   const E = createEmojiResolver(interaction.guildId);
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const flag = getCustomerFlag(interaction.guildId, interaction.user.id);
+  if (Number(flag.is_blacklisted) === 1) return interaction.editReply(`${E('status_cross')} Bạn đang bị chặn.`);
 
   const serverLink = interaction.fields.getTextInputValue('server_link')?.trim();
   const serverId   = interaction.fields.getTextInputValue('server_id')?.trim();
@@ -126,6 +129,10 @@ export async function handleBoostBuyModal(interaction, packageKey = null) {
     return;
   }
 
+  if (expectedPrice == null || Number(expectedPrice) !== pkg.price) {
+    return interaction.editReply(`${E('status_info')} Giá hiện tại là **${pkg.price.toLocaleString('vi-VN')}đ**. Vui lòng bấm mua lại để xác nhận giá trước khi tạo đơn.`);
+  }
+
   const order = createBoostOrder({
     guildId: interaction.guildId,
     customerId: interaction.user.id,
@@ -134,6 +141,7 @@ export async function handleBoostBuyModal(interaction, packageKey = null) {
     serverId,
     serverName,
     packageKey: pkg.key,
+    expectedPrice,
   });
 
   let paymentPayload;
@@ -227,6 +235,45 @@ async function resolveBoostStaff(interaction, guildId = interaction.guildId) {
   const guild = interaction.guild ?? interaction.client.guilds.cache.get(guildId);
   const member = guild ? await guild.members.fetch(interaction.user.id).catch(() => null) : null;
   return isStaffMember(member, getGuildConfig(guildId));
+}
+
+async function resolveBoostManager(interaction) {
+  if (!interaction.guild || !interaction.guildId) return false;
+  const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
+  return isManager(member, getGuildConfig(interaction.guildId));
+}
+
+export async function handleBoostPriceEdit(interaction) {
+  if (!await resolveBoostManager(interaction)) {
+    return safeReply(interaction, { content: 'Chỉ Admin/quản lý máy chủ được sửa giá Boost.', ephemeral: true });
+  }
+  const price = getBoostPrice();
+  const modal = new ModalBuilder().setCustomId(`boost:price:modal:${price}`).setTitle('Sửa giá Boost Server · 3 tháng');
+  modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder()
+    .setCustomId('price').setLabel('Giá mới (VND) · Ví dụ: 320000')
+    .setValue(String(price)).setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(8)));
+  return interaction.showModal(modal);
+}
+
+export async function handleBoostPriceModal(interaction, expectedPrice) {
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  // Re-fetch roles on submit: an old modal never grants persistent authority.
+  if (!await resolveBoostManager(interaction)) return interaction.editReply('Chỉ Admin/quản lý máy chủ được sửa giá Boost.');
+  let price;
+  try {
+    price = updateBoostPrice(interaction.fields.getTextInputValue('price'), expectedPrice, interaction.user.id);
+  } catch (error) {
+    return interaction.editReply(error.message);
+  }
+  const { refreshBoostPanel } = await import('../services/boostServerService.js');
+  const { refreshBoostPriceForumPost } = await import('../services/autoSetupPriceBoardService.js');
+  const results = await Promise.allSettled([
+    refreshBoostPanel(interaction.client, interaction.guildId),
+    refreshBoostPriceForumPost(interaction.guild),
+  ]);
+  const pending = results.some(result => result.status === 'rejected'
+    || (result.value?.status && result.value.status !== 'updated'));
+  return interaction.editReply(`Đã lưu giá Boost 3 tháng: **${price.toLocaleString('vi-VN')}đ** cho các đơn mới trên bot và website. Đơn đã tạo giữ nguyên số tiền.${pending ? '\nMột panel Discord chưa làm mới được; dùng /boost-server refresh và /product sync để thử lại.' : '\nĐã làm mới panel Boost và bài bảng giá.'}`);
 }
 
 export async function handleBoostKeyButton(interaction) {

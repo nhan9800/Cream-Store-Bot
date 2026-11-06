@@ -22,8 +22,10 @@ import { getNitroTrialEligibility, isNitroTrialProduct } from '../constants/nitr
 import { API_CREDIT_DURATION, isApiCreditProduct } from '../config/apiCreditCatalog.js';
 import { AUTOMATIC_PRICE_BOARD_PAUSED } from '../config/marketingAutomationPolicy.js';
 import { GEMINI_PRO_CDK_KEY } from '../config/geminiProCdk202611.js';
+import { STORE_FORUMS } from '../config/storeForums202611.js';
+import { listForumPosts, upsertForumPost } from './forumPublicationService.js';
 
-export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.25';
+export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.26';
 const publicationStates = new Map();
 export function getPriceBoardPublicationState(guildId) {
   return publicationStates.get(String(guildId)) || { status: 'not_started' };
@@ -59,7 +61,7 @@ export const PRICE_GROUPS = [
   },
   {
     key: 'server_boost', titleSlot: 'brand_boost', title: 'Discord Server Boost', accent: 0xEB459E,
-    note: 'Catalog hiện có hai gói 14 Boosts: 1 tháng 120.000đ hoặc 3 tháng 320.000đ. Cenar Studio có giá ticket 3 tháng 280.000đ khi staff xác nhận.',
+    note: '14 Boosts trong 3 tháng, loại có liền. Giá hiện tại ở từng gói bên dưới; Admin có thể cập nhật theo thị trường. Bảo hành theo điều kiện của gói.',
     match: (p) => p.service_type === 'GAME' && /server boost/i.test(p.name),
   },
   {
@@ -269,7 +271,7 @@ export function buildPricePortalPayload(guildId, guildConfig, panels = []) {
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent([
       international ? `### ${E('icon_search')} QUICK GUIDE` : `### ${E('icon_search')} HƯỚNG DẪN NHANH`,
-      international ? `${E('icon_search')} **Compare:** Review the package name, current price and duration.` : `${E('icon_search')} **Tra cứu:** Cuộn đến đúng danh mục, sau đó đối chiếu **tên gói · giá bán · thời hạn**.`,
+      international ? `${E('icon_search')} **Compare:** Review the package name, current price and duration.` : `${E('icon_search')} **Tra cứu:** Mở bài theo nhóm sản phẩm hoặc lọc bằng thẻ; đối chiếu **tên gói · giá bán · thời hạn**.`,
       international ? `${E('icon_cart')} **Order:** Select the exact package from the menu below its category.` : `${E('icon_cart')} **Đặt hàng:** Chọn đúng sản phẩm trong menu ngay bên dưới danh mục.`,
       international ? `${E('warranty_shield')} **Warranty:** Coverage follows the product description and selected duration.` : `${E('warranty_shield')} **Bảo hành:** Áp dụng theo mô tả sản phẩm và thời gian sử dụng của từng gói.`,
     ].join('\n'))
@@ -304,7 +306,8 @@ export function buildPricePortalPayload(guildId, guildConfig, panels = []) {
     ));
   }
   row.addComponents(setButtonEmoji(
-    new ButtonBuilder().setCustomId('price_list:admin:edit_portal').setLabel(international ? 'Manage Catalog' : 'Quản Lý Bảng Giá').setStyle(ButtonStyle.Secondary),
+    new ButtonBuilder().setCustomId(guildId === STORE_FORUMS.guildId ? 'boost:price:edit' : 'price_list:admin:edit_portal')
+      .setLabel(international ? 'Manage Catalog' : 'Sửa Giá Boost · Admin').setStyle(ButtonStyle.Secondary),
     E,
     'icon_settings',
   ));
@@ -449,11 +452,15 @@ function buildPriceGroupPages(guildId, group, products) {
 }
 
 async function findPriceChannel(guild, guildConfig) {
+  if (guild.id === STORE_FORUMS.guildId) {
+    const forum = await guild.channels.fetch(STORE_FORUMS.priceForumId).catch(() => null);
+    if (forum?.type === ChannelType.GuildForum) return forum;
+  }
   const configuredId = guildConfig?.price_list_channel_id
     || (guild.id === PRIMARY_GUILD_ID ? PRIMARY_PRICE_CHANNEL_ID : null);
   if (configuredId) {
     const configured = await guild.channels.fetch(configuredId).catch(() => null);
-    if (configured?.isTextBased() && !configured.isThread()) return configured;
+    if (configured?.type === ChannelType.GuildForum || (configured?.isTextBased() && !configured.isThread())) return configured;
   }
 
   const sendableChannels = [...guild.channels.cache.values()].filter((channel) => (
@@ -508,6 +515,19 @@ export async function publishPriceBoard(guild, { force = false, keepMessageIds =
   const channel = await findPriceChannel(guild, guildConfig);
   if (!channel) return { guildId: guild.id, status: 'channel_not_found' };
 
+  if (channel.type === ChannelType.GuildForum) {
+    const posts = await listForumPosts(channel);
+    const products = getPriceBoardProducts(getActiveProducts(guild.id));
+    const entries = buildPriceForumEntries(guild.id, guildConfig, products);
+    const sentMessageIds = [];
+    for (const entry of entries) {
+      const post = await upsertForumPost(channel, posts, entry);
+      sentMessageIds.push(post.id);
+    }
+    return { guildId: guild.id, channelId: channel.id, status: 'published',
+      sent: sentMessageIds.length, sentMessageIds, products: products.length, version: PRICE_BOARD_VERSION };
+  }
+
   if (!force && await hasCurrentPriceBoard(channel, guild.client.user.id)) {
     return { guildId: guild.id, channelId: channel.id, status: 'current' };
   }
@@ -544,6 +564,29 @@ export async function publishPriceBoard(guild, { force = false, keepMessageIds =
     products: products.length,
     version: PRICE_BOARD_VERSION,
   };
+}
+
+export function buildPriceForumEntries(guildId, guildConfig, products = getActiveProducts(guildId)) {
+  const groups = groupPriceProducts(getPriceBoardProducts(products));
+  return [
+    { key: 'portal', name: '00 · Bắt đầu mua hàng', tagName: 'Bắt đầu', payloads: [buildPricePortalPayload(guildId, guildConfig, groups)] },
+    ...groups.map(({ group, items }, index) => ({
+      key: group.key, name: `${String(index + 1).padStart(2, '0')} · ${group.title}`,
+      tagName: /nitro|boost|decor/.test(group.key) ? 'Discord'
+        : /chatgpt|gemini|claude|adobe|creative/.test(group.key) ? 'AI & công việc'
+          : /youtube|spotify|netflix|streaming/.test(group.key) ? 'Giải trí' : 'Dịch vụ',
+      payloads: buildPriceGroupPages(guildId, group, items),
+    })),
+  ];
+}
+
+export async function refreshBoostPriceForumPost(guild) {
+  const channel = await findPriceChannel(guild, getGuildConfig(guild.id));
+  if (channel?.type !== ChannelType.GuildForum) throw new Error('Không tìm thấy forum bảng giá.');
+  const posts = await listForumPosts(channel);
+  const entry = buildPriceForumEntries(guild.id, getGuildConfig(guild.id)).find(item => item.key === 'server_boost');
+  if (!entry) throw new Error('Không tìm thấy gói Boost trong catalog.');
+  return upsertForumPost(channel, posts, entry);
 }
 
 export async function autoSetupPriceBoard(client, { force = false, targetGuildId = null, automatic = true } = {}) {

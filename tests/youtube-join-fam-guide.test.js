@@ -14,7 +14,7 @@ const E = (slot) => {
 describe('YouTube join-fam guide announcement', () => {
   it('targets the guide channel in the Cenar Store guild', () => {
     expect(YOUTUBE_JOIN_FAM_GUIDE.guildId).toBe('1282637033340403754');
-    expect(YOUTUBE_JOIN_FAM_GUIDE.announcementChannelId).toBe('1524057155022491679');
+    expect(YOUTUBE_JOIN_FAM_GUIDE.announcementChannelId).toBe('1568246979128074280');
   });
 
   it('walks through the three ordered payment-profile steps', () => {

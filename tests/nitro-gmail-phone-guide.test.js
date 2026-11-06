@@ -15,7 +15,7 @@ const E = (slot) => {
 describe('Nitro Gmail phone security guide', () => {
   it('targets the Nitro guide channel and support channel', () => {
     expect(NITRO_GMAIL_PHONE_GUIDE.guildId).toBe('1282637033340403754');
-    expect(NITRO_GMAIL_PHONE_GUIDE.nitroGuideChannelId).toBe('1524057149783937214');
+    expect(NITRO_GMAIL_PHONE_GUIDE.nitroGuideChannelId).toBe('1568246897754513518');
     expect(NITRO_GMAIL_PHONE_GUIDE.supportChannelId).toBe('1514607020098191393');
   });
 

@@ -1,3 +1,4 @@
+import { getBoostPrice } from './boostPricingService.js';
 import {
   MessageFlags, ContainerBuilder, TextDisplayBuilder,
   SeparatorBuilder, SeparatorSpacingSize,
@@ -6,7 +7,7 @@ import {
 } from 'discord.js';
 
 const ANNOUNCE_CHANNEL_ID = '1514598369597587546';
-const BOOST_CHANNEL_ID    = '1524080488233435336';
+const BOOST_CHANNEL_ID    = '1568246987554295854';
 const SERVER1_ID          = '1282637033340403754';
 
 export async function sendBoostAnnouncement(client) {
@@ -36,9 +37,8 @@ export async function sendBoostAnnouncement(client) {
 
   const pricing = [
     `## <:cr_pay:1392750857329705000> Bảng Giá Dịch Vụ`,
-    `> <a:starxoay:1481141954346483845> **Gói 1 Tháng** (14 Boosts) — **120.000 VND**`,
-    `> <a:starxoay:1481141954346483845> **Gói 3 Tháng** (14 Boosts) — **320.000 VND**`,
-    `> <:cr_tim:1366636325352116225> *Cả hai gói đều là loại có liền.*`,
+    `> <a:starxoay:1481141954346483845> **Gói 3 Tháng** (14 Boosts) — **${getBoostPrice().toLocaleString('vi-VN')} VND**`,
+    `> <:cr_tim:1366636325352116225> *Gói 3 tháng là loại có liền.*`,
     ``,
     `<a:Dotyellow:1481134440725090315> *Nếu đông đơn, thời gian xử lý có thể lâu hơn — vui lòng kiên nhẫn!*`,
   ].join('\n');
