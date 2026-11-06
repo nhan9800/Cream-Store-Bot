@@ -23,9 +23,10 @@ import { API_CREDIT_DURATION, isApiCreditProduct } from '../config/apiCreditCata
 import { AUTOMATIC_PRICE_BOARD_PAUSED } from '../config/marketingAutomationPolicy.js';
 import { GEMINI_PRO_CDK_KEY } from '../config/geminiProCdk202611.js';
 import { STORE_FORUMS } from '../config/storeForums202611.js';
+import { isCapcutProduct } from '../config/capcutCatalog.js';
 import { listForumPosts, upsertForumPost } from './forumPublicationService.js';
 
-export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.27';
+export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.28';
 const publicationStates = new Map();
 export function getPriceBoardPublicationState(guildId) {
   return publicationStates.get(String(guildId)) || { status: 'not_started' };
@@ -403,8 +404,17 @@ export function buildPriceGroupPayload(guildId, group, products) {
     .setPlaceholder(`${international ? 'Select a product' : 'Chọn sản phẩm'} · ${group.title}`.slice(0, 150))
     .addOptions(options);
 
+  const rows = [];
+  if (guildId === STORE_FORUMS.guildId && group.key === 'creative_tools' && products.some(isCapcutProduct)) {
+    rows.push(new ActionRowBuilder().addComponents(setButtonEmoji(
+      new ButtonBuilder().setCustomId('capcut:price:edit').setLabel('Sửa Giá CapCut · Admin').setStyle(ButtonStyle.Secondary),
+      E, 'icon_settings',
+    )));
+  }
+  rows.push(new ActionRowBuilder().addComponents(select));
+
   return {
-    components: [container, new ActionRowBuilder().addComponents(select)],
+    components: [container, ...rows],
     flags: MessageFlags.IsComponentsV2,
     allowedMentions: { parse: [] },
   };
@@ -586,6 +596,18 @@ export async function refreshBoostPriceForumPost(guild) {
   const posts = await listForumPosts(channel);
   const entry = buildPriceForumEntries(guild.id, getGuildConfig(guild.id)).find(item => item.key === 'server_boost');
   if (!entry) throw new Error('Không tìm thấy gói Boost trong catalog.');
+  return upsertForumPost(channel, posts, entry);
+}
+
+export async function refreshCapcutPriceForumPost(guild) {
+  if (guild?.id !== STORE_FORUMS.guildId) throw new Error('Chỉ cập nhật bảng giá Cenar Store.');
+  const channel = await findPriceChannel(guild, getGuildConfig(guild.id));
+  if (channel?.type !== ChannelType.GuildForum) throw new Error('Không tìm thấy forum bảng giá.');
+  const posts = await listForumPosts(channel);
+  const entry = buildPriceForumEntries(guild.id, getGuildConfig(guild.id)).find(item => item.key === 'creative_tools');
+  if (!entry || ![...posts.values()].some(post => post.name === entry.name && post.ownerId === guild.client.user.id)) {
+    throw new Error('Không tìm thấy bài CapCut hiện có; dùng /product sync để đồng bộ.');
+  }
   return upsertForumPost(channel, posts, entry);
 }
 

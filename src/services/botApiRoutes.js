@@ -15,6 +15,8 @@ import { AUTOMATIC_PRICE_BOARD_PAUSED } from '../config/marketingAutomationPolic
  */
 
 import { db, nowIso } from '../database/db.js';
+import { isCapcutProduct } from '../config/capcutCatalog.js';
+import { getCapcutWebCheckoutPrice } from './capcutPricingService.js';
 import { config } from '../config.js';
 import { getAiKnowledge } from './aiKnowledgeService.js';
 import { applyCors } from '../utils/cors.js';
@@ -1482,18 +1484,18 @@ export function registerBotApiRoutes(app) {
                 };
             } else {
                 catalogProduct = db.prepare(`
-                    SELECT id, name, price, duration_months
+                    SELECT id, name, price, duration_months, product_key, guild_id, service_type
                     FROM product_catalog
                     WHERE id = ? AND is_active = 1
                     LIMIT 1
                 `).get(requestedProductId);
             }
-            const unitPrice = Number(catalogProduct?.price);
+            let unitPrice = Number(catalogProduct?.price);
             if (!catalogProduct || !Number.isFinite(unitPrice) || unitPrice <= 0) {
                 return res.status(400).json({ ok: false, error: 'Sản phẩm không thể checkout trực tuyến.' });
             }
 
-            const totalAmount = unitPrice * quantity;
+            let totalAmount = unitPrice * quantity;
             if (!Number.isSafeInteger(totalAmount) || totalAmount <= 0) {
                 return res.status(400).json({ ok: false, error: 'Tổng tiền không hợp lệ.' });
             }
@@ -1515,6 +1517,8 @@ export function registerBotApiRoutes(app) {
                     `Nitro Boost: ${collectibleMetadata.nitroEligible ? 'Có' : 'Không'}`,
                   ].filter(Boolean).join('\n').slice(0, 1_000)
                 : customerNote;
+            // A quote is a new-order precondition, not a reason to replace an
+            // existing invoice on retry. Keep legacy idempotency hashes stable.
             const requestHash = createHash('sha256').update(JSON.stringify({
                 customerId,
                 requestedProductId,
@@ -1567,6 +1571,14 @@ export function registerBotApiRoutes(app) {
                     const existingOrder = getOrderByCode(existing.order_code);
                     if (!existingOrder) throw new Error('Đơn checkout cũ không còn tồn tại.');
                     return { order: existingOrder, reused: true };
+                }
+
+                // New CapCut orders require the exact price the customer confirmed.
+                // This transaction runs after async imports; retries above retain their
+                // historical order snapshot even when today's catalog price changed.
+                if (isCapcutProduct(catalogProduct)) {
+                    unitPrice = getCapcutWebCheckoutPrice(catalogProduct.id, requestedItem.expected_price);
+                    totalAmount = unitPrice * quantity;
                 }
 
                 if (paymentProvider === 'WALLET') {
@@ -1624,6 +1636,8 @@ export function registerBotApiRoutes(app) {
             const created = createOrReuseOrder.immediate();
             order = created.order;
             reusedRequest = created.reused;
+            // Never recalculate a reused invoice or wallet debit at today's price.
+            totalAmount = Number(order.total_amount);
             orderCode = order.order_code;
             ticketId = order.ticket_id;
             channelId = order.ticket_channel_id;
@@ -1828,6 +1842,10 @@ export function registerBotApiRoutes(app) {
             }
             
         } catch (e) {
+            if (e?.code === 'CAPCUT_PRICE_CHANGED') {
+                return res.status(409).json({ ok: false, code: e.code, current_price: e.current_price,
+                    product_id: e.product_id, error: e.message });
+            }
             console.error('[WEB ORDERS API]', e);
             if (e?.name === 'WalletPaymentError') {
                 const status = e.code === 'INSUFFICIENT_BALANCE' ? 400 : 409;

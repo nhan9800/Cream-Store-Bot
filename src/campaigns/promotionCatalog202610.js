@@ -141,7 +141,7 @@ export const PROMOTION_CATALOG_ROWS = Object.freeze([
   }),
   catalog('entertainment', 'youtube-premium-continuous-6-months', 'YouTube Premium · Ổn định', 250000, { duration: '6 tháng' }),
   catalog('entertainment', 'youtube-premium-continuous-12-months', 'YouTube Premium · Ổn định', 400000, { duration: '12 tháng' }),
-  catalog('entertainment', 'locket-gold-1-nam', 'Locket Gold', 150000, {
+  catalog('entertainment', 'locket-gold-1-nam', 'Locket Gold', 80000, {
     duration: '1 năm', account: 'Kích hoạt theo username',
   }),
 

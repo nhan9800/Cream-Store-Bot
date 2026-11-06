@@ -16,6 +16,8 @@ import {
 } from 'discord.js';
 import { config } from '../config.js';
 import { isApiCreditProduct } from '../config/apiCreditCatalog.js';
+import { isCapcutProduct } from '../config/capcutCatalog.js';
+import { assertCapcutPurchaseQuote } from '../services/capcutPricingService.js';
 import { db } from '../database/db.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { getGuildConfig } from '../services/guildConfigService.js';
@@ -97,15 +99,18 @@ export async function handleProductSelect(interaction) {
     return;
   }
 
+  const capcut = isCapcutProduct(product);
+  const quotedPrice = capcut ? Number(isCustomerCtv(interaction.guildId, interaction.user.id, interaction.member) && product.ctv_price !== null
+    ? product.ctv_price : product.price) : null;
   const modal = new ModalBuilder()
-    .setCustomId(`product:purchase:modal:${product.id}`)
+    .setCustomId(`product:purchase:modal:${product.id}${capcut ? `:${quotedPrice}` : ''}`)
     .setTitle(`Mua: ${product.name}`.slice(0, 45));
 
   modal.addComponents(
     new ActionRowBuilder().addComponents(
       new TextInputBuilder()
         .setCustomId('quantity')
-        .setLabel('Số lượng')
+        .setLabel(capcut ? `Số lượng · Đơn giá ${quotedPrice.toLocaleString('vi-VN')}đ` : 'Số lượng')
         .setValue('1')
         .setStyle(TextInputStyle.Short)
         .setRequired(true)
@@ -125,7 +130,7 @@ export async function handleProductSelect(interaction) {
 
 // Helper to parse price input (e.g. 180k -> 180000, 180000 -> 180000)
 
-export async function handleProductPurchaseFlow(interaction, productId) {
+export async function handleProductPurchaseFlow(interaction, productId, expectedPrice) {
   const E = createEmojiResolver(interaction.guildId);
   const product = getProductById(Number(productId));
   if (!product || product.is_active !== 1) {
@@ -155,7 +160,11 @@ export async function handleProductPurchaseFlow(interaction, productId) {
   }
 
   const isCtv = isCustomerCtv(interaction.guildId, interaction.user.id, interaction.member);
-  const unitPrice = (isCtv && product.ctv_price !== null) ? product.ctv_price : product.price;
+  let unitPrice = (isCtv && product.ctv_price !== null) ? product.ctv_price : product.price;
+  if (isCapcutProduct(product)) {
+    try { unitPrice = assertCapcutPurchaseQuote(product.id, expectedPrice, isCtv); }
+    catch (error) { return interaction.editReply(error.message); }
+  }
   const totalPrice = unitPrice * quantity;
 
   const currentBalance = getWalletBalance(interaction.guildId, interaction.user.id);
@@ -245,6 +254,17 @@ export async function handleProductPurchaseFlow(interaction, productId) {
         await channel.setName(buildTicketChannelName(ticket.ticket_code, prefix)).catch(() => null);
       }
 
+      // Discord channel creation awaits network I/O. Recheck immediately before
+      // the synchronous order/payment work so an intervening edit cannot charge a stale quote.
+      if (isCapcutProduct(product)) {
+        try { assertCapcutPurchaseQuote(product.id, expectedPrice, isCtv); }
+        catch (error) {
+          closeTicket(ticket.id, interaction.client.user.id);
+          await channel.send({ content: error.message, allowedMentions: { parse: [] } }).catch(() => null);
+          await interaction.editReply(error.message);
+          return;
+        }
+      }
       let order = createOrder({
         guildId: interaction.guildId,
         ticketId: ticket.id,

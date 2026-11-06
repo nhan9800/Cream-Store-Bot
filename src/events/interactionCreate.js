@@ -144,6 +144,7 @@ import {
   handleBoostWarrantyReq,
   handleBoostWarrantyModal,
 } from "./boostHandlers.js";
+import { handleCapcutPriceEdit, handleCapcutPriceSelect, handleCapcutPriceModal } from './capcutPricingHandlers.js';
 import {
   handlePriceListSelect,
   handlePriceListAdminEditPortalButton,
@@ -607,8 +608,22 @@ export function registerInteractionHandler(client, commands) {
       }
 
       if (interaction.isModalSubmit() && interaction.customId.startsWith('product:purchase:modal:')) {
-        const productId = interaction.customId.split(':')[3];
-        await handleProductPurchaseFlow(interaction, productId);
+        const [, , , productId, expectedPrice] = interaction.customId.split(':');
+        await handleProductPurchaseFlow(interaction, productId, expectedPrice);
+        return;
+      }
+
+      if (interaction.isButton() && interaction.customId === 'capcut:price:edit') {
+        await handleCapcutPriceEdit(interaction);
+        return;
+      }
+      if (interaction.isStringSelectMenu() && interaction.customId === 'capcut:price:select') {
+        await handleCapcutPriceSelect(interaction);
+        return;
+      }
+      if (interaction.isModalSubmit() && interaction.customId.startsWith('capcut:price:modal:')) {
+        const [, , , productId, expectedPrice] = interaction.customId.split(':');
+        await handleCapcutPriceModal(interaction, productId, expectedPrice);
         return;
       }
 
