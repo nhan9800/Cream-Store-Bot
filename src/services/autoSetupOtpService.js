@@ -1,6 +1,7 @@
 import { MessageFlags } from 'discord.js';
 import { db } from '../database/db.js';
 import { buildOtpPanel } from '../commands/setup-otp.js';
+import { STORE_SERVICE_FORUM } from '../config/storeServiceForum202611.js';
 
 function containsOtpButton(message) {
   return JSON.stringify(message.components.map((component) => component.toJSON())).includes('otp:open_menu');
@@ -12,7 +13,9 @@ export async function autoRefreshOtpPanel(client) {
     const guild = client.guilds.cache.get(row.guild_id)
       || await client.guilds.fetch(row.guild_id).catch(() => null);
     if (!guild) continue;
-    const channel = guild.channels.cache.find((item) => item.isTextBased?.() && (
+    const channel = guild.id === STORE_SERVICE_FORUM.guildId
+      ? await guild.channels.fetch(STORE_SERVICE_FORUM.posts.sim).catch(() => null)
+      : guild.channels.cache.find((item) => item.isTextBased?.() && (
       item.name.includes('thue-sim-online')
       || item.name.includes('thue-so')
       || item.name.includes('thuê-sim-online')

@@ -10,6 +10,7 @@ import { db } from '../database/db.js';
 import { config } from '../config.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { membershipTierForSpend } from '../config/membershipProgram.js';
+import { STORE_SERVICE_FORUM, serviceMessageTarget } from '../config/storeServiceForum202611.js';
 import {
   getLeaderboardPeriodBounds,
   getLeaderboardRows as queryLeaderboardRows,
@@ -83,7 +84,9 @@ export async function runAutoVinhDanh(client) {
   for (const [guildId, guild] of client.guilds.cache) {
     try {
       // Tìm kênh vinh-danh
-      const vinhdanhChan = guild.channels.cache.find(
+      const vinhdanhChan = guildId === STORE_SERVICE_FORUM.guildId
+        ? await guild.channels.fetch(STORE_SERVICE_FORUM.posts.honor).catch(() => null)
+        : guild.channels.cache.find(
         c => c.type === ChannelType.GuildText && c.name.includes('vinh-danh')
       );
       if (!vinhdanhChan) continue;
@@ -119,7 +122,7 @@ export async function runAutoVinhDanh(client) {
       // 2. Cập nhật bảng vinh danh LIVE cho tháng này
       const currentMonthKey = `live_vinh_danh_msg_id_${currentYear}_${currentMonth + 1}_${guildId}`;
       const liveMsgRow = db.prepare('SELECT value FROM system_settings WHERE key = ?').get(currentMonthKey);
-      let liveMsgId = liveMsgRow?.value || null;
+      let liveMsgId = serviceMessageTarget(guildId, liveMsgRow?.value || null);
 
       const rowsCurr = queryLeaderboardRows(guildId, 'monthly', now, 10).rows;
       const titleCurr = `BẢNG XẾP HẠNG TIÊU DÙNG THÁNG ${currentMonth + 1}/${currentYear} (LIVE)`;

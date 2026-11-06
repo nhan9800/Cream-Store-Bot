@@ -26,7 +26,7 @@ function setup() {
   }));
   const message={id:'board',url:'https://discord.com/channels/1282637033340403754/channel/board',author:{id:'bot'},flags:new Set([MessageFlags.IsComponentsV2]),edit:vi.fn(async()=>message)};
   const channel={id:'channel',type:0,name:'đặc-quyền-thành-viên',messages:{fetch:vi.fn(async input=>typeof input==='string' ? message : new Collection())},send:vi.fn(async()=>message)};
-  const guild={id:'1282637033340403754',features:['ROLE_ICONS','ENHANCED_ROLE_COLORS'],roles:{cache:roleCache,fetch:vi.fn()},members:{fetchMe:vi.fn(async()=>({permissions:{has:()=>true}}))},channels:{fetch:vi.fn(async()=>new Collection([[channel.id,channel]])),create:vi.fn(async()=>channel)}};
+  const guild={id:'1282637033340403754',features:['ROLE_ICONS','ENHANCED_ROLE_COLORS'],roles:{cache:roleCache,fetch:vi.fn()},members:{fetchMe:vi.fn(async()=>({permissions:{has:()=>true}}))},channels:{fetch:vi.fn(async id=>id ? channel : new Collection([[channel.id,channel]])),create:vi.fn(async()=>channel)}};
   const client={user:{id:'bot'},application:{emojis},guilds:{fetch:vi.fn(async()=>guild)}};
   return {client,guild,roleCache,channel,message,emojis,live};
 }
@@ -65,14 +65,14 @@ describe('Cenar Circle preserves paid customer roles',()=>{
     const results=await Promise.all([refreshMembershipPresentation(s.client,{guildId:s.guild.id}),refreshMembershipPresentation(s.client,{guildId:s.guild.id})]);
     expect(results[0]).toMatchObject({status:'ready',verified:6,updated:6,enhanced:true});
     expect(s.emojis.create).toHaveBeenCalledTimes(6);
-    expect(s.channel.send).toHaveBeenCalledOnce();
+    expect(s.channel.send).not.toHaveBeenCalled();
     for(const role of s.roleCache.values()){
       expect(Object.keys(role.edit.mock.calls[0][0]).sort()).toEqual(['colors','icon','name','reason']);
       expect(role.permissions).toBe('0');expect(role.position).toBe(10);
     }
     expect(await refreshMembershipPresentation(s.client,{guildId:s.guild.id})).toMatchObject({updated:0,verified:6});
-    expect(s.emojis.create).toHaveBeenCalledTimes(6);expect(s.channel.send).toHaveBeenCalledOnce();
-    expect(s.message.edit).toHaveBeenCalledOnce();
+    expect(s.emojis.create).toHaveBeenCalledTimes(6);expect(s.channel.send).not.toHaveBeenCalled();
+    expect(s.message.edit).toHaveBeenCalledTimes(2);
   });
   it('replaces a deleted application badge instead of keeping a stale cached emoji',async()=>{
     const s=setup();await refreshMembershipPresentation(s.client,{guildId:s.guild.id});

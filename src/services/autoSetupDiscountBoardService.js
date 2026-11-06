@@ -1,6 +1,7 @@
 import { ChannelType } from 'discord.js';
 import { db } from '../database/db.js';
 import { buildDiscountBoardComponents } from './cardSwapService.js';
+import { STORE_SERVICE_FORUM } from '../config/storeServiceForum202611.js';
 
 export async function autoSetupDiscountBoard(client) {
   try {
@@ -10,6 +11,15 @@ export async function autoSetupDiscountBoard(client) {
     // We run it for the first available guild
     const guild = guilds.first();
     const guildId = guild.id;
+    if (guildId === STORE_SERVICE_FORUM.guildId) {
+      const channel = await guild.channels.fetch(STORE_SERVICE_FORUM.posts.cards);
+      const messageId = STORE_SERVICE_FORUM.messageTargets['1530830079788060763'];
+      const message = await channel.messages.fetch(messageId);
+      if (message.author.id !== client.user.id) throw new Error('DISCOUNT_FORUM_MESSAGE_NOT_OWNED');
+      db.prepare('UPDATE guild_settings SET discount_board_channel_id = ?, discount_board_message_id = ? WHERE guild_id = ?')
+        .run(channel.id, message.id, guildId);
+      return;
+    }
     
     // Check if it's already set up
     const row = db.prepare('SELECT discount_board_channel_id, discount_board_message_id FROM guild_settings WHERE guild_id = ?').get(guildId);

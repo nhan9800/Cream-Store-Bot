@@ -7,6 +7,8 @@ export const AUTOMATIC_PRICE_BOARD_PAUSED = true;
 export const PAUSED_MARKETING_CHANNEL_IDS = Object.freeze([
   '1514606987839672563', // Invite-event channel: owner requested full purge.
   '1515008584549797979', // Promotion channel: awaiting rebuilt sale.
+  '1568256315669618708', // Current promotion forum post; recurring writes remain paused.
+  '1568256352688537663', // Current events forum post.
   '1531206050383134842', // Automatically created profile-effect giveaway.
 ]);
 export function isMarketingWritePaused(channelId) {

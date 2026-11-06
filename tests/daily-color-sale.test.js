@@ -26,7 +26,7 @@ describe('Daily Color sale campaign', () => {
   it('keeps the supplied prices and products', () => {
     const content = Object.values(buildDailyColorSaleSections({ E: emojiResolver, customEmojis })).join('\n');
     for (const price of [
-      '90.000đ', '115.000đ', '140.000đ', '880.000đ', '110.000đ', '280.000đ',
+      '90.000đ', '115.000đ', '140.000đ', '850.000đ', '110.000đ', '280.000đ',
       '75.000đ', '190.000đ', '200.000đ', '250.000đ', '400.000đ', '530.000đ',
       '2.650.000đ', '4.500.000đ', '12.800.000đ', '550.000đ', '55.000đ', '290.000đ',
     ]) expect(content).toContain(price);

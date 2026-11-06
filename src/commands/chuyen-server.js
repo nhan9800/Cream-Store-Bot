@@ -31,13 +31,14 @@ export const data = new SlashCommandBuilder()
   );
 
 // Refresh access token dùng refresh_token
-async function refreshAccessToken(refreshToken) {
+export async function refreshAccessToken(refreshToken, { fetchImpl = fetch } = {}) {
   const clientId = config.clientId;
   const clientSecret = process.env.CLIENT_SECRET;
 
-  if (!clientSecret) throw new Error('CLIENT_SECRET chưa được cấu hình');
+  if (!String(clientSecret || '').trim()) throw new Error('CLIENT_SECRET chưa được cấu hình');
+  if (typeof refreshToken !== 'string' || !refreshToken.trim()) throw new Error('Token recovery không đầy đủ.');
 
-  const res = await fetch('https://discord.com/api/oauth2/token', {
+  const res = await fetchImpl('https://discord.com/api/oauth2/token', {
     method: 'POST',
     body: new URLSearchParams({
       client_id: clientId,
@@ -46,14 +47,25 @@ async function refreshAccessToken(refreshToken) {
       refresh_token: refreshToken,
     }),
     headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    signal: AbortSignal.timeout(12_000),
   });
 
   if (!res.ok) {
-    const err = await res.text();
-    throw new Error(`Refresh thất bại: ${err}`);
+    try { await res.body?.cancel(); } catch { /* Preserve the sanitized HTTP error. */ }
+    throw new Error(`Refresh thất bại: Discord HTTP ${res.status}`);
   }
 
   const data = await res.json();
+  if (!data || typeof data !== 'object'
+    || typeof data.access_token !== 'string' || !data.access_token.trim()
+    || (data.refresh_token != null && (typeof data.refresh_token !== 'string' || !data.refresh_token.trim()))
+    || !Number.isFinite(Number(data.expires_in)) || Number(data.expires_in) <= 0 || Number(data.expires_in) > 31_536_000) {
+    throw new Error('Discord không trả thông tin làm mới token hợp lệ.');
+  }
+  if (data.scope != null) {
+    const scopes = new Set(String(data.scope).split(/\s+/));
+    if (!scopes.has('identify') || !scopes.has('guilds.join')) throw new Error('Quyền recovery không còn đầy đủ.');
+  }
   return {
     access_token: data.access_token,
     refresh_token: data.refresh_token || refreshToken,

@@ -2,6 +2,7 @@ import { ChannelType } from 'discord.js';
 import { db } from '../database/db.js';
 import { buildCardPanelPayload } from './cardPanelService.js';
 import { isInternationalGuild } from '../utils/locale.js';
+import { STORE_SERVICE_FORUM } from '../config/storeServiceForum202611.js';
 
 export async function autoSetupCardChannel(client) {
   // Get the single guild config
@@ -15,7 +16,11 @@ export async function autoSetupCardChannel(client) {
 
   // Check if channel already exists
   const international = isInternationalGuild(guildId);
-  let channel = guild.channels.cache.find(c => c.name === 'gift-card-exchange' || c.name === '💳・nap-the-tu-dong' || c.name === 'nap-the-tu-dong' || c.name.includes('nap-the'));
+  const usesForum = guild.id === STORE_SERVICE_FORUM.guildId;
+  let channel = usesForum
+    ? await guild.channels.fetch(STORE_SERVICE_FORUM.posts.cards).catch(() => null)
+    : guild.channels.cache.find(c => c.name === 'gift-card-exchange' || c.name === '💳・nap-the-tu-dong' || c.name === 'nap-the-tu-dong' || c.name.includes('nap-the'));
+  if (usesForum && !channel) throw new Error('STORE_CARD_FORUM_POST_UNAVAILABLE');
   
   if (!channel) {
     // Create channel
@@ -34,15 +39,12 @@ export async function autoSetupCardChannel(client) {
   // Build and validate before deleting the currently working panel.
   const panelPayload = buildCardPanelPayload(guildId);
 
-  // Xóa các tin nhắn cũ của bot trong kênh
+  // The forum post also contains the discount board. Update only the card
+  // panel, preserving every other bot message and all historical replies.
   const oldMessages = await channel.messages.fetch({ limit: 20 }).catch(() => null);
-  if (oldMessages) {
-    for (const m of oldMessages.filter(m => m.author.id === client.user.id).values()) {
-      await m.delete().catch(() => null);
-    }
-  }
-
-  await channel.send(panelPayload).catch(err => {
+  const existing = oldMessages?.find(message => message.author.id === client.user.id
+    && /CENAR (?:GLOBAL.*GIFT CARD|CARD) CENTER/.test(JSON.stringify(message.toJSON())));
+  await (existing ? existing.edit(panelPayload) : channel.send(panelPayload)).catch(err => {
     console.error('[AUTO-SETUP-CARD] Failed to send panel:', err.message);
   });
 

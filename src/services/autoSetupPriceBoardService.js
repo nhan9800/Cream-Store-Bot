@@ -25,7 +25,7 @@ import { GEMINI_PRO_CDK_KEY } from '../config/geminiProCdk202611.js';
 import { STORE_FORUMS } from '../config/storeForums202611.js';
 import { listForumPosts, upsertForumPost } from './forumPublicationService.js';
 
-export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.26';
+export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.27';
 const publicationStates = new Map();
 export function getPriceBoardPublicationState(guildId) {
   return publicationStates.get(String(guildId)) || { status: 'not_started' };
@@ -261,7 +261,7 @@ export function buildPricePortalPayload(guildId, guildConfig, panels = []) {
       international ? `# ${E('icon_store')} CENAR GLOBAL • LIVE PRICING` : `# ${E('icon_store')} BẢNG GIÁ CENAR STORE`,
       international ? `> ${E('status_check')} **Live catalog synchronized across Discord and the website.**` : `> ${E('status_check')} **Đồng bộ trực tiếp từ hệ thống sản phẩm đang hoạt động.**`,
       ...(guildId === PRIMARY_GUILD_ID ? [
-        `> ${E('icon_gift')} **Cenar Studio đang diễn ra tại <#1515008584549797979> · Bàn Làm Việc Có Gu · giá ưu đãi và điều kiện được xác nhận tại ticket.**`,
+        `> ${E('icon_gift')} **Cenar Studio đang diễn ra tại <#1568256315669618708> · Bàn Làm Việc Có Gu · giá ưu đãi và điều kiện được xác nhận tại ticket.**`,
       ] : []),
     ].join('\n'))
   );
