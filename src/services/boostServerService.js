@@ -18,6 +18,8 @@ import {
 } from 'discord.js';
 import { createEmojiResolver, withButtonEmoji } from '../utils/emojiHelper.js';
 import { decrypt, encrypt } from '../utils/crypto.js';
+import { getBoostPrice } from './boostPricingService.js';
+import { STORE_FORUMS } from '../config/storeForums202611.js';
 import {
   BOOST_PRESENTATION_COLORS, BOOST_PRESENTATION_VERSION, BOOST_SILENT_MENTIONS, boostPresentationPanel,
 } from './boostPresentationService.js';
@@ -25,13 +27,12 @@ import {
 // ─── Constants ────────────────────────────────────────────────────────────────
 
 export const BOOST_PACKAGES = [
-  { key: '1m', label: '14x Boost Server · 1 Tháng', price: 120000, months: 1, availability: 'Có liền' },
   { key: '3m', label: '14x Boost Server · 3 Tháng', price: 320000, months: 3, availability: 'Có liền' },
 ];
 
 const STORE_ONE_BOOST_PANEL = Object.freeze({
-  channelId: '1524080488233435336',
-  messageId: '1524080492968935487',
+  channelId: STORE_FORUMS.guidePosts.boost,
+  messageId: STORE_FORUMS.guidePosts.boost,
 });
 
 // ─── DB helpers ───────────────────────────────────────────────────────────────
@@ -54,13 +55,15 @@ function payosCodeExists(code) {
 }
 
 export function getBoostPackage(packageKey) {
-  return BOOST_PACKAGES.find(item => item.key === String(packageKey || '').toLowerCase()) ?? null;
+  const pkg = BOOST_PACKAGES.find(item => item.key === String(packageKey || '').toLowerCase());
+  return pkg ? { ...pkg, price: getBoostPrice() } : null;
 }
 
-export function createBoostOrder({ guildId, customerId, customerTag, serverLink, serverId, serverName, packageKey, pkg, durationMonths }) {
+export function createBoostOrder({ guildId, customerId, customerTag, serverLink, serverId, serverName, packageKey, pkg, durationMonths, expectedPrice }) {
   const selectedPackage = getBoostPackage(packageKey)
-    || BOOST_PACKAGES.find(item => item.label === pkg || item.months === Number(durationMonths));
+    || getBoostPackage(BOOST_PACKAGES.find(item => item.label === pkg || item.months === Number(durationMonths))?.key);
   if (!selectedPackage) throw new Error('Gói Boost Server không hợp lệ.');
+  if (expectedPrice != null && selectedPackage.price !== Number(expectedPrice)) throw new Error('Giá đã thay đổi. Vui lòng chọn lại gói Boost để xác nhận giá mới.');
 
   let code = null;
   for (let i = 0; i < 25; i++) {
@@ -433,8 +436,7 @@ export function buildBoostPanelEmbed(guildId) {
       `${E('brand_boost')} **14x Boosts · loại có liền**`,
       `${E('payment_payos')} PayOS tự xác nhận và cấp key tra cứu live.`,
       '',
-      `${E('icon_price')} **1 Tháng:** **120.000 VND**`,
-      `${E('icon_price')} **3 Tháng:** **320.000 VND**`,
+      `${E('icon_price')} **3 Tháng:** **${getBoostPrice().toLocaleString('vi-VN')} VND**`,
       '',
       `${E('status_info')} Chọn gói, quét QR, nhận key rồi nhập key để theo dõi tiến độ.`,
     ].join('\n'));
@@ -478,7 +480,7 @@ export function buildBoostPanelPayload(guildId, { activeOrders = getActiveBoostO
         'Chọn thời hạn cho máy chủ của bạn. Thanh toán qua PayOS và nhận key theo dõi sau khi giao dịch được xác nhận.',
       ]),
       boostPresentationPanel(BOOST_PRESENTATION_COLORS.copper, [
-        `### ${E('icon_price')} Gói Boost chính thức\n${BOOST_PACKAGES.map((pkg) => `${E('icon_duration')} **${pkg.months} tháng · 14 Boosts**\n**${Number(pkg.price).toLocaleString('vi-VN')}đ** · ${pkg.availability}`).join('\n\n')}`,
+        `### ${E('icon_price')} Gói Boost chính thức\n${E('icon_duration')} **3 tháng · 14 Boosts**\n**${getBoostPrice().toLocaleString('vi-VN')}đ** · Có liền`,
         `${E('payment_qr')} **Đặt gói → Kiểm tra server → Thanh toán QR**\n${E('icon_key')} Key được gửi qua DM. Nhập key tại đây để xem trạng thái và gửi yêu cầu bảo hành.`,
       ]),
       boostPresentationPanel(BOOST_PRESENTATION_COLORS.teal, [
@@ -496,22 +498,17 @@ export function buildBoostPackagePickerPayload(guildId) {
   const container = new ContainerBuilder().setAccentColor(BOOST_PRESENTATION_COLORS.teal);
   container.addTextDisplayComponents(new TextDisplayBuilder().setContent([
     `# ${E('brand_boost')} CHỌN THỜI HẠN BOOST`,
-    `${E('status_check')} Cả hai gói đều là **loại có liền**. Giá được khóa theo nút bạn chọn.`,
+    `${E('status_check')} **14 Boosts · 3 tháng · Có liền**. Giá được xác nhận khi tạo đơn.`,
     '',
-    `> ${E('icon_duration')} **1 Tháng:** 120.000 VND`,
-    `> ${E('icon_duration')} **3 Tháng:** 320.000 VND`,
+    `> ${E('icon_duration')} **3 Tháng:** ${getBoostPrice().toLocaleString('vi-VN')} VND`,
   ].join('\n')));
 
-  const oneMonth = withButtonEmoji(
-    new ButtonBuilder().setCustomId('boost:buy:1m').setLabel('1 Tháng · 120K').setStyle(ButtonStyle.Primary),
-    E.component('brand_boost'),
-  );
   const threeMonths = withButtonEmoji(
-    new ButtonBuilder().setCustomId('boost:buy:3m').setLabel('3 Tháng · 320K').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('boost:buy:3m').setLabel(`3 Tháng · ${getBoostPrice().toLocaleString('vi-VN')}đ`).setStyle(ButtonStyle.Success),
     E.component('icon_duration'),
   );
   return {
-    components: [container, new ActionRowBuilder().addComponents(oneMonth, threeMonths)],
+    components: [container, new ActionRowBuilder().addComponents(threeMonths)],
     flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
   };
 }
@@ -547,7 +544,9 @@ export function buildBoostPanelRows(guildId) {
   const warEmo = E.component('ticket_claim');
   if (warEmo) warrantyBtn.setEmoji(warEmo);
 
-  return [new ActionRowBuilder().addComponents(buyBtn, checkBtn, recoverBtn, warrantyBtn)];
+  const editPrice = withButtonEmoji(new ButtonBuilder().setCustomId('boost:price:edit')
+    .setLabel('Sửa Giá · Admin').setStyle(ButtonStyle.Secondary), E.component('icon_settings'));
+  return [new ActionRowBuilder().addComponents(buyBtn, checkBtn, recoverBtn, warrantyBtn, editPrice)];
 }
 
 function boostStatusMeta(order, guildId) {

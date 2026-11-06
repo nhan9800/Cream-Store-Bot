@@ -5,11 +5,13 @@ import {
 } from 'discord.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { getGuildConfig } from '../services/guildConfigService.js';
+import { STORE_FORUMS } from '../config/storeForums202611.js';
+import { isManager } from '../utils/permissions.js';
 import { STORE_ONE_CHANNEL_NAMES } from '../config/storeOneChannelAesthetic.js';
 
 export const data = new SlashCommandBuilder()
   .setName('setup-guide')
-  .setDescription('Tạo danh mục Cẩm Nang Hướng Dẫn với các kênh HD Nitro, Youtube, Spotify, Netflix')
+  .setDescription('Thiết lập forum Hướng dẫn mua hàng, mỗi sản phẩm một bài')
   .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild);
 
 const GUIDE_CHANNELS = [
@@ -122,142 +124,47 @@ export function buildGuideContent(channelConfig, emojiResolver) {
 }
 
 export async function execute(interaction) {
-  const E = createEmojiResolver(interaction.guildId);
-  await interaction.deferReply({ ephemeral: true });
-
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+  const guild = interaction.guild;
+  const guildConfig = getGuildConfig(guild.id);
+  const member = await guild.members.fetch(interaction.user.id).catch(() => null);
+  if (!isManager(member, guildConfig)) return interaction.editReply('Chỉ Admin/quản lý được thiết lập forum.');
   try {
-    const guild = interaction.guild;
-    const guildConfig = getGuildConfig(guild.id);
-
-    // Tìm verified role để cấp quyền đọc
-    let verifiedRole = null;
-    if (guildConfig?.customer_role_id) {
-      verifiedRole = guild.roles.cache.get(guildConfig.customer_role_id);
-    }
-    if (!verifiedRole) {
-      verifiedRole = guild.roles.cache.find(r =>
-        r.name.includes('Explorer') || r.name.includes('Thành Viên') ||
-        r.name.includes('Active Customer') || r.name.includes('Khách Mua Hàng')
-      );
-    }
-
-    const everyoneRole = guild.roles.everyone;
-
-    // Tạo category "Cẩm Nang Hướng Dẫn"
-    const category = await guild.channels.create({
-      name: STORE_ONE_CHANNEL_NAMES.guideCategory,
-      type: ChannelType.GuildCategory,
-      permissionOverwrites: [
-        {
-          id: everyoneRole.id,
-          deny: [PermissionFlagsBits.ViewChannel],
-        },
-        ...(verifiedRole ? [{
-          id: verifiedRole.id,
-          allow: [PermissionFlagsBits.ViewChannel],
-          deny: [PermissionFlagsBits.SendMessages, PermissionFlagsBits.AddReactions],
-        }] : []),
-        {
-          id: guild.members.me.id,
-          allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageMessages],
-        },
-      ],
-    });
-
-    const createdChannels = [];
-
-    for (const ch of GUIDE_CHANNELS) {
-      const channel = await guild.channels.create({
-        name: ch.name,
-        type: ChannelType.GuildText,
-        topic: ch.topic,
-        parent: category.id,
+    await guild.channels.fetch();
+    let forum = guild.id === STORE_FORUMS.guildId
+      ? await guild.channels.fetch(STORE_FORUMS.guideForumId).catch(() => null)
+      : guild.channels.cache.find(channel => channel.type === ChannelType.GuildForum && channel.name.includes('hướng-dẫn-mua-hàng'));
+    if (!forum) {
+      const category = guild.channels.cache.find(channel => channel.type === ChannelType.GuildCategory && channel.name === STORE_ONE_CHANNEL_NAMES.guideCategory);
+      const reader = guildConfig?.customer_role_id;
+      const denied = [PermissionFlagsBits.SendMessages, PermissionFlagsBits.SendMessagesInThreads, PermissionFlagsBits.CreatePublicThreads];
+      forum = await guild.channels.create({
+        name: '📘・hướng-dẫn-mua-hàng', type: ChannelType.GuildForum, parent: category?.id,
+        topic: 'Chọn bài theo sản phẩm để xem hướng dẫn. Cần hỗ trợ riêng, hãy mở ticket.',
         permissionOverwrites: [
-          {
-            id: everyoneRole.id,
-            deny: [PermissionFlagsBits.ViewChannel],
-          },
-          ...(verifiedRole ? [{
-            id: verifiedRole.id,
-            allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory],
-            deny: [PermissionFlagsBits.SendMessages, PermissionFlagsBits.AddReactions, PermissionFlagsBits.CreatePublicThreads],
-          }] : []),
-          {
-            id: guild.members.me.id,
-            allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ManageMessages],
-          },
+          { id: guild.id, deny: [PermissionFlagsBits.ViewChannel, ...denied] },
+          ...(reader ? [{ id: reader, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory], deny: denied }] : []),
+          { id: guild.members.me.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.SendMessagesInThreads, PermissionFlagsBits.ManageThreads, PermissionFlagsBits.ReadMessageHistory] },
         ],
       });
-
-      // Gửi nội dung hướng dẫn vào kênh
-      const contentContainer = new ContainerBuilder().setAccentColor(0x7C3AED);
-      contentContainer.addTextDisplayComponents(
-        new TextDisplayBuilder().setContent(buildGuideContent(ch, E))
-      );
-      contentContainer.addSeparatorComponents(
-        new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
-      );
-      contentContainer.addTextDisplayComponents(
-        new TextDisplayBuilder().setContent(
-          `-# ${E('icon_heart_purple')} Mọi thắc mắc vui lòng mở ticket tại kênh hỗ-trợ để được giải đáp.`
-        )
-      );
-
-      // Riêng kênh YouTube: gắn nút "Yêu Cầu Bảo Hành" (customId khớp handler ytb:warranty:apply)
-      const guidePayload = {
-        components: [contentContainer],
-        flags: MessageFlags.IsComponentsV2,
-      };
-
-      if (ch.key === 'youtube') {
-        const btnWarranty = new ButtonBuilder()
-          .setCustomId('ytb:warranty:apply')
-          .setLabel('Yêu Cầu Bảo Hành')
-          .setStyle(ButtonStyle.Success);
-        const warrantyEmoji = E.component('panel_warranty');
-        if (warrantyEmoji) btnWarranty.setEmoji(warrantyEmoji);
-        guidePayload.components.push(new ActionRowBuilder().addComponents(btnWarranty));
-      }
-
-      await channel.send(guidePayload)
-        .catch(e => console.error(`[SETUP-GUIDE] Gửi nội dung ${ch.key} thất bại:`, e.message));
-
-      createdChannels.push(channel);
     }
-
-    // Reply xác nhận
-    const resultContainer = new ContainerBuilder().setAccentColor(0x10B981);
-    resultContainer.addTextDisplayComponents(
-      new TextDisplayBuilder().setContent([
-        `## ${E('status_check')} Tạo Cẩm Nang Thành Công!`,
-        `> ${E('icon_clipboard')} **Danh mục:** ${category}`,
-        '',
-        `### ${E('icon_store')} Các kênh đã tạo:`,
-        ...createdChannels.map(c => `> ${E('icon_link')} ${c}`),
-        '',
-        verifiedRole
-          ? `> ${E('ticket_claim')} Quyền đọc: Chỉ **${verifiedRole.name}** và cao hơn`
-          : `> ${E('status_warn')} Chưa tìm thấy verified role — cấp quyền thủ công nếu cần`,
-      ].join('\n'))
-    );
-    resultContainer.addSeparatorComponents(
-      new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
-    );
-    resultContainer.addTextDisplayComponents(
-      new TextDisplayBuilder().setContent(
-        `-# ${E('icon_sparkle')} Nội dung hướng dẫn đã được gửi tự động vào từng kênh.`
-      )
-    );
-
-    await interaction.editReply({
-      components: [resultContainer],
-      flags: MessageFlags.IsComponentsV2,
-    });
-
-  } catch (err) {
-    console.error('[SETUP-GUIDE] Lỗi:', err);
-    await interaction.editReply({
-      content: `${E('status_cross')} Đã xảy ra lỗi: \`${err.message}\``,
-    }).catch(() => null);
+    const { listForumPosts } = await import('../services/forumPublicationService.js');
+    const posts = await listForumPosts(forum);
+    const E = createEmojiResolver(guild.id);
+    for (const [index, guide] of GUIDE_CHANNELS.entries()) {
+      const name = `${String(index + 1).padStart(2, '0')} · ${guide.content[0].slice(3)}`;
+      const fixedId = guild.id === STORE_FORUMS.guildId ? STORE_FORUMS.guidePosts[guide.key] : null;
+      if (posts.has(fixedId) || [...posts.values()].some(post => post.name === name)) continue;
+      const panel = new ContainerBuilder().setAccentColor(0x10B981)
+        .addTextDisplayComponents(new TextDisplayBuilder().setContent(buildGuideContent(guide, E)));
+      const payload = { components: [panel], flags: MessageFlags.IsComponentsV2, allowedMentions: { parse: [] } };
+      if (guide.key === 'youtube') payload.components.push(new ActionRowBuilder().addComponents(
+        new ButtonBuilder().setCustomId('ytb:warranty:apply').setLabel('Yêu Cầu Bảo Hành').setStyle(ButtonStyle.Success)));
+      await forum.threads.create({ name, message: payload, autoArchiveDuration: 10080 });
+    }
+    return interaction.editReply(`Đã thiết lập forum <#${forum.id}>. Mỗi sản phẩm có một bài hướng dẫn; nội dung đã có được giữ nguyên.`);
+  } catch (error) {
+    console.error('[SETUP-GUIDE]', error.message);
+    return interaction.editReply('Chưa hoàn tất forum. Kiểm tra quyền Quản lý kênh/luồng rồi thử lại; các bài đã có được giữ nguyên.');
   }
 }

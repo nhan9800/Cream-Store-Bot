@@ -68,7 +68,7 @@ describe('Cenar price board V3', () => {
     expect(panels.find((panel) => panel.group.key === 'youtube_stable')?.items).toHaveLength(2);
     expect(panels.some((panel) => panel.group.key === 'youtube_family_switch')).toBe(false);
     expect(panels.find((panel) => panel.group.key === 'spotify')?.items).toHaveLength(2);
-    expect(panels.find((panel) => panel.group.key === 'server_boost')?.items).toHaveLength(2);
+    expect(panels.find((panel) => panel.group.key === 'server_boost')?.items).toHaveLength(1);
     expect(panels.find((panel) => panel.group.key === 'netflix')?.items).toHaveLength(1);
     expect(panels.some((panel) => panel.group.key === 'other')).toBe(false);
   });
@@ -271,22 +271,21 @@ describe('Cenar price board V3', () => {
     expect(announcement).toContain('Hỗ trợ gia hạn tiếp');
   });
 
-  it('synchronizes exactly two official 14-Boost packages at 120k and 320k', () => {
+  it('synchronizes only the three-month 14-Boost offer', () => {
     const products = getActiveProducts(GUILD_ID);
     const boostProducts = products.filter((product) => /server boost/i.test(product.name));
     expect(boostProducts.map((product) => [product.product_key, product.price])).toEqual([
-      ['discord-server-boost-14-1-month', 120000],
       ['discord-server-boost-14-3-months', 320000],
     ]);
 
     const panel = buildPriceBoardPayloads(GUILD_ID, {}, products)
       .map(serialize)
-      .find((json) => json.includes('Discord Server Boost'));
-    expect(panel).toContain('1 Tháng');
-    expect(panel).toContain('120.000');
+      .find((json) => json.includes('Discord Server Boost') && json.includes('product:select'));
+    expect(panel).not.toContain('1 Tháng');
+    expect(panel).not.toContain('120.000');
     expect(panel).toContain('3 Tháng');
     expect(panel).toContain('320.000');
-    expect(panel).toContain('Cenar Studio có giá ticket 3 tháng 280.000đ');
+    expect(panel).toContain('Admin có thể cập nhật theo thị trường');
     expect(panel).not.toContain('Level 2');
   });
 

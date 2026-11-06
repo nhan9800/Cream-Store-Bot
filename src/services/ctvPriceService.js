@@ -29,7 +29,6 @@ export const CTV_OFFICIAL_PRICE_CATALOG = Object.freeze({
     { label: 'Nitro Boost Login 12 Tháng · Chính chủ, kích hoạt một lần', price: 795_000 },
   ]),
   boost: Object.freeze([
-    { label: 'Boost Server 1 Tháng', price: 90_000 },
     { label: 'Boost Server 3 Tháng', price: 240_000 },
   ]),
   gemini: Object.freeze([

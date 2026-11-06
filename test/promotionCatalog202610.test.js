@@ -10,7 +10,6 @@ import {
 
 // Independent fixture for owner sale prices outside the November catalog changes.
 const ownerPrices = {
-  'sale-server-boost-1-month': 110000,
   'sale-server-boost-3-months': 280000,
   'sale-netflix-premium-4k-private-1-month': 75000,
   'sale-gemini-pro-google-one-5tb-12-months': 120000,

@@ -14,7 +14,7 @@ import { createEmojiResolver, withButtonEmoji } from '../utils/emojiHelper.js';
 
 export const NITRO_GMAIL_PHONE_GUIDE = Object.freeze({
   guildId: '1282637033340403754',
-  nitroGuideChannelId: '1524057149783937214',
+  nitroGuideChannelId: '1568246897754513518',
   supportChannelId: '1514607020098191393',
   marker: 'CENAR-NITRO-GMAIL-PHONE-GUIDE-2026-09',
   screenshotAttachmentName: 'nitro-gmail-device-phone-verification.png',

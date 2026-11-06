@@ -109,6 +109,9 @@ export async function buildClient() {
     // Restore the owned application icon set independently of slow optional
     // setup. Partial uploads/Discord failures retry; commerce stays available.
     const iconSetup=startCoreEmojiMaintenance(readyClient,{guildId:config.guildId,afterSync:refreshBotInterfaces});
+    void iconSetup.then(() => import('./services/storeForumAdoptionService.js'))
+      .then(({ adoptStoreForums }) => adoptStoreForums(readyClient))
+      .catch(error => console.error('[FORUM-ADOPTION]', error.message));
 
     // Start publication as soon as this process owns the HTTP port. It must
     // not wait for optional marketing, admin or warranty Discord operations,

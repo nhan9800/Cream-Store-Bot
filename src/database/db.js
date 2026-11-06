@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import { GEMINI_PRO_CDK_PRODUCT } from '../config/geminiProCdk202611.js';
+import { BOOST_PRODUCT_KEY, BOOST_PRICE_SETTING, parseBoostPrice } from '../config/boostCatalog.js';
 import path from 'node:path';
 import Database from 'better-sqlite3';
 import { fileURLToPath } from 'node:url';
@@ -1817,7 +1818,6 @@ export const DEFAULT_PRODUCT_CATALOG = [
     { product_key: 'discord-nitro-boost-1-nam-login', name: 'Discord Nitro Boost 12 Tháng (Login · Chính Chủ)', aliases: ['Discord Nitro Boost 1 Năm (Login)'], description: 'Kích hoạt trọn 12 tháng trong một lần trên tài khoản Discord chính chủ. Mở ticket riêng để xác nhận cách kích hoạt.', price: 880000, ctv_price: 795000, duration_months: 12, service_type: 'GAME', emoji: 'brand_nitro', original_price: 0, activation_method: 'OWN_ACCOUNT' },
 
     // Boost Server · chỉ giữ hai gói 14 Boosts chính thức
-    { product_key: 'discord-server-boost-14-1-month', name: 'Discord Server Boost 14 Boosts (1 Tháng)', aliases: ['Discord Server Boost Level 3 (1 Tháng)', '14 Nâng Cấp Server Boost Level 3 (1 Tháng)'], description: 'Loại có liền: nâng cấp máy chủ bằng 14 Boosts trong 1 tháng.', price: 120000, ctv_price: 90000, duration_months: 1, service_type: 'GAME', emoji: 'brand_boost', original_price: 0, is_featured: 1, virtual_purchase_count: 0 },
     { product_key: 'discord-server-boost-14-3-months', name: 'Discord Server Boost 14 Boosts (3 Tháng)', aliases: ['Discord Server Boost Level 3 (3 Tháng)', '14 Nâng Cấp Server Boost Level 3 (3 Tháng)'], description: 'Loại có liền: nâng cấp máy chủ bằng 14 Boosts trong 3 tháng.', price: 320000, ctv_price: 240000, duration_months: 3, service_type: 'GAME', emoji: 'brand_boost', original_price: 0, is_featured: 1, virtual_purchase_count: 0 },
 
     // Decor Trang Trí - Có Nitro
@@ -2190,7 +2190,6 @@ export function seedProductCatalog(dbInstance) {
     WHERE is_active = 1
       AND LOWER(name) LIKE '%server boost%'
       AND COALESCE(product_key, '') NOT IN (
-        'discord-server-boost-14-1-month',
         'discord-server-boost-14-3-months'
       )
   `);
@@ -2217,23 +2216,28 @@ export function seedProductCatalog(dbInstance) {
   `);
 
   let currentSort = 100;
+  const boostPriceOverride = dbInstance.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'system_settings'").get()
+    ? dbInstance.prepare('SELECT value FROM system_settings WHERE key = ?').get(BOOST_PRICE_SETTING)?.value
+    : null;
   
   dbInstance.transaction(() => {
     for (const p of products) {
       const key = productKey(p);
+      const override = key === BOOST_PRODUCT_KEY ? boostPriceOverride : null;
+      const price = override == null ? p.price : parseBoostPrice(override);
       const names = [p.name, ...(p.aliases || [])];
       const existing = findByKeyStmt.get(key)
         || names.map((name) => findByNameStmt.get(name, p.duration_months)).find(Boolean);
       if (existing) {
         updateStmt.run(
-          p.name, p.description, p.price, p.ctv_price ?? null, p.duration_months, p.service_type, p.emoji, p.original_price, p.warranty_policy || null,
+          p.name, p.description, price, p.ctv_price ?? null, p.duration_months, p.service_type, p.emoji, p.original_price, p.warranty_policy || null,
           p.base_price || null, p.base_duration_days || null, p.additional_day_price || null, p.minimum_days || null, p.maximum_days || null, p.quota_value || null, p.quota_unit || null, p.activation_method || null, p.username_required || 0, p.login_required || 0,
           p.is_featured ? 1 : 0, Math.max(0, Number(p.virtual_purchase_count || 0)), key, existing.id
         );
         deactivateDuplicatesStmt.run(existing.id, key, JSON.stringify(names), p.duration_months);
       } else {
         insertStmt.run(
-          p.name, p.description, p.price, p.ctv_price ?? null, p.duration_months, p.service_type, p.emoji, currentSort++, p.original_price, p.warranty_policy || null,
+          p.name, p.description, price, p.ctv_price ?? null, p.duration_months, p.service_type, p.emoji, currentSort++, p.original_price, p.warranty_policy || null,
           p.base_price || null, p.base_duration_days || null, p.additional_day_price || null, p.minimum_days || null, p.maximum_days || null, p.quota_value || null, p.quota_unit || null, p.activation_method || null, p.username_required || 0, p.login_required || 0,
           key, p.is_featured ? 1 : 0, Math.max(0, Number(p.virtual_purchase_count || 0))
         );

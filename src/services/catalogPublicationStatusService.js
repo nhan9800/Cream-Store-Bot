@@ -1,5 +1,7 @@
 import { getActiveProducts } from './productCatalogService.js';
 import { getGuildConfig } from './guildConfigService.js';
+import { ChannelType } from 'discord.js';
+import { listForumPosts } from './forumPublicationService.js';
 import { config } from '../config.js';
 import { getPriceBoardProducts, PRICE_BOARD_VERSION, priceBoardInternals, getPriceBoardPublicationState } from './autoSetupPriceBoardService.js';
 import {
@@ -38,6 +40,16 @@ function publicGalleryMedia(message) {
 }
 
 async function inspectBoard(channel, botId, select) {
+  if (channel?.type === ChannelType.GuildForum) {
+    const posts = await listForumPosts(channel);
+    const messages = [];
+    for (const thread of posts.values()) {
+      if (thread.ownerId !== botId) continue;
+      const result = await inspectBoard(thread, botId, select);
+      messages.push(...result.messages);
+    }
+    return { available: true, messages };
+  }
   if (!channel?.isTextBased?.()) return { available: false, messages: [] };
   const selected = [];
   let before;

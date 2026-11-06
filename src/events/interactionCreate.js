@@ -122,6 +122,8 @@ import {
 } from "./shared.js";
 import {
   handleBoostBuy,
+  handleBoostPriceEdit,
+  handleBoostPriceModal,
   handleBoostBuyPackage,
   handleBoostBuyModal,
   handleBoostCheck,
@@ -539,9 +541,13 @@ export function registerInteractionHandler(client, commands) {
       }
 
       // ═══════ BOOST SERVER MODAL HANDLERS ═══════
+      if (interaction.isModalSubmit() && interaction.customId.startsWith('boost:price:modal:')) {
+        await handleBoostPriceModal(interaction, interaction.customId.split(':')[3]);
+        return;
+      }
       if (interaction.isModalSubmit() && interaction.customId.startsWith('boost:buy:modal:')) {
         const packageKey = interaction.customId.split(':')[3];
-        await handleBoostBuyModal(interaction, packageKey);
+        await handleBoostBuyModal(interaction, packageKey, interaction.customId.split(':')[4]);
         return;
       }
 
@@ -2214,6 +2220,11 @@ export function registerInteractionHandler(client, commands) {
       // ═══════════════════════════════════════════════
       // ═══════ BOOST SERVER BUTTON HANDLERS ══════════
       // ═══════════════════════════════════════════════
+
+      if (interaction.customId === 'boost:price:edit') {
+        await handleBoostPriceEdit(interaction);
+        return;
+      }
 
       if (interaction.customId === 'boost:buy') {
         await handleBoostBuy(interaction);

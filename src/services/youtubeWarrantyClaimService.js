@@ -16,7 +16,7 @@ import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { accentFor } from '../utils/uiKit.js';
 import { completeWarranty } from './orderService.js';
 
-export const YOUTUBE_GUIDE_CHANNEL_ID = '1524057155022491679';
+export const YOUTUBE_GUIDE_CHANNEL_ID = '1568246979128074280';
 export const YOUTUBE_GUIDE_URL = `https://discord.com/channels/1282637033340403754/${YOUTUBE_GUIDE_CHANNEL_ID}`;
 export const YOUTUBE_BRAND_EMOJI = '<:cenar_yt_logo:1543842435707310151>';
 
