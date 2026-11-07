@@ -14,7 +14,9 @@ export async function adoptStoreForums(client) {
   if (posts.some(post => post?.parentId !== serviceForum.id)) throw new Error('Store service forum post is unavailable.');
   const row = db.prepare('SELECT * FROM guild_settings WHERE guild_id = ?').get(guild.id);
   if (row) db.transaction(() => {
+    db.prepare("UPDATE guild_settings SET order_log_channel_id = ?, sale_channel_id = ? WHERE guild_id = ?").run(STORE_SERVICE_FORUM.orderLogChannelId, STORE_SERVICE_FORUM.promotionChannelId, guild.id);
     for (const key of Object.keys(row)) {
+      if (['order_log_channel_id', 'sale_channel_id'].includes(key)) continue;
       const next = key.endsWith('_channel_id') ? serviceChannelTarget(guild.id, row[key])
         : key.endsWith('_message_id') ? serviceMessageTarget(guild.id, row[key]) : row[key];
       if (next !== row[key]) db.prepare(`UPDATE guild_settings SET "${key}" = ? WHERE guild_id = ?`).run(next, guild.id);

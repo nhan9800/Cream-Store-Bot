@@ -1,4 +1,4 @@
-import { ChannelType, PermissionFlagsBits, ActionRowBuilder, AttachmentBuilder } from 'discord.js';
+import { ChannelType, PermissionFlagsBits, ActionRowBuilder, AttachmentBuilder, MessageFlags } from 'discord.js';
 import { db } from '../database/db.js';
 import { buildLocketProductPanel, buildLocketDetails, LOCKET_PANEL_IMAGE } from './locketProductPanel.js';
 import { getProductByName } from './productCatalogService.js';
@@ -18,6 +18,7 @@ import { config } from '../config.js';
 import { getCenarHub } from './cenarHub.js';
 import { sendOrRefreshPaymentQr } from './paymentService.js';
 import { STORE_ONE_CHANNEL_NAMES } from '../config/storeOneChannelAesthetic.js';
+import { STORE_FORUMS } from '../config/storeForums202611.js';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
@@ -27,6 +28,103 @@ const __dirname = path.dirname(__filename);
 const botRoot = path.resolve(__dirname, '..', '..');
 const PREMIUM_CATEGORY_NAME = STORE_ONE_CHANNEL_NAMES.premiumCategory;
 const LOCKET_CHANNEL_NAME = STORE_ONE_CHANNEL_NAMES.locketGold;
+const locketForumPublications = new Map();
+const LOCKET_CONTROLS = ['product:locket:buy', 'product:locket:features', 'product:locket:policy'];
+
+function componentIds(message) {
+  const queue = [...(message.toJSON?.().components || message.components || [])];
+  const ids = [];
+  while (queue.length) {
+    const component = queue.shift();
+    const id = component.custom_id ?? component.customId;
+    if (id) ids.push(id);
+    if (component.components) queue.push(...component.components);
+  }
+  return ids;
+}
+
+function isLocketWorkflowCard(message, botId) {
+  const ids = componentIds(message);
+  return message.author?.id === botId && ids.length === LOCKET_CONTROLS.length
+    && LOCKET_CONTROLS.every(id => ids.includes(id));
+}
+
+async function publishStoreOneLocketForum(guild) {
+  if (locketForumPublications.has(guild.id)) return locketForumPublications.get(guild.id);
+  const publication = (async () => {
+    if (!db.prepare('SELECT guild_id FROM guild_settings WHERE guild_id = ?').get(guild.id)) {
+      throw new Error('Cenar Store chưa có thiết lập ticket; không tạo kênh Premium thay thế.');
+    }
+    const botId = guild.client.user.id;
+    const forum = await guild.channels.fetch(STORE_FORUMS.priceForumId);
+    const thread = await guild.channels.fetch(STORE_FORUMS.pricePosts.locket);
+    if (forum?.type !== ChannelType.GuildForum || forum.guildId !== guild.id
+      || thread?.type !== ChannelType.PublicThread || thread.guildId !== guild.id
+      || thread.parentId !== forum.id || thread.ownerId !== botId) {
+      throw new Error('Chưa xác minh được bài Locket trong forum bảng giá; không tạo lại kênh Premium.');
+    }
+    const starter = await thread.messages.fetch(thread.id);
+    if (starter.author?.id !== botId || !componentIds(starter).includes('product:select')) {
+      throw new Error('Bài bảng giá Locket không đúng cấu trúc; giữ nguyên nội dung để Admin kiểm tra.');
+    }
+    const product = getProductByName('WEB', 'Locket Gold — 1 năm');
+    if (!product || product.is_active !== 1) throw new Error('Gói Locket Gold không còn mở bán.');
+
+    const cards = new Map();
+    let before, complete = false;
+    for (let page = 0; page < 10; page++) {
+      const messages = await thread.messages.fetch({ limit: 100, ...(before ? { before } : {}) });
+      for (const message of messages.values()) {
+        if (message.id !== thread.id && isLocketWorkflowCard(message, botId)) cards.set(message.id, message);
+      }
+      if (messages.size < 100) { complete = true; break; }
+      const last = [...messages.values()].at(-1)?.id;
+      if (!last || last === before) break;
+      before = last;
+    }
+    if (!complete || cards.size > 1) throw new Error('Lịch sử Locket cần Admin kiểm tra; không đăng trùng hoặc xóa tin.');
+    if (thread.archived) await thread.setArchived(false);
+
+    const existing = [...cards.values()][0];
+    const attachments = [...(existing?.attachments?.values() || [])];
+    const hasBanner = attachments.some(attachment => attachment.name === LOCKET_PANEL_IMAGE || attachment.filename === LOCKET_PANEL_IMAGE);
+    const bannerPath = path.join(botRoot, 'assets/products/locket-gold', LOCKET_PANEL_IMAGE);
+    const addBanner = !hasBanner && fs.existsSync(bannerPath);
+    const payload = { ...buildLocketProductPanel(guild.id, product, hasBanner || addBanner),
+      allowedMentions: { parse: [] }, files: addBanner ? [new AttachmentBuilder(bannerPath)] : [] };
+    let panel;
+    if (existing) {
+      panel = await existing.edit({ ...payload, attachments: attachments.map(attachment => ({ id: attachment.id,
+        filename: attachment.name ?? attachment.filename })) });
+    } else {
+      panel = await thread.send({ ...payload, flags: MessageFlags.IsComponentsV2 | MessageFlags.SuppressNotifications });
+    }
+    if (panel.id === thread.id || !isLocketWorkflowCard(panel, botId)) throw new Error('Chưa xác minh được panel thao tác Locket.');
+    const publishedAttachments = [...(panel.attachments?.values() || [])];
+    if ((hasBanner || addBanner) && !publishedAttachments.some(attachment => (attachment.name ?? attachment.filename) === LOCKET_PANEL_IMAGE)) {
+      throw new Error('Chưa xác minh được hình ảnh Locket; giữ nguyên thiết lập kênh để kiểm tra.');
+    }
+    if (!attachments.every(attachment => publishedAttachments.some(published => published.id === attachment.id))) {
+      throw new Error('Tệp đính kèm panel Locket chưa được giữ đầy đủ.');
+    }
+
+    for (const column of ['premium_category_id', 'locket_channel_id', 'locket_product_message_id']) ensureGuildSettingColumn(column);
+    const adoption = db.prepare(`UPDATE guild_settings SET premium_category_id = NULL,
+      locket_channel_id = ?, locket_product_message_id = ? WHERE guild_id = ?`).run(thread.id, panel.id, guild.id);
+    if (adoption.changes !== 1) throw new Error('Chưa lưu được vị trí Locket; giữ nguyên lịch sử để Admin kiểm tra.');
+    return { status: existing ? 'updated' : 'published', channelId: thread.id, messageId: panel.id };
+  })();
+  locketForumPublications.set(guild.id, publication);
+  try { return await publication; }
+  finally { locketForumPublications.delete(guild.id); }
+}
+
+async function handleStoreOnePremiumCommand(interaction) {
+  if (!interaction.deferred && !interaction.replied) await interaction.deferReply({ ephemeral: true });
+  const result = await publishStoreOneLocketForum(interaction.guild);
+  await interaction.editReply(`✅ Locket Gold đã được gộp vào <#${STORE_FORUMS.pricePosts.locket}>. Giữ nguyên bảng giá, hình ảnh và các nút mua/đặc quyền/điều khoản.`);
+  return result;
+}
 
 // Helper to ensure column exists
 function ensureGuildSettingColumn(columnName) {
@@ -41,6 +139,7 @@ function ensureGuildSettingColumn(columnName) {
 }
 
 export async function setupPremiumProducts(interaction) {
+  if (interaction.guild.id === STORE_FORUMS.guildId) return handleStoreOnePremiumCommand(interaction);
   await interaction.deferReply({ ephemeral: true });
   const guild = interaction.guild;
   
@@ -110,6 +209,7 @@ export async function setupPremiumProducts(interaction) {
 }
 
 export async function publishPremiumProducts(interaction) {
+  if (interaction.guild.id === STORE_FORUMS.guildId) return handleStoreOnePremiumCommand(interaction);
   await interaction.deferReply({ ephemeral: true });
   const guild = interaction.guild;
 
@@ -143,6 +243,7 @@ export async function publishPremiumProducts(interaction) {
 
 // ─── Core publish function (dùng cho cả manual và auto) ───
 export async function publishPremiumProductsForGuild(guild, settingOverrides = {}) {
+  if (guild.id === STORE_FORUMS.guildId) return publishStoreOneLocketForum(guild);
 
   const storedSettings = db.prepare('SELECT * FROM guild_settings WHERE guild_id = ?').get(guild.id) || {};
   const settings = { ...storedSettings, ...settingOverrides };
@@ -415,6 +516,7 @@ async function handlePremiumBuyOrder(interaction, productName, quantity, totalPr
 
 export async function autoSetupAndPublishPremiumProducts(guild) {
   try {
+    if (guild.id === STORE_FORUMS.guildId) return await publishStoreOneLocketForum(guild);
     ensureGuildSettingColumn('premium_category_id');
     ensureGuildSettingColumn('locket_channel_id');
     ensureGuildSettingColumn('locket_product_message_id');

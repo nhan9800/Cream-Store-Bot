@@ -1,0 +1,29 @@
+[
+  {
+    "name": "cenar_decor27_pink",
+    "filename": "cenar_decor27_pink.gif",
+    "source": "https://emoji.gg/emoji/9385-sparkles-pinkpastel",
+    "url": "https://cdn3.emoji.gg/emojis/9385-sparkles-pinkpastel.gif",
+    "license": "Emoji.gg Basic License",
+    "bytes": 1829,
+    "sha256": "ff5fc93664b12dc31c571b585191c701c1469ee5c2d09cb6d07ec483af3f797f"
+  },
+  {
+    "name": "cenar_decor27_gold",
+    "filename": "cenar_decor27_gold.gif",
+    "source": "https://emoji.gg/emoji/1918-orange-sparkles",
+    "url": "https://cdn3.emoji.gg/emojis/1918-orange-sparkles.gif",
+    "license": "Emoji.gg Basic License",
+    "bytes": 3998,
+    "sha256": "eecc04a084551d0a06f802a1d14fa0f0ee1fc7b793942a94ba6a542932e492d3"
+  },
+  {
+    "name": "cenar_code27_dev",
+    "filename": "cenar_code27_dev.png",
+    "source": "https://emoji.gg/emoji/552691-developer",
+    "url": "https://cdn3.emoji.gg/emojis/552691-developer.png",
+    "license": "Emoji.gg Basic License",
+    "bytes": 246146,
+    "sha256": "1fa3b9d23c055b0f0d42b597f4507e09a609edc1fbc1468ea84f1d7d9a3f3094"
+  }
+]

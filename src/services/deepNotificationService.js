@@ -21,6 +21,7 @@ import { createEmojiResolver, withButtonEmoji } from '../utils/emojiHelper.js';
 import { isInternationalGuild, STORE_ONE_GUILD_ID } from '../utils/locale.js';
 import { translateProductName } from '../utils/internationalCatalog.js';
 import { runStoreOneAdminRenewalReminders } from './adminRenewalReminderService.js';
+import { reminderGuildId, resolveReminderChannel } from './reminderRoutingService.js';
 
 // ═══════════════ Helpers ═══════════════
 
@@ -42,12 +43,12 @@ async function safeSendEmbed(user, payload) {
   }
 }
 
-function getReminderChannel(client, guildId) {
+async function getReminderChannel(client, guildId) {
   try {
-    const gCfg = db.prepare('SELECT reminder_channel_id FROM guild_settings WHERE guild_id = ?').get(guildId);
-    if (gCfg?.reminder_channel_id) {
-      return client.channels.cache.get(gCfg.reminder_channel_id) ?? null;
-    }
+    const id = reminderGuildId(guildId);
+    const gCfg = db.prepare('SELECT reminder_channel_id FROM guild_settings WHERE guild_id = ?').get(id);
+    const guild = client.guilds.cache.get(id) || await client.guilds.fetch(id).catch(() => null);
+    return await resolveReminderChannel(client, guild, gCfg, { staffFallback: false });
   } catch {}
   return null;
 }
@@ -223,7 +224,7 @@ export async function checkExpiredSubscriptionOrders(client) {
   let alerted = 0;
   for (const order of expiredOrders) {
     try {
-      const ch = getReminderChannel(client, order.guild_id);
+      const ch = await getReminderChannel(client, order.guild_id);
       if (ch) {
         await ch.send(buildExpiredSubscriptionAlertV2(order, ch.guild.ownerId));
         markExpiryNoticeRaw(order.order_code, 'expiry_notice_expired_sent_at');
@@ -256,8 +257,8 @@ export async function runDeepNotifications(client) {
     if (ok) {
       markExpiryNoticeRaw(order.order_code, 'expiry_notice_3d_sent_at'); sent3d++;
       try {
-        const ch = getReminderChannel(client, order.guild_id);
-        ch?.send(`${E('icon_announce')} Đã nhắc gia hạn **(3 ngày)** cho <@${order.customer_id}> — \`${order.order_code}\` | **${order.product_name}**`);
+        const ch = await getReminderChannel(client, order.guild_id);
+        await ch?.send(`${E('icon_announce')} Đã nhắc gia hạn **(3 ngày)** cho <@${order.customer_id}> — \`${order.order_code}\` | **${order.product_name}**`);
       } catch {}
     }
   }
@@ -274,7 +275,7 @@ export async function runDeepNotifications(client) {
     ].join('\n'));
     if (ok) {
       markExpiryNoticeRaw(order.order_code, 'expiry_notice_2d_sent_at'); sent2d++;
-      try { const ch = getReminderChannel(client, order.guild_id); ch?.send(`${E('icon_announce')} Đã nhắc gia hạn **(2 ngày)** cho <@${order.customer_id}> — \`${order.order_code}\` | **${order.product_name}**`); } catch {}
+      try { const ch = await getReminderChannel(client, order.guild_id); await ch?.send(`${E('icon_announce')} Đã nhắc gia hạn **(2 ngày)** cho <@${order.customer_id}> — \`${order.order_code}\` | **${order.product_name}**`); } catch {}
     }
   }
 
@@ -290,7 +291,7 @@ export async function runDeepNotifications(client) {
     ].join('\n'));
     if (ok) {
       markExpiryNoticeRaw(order.order_code, 'expiry_notice_1d_sent_at'); sent1d++;
-      try { const ch = getReminderChannel(client, order.guild_id); ch?.send(`${E('icon_clock')} Đã nhắc gia hạn **(1 ngày)** cho <@${order.customer_id}> — \`${order.order_code}\` | **${order.product_name}**`); } catch {}
+      try { const ch = await getReminderChannel(client, order.guild_id); await ch?.send(`${E('icon_clock')} Đã nhắc gia hạn **(1 ngày)** cho <@${order.customer_id}> — \`${order.order_code}\` | **${order.product_name}**`); } catch {}
     }
   }
 
@@ -320,7 +321,7 @@ export async function runSubscriptionNotifications(client) {
         markRemindSent(sub.id);
         continue;
       }
-      const ch = getReminderChannel(client, sub.guild_id);
+      const ch = await getReminderChannel(client, sub.guild_id);
       if (!ch) continue;
 
       await ch.send(buildRenewalV2(sub));
@@ -350,7 +351,7 @@ export async function runSubscriptionNotifications(client) {
           continue;
         }
         // Không có khách → nhắc chủ shop
-        const ch = getReminderChannel(client, sub.guild_id);
+        const ch = await getReminderChannel(client, sub.guild_id);
         if (ch) {
           await ch.send(buildRenewalV2(sub));
           markRemindSent(sub.id);

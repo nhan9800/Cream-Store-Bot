@@ -26,7 +26,7 @@ const campaignBannerPath = path.resolve(__dirname, '../../assets/campaigns', cam
 
 export const DAILY_COLOR_SALE = Object.freeze({
   guildId: '1282637033340403754',
-  promotionChannelId: '1568256315669618708',
+  promotionChannelId: '1515008584549797979',
   supportChannelId: '1514607020098191393',
   priceChannelId: '1514606995842273280',
   memberRoleId: '1282638730812854345',

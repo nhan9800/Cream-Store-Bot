@@ -1,11 +1,9 @@
 export const NITRO_TRIAL_ELIGIBILITY_VI = Object.freeze([
   'Tài khoản được tạo trên 1 tháng và chưa từng sử dụng Nitro.',
-  'Tài khoản đã từng sử dụng Nitro nhưng không dùng lại Nitro trong ít nhất 12 tháng liên tục.',
 ]);
 
 export const NITRO_TRIAL_ELIGIBILITY_EN = Object.freeze([
   'The account is over one month old and has never used Nitro.',
-  'The account used Nitro before but has not used Nitro again for at least 12 consecutive months.',
 ]);
 
 export function isNitroTrialProduct(product) {

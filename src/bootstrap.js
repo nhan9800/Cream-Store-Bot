@@ -3,6 +3,7 @@ import { assertRuntimeConfig, config } from './config.js';
 import { initDatabase } from './database/db.js';
 import { getClientOptions, loadCommands, registerInteractionHandler } from './events/interactionCreate.js';
 import { startScheduler } from './services/schedulerService.js';
+import { adoptStoreOneReminderRouting } from './services/reminderRoutingService.js';
 import { startWebhookServer } from './services/webhookServer.js';
 import { startPresenceRotation } from './services/presenceService.js';
 import { startOtpAutoCheck } from './services/otpAutoCheckService.js';
@@ -103,6 +104,7 @@ export async function buildClient() {
     // Chỉ một tiến trình giữ được cổng HTTP production mới được chạy
     // scheduler. Điều này loại bỏ cửa sổ vài giây mà một bot trùng phiên có
     // thể gửi reminder trước khi bị cơ chế khóa launcher dừng lại.
+    adoptStoreOneReminderRouting(config.guildId);
     startScheduler(readyClient);
     startOtpAutoCheck(readyClient);
 
