@@ -27,6 +27,8 @@ import { execute as editOrderCommand } from '../src/commands/sua-don.js';
 import { registerAdminRoutes } from '../src/services/adminApiRoutes.js';
 import { config } from '../src/config.js';
 import { normalizeMessagePresentation } from '../src/utils/discordEmojiBoundary.js';
+import { STORE_SERVICE_FORUM } from '../src/config/storeServiceForum202611.js';
+import { RESTORED_FEEDBACK_MESSAGES } from '../src/config/restoredFeedbackMessages20261107.js';
 
 const suffix = Date.now().toString();
 const guildId = `guild_edit_sync_${suffix}`;
@@ -34,12 +36,12 @@ const customerId = '123456789012345678';
 const staffId = `staff_edit_sync_${suffix}`;
 let sequence = 0;
 
-function createCompletedOrder() {
+function createCompletedOrder(targetGuildId = guildId) {
   sequence += 1;
   const orderCode = `CN_${String(920000 + sequence)}`;
   const channelId = `ticket-${orderCode.toLowerCase()}`;
   const ticket = createTicket({
-    guildId,
+    guildId: targetGuildId,
     channelId,
     customerId,
     openedById: customerId,
@@ -48,7 +50,7 @@ function createCompletedOrder() {
   });
   createOrder({
     orderCode,
-    guildId,
+    guildId: targetGuildId,
     ticketId: ticket.id,
     ticketChannelId: channelId,
     customerId,
@@ -370,6 +372,32 @@ describe('/sua-don completion presentation synchronization', () => {
     expect(payload.allowedMentions).toEqual({ parse: [] }); expect(channel.send).not.toHaveBeenCalled();
     review.components = payload.components;
     expect(await inspectOrderFeedbackMessages({ guild, order: edited })).toEqual({ count: 1, verified: 1 });
+  });
+
+  it('preserves the original timestamp when rebuilding a restored classic review', async () => {
+    const order = createCompletedOrder(STORE_SERVICE_FORUM.guildId);
+    const originalId = '1515708177876783147';
+    const { sourceChannelId, messageId } = RESTORED_FEEDBACK_MESSAGES[originalId];
+    const channelId = STORE_SERVICE_FORUM.feedbackChannelId;
+    db.prepare(`INSERT INTO feedbacks(guild_id,order_code,customer_id,stars,content,product_name,feedback_channel_id,feedback_message_id)
+      VALUES (?,?,?,5,'Ý kiến gốc',?,?,?)`).run(order.guild_id, order.order_code, customerId, order.product_name, sourceChannelId, originalId);
+    const review = { id: messageId, author: { id: 'bot-user' }, flags: { bitfield: 4096 }, edit: vi.fn() };
+    const { channel } = createFakeDiscordChannel(channelId, [review]);
+    const guild = { ...createFakeGuild(channel), id: order.guild_id, members: { fetch: vi.fn(async () => ({ id: customerId })) } };
+    const edited = updateOrderFieldsRaw(order.order_code, { product_name: 'Sản phẩm cập nhật' });
+    expect(await syncOrderFeedbackMessages({ guild, order: edited })).toMatchObject({ synced: true, count: 1 });
+    const payload = review.edit.mock.calls[0][0];
+    expect(payload).toMatchObject({ flags: 36864, content: null, embeds: [], allowedMentions: { parse: [] } });
+    expect(payload.components.at(-1)).toEqual({
+      type: 10,
+      content: `-# Bản khôi phục · Thời điểm gốc <t:1781443390:F> · CENAR-RESTORE:${sourceChannelId}:${originalId}`,
+    });
+    expect(channel.send).not.toHaveBeenCalled();
+    review.components = payload.components;
+    db.prepare('UPDATE feedbacks SET feedback_channel_id=?, feedback_message_id=? WHERE order_code=?').run(channelId, messageId, order.order_code);
+    expect(await inspectOrderFeedbackMessages({ guild, order: edited })).toEqual({ count: 1, verified: 1 });
+    review.components = payload.components.slice(0, -1);
+    expect(await inspectOrderFeedbackMessages({ guild, order: edited })).toEqual({ count: 1, verified: 0 });
   });
 
   it('supports an authorized sync-only command without changing price, expiry or fulfillment', async () => {

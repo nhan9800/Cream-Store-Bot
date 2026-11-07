@@ -1,3 +1,4 @@
+import { ComponentType, SnowflakeUtil } from 'discord.js';
 import { db } from '../database/db.js';
 import { STORE_SERVICE_FORUM } from '../config/storeServiceForum202611.js';
 import { RESTORED_FEEDBACK_MESSAGES } from '../config/restoredFeedbackMessages20261107.js';
@@ -22,4 +23,20 @@ export function rebindRestoredFeedbackReferences(guildId) {
 
 export function restoredFeedbackReferenceHealth() {
   return { verified: verifiedRestoration, verifiedMessageMappings: Object.keys(RESTORED_FEEDBACK_MESSAGES).length };
+}
+
+export function withRestoredFeedbackAttribution(components, { guildId, channelId, messageId }) {
+  if (guildId !== STORE_SERVICE_FORUM.guildId || channelId !== STORE_SERVICE_FORUM.feedbackChannelId) {
+    return components;
+  }
+  const original = Object.entries(RESTORED_FEEDBACK_MESSAGES)
+    .find(([, reference]) => reference.messageId === messageId);
+  if (!original) return components;
+
+  const [sourceMessageId, { sourceChannelId }] = original;
+  const timestamp = Math.floor(SnowflakeUtil.timestampFrom(sourceMessageId) / 1000);
+  return [...components, {
+    type: ComponentType.TextDisplay,
+    content: `-# Bản khôi phục · Thời điểm gốc <t:${timestamp}:F> · CENAR-RESTORE:${sourceChannelId}:${sourceMessageId}`,
+  }];
 }
