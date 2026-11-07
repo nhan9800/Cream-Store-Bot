@@ -33,4 +33,7 @@ export async function adoptStoreForums(client) {
   }
   const result = await refreshBoostPanel(client, guild.id);
   if (result.status !== 'updated') throw new Error(`Boost panel not updated: ${result.status}`);
+  // Required forum adoption must not wait behind unrelated optional setup.
+  const { publishPremiumProductsForGuild } = await import('./premiumProductSetupService.js');
+  await publishPremiumProductsForGuild(guild);
 }
