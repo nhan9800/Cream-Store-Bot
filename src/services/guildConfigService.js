@@ -201,7 +201,11 @@ export function getGuildConfig(guildId) {
     if (key.endsWith('_channel_id')) row[key] = serviceChannelTarget(guildId, row[key]);
     else if (key.endsWith('_message_id')) row[key] = serviceMessageTarget(guildId, row[key]);
   }
-  if (String(guildId) === STORE_SERVICE_FORUM.guildId) row.order_log_channel_id = STORE_SERVICE_FORUM.orderLogChannelId;
+  if (String(guildId) === STORE_SERVICE_FORUM.guildId) {
+    row.order_log_channel_id = STORE_SERVICE_FORUM.orderLogChannelId;
+    row.feedback_channel_id = STORE_SERVICE_FORUM.feedbackChannelId;
+    row.public_order_log_channel_id = STORE_SERVICE_FORUM.completedOrderLogChannelId;
+  }
   return row;
 }
 

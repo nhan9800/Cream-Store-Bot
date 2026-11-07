@@ -16,6 +16,11 @@ describe('store forum maintenance',()=>{
     expect(serviceChannelTarget(STORE_SERVICE_FORUM.guildId,'1514607026247045121')).toBe('1514607026247045121');
     expect(serviceMessageTarget(STORE_SERVICE_FORUM.guildId,'1568256315669618708')).toBe('1568092041366216796');
     expect(STORE_SERVICE_FORUM.posts).not.toHaveProperty('promotion');
+    expect(STORE_SERVICE_FORUM.posts).not.toHaveProperty('feedback');
+    expect(STORE_SERVICE_FORUM.posts).not.toHaveProperty('transactions');
+    for(const id of ['1514606999386587206','1568256285105987665'])expect(serviceChannelTarget(STORE_SERVICE_FORUM.guildId,id)).toBe(STORE_SERVICE_FORUM.feedbackChannelId);
+    for(const id of ['1514620623685685390','1568256313777979492'])expect(serviceChannelTarget(STORE_SERVICE_FORUM.guildId,id)).toBe(STORE_SERVICE_FORUM.completedOrderLogChannelId);
+    expect(Object.values(STORE_SERVICE_FORUM.postNames).map(x=>x.slice(0,2))).toEqual(['01','02','03','04','05','06','07','08']);
   });
   it('edits the shared card starter while preserving the discount board and other replies',async()=>{
     const card={id:'card',author:{id:'bot'},toJSON:()=>({content:'CENAR CARD CENTER'}),edit:vi.fn().mockResolvedValue({}),delete:vi.fn()};
