@@ -8,6 +8,7 @@ import { getFeedbackAutoCloseState, scheduleOrderTicketAutoClose } from './ticke
 import { db } from '../database/db.js';
 import { normalizeMessagePresentation } from '../utils/discordEmojiBoundary.js';
 import { serviceChannelTarget, serviceMessageTarget } from '../config/storeServiceForum202611.js';
+import { withRestoredFeedbackAttribution } from './restoredFeedbackReferenceService.js';
 
 export function scheduleFeedbackTicketAutoClose(order) {
   const ticket = scheduleOrderTicketAutoClose(order, config.autoCloseCompletedTicketMinutes);
@@ -57,7 +58,11 @@ export async function syncPublishedFeedbackMessage({ client, feedback, guild: pr
     stars: feedback.stars,
     content: feedback.content,
   });
-  await message.edit({ content: null, embeds: [], components: [container], flags, allowedMentions: { parse: [] } });
+  const components = withRestoredFeedbackAttribution([container], { guildId, channelId, messageId });
+  await message.edit({
+    content: null, embeds: [], components, flags: flags | (message.flags?.bitfield ?? 0),
+    allowedMentions: { parse: [] },
+  });
   console.info(`[FEEDBACK-SYNC] Updated Discord message ${messageId} for order ${order.order_code}`);
   return { synced: true, channelId, messageId };
 }
@@ -100,13 +105,16 @@ export async function inspectOrderFeedbackMessages({ guild, order }) {
   };
   for (const feedback of feedbacks) {
     try {
-      const channel = await guild.channels.fetch(serviceChannelTarget(guild.id, feedback.feedback_channel_id));
-      const message = await channel?.messages?.fetch(serviceMessageTarget(guild.id, feedback.feedback_message_id));
+      const channelId = serviceChannelTarget(guild.id, feedback.feedback_channel_id);
+      const messageId = serviceMessageTarget(guild.id, feedback.feedback_message_id);
+      const channel = await guild.channels.fetch(channelId);
+      const message = await channel?.messages?.fetch(messageId);
       if (!message || message.author?.id !== guild.client.user?.id) continue;
       const { container } = buildFeedbackV2({ member: { id: feedback.customer_id },
         order: { ...order, product_name: feedback.product_name || order.product_name },
         stars: feedback.stars, content: feedback.content });
-      const expected = normalizeMessagePresentation({ components: [container] }, guild.id);
+      const components = withRestoredFeedbackAttribution([container], { guildId: guild.id, channelId, messageId });
+      const expected = normalizeMessagePresentation({ components }, guild.id);
       if (JSON.stringify(texts(message.components)) === JSON.stringify(texts(expected.components))) verified += 1;
     } catch { /* Report failed reads as unverified; never recreate a public review. */ }
   }
