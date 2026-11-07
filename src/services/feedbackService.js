@@ -7,6 +7,7 @@ import { config } from '../config.js';
 import { getFeedbackAutoCloseState, scheduleOrderTicketAutoClose } from './ticketService.js';
 import { db } from '../database/db.js';
 import { normalizeMessagePresentation } from '../utils/discordEmojiBoundary.js';
+import { serviceChannelTarget, serviceMessageTarget } from '../config/storeServiceForum202611.js';
 
 export function scheduleFeedbackTicketAutoClose(order) {
   const ticket = scheduleOrderTicketAutoClose(order, config.autoCloseCompletedTicketMinutes);
@@ -22,8 +23,8 @@ export function scheduleFeedbackTicketAutoClose(order) {
 
 /** Rebuild the Discord card after an admin edits the published feedback. */
 export async function syncPublishedFeedbackMessage({ client, feedback, guild: providedGuild = null }) {
-  const channelId = String(feedback?.feedback_channel_id || '').trim();
-  const messageId = String(feedback?.feedback_message_id || '').trim();
+  const channelId = String(serviceChannelTarget(feedback?.guild_id, feedback?.feedback_channel_id) || '').trim();
+  const messageId = String(serviceMessageTarget(feedback?.guild_id, feedback?.feedback_message_id) || '').trim();
   if (!client || !channelId || !messageId) return { synced: false, reason: 'missing_message_reference' };
 
   const guildId = String(feedback?.guild_id || '').trim();
@@ -99,8 +100,8 @@ export async function inspectOrderFeedbackMessages({ guild, order }) {
   };
   for (const feedback of feedbacks) {
     try {
-      const channel = await guild.channels.fetch(feedback.feedback_channel_id);
-      const message = await channel?.messages?.fetch(feedback.feedback_message_id);
+      const channel = await guild.channels.fetch(serviceChannelTarget(guild.id, feedback.feedback_channel_id));
+      const message = await channel?.messages?.fetch(serviceMessageTarget(guild.id, feedback.feedback_message_id));
       if (!message || message.author?.id !== guild.client.user?.id) continue;
       const { container } = buildFeedbackV2({ member: { id: feedback.customer_id },
         order: { ...order, product_name: feedback.product_name || order.product_name },

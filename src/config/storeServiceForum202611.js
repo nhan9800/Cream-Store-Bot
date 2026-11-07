@@ -1,13 +1,15 @@
+import { RESTORED_FEEDBACK_MESSAGES } from './restoredFeedbackMessages20261107.js';
+
 export const STORE_SERVICE_FORUM = Object.freeze({
   "guildId": "1282637033340403754",
   "forumId": "1568256269985390753",
   "promotionChannelId": "1515008584549797979",
   "orderLogChannelId": "1514607026247045121",
+  "feedbackChannelId": "1568445613308121270",
+  "completedOrderLogChannelId": "1568445631109005523",
   "posts": {
     "overview": "1568256273328242799",
-    "feedback": "1568256285105987665",
     "honor": "1568256287446147223",
-    "transactions": "1568256313777979492",
     "valorant": "1568256322170912963",
     "development": "1568256325090025553",
     "sim": "1568256345864544378",
@@ -15,10 +17,18 @@ export const STORE_SERVICE_FORUM = Object.freeze({
     "events": "1568256352688537663",
     "membership": "1568256354907328702"
   },
+  "postNames": {
+    "overview": "01 · Bắt đầu tại Cenar", "honor": "02 · Bảng vinh danh",
+    "valorant": "03 · Cày thuê Valorant", "development": "04 · Thiết kế Bot & Website",
+    "sim": "05 · Thuê SIM online", "cards": "06 · Nạp thẻ & chiết khấu",
+    "events": "07 · Sự kiện & Giveaway", "membership": "08 · Đặc quyền thành viên"
+  },
   "channelTargets": {
-    "1514606999386587206": "1568256285105987665",
+    "1514606999386587206": "1568445613308121270",
+    "1568256285105987665": "1568445613308121270",
     "1514607003102740520": "1568256287446147223",
-    "1514620623685685390": "1568256313777979492",
+    "1514620623685685390": "1568445631109005523",
+    "1568256313777979492": "1568445631109005523",
     "1568256315669618708": "1515008584549797979",
     "1522130462456414220": "1568256322170912963",
     "1526895735067381841": "1568256325090025553",
@@ -63,5 +73,6 @@ export function serviceChannelTarget(guildId, id) {
 }
 
 export function serviceMessageTarget(guildId, id) {
-  return String(guildId) === STORE_SERVICE_FORUM.guildId ? (STORE_SERVICE_FORUM.messageTargets[id] || id) : id;
+  if (String(guildId) !== STORE_SERVICE_FORUM.guildId) return id;
+  return RESTORED_FEEDBACK_MESSAGES[id]?.messageId || STORE_SERVICE_FORUM.messageTargets[id] || id;
 }
