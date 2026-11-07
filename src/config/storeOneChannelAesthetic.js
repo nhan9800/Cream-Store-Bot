@@ -70,6 +70,8 @@ export const PROSETTINGS_EMOJI_INDEX = Object.freeze({
   '🎫': 898,
 });
 
+export const STORE_ONE_ADMIN_CATEGORY_ID = '1514607024476917872';
+
 export const STORE_ONE_CHANNEL_NAMES = Object.freeze({
   generalCategory: '🦉 ｜ ──・ THÔNG TIN CHUNG',
   storeCategory: '🦚 ｜ ──・ CỬA HÀNG CENAR',
@@ -80,7 +82,6 @@ export const STORE_ONE_CHANNEL_NAMES = Object.freeze({
   supportCategory: '🧰 ｜ ──・ TRUNG TÂM HỖ TRỢ',
   premiumCategory: '💎 ｜ ──・ SẢN PHẨM PREMIUM',
   adminCategory: '🐉 ｜ ──・ NHẬT KÝ QUẢN TRỊ',
-  adminOrderCategory: '🐙 ｜ ──・ QUẢN TRỊ ĐƠN HÀNG',
   warrantyTicketCategory: '🧪 ｜ ──・ TICKET BẢO HÀNH',
   supportTicketCategory: '🧩 ｜ ──・ TICKET HỖ TRỢ',
   complaintTicketCategory: '🚨 ｜ ──・ TICKET KHIẾU NẠI',
@@ -143,8 +144,8 @@ export const STORE_ONE_CHANNEL_NAMES = Object.freeze({
   ctvOrderLog: '📝・ctv-log-đơn-hàng',
   ctvPrice: '💰・ctv-bảng-giá',
 
-  adminOrderCenter: '📦・trung-tam-don-hang',
-  inviteEventLog: '🎫・log-event-invite',
+  adminOrderCenter: '📦・log-điều-phối-đơn-hàng',
+  inviteEventLog: '🎫・log-mời-thành-viên',
 });
 
 export const STORE_ONE_CHANNEL_DESIGN = Object.freeze({
@@ -156,8 +157,7 @@ export const STORE_ONE_CHANNEL_DESIGN = Object.freeze({
   '1522844526195114185': STORE_ONE_CHANNEL_NAMES.partnerCategory,
   '1514607018382721135': STORE_ONE_CHANNEL_NAMES.supportCategory,
   '1531297028695658576': STORE_ONE_CHANNEL_NAMES.premiumCategory,
-  '1514607024476917872': STORE_ONE_CHANNEL_NAMES.adminCategory,
-  '1537505375773925376': STORE_ONE_CHANNEL_NAMES.adminOrderCategory,
+  [STORE_ONE_ADMIN_CATEGORY_ID]: STORE_ONE_CHANNEL_NAMES.adminCategory,
   '1514620828078309538': STORE_ONE_CHANNEL_NAMES.warrantyTicketCategory,
   '1514620831534153789': STORE_ONE_CHANNEL_NAMES.supportTicketCategory,
   '1514620835317415987': STORE_ONE_CHANNEL_NAMES.complaintTicketCategory,

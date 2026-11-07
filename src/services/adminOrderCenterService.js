@@ -22,10 +22,10 @@ import { formatCurrency, formatOrderDuration, getOrderStatusLabel, getPaymentSta
 import { isManager } from '../utils/permissions.js';
 import { autoSyncGuildEmojis, formatProductDisplayName } from './emojiService.js';
 import { getGuildConfig } from './guildConfigService.js';
-import { STORE_ONE_CHANNEL_NAMES } from '../config/storeOneChannelAesthetic.js';
+import { STORE_ONE_ADMIN_CATEGORY_ID, STORE_ONE_CHANNEL_NAMES } from '../config/storeOneChannelAesthetic.js';
 import { resolveReminderChannel } from './reminderRoutingService.js';
 
-const CATEGORY_NAME = STORE_ONE_CHANNEL_NAMES.adminOrderCategory;
+const CATEGORY_NAME = STORE_ONE_CHANNEL_NAMES.adminCategory;
 const CHANNEL_NAME = STORE_ONE_CHANNEL_NAMES.adminOrderCenter;
 const ACTIVE_STATUSES = [
   'PENDING_PAYMENT',
@@ -551,17 +551,13 @@ export async function ensureAdminOrderCenter(guild) {
     return null;
   }
 
-  await guild.channels.fetch().catch(() => null);
+  const channels = await guild.channels.fetch();
   await guild.roles.fetch().catch(() => null);
   const emojiResult = await ensureAdminOrderEmojis(guild);
   const overwrites = privateOverwrites(guild, guildConfig);
 
-  let category = guildConfig.admin_order_category_id
-    ? await guild.channels.fetch(guildConfig.admin_order_category_id).catch(() => null)
-    : null;
-  if (!category || category.type !== ChannelType.GuildCategory) {
-    category = guild.channels.cache.find((channel) => channel.type === ChannelType.GuildCategory && channel.name === CATEGORY_NAME) || null;
-  }
+  let category = channels.get(STORE_ONE_ADMIN_CATEGORY_ID)
+    || channels.find((channel) => channel.type === ChannelType.GuildCategory && channel.name === CATEGORY_NAME);
   if (!category) {
     category = await guild.channels.create({
       name: CATEGORY_NAME,

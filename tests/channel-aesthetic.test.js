@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'vitest';
 import {
   PROSETTINGS_EMOJI_INDEX,
+  STORE_ONE_ADMIN_CATEGORY_ID,
   STORE_ONE_CHANNEL_DESIGN,
   STORE_ONE_CHANNEL_NAMES,
   channelLeadingEmoji,
@@ -11,7 +12,7 @@ describe('Store 1 channel aesthetic', () => {
     const names = Object.values(STORE_ONE_CHANNEL_DESIGN);
     const emojis = names.map(channelLeadingEmoji);
 
-    expect(names).toHaveLength(53);
+    expect(names).toHaveLength(52);
     expect(emojis.every(Boolean)).toBe(true);
     expect(new Set(emojis).size).toBe(emojis.length);
     for (const emoji of emojis) {
@@ -26,7 +27,10 @@ describe('Store 1 channel aesthetic', () => {
     expect(STORE_ONE_CHANNEL_NAMES.premiumCategory).toBe('💎 ｜ ──・ SẢN PHẨM PREMIUM');
     expect(STORE_ONE_CHANNEL_NAMES.partnerCategory).toBe('🦄 ｜ ──・ CENAR PARTNER');
     expect(STORE_ONE_CHANNEL_NAMES.ctvCategory).toBe('🐝 ｜ ──・ CENAR CTV');
-    expect(STORE_ONE_CHANNEL_NAMES.adminOrderCategory).toBe('🐙 ｜ ──・ QUẢN TRỊ ĐƠN HÀNG');
+    expect(STORE_ONE_CHANNEL_DESIGN[STORE_ONE_ADMIN_CATEGORY_ID]).toBe('🐉 ｜ ──・ NHẬT KÝ QUẢN TRỊ');
+    expect(STORE_ONE_CHANNEL_DESIGN['1537505375773925376']).toBeUndefined();
+    expect(STORE_ONE_CHANNEL_DESIGN['1537505377925472266']).toBe('📦・log-điều-phối-đơn-hàng');
+    expect(STORE_ONE_CHANNEL_DESIGN['1537814319235080253']).toBe('🎫・log-mời-thành-viên');
   });
 
   test('avoids muted symbols that look unloaded on Discord dark mode', () => {

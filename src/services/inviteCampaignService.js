@@ -12,6 +12,7 @@ import {
 } from 'discord.js';
 import { config } from '../config.js';
 import { AUTOMATIC_MARKETING_PAUSED } from '../config/marketingAutomationPolicy.js';
+import { STORE_ONE_ADMIN_CATEGORY_ID, STORE_ONE_CHANNEL_NAMES } from '../config/storeOneChannelAesthetic.js';
 import { db, nowIso } from '../database/db.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { getGuildConfig } from './guildConfigService.js';
@@ -27,7 +28,7 @@ export const INVITE_DECOR_CAMPAIGN = Object.freeze({
   rewardName: '01 Decor / Hiệu ứng hồ sơ Discord',
   rewardValue: 66_000,
   announcementChannelId: '1514606987839672563',
-  logChannelName: '🎟・log-event-invite',
+  logChannelName: STORE_ONE_CHANNEL_NAMES.inviteEventLog,
 });
 
 const INVITE_ANNOUNCEMENT_MARKER = 'EVENT MỜI BẠN · NHẬN DECOR 66K';
@@ -375,9 +376,8 @@ async function ensureInviteAdminLogChannel(guild, campaign) {
       candidate.type === ChannelType.GuildText && candidate.name === INVITE_DECOR_CAMPAIGN.logChannelName
     )) || null;
   }
-  const category = guildConfig?.admin_order_category_id
-    ? await guild.channels.fetch(guildConfig.admin_order_category_id).catch(() => null)
-    : null;
+  const category = guild.channels.cache.get(STORE_ONE_ADMIN_CATEGORY_ID)
+    || guild.channels.cache.get(guildConfig?.admin_order_category_id);
   const overwrites = eventLogPermissionOverwrites(guild, guildConfig);
   if (!channel) {
     channel = await guild.channels.create({
