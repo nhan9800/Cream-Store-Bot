@@ -103,6 +103,32 @@ describe('Store1 Locket workflow consolidation', () => {
     expect(fixture.human.delete).not.toHaveBeenCalled(); expect(fixture.oldChannel.delete).not.toHaveBeenCalled();
   });
 
+  it('adopts and retains real V2 inline media even when message.attachments is empty', async () => {
+    legacySettings();
+    const fixture = forumGuild();
+    const mediaId = '1777777777777777777';
+    const resolveInline = payload => {
+      const components = jsonComponents(payload);
+      const section = components[0].components.find(c => c.type === 9);
+      section.accessory.media = { url: `https://cdn.discordapp.com/attachments/${fixture.thread.id}/${mediaId}/${LOCKET_PANEL_IMAGE}`, attachment_id: mediaId, content_type: 'image/webp', loading_state: 2 };
+      return components;
+    };
+    let card;
+    fixture.thread.send.mockImplementation(async payload => {
+      card = message('1568249645497450611', resolveInline(payload), []);
+      card.edit.mockImplementation(async update => { card.components = resolveInline(update); return card; });
+      fixture.messages.set(card.id, card);
+      return card;
+    });
+    await publishPremiumProductsForGuild(fixture.guild);
+    expect(card.attachments.size).toBe(0);
+    expect(settings().locket_product_message_id).toBe(card.id);
+    await publishPremiumProductsForGuild(fixture.guild);
+    expect(fixture.thread.send).toHaveBeenCalledOnce();
+    expect(card.edit.mock.calls[0][0].attachments).toEqual([{ id: mediaId, filename: LOCKET_PANEL_IMAGE }]);
+    expect(card.edit.mock.calls[0][0].files).toEqual([]);
+  });
+
   it('edits the existing workflow card without replacing attachments or posting another card', async () => {
     legacySettings(); const fixture = forumGuild({ withCard: true });
     const card = [...fixture.messages.values()].find(value => value.id !== fixture.thread.id && controlIds(value).includes('product:locket:buy'));

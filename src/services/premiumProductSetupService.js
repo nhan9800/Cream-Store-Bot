@@ -49,6 +49,26 @@ function isLocketWorkflowCard(message, botId) {
     && LOCKET_CONTROLS.every(id => ids.includes(id));
 }
 
+function inlineLocketBanner(message, channelId) {
+  const queue = [...(message?.toJSON?.().components || message?.components || [])];
+  while (queue.length) {
+    const component = queue.shift();
+    if (component.components) queue.push(...component.components);
+    if (component.accessory) queue.push(component.accessory);
+    const media = component.media;
+    const attachmentId = media?.attachment_id ?? media?.attachmentId;
+    if (!/^\d{15,22}$/.test(String(attachmentId || ''))) continue;
+    try {
+      const url = new URL(media.url);
+      if (['cdn.discordapp.com', 'media.discordapp.net'].includes(url.hostname)
+        && url.pathname === `/attachments/${channelId}/${attachmentId}/${LOCKET_PANEL_IMAGE}`) {
+        return { id: String(attachmentId), filename: LOCKET_PANEL_IMAGE };
+      }
+    } catch { /* Only validated owned-channel Discord media is retained. */ }
+  }
+  return null;
+}
+
 async function publishStoreOneLocketForum(guild) {
   if (locketForumPublications.has(guild.id)) return locketForumPublications.get(guild.id);
   const publication = (async () => {
@@ -87,21 +107,25 @@ async function publishStoreOneLocketForum(guild) {
 
     const existing = [...cards.values()][0];
     const attachments = [...(existing?.attachments?.values() || [])];
-    const hasBanner = attachments.some(attachment => attachment.name === LOCKET_PANEL_IMAGE || attachment.filename === LOCKET_PANEL_IMAGE);
+    // Discord V2 consumes inline files into component media; message.attachments may be empty.
+    const inlineBanner = inlineLocketBanner(existing, thread.id);
+    const hasBanner = Boolean(inlineBanner) || attachments.some(attachment => attachment.name === LOCKET_PANEL_IMAGE || attachment.filename === LOCKET_PANEL_IMAGE);
     const bannerPath = path.join(botRoot, 'assets/products/locket-gold', LOCKET_PANEL_IMAGE);
     const addBanner = !hasBanner && fs.existsSync(bannerPath);
+    if (!hasBanner && !addBanner) throw new Error('Chưa có banner Locket để xuất bản; giữ nguyên thiết lập cũ.');
+    const retainedAttachments = attachments.map(attachment => ({ id: attachment.id, filename: attachment.name ?? attachment.filename }));
+    if (inlineBanner && !retainedAttachments.some(attachment => attachment.id === inlineBanner.id)) retainedAttachments.push(inlineBanner);
     const payload = { ...buildLocketProductPanel(guild.id, product, hasBanner || addBanner),
       allowedMentions: { parse: [] }, files: addBanner ? [new AttachmentBuilder(bannerPath)] : [] };
     let panel;
     if (existing) {
-      panel = await existing.edit({ ...payload, attachments: attachments.map(attachment => ({ id: attachment.id,
-        filename: attachment.name ?? attachment.filename })) });
+      panel = await existing.edit({ ...payload, attachments: retainedAttachments });
     } else {
       panel = await thread.send({ ...payload, flags: MessageFlags.IsComponentsV2 | MessageFlags.SuppressNotifications });
     }
     if (panel.id === thread.id || !isLocketWorkflowCard(panel, botId)) throw new Error('Chưa xác minh được panel thao tác Locket.');
     const publishedAttachments = [...(panel.attachments?.values() || [])];
-    if ((hasBanner || addBanner) && !publishedAttachments.some(attachment => (attachment.name ?? attachment.filename) === LOCKET_PANEL_IMAGE)) {
+    if (!inlineLocketBanner(panel, thread.id) && !publishedAttachments.some(attachment => (attachment.name ?? attachment.filename) === LOCKET_PANEL_IMAGE)) {
       throw new Error('Chưa xác minh được hình ảnh Locket; giữ nguyên thiết lập kênh để kiểm tra.');
     }
     if (!attachments.every(attachment => publishedAttachments.some(published => published.id === attachment.id))) {
