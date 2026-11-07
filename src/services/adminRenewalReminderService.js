@@ -28,6 +28,7 @@ import { STORE_ONE_GUILD_ID } from '../utils/locale.js';
 import { accentFor } from '../utils/uiKit.js';
 import { isManager } from '../utils/permissions.js';
 import { emitAutomationLog } from './automationLogService.js';
+import { resolveReminderChannel } from './reminderRoutingService.js';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 const SERVICE_META = {
@@ -301,15 +302,6 @@ function buildActionResultV2(sub, { action, adminId, snoozedUntil = null }) {
   };
 }
 
-async function resolveReminderChannel(client, guild, settings) {
-  const channelId = settings?.reminder_channel_id || settings?.staff_log_channel_id;
-  if (!channelId) return null;
-  return guild.channels.cache.get(channelId)
-    || await guild.channels.fetch(channelId).catch(() => null)
-    || client.channels.cache.get(channelId)
-    || await client.channels.fetch(channelId).catch(() => null);
-}
-
 export async function runStoreOneAdminRenewalReminders(client) {
   if (String(config.guildId) !== STORE_ONE_GUILD_ID) {
     return { skipped: true, scanned: 0, sent: 0, errors: 0 };
@@ -505,6 +497,9 @@ export async function cleanupStaleAdminRenewalPanels(client, { maxMessages = 500
     if (currentSeen.has(id)) continue;
     const sub = getSubscriptionById(id);
     if (!sub || sub.status !== 'ACTIVE') continue;
+    // A routing change is not evidence that a previously delivered card was
+    // lost. Preserve its original channel and reminder reservation.
+    if (sub.admin_reminder_channel_id && String(sub.admin_reminder_channel_id) !== String(channel.id)) continue;
     const currentMessageId = String(sub.admin_reminder_message_id || '');
     if (currentMessageId) {
       const currentMessage = await channel.messages.fetch(currentMessageId).catch(() => null);

@@ -10,6 +10,7 @@ import {
 } from 'discord.js';
 import { config } from '../config.js';
 import { getGuildConfig } from './guildConfigService.js';
+import { resolveReminderChannel } from './reminderRoutingService.js';
 import { isManager } from '../utils/permissions.js';
 import { createEmojiResolver, withButtonEmoji } from '../utils/emojiHelper.js';
 import { accentFor } from '../utils/uiKit.js';
@@ -146,15 +147,6 @@ function resultPanel(family, title, tone, actorId, detail) {
     `-# ${E('verify_shield')} Đã đồng bộ với Spotify Family Center trên website`,
   ].join('\n')));
   return { components: [container], flags: MessageFlags.IsComponentsV2, allowedMentions: { parse: [] } };
-}
-
-async function resolveReminderChannel(client, guild, settings) {
-  const channelId = settings?.reminder_channel_id || settings?.staff_log_channel_id;
-  if (!channelId) return null;
-  return guild.channels.cache.get(channelId)
-    || await guild.channels.fetch(channelId).catch(() => null)
-    || client.channels.cache.get(channelId)
-    || await client.channels.fetch(channelId).catch(() => null);
 }
 
 export async function runSpotifyFamilyReminders(client) {

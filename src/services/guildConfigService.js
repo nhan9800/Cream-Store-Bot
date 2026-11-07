@@ -1,5 +1,5 @@
 import { db, nowIso } from '../database/db.js';
-import { serviceChannelTarget, serviceMessageTarget } from '../config/storeServiceForum202611.js';
+import { STORE_SERVICE_FORUM, serviceChannelTarget, serviceMessageTarget } from '../config/storeServiceForum202611.js';
 
 function upsertGuildConfigStmt() {
   return db.prepare(`
@@ -201,6 +201,7 @@ export function getGuildConfig(guildId) {
     if (key.endsWith('_channel_id')) row[key] = serviceChannelTarget(guildId, row[key]);
     else if (key.endsWith('_message_id')) row[key] = serviceMessageTarget(guildId, row[key]);
   }
+  if (String(guildId) === STORE_SERVICE_FORUM.guildId) row.order_log_channel_id = STORE_SERVICE_FORUM.orderLogChannelId;
   return row;
 }
 

@@ -11,6 +11,11 @@ describe('store forum maintenance',()=>{
     expect(serviceChannelTarget(STORE_SERVICE_FORUM.guildId,'1530821462590492672')).toBe(STORE_SERVICE_FORUM.posts.cards);
     expect(serviceMessageTarget(STORE_SERVICE_FORUM.guildId,'1530830079788060763')).toMatch(/^\d+$/);
     expect(serviceChannelTarget('1070676180103086132','1530821462590492672')).toBe('1530821462590492672');
+    expect(serviceChannelTarget(STORE_SERVICE_FORUM.guildId,'1568256315669618708')).toBe('1515008584549797979');
+    expect(serviceChannelTarget(STORE_SERVICE_FORUM.guildId,'1515008584549797979')).toBe('1515008584549797979');
+    expect(serviceChannelTarget(STORE_SERVICE_FORUM.guildId,'1514607026247045121')).toBe('1514607026247045121');
+    expect(serviceMessageTarget(STORE_SERVICE_FORUM.guildId,'1568256315669618708')).toBe('1568092041366216796');
+    expect(STORE_SERVICE_FORUM.posts).not.toHaveProperty('promotion');
   });
   it('edits the shared card starter while preserving the discount board and other replies',async()=>{
     const card={id:'card',author:{id:'bot'},toJSON:()=>({content:'CENAR CARD CENTER'}),edit:vi.fn().mockResolvedValue({}),delete:vi.fn()};

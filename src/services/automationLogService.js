@@ -8,6 +8,8 @@ import {
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { getGuildConfig } from './guildConfigService.js';
 import { recordStaffLog } from './staffLogService.js';
+import { reminderChannelId } from './reminderRoutingService.js';
+import { STORE_ONE_GUILD_ID } from '../utils/locale.js';
 
 function clean(value, max = 500) {
   return String(value ?? '')
@@ -50,11 +52,15 @@ export async function emitAutomationLog(client, {
 
   if (!client) return;
   const settings = getGuildConfig(guildId);
-  if (!settings?.staff_log_channel_id) return;
+  const isRenewalLog = /^SUBSCRIPTION_(?:RENEWAL_|RENEWED$|DISCONNECTED$)/.test(String(action || ''))
+    || action === 'ORDER_RENEW_CREATED';
+  const channelId = String(guildId) === STORE_ONE_GUILD_ID && isRenewalLog
+    ? reminderChannelId(guildId, settings) : settings?.staff_log_channel_id;
+  if (!channelId) return;
   const guild = client.guilds.cache.get(guildId)
     || await client.guilds.fetch(guildId).catch(() => null);
   const channel = guild
-    ? await guild.channels.fetch(settings.staff_log_channel_id).catch(() => null)
+    ? await guild.channels.fetch(channelId).catch(() => null)
     : null;
   if (!channel?.isTextBased()) return;
 

@@ -22,7 +22,7 @@ const previousClient = global.discordClient;
 const liveNames = [...CORE_UI_EMOJI_ASSETS.map((asset) => asset.name),
   'cenar_spotify', 'cenar_price_chatgpt', 'cenar_price_nitro', 'cenar_boost',
   'cenar_gemini', 'cenar_claude', 'cenar_adobe', 'cenar_capcut', 'cenar_office',
-  'cenar_youtube', 'cenar_netflix', 'cenar_gearup', 'cenar_locket', 'cenar_discord'];
+  'cenar_decor27_pink', 'cenar_decor27_gold', 'cenar_code27_dev', 'cenar_youtube', 'cenar_netflix', 'cenar_gearup', 'cenar_locket', 'cenar_discord'];
 const liveInventory = new Collection(liveNames.map((name, index) => {
   const id = String(1550000000000000200n + BigInt(index));
   return [id, { id, name, animated: false }];
@@ -55,6 +55,17 @@ function collectTextContent(payload) {
 }
 
 describe('Cenar price board V3', () => {
+  it('uses the distinct live custom artwork for Decor and development headings, cards and selectors', () => {
+    const payloads = buildPriceBoardPayloads(GUILD_ID, {}, getActiveProducts(GUILD_ID)).map(serialize);
+    for (const [title, name] of [['Tài Khoản Có Nitro', 'cenar_decor27_pink'], ['Tài Khoản Chưa Có Nitro', 'cenar_decor27_gold'], ['Bot, Website & Setup Discord', 'cenar_code27_dev']]) {
+      const board = payloads.find(json => json.includes(title));
+      expect(board).toContain(name);
+      expect(board.replace(/<a?:[a-zA-Z0-9_]+:\d+>/g, '')).not.toMatch(NATIVE_EMOJI);
+      const parsed = JSON.parse(board);
+      const selector = parsed.components.find(c => c.type === 1 && c.components[0]?.type === 3)?.components[0];
+      expect(selector.options.every(o => o.emoji?.name === name)).toBe(true);
+    }
+  });
   it('assigns every active product to exactly one clear category', () => {
     const products = getActiveProducts(GUILD_ID);
     const panels = groupPriceProducts(products);
@@ -154,7 +165,7 @@ describe('Cenar price board V3', () => {
     expect(allJson).toContain('https://cenarstore.xyz');
     expect(allJson).toContain('Cenar Studio');
     expect(allJson).not.toContain('PUBG Trend Sale');
-    expect(allJson).toContain('<#1568256315669618708>');
+    expect(allJson).toContain('<#1515008584549797979>');
 
     for (const payload of payloads.slice(1)) {
       const row = payload.components.at(-1).toJSON();
@@ -211,16 +222,10 @@ describe('Cenar price board V3', () => {
   });
 
   it('shows the complete eligibility for the first-offer Nitro Trial 3-month package', () => {
-    const trial = {
-      product_key: 'discord-nitro-boost-trial-3-months-first-offer',
-      name: 'Discord Nitro Boost Trial 3 Tháng (Ưu Đãi Lần Đầu)',
-      description: 'Tài khoản chưa từng sử dụng Nitro hoặc đã ngừng ít nhất 12 tháng liên tục.',
-      duration_months: 3, price: 50000, service_type: 'GAME', emoji: 'brand_nitro',
-    };
-    expect(trial?.name).toContain('Trial 3 Tháng (Ưu Đãi Lần Đầu)');
-    expect(trial?.price).toBe(50000);
-    expect(trial?.description).toContain('chưa từng sử dụng Nitro');
-    expect(trial?.description).toContain('ít nhất 12 tháng liên tục');
+    const trial = getActiveProducts(GUILD_ID).find(p => p.product_key === 'discord-nitro-boost-trial-3-months-first-offer');
+    expect(trial).toMatchObject({ price: 65000, duration_months: 3, is_active: 1 });
+    expect(trial.description).toContain('chưa từng sử dụng Nitro');
+    expect(trial.description).toContain('trên 1 tháng');
 
     const products = [
       ...getActiveProducts(GUILD_ID).filter((product) => !/nitro.*(?:trial|trail)/i.test(product.name)),
@@ -231,12 +236,12 @@ describe('Cenar price board V3', () => {
       .find((json) => json.includes('Discord Nitro'));
     expect(nitroPayload).toContain('Đối tượng áp dụng');
     expect(nitroPayload).toContain('Tài khoản được tạo trên 1 tháng và chưa từng sử dụng Nitro.');
-    expect(nitroPayload).toContain('không dùng lại Nitro trong ít nhất 12 tháng liên tục.');
+    expect(nitroPayload).not.toContain('12 tháng liên tục');
 
     const announcement = buildPriceAnnouncementContent(GUILD_ID, products);
     expect(announcement).toContain('Nitro Trial 3 Tháng · Ưu Đãi Lần Đầu');
-    expect(announcement).toContain('50.000');
-    expect(announcement).toContain('ít nhất 12 tháng liên tục.');
+    expect(announcement).toContain('65.000');
+    expect(announcement).not.toContain('12 tháng liên tục');
   });
 
   it('publishes only the stable 75k Netflix Slot and retires the 35k product', () => {

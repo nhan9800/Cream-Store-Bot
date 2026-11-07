@@ -23,6 +23,7 @@ import { isManager } from '../utils/permissions.js';
 import { autoSyncGuildEmojis, formatProductDisplayName } from './emojiService.js';
 import { getGuildConfig } from './guildConfigService.js';
 import { STORE_ONE_CHANNEL_NAMES } from '../config/storeOneChannelAesthetic.js';
+import { resolveReminderChannel } from './reminderRoutingService.js';
 
 const CATEGORY_NAME = STORE_ONE_CHANNEL_NAMES.adminOrderCategory;
 const CHANNEL_NAME = STORE_ONE_CHANNEL_NAMES.adminOrderCenter;
@@ -909,6 +910,8 @@ export async function processAdminOrderAgingReminders(client) {
   const cleanup = await cleanupStaleAdminOrderReminderCards(guild, { setup });
 
   const guildConfig = getGuildConfig(guild.id);
+  const reminderChannel = await resolveReminderChannel(client, guild, guildConfig);
+  if (!reminderChannel) return { sent: 0, skipped: true };
   const roleIds = [...new Set([guildConfig?.manager_role_id, ...config.ownerRoleIds]
     .filter((id) => id && guild.roles.cache.has(String(id)))
     .map(String))];
@@ -933,7 +936,7 @@ export async function processAdminOrderAgingReminders(client) {
       resolveOrderCustomerIdentity(guild, reservation.order),
     ]);
     try {
-      const message = await setup.channel.send(buildAdminOrderDetailPayload(reservation.order, {
+      const message = await reminderChannel.send(buildAdminOrderDetailPayload(reservation.order, {
         reminderStage: stage,
         roleIds,
         ticketChannelId: ticketChannel?.id || null,
@@ -941,7 +944,7 @@ export async function processAdminOrderAgingReminders(client) {
       }));
       const finalized = finalizeAdminOrderAgingReminder(reservation.token, {
         messageId: message.id,
-        channelId: setup.channel.id,
+        channelId: reminderChannel.id,
       });
       if (!finalized) {
         stale += 1;

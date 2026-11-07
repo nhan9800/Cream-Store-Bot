@@ -154,7 +154,7 @@ export async function handleSubscriptionRenewButton(interaction) {
   if (response === 'yes') {
     markSubResponse(subId, 'YES');
     // Gửi thông tin về kênh reminder cho chủ shop
-    const ch = getReminderChannel(interaction.client, sub.guild_id);
+    const ch = await getReminderChannel(interaction.client, sub.guild_id);
     if (ch) {
       const customerUser = sub.customer_id ? await interaction.client.users.fetch(sub.customer_id).catch(() => null) : null;
       await ch.send(buildOwnerCustomerWantsRenewalV2(sub, customerUser || interaction.user));

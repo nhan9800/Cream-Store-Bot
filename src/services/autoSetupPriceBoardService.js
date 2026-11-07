@@ -26,7 +26,7 @@ import { STORE_FORUMS } from '../config/storeForums202611.js';
 import { isCapcutProduct } from '../config/capcutCatalog.js';
 import { listForumPosts, upsertForumPost } from './forumPublicationService.js';
 
-export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.28';
+export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.29';
 const publicationStates = new Map();
 export function getPriceBoardPublicationState(guildId) {
   return publicationStates.get(String(guildId)) || { status: 'not_started' };
@@ -57,7 +57,7 @@ const OFFICIAL_SPOTIFY_PRODUCT_KEYS = new Set([
 export const PRICE_GROUPS = [
   {
     key: 'nitro', titleSlot: 'brand_nitro', title: 'Discord Nitro', accent: 0x5865F2,
-    note: 'Nitro Boost Login 1 và 2 tháng, cùng gói chính chủ kích hoạt trọn 12 tháng.',
+    note: 'Nitro Boost Login 1 và 2 tháng; chính chủ 12 tháng; Trial 3 tháng 65k cho tài khoản trên 1 tháng chưa từng dùng Nitro.',
     match: (p) => p.service_type === 'GAME' && /nitro/i.test(p.name),
   },
   {
@@ -262,7 +262,7 @@ export function buildPricePortalPayload(guildId, guildConfig, panels = []) {
       international ? `# ${E('icon_store')} CENAR GLOBAL • LIVE PRICING` : `# ${E('icon_store')} BẢNG GIÁ CENAR STORE`,
       international ? `> ${E('status_check')} **Live catalog synchronized across Discord and the website.**` : `> ${E('status_check')} **Đồng bộ trực tiếp từ hệ thống sản phẩm đang hoạt động.**`,
       ...(guildId === PRIMARY_GUILD_ID ? [
-        `> ${E('icon_gift')} **Cenar Studio đang diễn ra tại <#1568256315669618708> · Bàn Làm Việc Có Gu · giá ưu đãi và điều kiện được xác nhận tại ticket.**`,
+        `> ${E('icon_gift')} **Cenar Studio đang diễn ra tại <#1515008584549797979> · Bàn Làm Việc Có Gu · giá ưu đãi và điều kiện được xác nhận tại ticket.**`,
       ] : []),
     ].join('\n'))
   );
@@ -324,10 +324,12 @@ export function buildPriceGroupPayload(guildId, group, products) {
   const E = createPriceBoardEmojiResolver(guildId);
   const international = isInternationalGuild(guildId);
   if (international) group = translateCatalogGroup(group);
+  const groupArt = { decor_nitro: 'cenar_decor27_pink', decor_no_nitro: 'cenar_decor27_gold', services: 'cenar_code27_dev' }[group.key];
+  const groupIcon = (groupArt && E(groupArt)) || E(group.titleSlot);
   const container = new ContainerBuilder().setAccentColor(group.accent || config.accentColorPrimary);
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent([
-      `## ${E(group.titleSlot)} ${group.title}`,
+      `## ${groupIcon} ${group.title}`,
       `> ${E('status_info')} ${group.note}`,
       subtext(international ? `${products.length} options · Live prices` : `${products.length} lựa chọn · Giá hiển thị là giá bán hiện tại`),
     ].join('\n'))
@@ -343,7 +345,7 @@ export function buildPriceGroupPayload(guildId, group, products) {
       );
     }
     const slot = inferProductSlot(product);
-    const productIcon = E(slot) || E(group.titleSlot) || E('order_product');
+    const productIcon = (groupArt && E(groupArt)) || E(slot) || groupIcon || E('order_product');
     const duration = getDurationText(product, international);
     const hasDiscount = Number(product.original_price) > Number(product.price) && Number(product.price) > 0;
     const price = Number(product.price) > 0
@@ -394,7 +396,7 @@ export function buildPriceGroupPayload(guildId, group, products) {
       description: `${Number(product.price) > 0 ? (international ? formatInternationalPrice(product.price) : formatCurrency(product.price)) : (international ? 'Contact us' : 'Liên hệ')} · ${getDurationText(product, international)}`.slice(0, 100),
       value: String(product.id),
     };
-    const emoji = E.component(inferProductSlot(product)) || E.component(group.titleSlot) || E.component('order_product');
+    const emoji = (groupArt && E.component(groupArt)) || E.component(inferProductSlot(product)) || E.component(group.titleSlot) || E.component('order_product');
     if (emoji) option.emoji = emoji;
     return option;
   });

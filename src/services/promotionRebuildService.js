@@ -4,7 +4,7 @@ import { MessageFlags, PermissionFlagsBits } from 'discord.js';
 // legacy clearPromotionChannel(), which also restores commerce prices.
 export const PROMOTION_REBUILD_TARGET = Object.freeze({
   guildId: '1282637033340403754',
-  channelId: '1568256315669618708',
+  channelId: '1515008584549797979',
 });
 
 const SILENT_MENTIONS = Object.freeze({ parse: [], users: [], roles: [], repliedUser: false });

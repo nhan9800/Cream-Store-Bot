@@ -13,6 +13,7 @@ import { createEmojiResolver, withButtonEmoji } from '../utils/emojiHelper.js';
 import { isManager } from '../utils/permissions.js';
 import { accentFor } from '../utils/uiKit.js';
 import { getGuildConfig } from './guildConfigService.js';
+import { resolveReminderChannel } from './reminderRoutingService.js';
 import {
   getYoutubeMembership,
   getYoutubeMembershipsDueForReminder,
@@ -158,15 +159,6 @@ function resultPanel(membership, title, tone, actorId, detail) {
     `-# ${E('verify_shield')} Đã đồng bộ với YouTube Renewal Center trên website`,
   ].join('\n')));
   return { components: [container], flags: MessageFlags.IsComponentsV2, allowedMentions: { parse: [] } };
-}
-
-async function resolveReminderChannel(client, guild, settings) {
-  const channelId = settings?.reminder_channel_id || settings?.staff_log_channel_id;
-  if (!channelId) return null;
-  return guild.channels.cache.get(channelId)
-    || await guild.channels.fetch(channelId).catch(() => null)
-    || client.channels.cache.get(channelId)
-    || await client.channels.fetch(channelId).catch(() => null);
 }
 
 export async function runYoutubeRenewalReminders(client) {
