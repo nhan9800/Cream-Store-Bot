@@ -155,7 +155,7 @@ describe('Cenar price board V3', () => {
     expect(allJson).toContain(PRICE_BOARD_VERSION);
     expect(allJson).toContain('cenar_price_chatgpt');
     expect(allJson).toContain('cenar_price_nitro');
-    expect(allJson).toContain('cenar_ui26_');
+    expect(allJson).toContain('cenar_ui27_');
     expect(allJson).not.toMatch(NATIVE_EMOJI);
     const visibleText = payloads
       .map(collectTextContent)

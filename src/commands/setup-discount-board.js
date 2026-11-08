@@ -5,6 +5,7 @@ import {
 } from 'discord.js';
 import { db } from '../database/db.js';
 import { buildDiscountBoardComponents } from '../services/cardSwapService.js';
+import { createEmojiResolver } from '../utils/emojiHelper.js';
 
 export const data = new SlashCommandBuilder()
   .setName('setup-discount-board')
@@ -18,6 +19,7 @@ export const data = new SlashCommandBuilder()
   );
 
 export async function execute(interaction) {
+  const E = createEmojiResolver(interaction.guildId);
   await interaction.deferReply({ ephemeral: true });
 
   const targetChannel = interaction.options.getChannel('kenh') || interaction.channel;
@@ -35,9 +37,9 @@ export async function execute(interaction) {
       WHERE guild_id = ?
     `).run(targetChannel.id, msg.id, interaction.guildId);
 
-    await interaction.editReply(`✅ Đã thiết lập bảng chiết khấu tự động tại <#${targetChannel.id}>. Bảng sẽ tự động cập nhật mỗi giờ.`);
+    await interaction.editReply(`${E('status_check')} Đã thiết lập bảng chiết khấu tự động tại <#${targetChannel.id}>. Bảng sẽ tự động cập nhật mỗi giờ.`);
   } catch (error) {
     console.error('Lỗi setup-discount-board:', error);
-    await interaction.editReply(`❌ Có lỗi xảy ra: ${error.message}`);
+    await interaction.editReply(`${E('status_cross')} Có lỗi xảy ra: ${error.message}`);
   }
 }

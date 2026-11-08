@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Collection, MessageFlags } from 'discord.js';
-import { CORE_UI_EMOJI_ASSETS } from '../src/config/coreEmojiPack2026.js';
+import { CORE_UI_EMOJI_ASSETS, CORE_UI_EMOJI_SLOTS } from '../src/config/coreEmojiPack2026.js';
 import {
   TERMS_BOARD,
   buildTermsBoardPayload,
@@ -63,7 +63,7 @@ describe('Cenar terms board 2026', () => {
     expect(json).toContain('tài khoản chưa được bảo mật');
     expect(json).toContain('cenar_price_nitro');
     expect(json).toContain('cenar_yt_logo');
-    expect(json).toContain('cenar_ui26_shield');
+    expect(json).toContain(CORE_UI_EMOJI_SLOTS.panel_warranty);
 
     const contents = [];
     const collect = (value) => {

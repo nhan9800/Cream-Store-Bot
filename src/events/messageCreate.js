@@ -272,37 +272,37 @@ export async function execute(message) {
 
         const embed = new EmbedBuilder()
           .setColor(embedColor)
-          .setTitle(`## <a:tsm_fire:1327553120842158111> HƯỚNG DẪN BẢO MẬT & DUY TRÌ GMAIL NITRO <:verifybadge:1481127479702847646>`)
+          .setTitle(`${E('verify_shield')} HƯỚNG DẪN BẢO MẬT & DUY TRÌ GMAIL NITRO`)
           .setDescription([
-            `Chào quý khách! <:20952woodstockjump:1282641293474009089>`,
+            `${E('ticket_user')} Chào quý khách!`,
             'Dưới đây là các bước **cực kỳ quan trọng** giúp bạn bảo mật tối đa tài khoản Gmail liên kết Nitro, tránh tình trạng bị quét hoặc khóa tài khoản đáng tiếc từ Google:',
-            '<a:ccjdeobt:1481142015994495059><a:ccjdeobt:1481142015994495059><a:ccjdeobt:1481142015994495059><a:ccjdeobt:1481142015994495059><a:ccjdeobt:1481142015994495059>',
+            '━━━━━━━━━━━━━━',
             '',
-            '### <a:starxoay:1481141954346483845> 1. DUY TRÌ TRẠNG THÁI ĐĂNG NHẬP',
-            '> * <a:chamxanh:1481124932447371374> Sau khi đăng nhập thành công, bạn vui lòng **LOG OUT - LOG IN** thường xuyên để kiểm tra.',
-            '> * <a:chamxanh:1481124932447371374> *Chú ý:* Gmail bị khóa (die) trên điện thoại và PC nhiều khi không hiển thị thông báo lỗi trực tiếp.',
+            `### ${E('icon_key')} 1. DUY TRÌ TRẠNG THÁI ĐĂNG NHẬP`,
+            `> * ${E('status_check')} Sau khi đăng nhập thành công, bạn vui lòng **LOG OUT - LOG IN** thường xuyên để kiểm tra.`,
+            `> * ${E('status_info')} *Chú ý:* Gmail bị khóa (die) trên điện thoại và PC nhiều khi không hiển thị thông báo lỗi trực tiếp.`,
             '',
-            '### <a:starxoay:1481141954346483845> 2. CẬP NHẬT THÔNG TIN KHÔI PHỤC (Làm ngay lập tức)',
+            `### ${E('recovery_restore')} 2. CẬP NHẬT THÔNG TIN KHÔI PHỤC (Làm ngay lập tức)`,
             '> *Sau khi login, hãy bổ sung ngay số điện thoại & mail khôi phục để tránh Google quét xác minh:*',
-            '> * <a:69_Arrow:1448888143120957532> **Thêm Số điện thoại khôi phục (Recovery Phone):**',
-            '>   👉 [Bấm vào đây để thiết lập](https://myaccount.google.com/signinoptions/rescuephone)',
-            '> * <a:69_Arrow:1448888143120957532> **Thêm Email khôi phục (Recovery Gmail):**',
-            '>   👉 [Bấm vào đây để thiết lập](https://myaccount.google.com/intro/recovery/email)',
+            `> * ${E('icon_settings')} **Thêm Số điện thoại khôi phục (Recovery Phone):**`,
+            `>   ${E('icon_link')} [Bấm vào đây để thiết lập](https://myaccount.google.com/signinoptions/rescuephone)`,
+            `> * ${E('icon_mail')} **Thêm Email khôi phục (Recovery Gmail):**`,
+            `>   ${E('icon_link')} [Bấm vào đây để thiết lập](https://myaccount.google.com/intro/recovery/email)`,
             '',
-            '### <a:starxoay:1481141954346483845> 3. THAY ĐỔI THÔNG TIN BẢO MẬT (Nên làm sau 7 - 14 ngày)',
+            `### ${E('icon_lock')} 3. THAY ĐỔI THÔNG TIN BẢO MẬT (Nên làm sau 7 - 14 ngày)`,
             '> *Đợi mail sống ổn định từ 7-14 ngày trên thiết bị mới rồi mới tiến hành thay đổi các thông tin sau để tránh bị Google khóa tài khoản:*',
-            '> * <a:chamxanh:1481124932447371374> **Thay đổi Số xác minh (Verification Phone):** Cực kỳ quan trọng - **NÊN ĐỔI + XÓA SỐ LẠ**.',
-            '>   👉 [Bấm vào đây để thay đổi](https://myaccount.google.com/phone)',
-            '> * <a:chamxanh:1481124932447371374> **Xác minh khuôn mặt (Video Verification):** Giúp tăng 200% độ bảo mật cho tài khoản.',
-            '>   👉 [Bấm vào đây để xác minh](https://myaccount.google.com/video-verification/signin/precollection)',
+            `> * ${E('icon_edit')} **Thay đổi Số xác minh (Verification Phone):** Cực kỳ quan trọng - **NÊN ĐỔI + XÓA SỐ LẠ**.`,
+            `>   ${E('icon_link')} [Bấm vào đây để thay đổi](https://myaccount.google.com/phone)`,
+            `> * ${E('ticket_user')} **Xác minh khuôn mặt (Video Verification):** Giúp tăng 200% độ bảo mật cho tài khoản.`,
+            `>   ${E('icon_link')} [Bấm vào đây để xác minh](https://myaccount.google.com/video-verification/signin/precollection)`,
             '',
-            '<a:ccjdeobt:1481142015994495059><a:ccjdeobt:1481142015994495059><a:ccjdeobt:1481142015994495059><a:ccjdeobt:1481142015994495059><a:ccjdeobt:1481142015994495059>',
-            '🚨 **🚨 PHÁT HIỆN THIẾT BỊ LẠ ĐĂNG NHẬP ≫ ĐỔI PASSWORD + 2FA NGAY LẬP TỨC! 🚨**',
+            '━━━━━━━━━━━━━━',
+            `${E('status_warn')} **PHÁT HIỆN THIẾT BỊ LẠ ĐĂNG NHẬP ≫ ĐỔI PASSWORD + 2FA NGAY LẬP TỨC!**`,
             '',
-            `-# *Nếu cần hỗ trợ thêm, bạn hãy nhắn trực tiếp tại ticket này để staff ${brandName} hỗ trợ ngay nhé!* <:purple_heart_glow:1327541911749263360>`
+            `-# ${E('panel_support')} *Nếu cần hỗ trợ thêm, bạn hãy nhắn trực tiếp tại ticket này để staff ${brandName} hỗ trợ ngay nhé!*`
           ].join('\n'))
           .setImage('attachment://gmail_update.png')
-          .setFooter({ text: `${brandName} — Phục Vụ Uy Tín & Tận Tâm 💜` })
+          .setFooter({ text: `${brandName} — Phục Vụ Uy Tín & Tận Tâm` })
           .setTimestamp();
 
         await message.channel.send({

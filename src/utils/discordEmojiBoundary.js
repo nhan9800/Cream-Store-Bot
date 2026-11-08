@@ -12,15 +12,26 @@ function componentEmoji(value,guildId) {
 export function normalizeMessagePresentation(payload,guildId) {
   if (!payload || typeof payload !== 'object') return payload;
   const text = value => typeof value === 'string' ? sanitizeCustomEmojiText(guildId,value) : value;
+  const plain = value => typeof value === 'string' ? text(value).replace(CUSTOM_TOKEN,'').trim() : value;
+  const identity = (item,key) => {
+    const normalized=text(item[key]);
+    const first=typeof normalized==='string' && normalized.match(/<(a?):[A-Za-z0-9_]+:(\d+)>/);
+    return {...item,[key]:plain(item[key]),...(!item.icon_url && first
+      ? {icon_url:`https://cdn.discordapp.com/emojis/${first[2]}.${first[1]?'gif':'png'}`} : {})};
+  };
   const component = value => {
     const item = value?.toJSON?.() || value;
     if (!item || typeof item !== 'object') return item;
     const result = {...item};
     if (typeof result.content === 'string') result.content=text(result.content);
-    if (typeof result.description === 'string') result.description=text(result.description);
+    if (typeof result.description === 'string') result.description=plain(result.description);
     // Discord labels cannot render custom emoji markup; emoji is a separate
     // field. Values/custom_ids are protocol data and are never rewritten.
-    for (const key of ['label','placeholder']) if (typeof result[key]==='string') result[key]=text(result[key]).replace(CUSTOM_TOKEN,'').trim();
+    if (!result.emoji && typeof result.label==='string') {
+      const token=text(result.label).match(CUSTOM_TOKEN)?.[0];
+      if (token) result.emoji=componentEmoji(token,guildId);
+    }
+    for (const key of ['label','placeholder']) if (typeof result[key]==='string') result[key]=plain(result[key]);
     if (result.emoji) {
       const emoji=componentEmoji(result.emoji,guildId);
       if (emoji) result.emoji=emoji; else delete result.emoji;
@@ -35,8 +46,8 @@ export function normalizeMessagePresentation(payload,guildId) {
     const result={...item};
     for (const key of ['title','description']) if (typeof result[key]==='string') result[key]=text(result[key]);
     if (result.fields) result.fields=result.fields.map(field=>({...field,name:text(field.name),value:text(field.value)}));
-    if (result.footer) result.footer={...result.footer,text:text(result.footer.text)};
-    if (result.author) result.author={...result.author,name:text(result.author.name)};
+    if (result.footer) result.footer=identity(result.footer,'text');
+    if (result.author) result.author=identity(result.author,'name');
     return result;
   };
   return {

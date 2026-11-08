@@ -144,9 +144,10 @@ async function publishStoreOneLocketForum(guild) {
 }
 
 async function handleStoreOnePremiumCommand(interaction) {
+  const E = createEmojiResolver(interaction.guildId);
   if (!interaction.deferred && !interaction.replied) await interaction.deferReply({ ephemeral: true });
   const result = await publishStoreOneLocketForum(interaction.guild);
-  await interaction.editReply(`✅ Locket Gold đã được gộp vào <#${STORE_FORUMS.pricePosts.locket}>. Giữ nguyên bảng giá, hình ảnh và các nút mua/đặc quyền/điều khoản.`);
+  await interaction.editReply(`${E('status_check')} Locket Gold đã được gộp vào <#${STORE_FORUMS.pricePosts.locket}>. Giữ nguyên bảng giá, hình ảnh và các nút mua/đặc quyền/điều khoản.`);
   return result;
 }
 
@@ -233,6 +234,7 @@ export async function setupPremiumProducts(interaction) {
 }
 
 export async function publishPremiumProducts(interaction) {
+  const E = createEmojiResolver(interaction.guildId);
   if (interaction.guild.id === STORE_FORUMS.guildId) return handleStoreOnePremiumCommand(interaction);
   await interaction.deferReply({ ephemeral: true });
   const guild = interaction.guild;
@@ -240,13 +242,13 @@ export async function publishPremiumProducts(interaction) {
   // Xóa tin cũ của bot trước khi publish lại
   const settings = db.prepare('SELECT * FROM guild_settings WHERE guild_id = ?').get(guild.id);
   if (!settings?.locket_channel_id) {
-    return interaction.editReply('❌ Vui lòng chạy `/product setup` trước!');
+    return interaction.editReply(`${E('status_cross')} Vui lòng chạy \`/product setup\` trước!`);
   }
 
   const locketChannel = guild.channels.cache.get(settings.locket_channel_id);
 
   if (!locketChannel) {
-    return interaction.editReply('❌ Không tìm thấy channel, vui lòng chạy `/product repair`.');
+    return interaction.editReply(`${E('status_cross')} Không tìm thấy channel, vui lòng chạy \`/product repair\`.`);
   }
 
   // Xóa tin cũ
@@ -262,7 +264,7 @@ export async function publishPremiumProducts(interaction) {
   db.prepare('UPDATE guild_settings SET locket_product_message_id = NULL WHERE guild_id = ?').run(guild.id);
 
   await publishPremiumProductsForGuild(guild);
-  await interaction.editReply('✅ Đã xóa tin cũ và publish lại giao diện mới nhất!');
+  await interaction.editReply(`${E('status_check')} Đã xóa tin cũ và publish lại giao diện mới nhất!`);
 }
 
 // ─── Core publish function (dùng cho cả manual và auto) ───

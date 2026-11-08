@@ -631,18 +631,16 @@ export function buildOrderCreatedEmbed(order, orderChannelId) {
 // ═══ Order Created V2 (Components V2) ═══
 export function buildOrderCreatedV2(order, orderChannelId) {
   const hasPay = order.total_amount > 0;
-  const em = order.guild_id ? getEmojiMap(order.guild_id) : {};
   const E = createEmojiResolver(order.guild_id);
   const container = new ContainerBuilder().setAccentColor(accentFor(hasPay ? 'primary' : 'success'));
 
-  // Header — mention khách ngay trong header (gộp tin thừa, chống spam)
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(joinLines(
-      `## ${E('order_created', '🧾')} Đơn Hàng ${fmt.code(order.order_code)} Đã Được Tạo`,
-      `> ${fmt.user(order.customer_id)} — đơn của bạn đã được tạo!`,
+      h2(`${E('order_created')} ĐƠN HÀNG ĐÃ TẠO`),
+      `${fmt.user(order.customer_id)} · ${E('order_id')} ${fmt.code(order.order_code)}`,
       hasPay
-        ? `> ${E('payment_payos', '💳')} Vui lòng ${fmt.b('chọn phương thức thanh toán')} để đơn được xử lý`
-        : `> ${E('icon_gift', '🎁')} Đơn không cần thanh toán — đưa vào hàng xử lý ngay!`,
+        ? `Chọn ${fmt.b('phương thức thanh toán')} bên dưới để đơn được xử lý.`
+        : `${E('icon_gift')} Đơn không cần thanh toán — đưa vào hàng xử lý ngay!`,
     ))
   );
 
@@ -650,15 +648,14 @@ export function buildOrderCreatedV2(order, orderChannelId) {
     new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
   );
 
-  // Order details — table-like layout
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(joinLines(
-      `${E('order_product', '📦')} ${fmt.b('Sản phẩm:')} ${formatOrderProduct(order.quantity, order.product_name)}`,
-      `${E('icon_duration', '📅')} ${fmt.b('Thời hạn:')} ${fmt.b(formatOrderDuration(order))}`,
-      `${E('payment_money', '💰')} ${fmt.b('Số tiền:')} ${hasPay ? fmt.b(formatCurrency(order.total_amount)) : `${fmt.i('Miễn phí')}`}`,
-      `${E('icon_chart', '📊')} ${fmt.b('Trạng thái:')} ${getOrderStatusLabel(order.status)}`,
-      `${E('icon_clock', '🕒')} ${fmt.b('Tạo lúc:')} ${T.rel(order.created_at || new Date())}`,
-      `${E('icon_clipboard', '🔗')} ${fmt.b('Theo dõi tại:')} ${fmt.channel(orderChannelId)}`,
+      `${E('order_product')} ${fmt.b('Sản phẩm:')} ${formatOrderProduct(order.quantity, order.product_name)}`,
+      `${E('icon_duration')} ${fmt.b('Thời hạn:')} ${formatOrderDuration(order)}`,
+      `${E('payment_money')} ${fmt.b('Số tiền:')} ${hasPay ? fmt.b(formatCurrency(order.total_amount)) : fmt.i('Miễn phí')}`,
+      `${fmt.b('Trạng thái:')} ${getOrderStatusLabel(order.status, order.guild_id)}`,
+      `${E('icon_clock')} ${fmt.b('Tạo lúc:')} ${T.rel(order.created_at || new Date())}`,
+      `${E('order_tracking')} ${fmt.b('Theo dõi:')} ${fmt.channel(orderChannelId)}`,
     ))
   );
 
@@ -795,16 +792,14 @@ export function buildQueuePositionEmbed(order, position, totalInQueue) {
 // ═══ Queue Position V2 (Components V2) ═══
 export function buildQueuePositionV2(order, position, totalInQueue) {
   const groupName = normalizeQueueGroup(order.product_name) || 'đơn hàng';
-  const em = order.guild_id ? getEmojiMap(order.guild_id) : {};
   const E = createEmojiResolver(order.guild_id);
   const container = new ContainerBuilder().setAccentColor(accentFor('info'));
 
   container.addTextDisplayComponents(
-    new TextDisplayBuilder().setContent(
-      `## ${E('order_queue', '🏅')} Vị Trí Xếp Hàng\n` +
-      `> ${E('icon_tag', '🏷️')} Mã đơn: \`${order.order_code}\`\n` +
-      `> ${E('order_product', '📦')} Nhóm: \`${groupName}\``
-    )
+    new TextDisplayBuilder().setContent(joinLines(
+      h2(`${E('order_queue')} HÀNG CHỜ XỬ LÝ`),
+      `${E('order_id')} ${fmt.b('Mã đơn:')} ${fmt.code(order.order_code)}`,
+    ))
   );
 
   container.addSeparatorComponents(
@@ -812,23 +807,25 @@ export function buildQueuePositionV2(order, position, totalInQueue) {
   );
 
   container.addTextDisplayComponents(
-    new TextDisplayBuilder().setContent(
-      `${E('order_pending', '⏳')} **Vị trí:** \`${position} / ${totalInQueue}\`\n` +
-      `${E('icon_folder', '🗂️')} **Nhóm xử lý:** \`${groupName}\`\n` +
-      `${E('status_info', 'ℹ️')} _Thứ tự xử lý theo ưu tiên và thời gian đặt hàng._`
-    )
+    new TextDisplayBuilder().setContent(joinLines(
+      `${E('queue_position')} ${fmt.b('Vị trí:')} ${fmt.b(`${position} / ${totalInQueue}`)}`,
+      `${E('queue_group')} ${fmt.b('Nhóm xử lý:')} ${fmt.code(groupName)}`,
+      subtext('Thứ tự xử lý theo ưu tiên và thời gian đặt hàng.'),
+    ))
   );
 
   const viewBtn = new ButtonBuilder()
     .setCustomId(`queue:view:${order.order_code}`)
     .setLabel('Xem Vị Trí')
     .setStyle(ButtonStyle.Primary);
-  if (em.icon_location) viewBtn.setEmoji(em.icon_location);
+  const viewEmoji = E.component('queue_view');
+  if (viewEmoji) viewBtn.setEmoji(viewEmoji);
   const claimBtn = new ButtonBuilder()
     .setCustomId(`order:claim:${order.order_code}`)
     .setLabel('Claim Đơn')
     .setStyle(ButtonStyle.Secondary);
-  if (em.ticket_claim) claimBtn.setEmoji(em.ticket_claim);
+  const claimEmoji = E.component('ticket_claim');
+  if (claimEmoji) claimBtn.setEmoji(claimEmoji);
   const actionRow = new ActionRowBuilder().addComponents(viewBtn, claimBtn);
 
   return { container, actionRow, flags: MessageFlags.IsComponentsV2 };
@@ -899,7 +896,6 @@ export function buildPaymentPendingComponents(orderCode, checkoutUrl = null) {
 
 // ═══ Payment QR V2 (Components V2 — QR inline qua MediaGallery attachment://) ═══
 export function buildPaymentQrV2({ order, attachmentName = null, checkoutUrl = null, hasImage = false }) {
-  const em = order.guild_id ? getEmojiMap(order.guild_id) : {};
   const E = createEmojiResolver(order.guild_id);
   const international = isInternationalGuild(order.guild_id);
 
@@ -909,13 +905,11 @@ export function buildPaymentQrV2({ order, attachmentName = null, checkoutUrl = n
 
   const container = new ContainerBuilder().setAccentColor(accentFor('info'));
 
-  // Header — mention khách trong TextDisplay (V2 không dùng content/embeds)
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(joinLines(
-      h2(`${E('payment_payos')}  ${international ? 'SECURE BANK CHECKOUT' : 'Thanh Toán Đơn Hàng'}`),
-      `> ${fmt.user(order.customer_id)}`,
-      international ? `> ${E('payment_qr')} Scan the QR code ${fmt.b('or')} use ${fmt.b('Pay Now')} below` : `> ${E('payment_qr')} Quét mã QR ${fmt.b('hoặc')} bấm ${fmt.b('Thanh Toán Ngay')} bên dưới`,
-      international ? `> ${E('status_check')} Processing starts only after the provider confirms payment` : `> ${E('status_check')} Bot ${fmt.b('tự động xác nhận')} sau khi nhận được giao dịch`,
+      h2(`${E('payment_payos')} ${international ? 'SECURE BANK CHECKOUT' : 'THANH TOÁN ĐƠN HÀNG'}`),
+      `${fmt.user(order.customer_id)} · ${E('order_id')} ${fmt.code(order.order_code)}`,
+      international ? `${E('payment_qr')} Scan the QR code or select ${fmt.b('Pay Now')}.` : `${E('payment_qr')} Quét QR hoặc bấm ${fmt.b('Thanh Toán Ngay')}.`,
     ))
   );
 
@@ -926,10 +920,10 @@ export function buildPaymentQrV2({ order, attachmentName = null, checkoutUrl = n
   // Thông tin đơn
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(joinLines(
-      `${E('order_id')} ${fmt.b(international ? 'Reference:' : 'Nội dung:')} ${fmt.code(order.payment_code ?? order.order_code)}`,
       `${E('order_product')} ${fmt.b(international ? 'Product:' : 'Sản phẩm:')} ${formatOrderProduct(order.quantity, international ? translateProductName(order.product_name) : order.product_name)}`,
       `${E('payment_money')} ${fmt.b(international ? 'Amount:' : 'Số tiền:')} ${fmt.b(international ? formatInternationalPrice(order.total_amount, { includeSource: true }) : formatCurrency(order.total_amount))}`,
-      `${E('icon_clock')} ${fmt.b(international ? 'Expires:' : 'Hết hạn:')} ${expireText}`,
+      `${E('payment_reference')} ${fmt.b(international ? 'Reference:' : 'Nội dung:')} ${fmt.code(order.payment_code ?? order.order_code)}`,
+      `${E('icon_expire')} ${fmt.b(international ? 'Expires:' : 'Hết hạn:')} ${expireText}`,
     ))
   );
 
@@ -947,30 +941,32 @@ export function buildPaymentQrV2({ order, attachmentName = null, checkoutUrl = n
   );
 
   container.addTextDisplayComponents(
-    new TextDisplayBuilder().setContent(
+    new TextDisplayBuilder().setContent(joinLines(
+      international
+        ? `${E('payment_auto_confirm')} Processing starts only after the provider confirms payment.`
+        : `${E('payment_auto_confirm')} Bot ${fmt.b('tự động xác nhận')} khi nhận được giao dịch.`,
       subtext(international
         ? `${E('status_warn')} This invoice expires automatically if unpaid. Create a new invoice instead of reusing an expired one.`
-        : `${E('status_warn')} Giao dịch hết hạn sau ít phút nếu chưa thanh toán. Bạn có thể tạo lại hoá đơn mới.`)
-    )
+        : `${E('status_warn')} Hoá đơn tự hết hạn nếu chưa thanh toán. Hãy tạo hoá đơn mới khi hết hạn.`),
+    ))
   );
 
   const actionRow = new ActionRowBuilder();
   if (checkoutUrl && /^https?:\/\//i.test(checkoutUrl)) {
     const payBtn = new ButtonBuilder().setLabel(international ? 'Pay Now' : 'Thanh Toán Ngay').setStyle(ButtonStyle.Link).setURL(checkoutUrl);
-    const ePay = E.component('payment_payos'); if (ePay) payBtn.setEmoji(ePay);
+    const ePay = E.component('payment_checkout'); if (ePay) payBtn.setEmoji(ePay);
     actionRow.addComponents(payBtn);
   }
   const regenBtn = new ButtonBuilder().setCustomId(`payment:regen:${order.order_code}`).setLabel(international ? 'New Invoice' : 'Tạo Hoá Đơn Mới').setStyle(ButtonStyle.Secondary);
   const queueBtn = new ButtonBuilder().setCustomId(`queue:view:${order.order_code}`).setLabel(international ? 'Queue Status' : 'Xem Hàng Chờ').setStyle(ButtonStyle.Secondary);
-  const eRefresh = E.component('icon_refresh'); if (eRefresh) regenBtn.setEmoji(eRefresh);
-  const eQueue = E.component('order_queue'); if (eQueue) queueBtn.setEmoji(eQueue);
+  const eRefresh = E.component('payment_regenerate'); if (eRefresh) regenBtn.setEmoji(eRefresh);
+  const eQueue = E.component('queue_view'); if (eQueue) queueBtn.setEmoji(eQueue);
   actionRow.addComponents(regenBtn, queueBtn);
 
   return { container, actionRow, flags: MessageFlags.IsComponentsV2 };
 }
 
 export function buildPaymentSuccessEmbed(order, amountText = null, transactionContent = null) {
-  const em = order.guild_id ? getEmojiMap(order.guild_id) : {};
   const E = createEmojiResolver(order.guild_id);
   const international = isInternationalGuild(order.guild_id);
 
@@ -982,9 +978,9 @@ export function buildPaymentSuccessEmbed(order, amountText = null, transactionCo
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(
       joinLines(
+        h2(`${E('payment_success')} ${international ? 'PAYMENT CONFIRMED' : 'THANH TOÁN THÀNH CÔNG'}`),
         `<@${order.customer_id}>`,
-        h2(`${E('payment_success')}  ${international ? 'PAYMENT CONFIRMED' : 'Thanh Toán Thành Công!'}`),
-        `> ${E('icon_heart_purple')} ${international ? 'Your order is confirmed and has entered processing.' : 'Đơn hàng đã xác nhận — shop sẽ xử lý ngay!'}`.trim(),
+        international ? 'Your order is confirmed and has entered processing.' : 'Đơn hàng đã xác nhận — shop sẽ xử lý ngay!',
       )
     )
   );
@@ -996,11 +992,11 @@ export function buildPaymentSuccessEmbed(order, amountText = null, transactionCo
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(
       joinLines(
-        `> ${E('order_id')} ${fmt.b(international ? 'Order:' : 'Mã Đơn:')} ${fmt.code(order.order_code)}`.trim(),
-        `> ${E('payment_money')} ${fmt.b(international ? 'Received:' : 'Đã Nhận:')} **${amountDisplay}**`.trim(),
-        `> ${E('order_product')} ${fmt.b(international ? 'Product:' : 'Sản Phẩm:')} ${productDisplay}`.trim(),
-        `> ${E('icon_clock')} ${fmt.b(international ? 'Time:' : 'Thời gian:')} ${T.rel(order.payment_confirmed_at || new Date())}`.trim(),
-        ...(transactionContent ? [`> ${E('icon_doc')} ${fmt.b(international ? 'Transaction:' : 'Mã GD:')} ${fmt.code(transactionContent)}`.trim()] : []),
+        `${E('payment_received')} ${fmt.b(international ? 'Received:' : 'Đã nhận:')} ${fmt.b(amountDisplay)}`,
+        `${E('order_product')} ${fmt.b(international ? 'Product:' : 'Sản phẩm:')} ${productDisplay}`,
+        `${E('order_id')} ${fmt.b(international ? 'Order:' : 'Mã đơn:')} ${fmt.code(order.order_code)}`,
+        `${E('payment_confirmed_at')} ${fmt.b(international ? 'Confirmed:' : 'Xác nhận lúc:')} ${T.rel(order.payment_confirmed_at || new Date())}`,
+        ...(transactionContent ? [`${E('payment_transaction')} ${fmt.b(international ? 'Transaction:' : 'Mã GD:')} ${fmt.code(transactionContent)}`] : []),
       )
     )
   );
@@ -1031,8 +1027,6 @@ export function buildPaymentSuccessEmbed(order, amountText = null, transactionCo
 }
 
 export function buildPaymentSuccessDmEmbed(order) {
-  // Lấy emoji custom theo guild của order.
-  const em = order.guild_id ? getEmojiMap(order.guild_id) : {};
   const E = createEmojiResolver(order.guild_id);
 
   const desc = joinLines(
@@ -1040,9 +1034,9 @@ export function buildPaymentSuccessDmEmbed(order) {
     fmt.b('Cảm ơn bạn đã tin tưởng Cenar Store!'),
     '',
     `> ${E('order_id')} ${fmt.b('Mã Đơn:')} ${fmt.code(order.order_code)}`,
-    `> ${E('payment_money')} ${fmt.b('Số Tiền:')} ${fmt.b(formatCurrency(order.amount_paid || order.total_amount))}`,
+    `> ${E('payment_received')} ${fmt.b('Số Tiền:')} ${fmt.b(formatCurrency(order.amount_paid || order.total_amount))}`,
     `> ${E('order_product')} ${fmt.b('Sản Phẩm:')} ${formatOrderProduct(order.quantity, order.product_name)}`,
-    `> ${E('icon_clock')} ${fmt.b('Thời gian:')} ${T.rel(order.payment_confirmed_at || new Date())}`,
+    `> ${E('payment_confirmed_at')} ${fmt.b('Thời gian:')} ${T.rel(order.payment_confirmed_at || new Date())}`,
     '',
     subtext('Shop sẽ xử lý đơn của bạn ngay lập tức. Vui lòng đợi tin nhắn giao hàng qua DM.'),
   );

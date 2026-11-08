@@ -14,12 +14,13 @@ vi.mock('../src/database/db.js', async () => {
 
 import { db } from '../src/database/db.js';
 import { resetAllEmojis } from '../src/services/emojiService.js';
+import { CORE_UI_EMOJI_SLOTS } from '../src/config/coreEmojiPack2026.js';
 import { installDiscordEmojiBoundary, normalizeMessagePresentation } from '../src/utils/discordEmojiBoundary.js';
 
 const guildId = 'emoji-boundary-guild';
 const channelId = '1550000000000000100';
-const store = { id: '1550000000000000101', name: 'cenar_ui26_store', animated: false };
-const shield = { id: '1550000000000000102', name: 'cenar_ui26_shield', animated: false };
+const store = { id: '1550000000000000101', name: CORE_UI_EMOJI_SLOTS.icon_store, animated: false };
+const shield = { id: '1550000000000000102', name: CORE_UI_EMOJI_SLOTS.verify_shield, animated: false };
 const oldStore = { id: '1392749981332541501', name: 'cr_shop', animated: false };
 const brand = { id: '1550000000000000103', name: 'renamed_brand', animated: true };
 const stale = '<:unknown_deleted:1550000000000000199>';
@@ -159,7 +160,7 @@ describe('Discord live emoji message boundary', () => {
     const selector = result.components[1].components[0];
     expect(selector).toMatchObject({ custom_id: customId, placeholder: 'Chọn gói' });
     expect(selector.options[0]).toMatchObject({ label: '1 tháng', value: selectedValue,
-      description: `${replacement} BH full `, emoji: { id: store.id, name: store.name, animated: false } });
+      description: 'BH full', emoji: { id: store.id, name: store.name, animated: false } });
   });
 
   it('preserves literal credentials in code fences, inline code, spoilers and text URLs exactly', () => {
@@ -195,7 +196,8 @@ describe('Discord live emoji message boundary', () => {
     expect(result.embeds[0]).toMatchObject({ title: `${replacement} Store`,
       description: `<:${shield.name}:${shield.id}> Khách `, color: 0xabc123,
       fields: [{ name: `${replacement} Mã đơn`, value: `${replacement} CN_123456 / 150.000đ`, inline: true }],
-      footer: { text: `${replacement} Cenar` }, author: { name: `<a:${brand.name}:${brand.id}> Brand` },
+      footer: { text: 'Cenar', icon_url: `https://cdn.discordapp.com/emojis/${store.id}.png` },
+      author: { name: 'Brand', icon_url: `https://cdn.discordapp.com/emojis/${brand.id}.gif` },
       timestamp: '2026-10-02T13:30:15Z' });
     expect(result.components[0].accent_color).toBe(0xabc123);
     const section = result.components[0].components[0];

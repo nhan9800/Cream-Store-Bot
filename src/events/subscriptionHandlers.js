@@ -110,12 +110,12 @@ export async function handleSubscriptionAddModal(interaction) {
     });
     const progress = getSubscriptionProgress(sub);
 
-    const EMOJI = { nitro: '🚀', spotify: '🎵', youtube: '📺', netflix: '🎬' };
+    const EMOJI_SLOT = { nitro: 'brand_nitro', spotify: 'brand_spotify', youtube: 'brand_youtube', netflix: 'brand_netflix' };
     const LABEL = { nitro: 'Discord Nitro', spotify: 'Spotify Family', youtube: 'YouTube Premium', netflix: 'Netflix' };
-    const MODE_LABEL = { auto_cycle: '🔄 Định kỳ', one_time: '🔂 Mua lẻ', full_paid: `${E('status_check')} Đã trả hết` };
+    const MODE_LABEL = { auto_cycle: `${E('icon_cycle')} Định kỳ`, one_time: `${E('icon_once')} Mua lẻ`, full_paid: `${E('payment_success')} Đã trả hết` };
 
     const embed = new EmbedBuilder()
-      .setTitle(`${EMOJI[type]} Đã Thêm ${LABEL[type]}`)
+      .setTitle(`${E(EMOJI_SLOT[type])} Đã Thêm ${LABEL[type]}`)
       .setColor(0x57F287)
       .setDescription([
         `**ID:** ${sub.id}`,

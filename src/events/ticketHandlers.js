@@ -243,28 +243,28 @@ export async function handleTicketCreate(interaction, ticketType = 'ORDER', gmai
 
       const welcomeEmbed = new EmbedBuilder()
         .setColor(0x5865F2)
-        .setTitle(`<:cr_baohanh:1348625535512870965> TICKET KHÁNG 12 THÁNG YOUTUBE PREMIUM`)
+        .setTitle(`${E('panel_warranty')} TICKET KHÁNG 12 THÁNG YOUTUBE PREMIUM`)
         .setDescription([
           `Xin chào <@${interaction.user.id}>!`,
-          `> <:cr_shop:1392749981332541501> **Mã Ticket:** \`${ticket.ticket_code}\``,
-          `> <a:redload:1459179959158571119> **Thời gian:** <t:${Math.floor(Date.now() / 1000)}:R>`,
-          gmailAddress ? `> 📧 **Gmail yêu cầu kháng:** \`${gmailAddress}\`` : '',
+          `> ${E('ticket_open')} **Mã Ticket:** \`${ticket.ticket_code}\``,
+          `> ${E('icon_clock')} **Thời gian:** <t:${Math.floor(Date.now() / 1000)}:R>`,
+          gmailAddress ? `> ${E('icon_mail')} **Gmail yêu cầu kháng:** \`${gmailAddress}\`` : '',
           '',
           `**Yêu cầu kháng cáo giới hạn 12 tháng gia đình YouTube của bạn đã được tiếp nhận. Vui lòng đọc kỹ các quy định sau và chuẩn bị phối hợp cùng Admin.**`,
         ].filter(Boolean).join('\n'))
         .addFields(
           {
-            name: `<a:tsm_fire:1327553120842158111> 1. Luôn online`,
+            name: `${E('ticket_user')} 1. Luôn online`,
             value: `> Bạn cần duy trì online. Khi Admin/Chủ shop tag tên, bạn cần phản hồi ngay lập tức để tiến hành kháng.`,
             inline: false
           },
           {
-            name: `<a:redload:1459179959158571119> 2. Kế hoạch dự phòng`,
+            name: `${E('recovery_backup')} 2. Kế hoạch dự phòng`,
             value: `> Nếu không kháng được, bắt buộc phải đổi email khác hoặc chờ 7 - 15 ngày để bắt đầu lượt kháng thứ 2.`,
             inline: false
           },
           {
-            name: `<:money:1442876095442714748> 3. Phí dịch vụ (Khách vãng lai)`,
+            name: `${E('payment_money')} 3. Phí dịch vụ (Khách vãng lai)`,
             value: `> Miễn phí nếu mua YouTube tại shop. Phí 20,000đ/lượt thành công đối với khách vãng lai.`,
             inline: false
           }
@@ -275,26 +275,30 @@ export async function handleTicketCreate(interaction, ticketType = 'ORDER', gmai
       const btnApprove = new ButtonBuilder()
         .setCustomId(`ytb:appeal:approve:${ticket.id}`)
         .setLabel('Duyệt Kháng Thành Công')
-        .setStyle(ButtonStyle.Success)
-        .setEmoji('1384069022831874169');
+        .setStyle(ButtonStyle.Success);
+      const approveEmoji = E.component('status_check');
+      if (approveEmoji) btnApprove.setEmoji(approveEmoji);
 
       const btnReject = new ButtonBuilder()
         .setCustomId(`ytb:appeal:reject:${ticket.id}`)
         .setLabel('Thất Bại / Đổi Mail')
-        .setStyle(ButtonStyle.Danger)
-        .setEmoji('1384069065626222632');
+        .setStyle(ButtonStyle.Danger);
+      const rejectEmoji = E.component('status_cross');
+      if (rejectEmoji) btnReject.setEmoji(rejectEmoji);
 
       const btnClose = new ButtonBuilder()
         .setCustomId(`ticket:close:${ticket.id}`)
         .setLabel('Đóng Ticket')
-        .setStyle(ButtonStyle.Danger)
-        .setEmoji('1384069065626222632');
+        .setStyle(ButtonStyle.Danger);
+      const closeEmoji = E.component('ticket_close');
+      if (closeEmoji) btnClose.setEmoji(closeEmoji);
 
       const btnMute = new ButtonBuilder()
         .setCustomId(`ticket:mute:${interaction.user.id}`)
         .setLabel('Mute User')
-        .setStyle(ButtonStyle.Secondary)
-        .setEmoji('1367140105248047114');
+        .setStyle(ButtonStyle.Secondary);
+      const muteEmoji = E.component('icon_block');
+      if (muteEmoji) btnMute.setEmoji(muteEmoji);
 
       const appealRow = new ActionRowBuilder().addComponents(btnApprove, btnReject);
       const controlRow = new ActionRowBuilder().addComponents(btnClose, btnMute);
@@ -403,7 +407,7 @@ export async function handleTicketCreate(interaction, ticketType = 'ORDER', gmai
 
     if (normalizedType === 'APPEAL') {
       await safeReply(interaction, {
-        content: `<a:tickgreen:1384069022831874169> **Yêu cầu Kháng 12 Tháng YouTube của bạn đã được tạo thành công!**\n> ➡️ Vui lòng nhấn vào luồng hỗ trợ riêng tư của bạn tại đây để làm việc cùng Staff nhé: <#${channel.id}>`,
+        content: `${E('status_check')} **Yêu cầu Kháng 12 Tháng YouTube của bạn đã được tạo thành công!**\n> ${E('icon_next')} Vui lòng nhấn vào luồng hỗ trợ riêng tư của bạn tại đây để làm việc cùng Staff nhé: <#${channel.id}>`,
         ephemeral: true,
       });
     } else {

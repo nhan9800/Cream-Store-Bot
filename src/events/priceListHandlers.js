@@ -38,7 +38,7 @@ export async function handlePriceListSelect(interaction) {
   );
   const guildConfig = getGuildConfig(interaction.guildId);
 
-  const defaults = getDefaultCategoryDetails(category);
+  const defaults = getDefaultCategoryDetails(category, interaction.guildId);
   let embedColor = Number.parseInt(defaults.color, 16) || 0xF3A6D7;
   let title = defaults.title;
   let categoryName = defaults.name;
@@ -135,7 +135,7 @@ export async function handlePriceListSelect(interaction) {
       if (catConfig.description) {
         desc = catConfig.description + '\n\n';
       } else if (subtitle) {
-        desc = `## ${subtitle}  ⭐\n\n`;
+        desc = `## ${E('icon_star')} ${subtitle}\n\n`;
       }
 
       if (products.length === 0) {
@@ -228,7 +228,7 @@ export async function handlePriceListSelect(interaction) {
         description: `Giá: ${p.price > 0 ? Number(p.price).toLocaleString('vi-VN') + 'đ' : 'Thương lượng'} | Hạn: ${p.duration_months}T`.slice(0, 100),
         value: `${p.id}`,
       };
-      const emoji = resolveSelectMenuEmoji(interaction.guildId, p.emoji, '🛒');
+      const emoji = resolveSelectMenuEmoji(interaction.guildId, p.emoji, E('icon_cart'));
       if (emoji) {
         opt.emoji = emoji;
       }
@@ -238,7 +238,7 @@ export async function handlePriceListSelect(interaction) {
     const purchaseRow = new ActionRowBuilder().addComponents(
       new StringSelectMenuBuilder()
         .setCustomId('product:select')
-        .setPlaceholder('🛒 Chọn gói dịch vụ bạn muốn đặt mua')
+        .setPlaceholder('Chọn gói dịch vụ bạn muốn đặt mua')
         .addOptions(selectOptions)
     );
     rows.push(purchaseRow);
@@ -280,7 +280,7 @@ export async function handlePriceListSelect(interaction) {
         const cleanPurchaseRow = new ActionRowBuilder().addComponents(
           new StringSelectMenuBuilder()
             .setCustomId('product:select')
-            .setPlaceholder('🛒 Chọn gói dịch vụ bạn muốn đặt mua')
+            .setPlaceholder('Chọn gói dịch vụ bạn muốn đặt mua')
             .addOptions(cleanSelectOptions)
         );
 
@@ -325,31 +325,31 @@ export async function handlePriceListAdminEditPortalButton(interaction) {
 
   const modal = new ModalBuilder()
     .setCustomId('price_list:admin:edit_portal_modal')
-    .setTitle('✏️ Chỉnh Sửa Bảng Giá Chính');
+    .setTitle('Chỉnh Sửa Bảng Giá Chính');
 
-  const defaultTitle = guildConfig?.price_list_title || '📺  PREMIUM SERVICES CATALOG — CENAR STORE  📺';
+  const defaultTitle = guildConfig?.price_list_title || `${E('stock_header')} PREMIUM SERVICES CATALOG — CENAR STORE`;
   const defaultDesc = guildConfig?.price_list_description || [
-    '# 🌟 CHÀO MỪNG BẠN ĐẾN VỚI HỆ THỐNG DỊCH VỤ PREMIUM 🌟',
+    `# ${E('icon_sparkle')} CHÀO MỪNG BẠN ĐẾN VỚI HỆ THỐNG DỊCH VỤ PREMIUM`,
     '',
     'Cửa hàng chuyên cung cấp các tài khoản giải trí, học tập và làm việc Premium chính chủ với giá siêu ưu đãi, bảo hành trọn vẹn thời gian sử dụng.',
     '',
     '---',
     '',
-    '### 🛍️ DANH MỤC DỊCH VỤ NỔI BẬT:',
-    '📺 **YouTube Premium** — Xem video không quảng cáo, chạy nền tiện lợi.',
-    '🎵 **Spotify Premium** — Nghe nhạc chất lượng cao offline không giới hạn.',
-    '🍿 **Netflix Premium** — Trải nghiệm phim ảnh chất lượng UltraHD 4K.',
-    '💎 **Discord Nitro** — Đầy đủ đặc quyền VIP, nhận 2 Boosts Server.',
-    '🚀 **Discord Boost Server** — Tối ưu hóa cộng đồng của bạn nhanh chóng.',
+    `### ${E('icon_cart')} DANH MỤC DỊCH VỤ NỔI BẬT:`,
+    `${E('brand_youtube')} **YouTube Premium** — Xem video không quảng cáo, chạy nền tiện lợi.`,
+    `${E('brand_spotify')} **Spotify Premium** — Nghe nhạc chất lượng cao offline không giới hạn.`,
+    `${E('brand_netflix')} **Netflix Premium** — Trải nghiệm phim ảnh chất lượng UltraHD 4K.`,
+    `${E('brand_nitro')} **Discord Nitro** — Đầy đủ đặc quyền VIP, nhận 2 Boosts Server.`,
+    `${E('brand_boost')} **Discord Boost Server** — Tối ưu hóa cộng đồng của bạn nhanh chóng.`,
     '',
     '---',
     '',
-    '### 💡 HƯỚNG DẪN MUA HÀNG:',
+    `### ${E('icon_tip')} HƯỚNG DẪN MUA HÀNG:`,
     '1. Sử dụng **Menu Thả Xuống** bên dưới để chọn dịch vụ bạn muốn xem bảng giá.',
     '2. Bảng giá chi tiết sẽ hiện lên riêng tư kèm nút đặt mua.',
     '3. Chọn gói và điền thông tin để hệ thống tự động mở ticket xử lý nhanh chóng.',
     '',
-    '🛡️ *Mọi giao dịch đều được đảm bảo an toàn & bảo hành trọn vẹn thời hạn sử dụng!*'
+    `${E('warranty_shield')} *Mọi giao dịch đều được đảm bảo an toàn & bảo hành trọn vẹn thời hạn sử dụng!*`
   ].join('\n');
   const defaultImage = guildConfig?.price_list_image_url || '';
 
@@ -425,7 +425,7 @@ export async function handlePriceListAdminEditPortalModal(interaction) {
           .setColor(0xF3A6D7)
           .setTitle(title)
           .setDescription(description)
-          .setFooter({ text: 'Cenar Store • An toàn - Uy tín - Chất lượng 💙' })
+          .setFooter({ text: 'Cenar Store • An toàn - Uy tín - Chất lượng' })
           .setTimestamp();
 
         if (imageUrl && imageUrl.startsWith('http')) {
@@ -460,7 +460,7 @@ export async function handlePriceListAdminAddButton(interaction, category) {
   }
 
   // Check if this category is in compact mode
-  const defaults = getDefaultCategoryDetails(category);
+  const defaults = getDefaultCategoryDetails(category, interaction.guildId);
   let customConfigs = {};
   if (guildConfig?.price_list_category_configs) {
     try {
@@ -472,7 +472,7 @@ export async function handlePriceListAdminAddButton(interaction, category) {
 
   const modal = new ModalBuilder()
     .setCustomId(`price_list:admin:add_modal:${category}`)
-    .setTitle(`➕ Thêm Gói [${category.toUpperCase()}]`);
+    .setTitle(`Thêm Gói [${category.toUpperCase()}]`);
 
   modal.addComponents(
     new ActionRowBuilder().addComponents(
@@ -505,7 +505,7 @@ export async function handlePriceListAdminAddButton(interaction, category) {
       new TextInputBuilder()
         .setCustomId('emoji')
         .setLabel('Icon / Emoji')
-        .setPlaceholder('VD: 📺')
+        .setPlaceholder('VD: brand_youtube hoặc <:ten:id>')
         .setStyle(TextInputStyle.Short)
         .setRequired(false)
     ),
@@ -597,12 +597,12 @@ export async function handlePriceListAdminEditCategoryButton(interaction, catego
     } catch (e) {}
   }
   const catConfig = customConfigs[category.toLowerCase()] || {};
-  const defaults = getDefaultCategoryDetails(category);
+  const defaults = getDefaultCategoryDetails(category, interaction.guildId);
 
   const defaultTitle = catConfig.title || defaults.title;
   const defaultColor = catConfig.color || defaults.color;
   const defaultImage = catConfig.image_url || '';
-  const defaultDesc = catConfig.description || `### 🌟 Danh sách gói dịch vụ [${defaults.name}] đang mở bán:`;
+  const defaultDesc = catConfig.description || `### ${E('icon_sparkle')} Danh sách gói dịch vụ [${defaults.name}] đang mở bán:`;
   const currentMode = catConfig.display_mode || defaults.display_mode || 'detailed';
   const currentSubtitle = catConfig.subtitle || defaults.subtitle || '';
   // Combine display_mode and subtitle into one field for the modal
@@ -612,7 +612,7 @@ export async function handlePriceListAdminEditCategoryButton(interaction, catego
 
   const modal = new ModalBuilder()
     .setCustomId(`price_list:admin:edit_category_modal:${category}`)
-    .setTitle(`✏️ Sửa Chi Tiết [${category.toUpperCase()}]`);
+    .setTitle(`Sửa Chi Tiết [${category.toUpperCase()}]`);
 
   modal.addComponents(
     new ActionRowBuilder().addComponents(
@@ -782,19 +782,19 @@ export async function handlePriceListAdminEditButton(interaction, category) {
   }
 
   const selectOptions = products.slice(0, 25).map(p => {
-    const statusText = p.is_active ? '🟢' : '🔴';
+    const statusText = p.is_active ? 'Đang bán' : 'Tạm ẩn';
     return {
       label: `${p.name}`.slice(0, 100),
       description: `Giá: ${Number(p.price).toLocaleString('vi-VN')}đ | Hạn: ${p.duration_months}T | Trạng thái: ${statusText}`.slice(0, 100),
       value: `${p.id}`,
-      emoji: resolveSelectMenuEmoji(interaction.guildId, p.emoji, '📦') || undefined
+      emoji: resolveSelectMenuEmoji(interaction.guildId, p.emoji, E('order_product')) || undefined
     };
   });
 
   const row = new ActionRowBuilder().addComponents(
     new StringSelectMenuBuilder()
       .setCustomId(`price_list:admin:select_product_to_edit:${category}`)
-      .setPlaceholder('✏️ Chọn sản phẩm bạn muốn sửa thông tin')
+      .setPlaceholder('Chọn sản phẩm bạn muốn sửa thông tin')
       .addOptions(selectOptions)
   );
 
@@ -828,7 +828,7 @@ export async function handlePriceListAdminSelectProductToEdit(interaction, categ
 
   const modal = new ModalBuilder()
     .setCustomId(`price_list:admin:edit_modal:${product.id}`)
-    .setTitle(`✏️ Sửa: ${product.name}`.slice(0, 45));
+    .setTitle(`Sửa: ${String(product.name).replace(/<a?:[a-zA-Z0-9_]+:\d+>/g, '').trim()}`.slice(0, 45));
 
   modal.addComponents(
     new ActionRowBuilder().addComponents(
