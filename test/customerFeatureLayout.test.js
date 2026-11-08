@@ -150,6 +150,12 @@ describe('remaining active customer feature layouts', () => {
       await sendVietQRPayment({ guild: { channels: { fetch: vi.fn().mockResolvedValue({ isTextBased: () => true, send }) } }, orderCode: order.order_code });
       const payload = send.mock.calls[0][0]; valid(payload);
       expect(payload.allowedMentions).toEqual({ parse: [], users: [ticket.customer_id] });
+      const displayed = flatten(payload.components).filter(node => node.type === 10).map(node => node.content);
+      for (const [slot, label] of [['payment_qr', 'Thông Tin Thanh Toán Đơn Hàng'], ['payment_vietqr', 'Ngân hàng'],
+        ['icon_number', 'Số tài khoản'], ['ticket_user', 'Chủ tài khoản'], ['payment_reference', 'Nội dung chuyển khoản'],
+        ['order_product', 'Sản phẩm'], ['payment_money', 'Số tiền'], ['icon_expire', 'Lưu ý:']]) {
+        expect(displayed.some(text => text.includes(`<:layout_${slot}:1550000000000000001> ${label}`))).toBe(true);
+      }
       for (const value of ['230.000', '1234567890', 'FIXTURE', order.payment_code || order.order_code, '2x Test bank package', `<@${ticket.customer_id}>`]) expect(texts(payload)).toContain(value);
       expect(payload.files[0].attachment).toEqual(bytes);
       expect(flatten(payload.components).find(node => node.type === 12).items[0].media.url).toBe(`attachment://vietqr-${order.order_code}.png`);

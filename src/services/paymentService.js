@@ -356,13 +356,25 @@ export async function sendVietQRPayment({ guild, orderCode }) {
     .setImage(`attachment://${attachmentName}`)
     .setFooter({ text: 'Lưu ý: Giao dịch sẽ hết hạn sau 10 phút nếu chưa thanh toán.' });
 
-  const sentMessage = await ticketChannel.send(buildLegacyFeatureCard({
+  const originalPayload = {
     content: `<@${order.customer_id}>`,
     embeds: [embed],
     files: [new AttachmentBuilder(imageBuffer, { name: attachmentName })],
     // Retain the invoice recipient, without activating mentions in product or bank text.
     allowedMentions: { parse: [], users: [order.customer_id] },
-  }));
+  };
+  const E = createEmojiResolver(order.guild_id);
+  const source = embed.toJSON();
+  const fieldSlots = ['payment_vietqr', 'icon_number', 'ticket_user', 'payment_reference', 'order_product', 'payment_money'];
+  const decorated = {
+    ...source,
+    title: `${E('payment_qr')} ${source.title}`.trim(),
+    fields: source.fields.map((field, index) => ({ ...field, name: `${E(fieldSlots[index])} ${field.name}`.trim() })),
+    footer: { ...source.footer, text: `${E('icon_expire')} ${source.footer.text}`.trim() },
+  };
+  const nativePayload = buildLegacyFeatureCard({ ...originalPayload, embeds: [decorated] });
+  const sentMessage = await ticketChannel.send(nativePayload.flags & MessageFlags.IsComponentsV2
+    ? nativePayload : originalPayload);
 
   // Lưu VietQR URL vào DB để website hiển thị QR code
   savePaymentLinkData(order.order_code, {
