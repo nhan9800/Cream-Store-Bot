@@ -1,6 +1,6 @@
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { PermissionFlagsBits, SlashCommandBuilder } from 'discord.js';
-import { buildBlacklistEmbed } from '../utils/embeds.js';
+import { buildBlacklistV2 } from '../utils/embeds.js';
 import { clearWarnings, getCustomerFlag, setBlacklistStatus, warnCustomer } from '../services/blacklistService.js';
 import { applyCustomerRoles } from '../services/roleService.js';
 import { emitStaffLog } from '../services/staffLogService.js';
@@ -33,5 +33,5 @@ export async function execute(interaction) {
   else if (action === 'go') { flag = setBlacklistStatus(interaction.guildId, user.id, false, interaction.user.id, null); await applyCustomerRoles(interaction.guild, user.id); await emitStaffLog(interaction.client, { guildId: interaction.guildId, actorId: interaction.user.id, targetId: user.id, action: 'BLACKLIST_REMOVE', detail: 'Gỡ blacklist' }); }
   else if (action === 'xoacanhbao') { flag = clearWarnings(interaction.guildId, user.id, interaction.user.id); await emitStaffLog(interaction.client, { guildId: interaction.guildId, actorId: interaction.user.id, targetId: user.id, action: 'WARNINGS_CLEAR', detail: 'Xóa cảnh báo' }); }
   else { flag = getCustomerFlag(interaction.guildId, user.id); }
-  await interaction.reply({ embeds: [buildBlacklistEmbed(user, flag)], ephemeral: true });
+  await interaction.reply({ ...buildBlacklistV2(user, flag, interaction.guildId), ephemeral: true });
 }

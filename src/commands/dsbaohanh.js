@@ -1,4 +1,5 @@
 import { createEmojiResolver } from '../utils/emojiHelper.js';
+import { buildLegacyFeatureCard } from '../utils/featureCard.js';
 import { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } from 'discord.js';
 import Database from 'better-sqlite3';
 import { config } from '../config.js';
@@ -60,7 +61,7 @@ export async function execute(interaction) {
       embed.setFooter({ text: `Và ${warranties.length - 25} yêu cầu khác...` });
     }
 
-    await interaction.editReply({ embeds: [embed] });
+    await interaction.editReply(buildLegacyFeatureCard({ embeds: [embed] }));
   } catch (error) {
     console.error('[dsbaohanh] Error:', error);
     await interaction.editReply(`${E('status_cross')} Đã xảy ra lỗi khi tải danh sách bảo hành.`);

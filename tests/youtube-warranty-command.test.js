@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { data, buildYoutubeWarrantyAdminPayload } from '../src/commands/ytbaohanh.js';
 import { EMOJI_SLOTS } from '../src/services/emojiService.js';
 import { createEmojiResolver } from '../src/utils/emojiHelper.js';
+import { MessageFlags } from 'discord.js';
 import fs from 'node:fs';
 
 const emojiInventory = new Map([
@@ -42,8 +43,12 @@ describe('YouTube warranty admin command', () => {
         { id: 12, orderCode: 'CN_12', claimCode: 'YW_12', productName: 'YouTube Premium', status: 'AWAITING_CUSTOMER', customerId: '100000000000000002', customerGmail: null, customerGmailMasked: null, ticketChannelId: '200000000000000002', guidanceAcceptedAt: null },
       ],
     });
-    const serialized = JSON.stringify(payload.components.map((row) => row.toJSON()));
-    expect(payload.embeds[0].data.description).toContain('ngừng bảo hành');
+    const serialized = JSON.stringify(payload.components.map((row) => row.toJSON?.() || row));
+    expect(payload.flags & MessageFlags.IsComponentsV2).toBeTruthy();
+    expect(payload.flags & MessageFlags.Ephemeral).toBeTruthy();
+    expect(serialized).toContain('ngừng bảo hành');
+    expect(serialized).toContain('user@gmail.com');
+    expect(serialized).toContain('YW_11');
     expect(serialized).toContain('ytw:complete:11');
     expect(serialized).toContain('ytw:resend:12');
     expect(payload.ephemeral).toBe(true);

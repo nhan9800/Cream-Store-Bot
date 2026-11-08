@@ -1,6 +1,6 @@
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { SlashCommandBuilder } from 'discord.js';
-import { buildAutomationGuideEmbed } from '../utils/embeds.js';
+import { buildAutomationGuideV2 } from '../utils/embeds.js';
 
 export const data = new SlashCommandBuilder()
   .setName('cochebot')
@@ -10,7 +10,7 @@ export const data = new SlashCommandBuilder()
 export async function execute(interaction) {
   const E = createEmojiResolver(interaction?.guildId);
   await interaction.reply({
-    embeds: [buildAutomationGuideEmbed()],
+    ...buildAutomationGuideV2(interaction.guildId),
     ephemeral: true,
   });
 }

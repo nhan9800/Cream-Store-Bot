@@ -15,6 +15,7 @@ import {
   getWalletSummary,
 } from '../services/walletService.js';
 import { formatCurrency } from '../utils/formatters.js';
+import { addSeparator } from '../utils/uiKit.js';
 
 export const data = new SlashCommandBuilder()
   .setName('wallet')
@@ -83,17 +84,25 @@ export function buildWalletView({ guildId, targetUser, balance, summary, transac
     new TextDisplayBuilder().setContent([
       `## ${E('icon_wallet')} VÍ CENAR`,
       `-# Tài khoản <@${targetUser.id}> · Đồng bộ trực tiếp với cenarstore.xyz`,
-      '',
+    ].join('\n')),
+  );
+  addSeparator(container, { size: 'large' });
+  container.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent([
       '### Số dư khả dụng',
-      `# ${formatCurrency(balance)}`,
-      '',
+      `## ${formatCurrency(balance)}`,
+    ].join('\n')),
+  );
+  addSeparator(container, { divider: false });
+  container.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent([
       `> ${E('icon_green')} **Tổng tiền vào:** ${formatCurrency(summary.totalIn)}`,
       `> ${E('icon_red')} **Tổng đã sử dụng:** ${formatCurrency(summary.totalOut)}`,
       `> ${E('icon_clipboard')} **Số giao dịch:** ${summary.transactionCount}`,
     ].join('\n')),
   );
   container.addSeparatorComponents(
-    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small),
+    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Large),
   );
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(
@@ -133,12 +142,25 @@ function buildWalletAdjustment({ guildId, targetUser, amount, reason, newBalance
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent([
       `## ${positive ? E('status_check') : E('status_warn')} ĐÃ CẬP NHẬT VÍ`,
-      '',
+    ].join('\n')),
+  );
+  addSeparator(container, { size: 'large' });
+  container.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent([
       `> **Khách hàng:** <@${targetUser.id}>`,
       `> **Điều chỉnh:** ${positive ? '+' : '−'}${formatCurrency(Math.abs(amount))}`,
       `> **Lý do:** ${oneLine(reason, 300)}`,
-      '',
+    ].join('\n')),
+  );
+  addSeparator(container, { size: 'large' });
+  container.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent([
       `### Số dư mới · ${formatCurrency(newBalance)}`,
+    ].join('\n')),
+  );
+  addSeparator(container);
+  container.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent([
       `-# Thao tác quản trị đã được ghi vào lịch sử ví.`,
     ].join('\n')),
   );

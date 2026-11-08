@@ -1,4 +1,5 @@
 import { createEmojiResolver } from '../utils/emojiHelper.js';
+import { buildLegacyFeatureCard } from '../utils/featureCard.js';
 import { SlashCommandBuilder, EmbedBuilder } from 'discord.js';
 import { getOrCreateReferralCode, getReferralStats, getReferralLeaderboard } from '../services/referralService.js';
 
@@ -37,7 +38,7 @@ export async function execute(interaction) {
       .setThumbnail(interaction.user.displayAvatarURL())
       .setTimestamp();
 
-    await interaction.reply({ embeds: [embed] });
+    await interaction.reply(buildLegacyFeatureCard({ embeds: [embed] }));
   }
 
   else if (sub === 'stats') {
@@ -61,7 +62,7 @@ export async function execute(interaction) {
       embed.addFields({ name: `${E('icon_clipboard')} Lịch sử gần đây`, value: eventLines.join('\n') });
     }
 
-    await interaction.reply({ embeds: [embed], ephemeral: true });
+    await interaction.reply(buildLegacyFeatureCard({ embeds: [embed], ephemeral: true }));
   }
 
   else if (sub === 'leaderboard') {
@@ -82,6 +83,6 @@ export async function execute(interaction) {
       .setDescription(lines.join('\n'))
       .setTimestamp();
 
-    await interaction.reply({ embeds: [embed] });
+    await interaction.reply(buildLegacyFeatureCard({ embeds: [embed] }));
   }
 }

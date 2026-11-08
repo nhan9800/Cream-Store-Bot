@@ -3,6 +3,7 @@ import {
   SectionBuilder, TextDisplayBuilder, ThumbnailBuilder,
 } from 'discord.js';
 import { createEmojiResolver, withButtonEmoji } from '../utils/emojiHelper.js';
+import { addSeparator } from '../utils/uiKit.js';
 
 export const LOCKET_PANEL_IMAGE = 'locket-gold-banner.webp';
 const priceText = (product) => `${Number(product.base_price ?? product.price ?? 0).toLocaleString('vi-VN')}đ`;
@@ -18,10 +19,18 @@ export function buildLocketProductPanel(guildId, product, hasImage = true) {
   if (hasImage) container.addSectionComponents(new SectionBuilder().addTextDisplayComponents(heading)
     .setThumbnailAccessory(new ThumbnailBuilder().setURL(`attachment://${LOCKET_PANEL_IMAGE}`).setDescription('Locket Gold · Cenar Store')));
   else container.addTextDisplayComponents(heading);
+  addSeparator(container, { size: 'large' });
   container.addTextDisplayComponents(new TextDisplayBuilder().setContent([
+    `### ${E('icon_crown')} Quyền lợi & kích hoạt`,
     `${E('icon_key')} Không cần mật khẩu hoặc OTP.`,
     `${E('icon_star')} Icon tùy chỉnh · Không quảng cáo · Hỗ trợ streak theo chính sách Locket.`,
+  ].join('\n')));
+  addSeparator(container, { size: 'large' });
+  container.addTextDisplayComponents(new TextDisplayBuilder().setContent([
     `${E('panel_order')} **Mua ngay** → Username → Xác nhận giá → Thanh toán trong ticket.`,
+  ].join('\n')));
+  addSeparator(container);
+  container.addTextDisplayComponents(new TextDisplayBuilder().setContent([
     `-# ${E('warranty_shield')} Bảo hành 12 tháng · Kiểm tra đúng Username trước khi xác nhận.`,
   ].join('\n')));
   const actions = new ActionRowBuilder().addComponents(
@@ -52,9 +61,18 @@ export function buildLocketDetails(guildId, page, product) {
     `${E('cenar_staff')} Hỗ trợ trong ticket suốt thời gian sử dụng.`,
     `${E('status_warn')} **Không hoàn tiền** sau khi đã kích hoạt thành công.`,
   ];
+  const container = new ContainerBuilder().setAccentColor(0xE8BE69);
+  container.addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.slice(0, 2).join('\n')));
+  addSeparator(container, { size: 'large' });
+  const details = lines.slice(3);
+  const footer = details.at(-1)?.startsWith('-# ') ? details.pop() : null;
+  container.addTextDisplayComponents(new TextDisplayBuilder().setContent(details.join('\n\n')));
+  if (footer) {
+    addSeparator(container);
+    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(footer));
+  }
   return {
-    components: [new ContainerBuilder().setAccentColor(0xE8BE69)
-      .addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join('\n')))],
+    components: [container],
     flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral, allowedMentions: { parse: [] },
   };
 }

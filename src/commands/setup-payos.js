@@ -2,7 +2,7 @@ import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { PermissionFlagsBits, SlashCommandBuilder } from 'discord.js';
 import { collectPaymentConfigIssues } from '../config.js';
 import { confirmPayOSWebhookUrl } from '../services/paymentService.js';
-import { buildPayOSSetupEmbed } from '../utils/embeds.js';
+import { buildPayOSSetupV2 } from '../utils/embeds.js';
 
 export const data = new SlashCommandBuilder()
   .setName('setup-payos')
@@ -37,7 +37,7 @@ export async function execute(interaction) {
   }
 
   await interaction.reply({
-    embeds: [buildPayOSSetupEmbed(notes)],
+    ...buildPayOSSetupV2(notes, interaction.guildId),
     ephemeral: true,
   });
 }

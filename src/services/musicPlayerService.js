@@ -19,7 +19,7 @@ import { ensureYtDlpRuntime } from '../utils/ytDlpRuntime.js';
 import { config } from '../config.js';
 import { db } from '../database/db.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
-import { accentFor } from '../utils/uiKit.js';
+import { accentFor, addSeparator } from '../utils/uiKit.js';
 import { configureCleanMusicDispatcher, createFrameAlignedMusicPcm, createMusicOpusStream } from './musicAudioPipeline.js';
 import { loadYoutubeMix, normalizeYoutubeMixUrl } from './youtubeMixSource.js';
 import { createResilientYoutubePcmStream, YOUTUBE_DIRECT_STARTUP_TIMEOUT_MS } from './youtubeDirectPcmStream.js';
@@ -996,30 +996,40 @@ export function buildMusicPanelPayload(guildId, { notice = null } = {}) {
   if (!queueLines.length) queueLines.push('_Hàng đợi đang trống — hãy thêm video, playlist hoặc Mix/Radio YouTube._');
 
   const container = new ContainerBuilder().setAccentColor(accentFor(current ? 'success' : 'primary'));
-  container.addTextDisplayComponents(new TextDisplayBuilder().setContent([
-    `# ${E('music_wave')} CENAR MUSIC · CONTROL DECK`,
+  const textGroups = [[
+    `## ${E('music_wave')} CENAR MUSIC · CONTROL DECK`,
     `> ${E('cenar_verified')} YouTube Engine · 48 kHz Stereo · bitrate tự động theo phòng thoại`,
     notice ? `> ${notice}` : '',
     state.recovery.blocked ? `> **Đã giữ lại ${state.recovery.retainedTracks} bài.** ${state.recovery.message}` : '',
-    '',
+  ], [
     current
-      ? `## ${E('music_now')} [${plain(current.title)}](${current.url})`
-      : `## ${E('music_now')} Chưa có bài hát đang phát`,
+      ? `### ${E('music_now')} [${plain(current.title)}](${current.url})`
+      : `### ${E('music_now')} Chưa có bài hát đang phát`,
     current ? `**Kênh:** ${plain(current.author)} · **Yêu cầu:** ${plain(current.requestedBy)}` : '',
     current
       ? `\`${state.progress.currentLabel}\` ${queueProgress(state.progress.percent, E('music_play'))} \`${state.progress.totalLabel}\``
       : `Kết nối vào phòng thoại, nhấn **Thêm bài / playlist / Mix** rồi dán link YouTube.`,
-    '',
+  ], [
     `**Trạng thái:** ${state.recovery.blocked ? 'Chờ thử phát lại' : state.paused ? 'Tạm dừng' : state.playing ? 'Đang phát' : state.buffering ? 'Đang tải âm thanh' : 'Sẵn sàng'} · **Âm lượng:** ${state.volume}% · **${repeatLabel}** · **Shuffle:** ${state.shuffle ? 'Bật' : 'Tắt'}`,
     `**Âm thanh:** ${plain(soundName)} · ${state.sound.live ? 'Áp dụng live' : 'Sẵn sàng cho bài tiếp theo'}`,
     `**Phòng thoại:** ${state.voiceChannel ? `${E('music_volume')} ${plain(state.voiceChannel.name)}` : 'Chưa kết nối'} · **Người nghe:** ${state.listeners.length} · **Ping:** ${state.ping}ms`,
-    '',
+  ], [
     `### ${E('music_queue')} HÀNG ĐỢI · ${state.queue.length} BÀI`,
     ...queueLines,
     state.queue.length > 8 ? `-# Và ${state.queue.length - 8} bài khác trên Dashboard.` : '',
-    '',
+  ], [
     `-# Video / playlist / Mix / Radio YouTube · Mix tối đa 50 bài mỗi lượt · tự rời phòng sau 3 phút không có người nghe`,
-  ].filter(Boolean).join('\n').slice(0, 4000)));
+  ]];
+  // Keep the existing total text budget across independently readable sections.
+  let remainingText = 4000;
+  for (const [index, group] of textGroups.entries()) {
+    const content = group.filter(Boolean).join('\n').slice(0, remainingText);
+    if (!content) continue;
+    if (index) addSeparator(container, { size: index === textGroups.length - 1 ? 'small' : 'large' });
+    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(content));
+    remainingText -= content.length;
+  }
+  addSeparator(container, { divider: false, size: 'large' });
 
   const add = setButtonEmoji(
     new ButtonBuilder().setCustomId('music:add').setLabel('Thêm bài / playlist / Mix').setStyle(ButtonStyle.Success),

@@ -14,7 +14,8 @@ const state = vi.hoisted(() => ({
   pauseMarketing: vi.fn(() => ({ paused: true })),
 }));
 
-vi.mock('discord.js', () => ({
+vi.mock('discord.js', async (importOriginal) => ({
+  ...await importOriginal(),
   Events: { ClientReady: 'clientReady' },
   Client: class {
     constructor() { this.user = { tag: 'startup-test-bot' }; this.guilds = { cache: new Map() }; }

@@ -48,6 +48,37 @@ afterEach(() => { global.discordClient = previousClient; });
 afterAll(() => db.close());
 
 describe('Discord live emoji message boundary', () => {
+  it('applies native group spacing on every message route without changing text or interactive controls', () => {
+    installDiscordEmojiBoundary(client);
+    const routes = [
+      ['POST', `/channels/${channelId}/messages`],
+      ['PATCH', `/channels/${channelId}/messages/1550000000000000120`],
+      ['POST', '/interactions/1550000000000000121/token/callback', 4],
+      ['POST', '/interactions/1550000000000000121/token/callback', 7],
+      ['POST', '/webhooks/1550000000000000122/token?wait=true'],
+      ['PATCH', '/webhooks/1550000000000000122/token/messages/@original'],
+    ];
+    for (const [method, fullRoute, type] of routes) {
+      const message = { flags: 32768 | 64, allowed_mentions: { parse: [] }, components: [{ type: 17, components: [
+        { type: 10, content: '## Thanh toán' },
+        { type: 10, content: '**Mã đơn:** CN_123456\n**Giá:** 115.000đ' },
+        { type: 1, components: [{ type: 2, style: 1, label: 'Thanh toán', custom_id: 'pay:CN_123456' }] },
+      ] }] };
+      const options = { method, fullRoute, body: type ? { type, data: message } : message };
+      client.rest.request(options);
+      const forwarded = request.mock.calls.at(-1)[0].body;
+      const actual = type ? forwarded.data : forwarded;
+      expect(actual.components[0].components.map(node => node.type)).toEqual([10, 14, 10, 14, 1]);
+      expect(actual.components[0].components[1]).toMatchObject({ divider: true, spacing: 2 });
+      expect(actual.components[0].components[3]).toMatchObject({ divider: false, spacing: 2 });
+      expect(actual.components[0].components[2].content).toBe('**Mã đơn:** CN_123456\n**Giá:** 115.000đ');
+      expect(actual.components[0].components[4]).toEqual(message.components[0].components[2]);
+      expect(actual.flags).toBe(message.flags);
+      expect(actual.allowed_mentions).toBe(message.allowed_mentions);
+      expect(message.components[0].components).toHaveLength(3);
+    }
+  });
+
   it('blocks all send/edit requests in paused marketing channels while allowing deletion and commerce', async () => {
     installDiscordEmojiBoundary(client);
     for (const id of ['1514606987839672563', '1515008584549797979', '1531206050383134842']) {

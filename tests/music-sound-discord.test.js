@@ -19,6 +19,7 @@ vi.mock('../src/database/db.js', async () => {
 import { db } from '../src/database/db.js';
 import { buildMusicPanelPayload, handleMusicInteraction } from '../src/services/musicPlayerService.js';
 import { readMusicSoundSettings } from '../src/services/musicSoundService.js';
+import { countDiscordComponents, normalizeDiscordV2Layout } from '../src/utils/discordLayout.js';
 
 beforeEach(() => db.exec('DELETE FROM music_sound_settings; DELETE FROM music_guild_settings'));
 afterAll(() => db.close());
@@ -46,6 +47,11 @@ describe('Discord sound controls retain voice/DJ authorization', () => {
       .find((item) => item.custom_id === 'music:sound');
     expect(component.options).toHaveLength(8);
     expect(component.options.filter((option) => option.default)).toHaveLength(1);
+    const layout = normalizeDiscordV2Layout(payload);
+    const blocks = layout.components[0].components;
+    expect(blocks.filter((item) => item.type === 10)).toHaveLength(5);
+    expect(blocks.filter((item) => item.type === 14 && item.spacing === 2).length).toBeGreaterThanOrEqual(3);
+    expect(countDiscordComponents(layout.components)).toBeLessThanOrEqual(40);
   });
 
   it('rejects unauthorized selections and forged modal submissions before persistence', async () => {

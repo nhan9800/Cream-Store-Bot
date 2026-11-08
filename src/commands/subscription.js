@@ -1,4 +1,5 @@
 import { createEmojiResolver } from '../utils/emojiHelper.js';
+import { buildLegacyFeatureCard } from '../utils/featureCard.js';
 import { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder, ModalBuilder, ActionRowBuilder, TextInputBuilder, TextInputStyle, ButtonBuilder, ButtonStyle } from 'discord.js';
 import { getPublicUrl } from '../config.js';
 import {
@@ -260,19 +261,19 @@ export async function execute(interaction) {
     if (sub === 'list') {
       const filterType = interaction.options.getString('loai');
       const subs = getAllActiveSubscriptions(interaction.guildId, filterType);
-      return interaction.editReply({ embeds: [buildListEmbed(subs, filterType, interaction.guildId)] });
+      return interaction.editReply(buildLegacyFeatureCard({ embeds: [buildListEmbed(subs, filterType, interaction.guildId)] }));
     }
 
     if (sub === 'check') {
       const days = interaction.options.getInteger('so_ngay') || 7;
       const subs = getSubscriptionsDueInDays(interaction.guildId, days);
-      return interaction.editReply({ embeds: [buildCheckEmbed(subs, days, interaction.guildId)] });
+      return interaction.editReply(buildLegacyFeatureCard({ embeds: [buildCheckEmbed(subs, days, interaction.guildId)] }));
     }
 
     if (sub === 'find') {
       const keyword = interaction.options.getString('tu_khoa', true);
       const matches = findSubscriptions(interaction.guildId, keyword, 20);
-      return interaction.editReply({ embeds: [buildSearchEmbed(matches, keyword, interaction.guildId)] });
+      return interaction.editReply(buildLegacyFeatureCard({ embeds: [buildSearchEmbed(matches, keyword, interaction.guildId)] }));
     }
 
     if (sub === 'history') {
@@ -281,7 +282,7 @@ export async function execute(interaction) {
       if (!existing || ![interaction.guildId, 'WEB'].includes(existing.guild_id)) {
         return interaction.editReply(`${E('status_cross')} Không tìm thấy subscription với ID này.`);
       }
-      return interaction.editReply({ embeds: [buildHistoryEmbed(existing, getSubscriptionHistory(id), interaction.guildId)] });
+      return interaction.editReply(buildLegacyFeatureCard({ embeds: [buildHistoryEmbed(existing, getSubscriptionHistory(id), interaction.guildId)] }));
     }
 
     if (sub === 'progress') {
@@ -299,7 +300,7 @@ export async function execute(interaction) {
       });
       const progress = getSubscriptionProgress(updated);
       const nextTs = progress.nextActionAt ? `<t:${Math.floor(new Date(progress.nextActionAt).getTime() / 1000)}:F>` : '—';
-      return interaction.editReply({ embeds: [new EmbedBuilder()
+      return interaction.editReply(buildLegacyFeatureCard({ embeds: [new EmbedBuilder()
         .setTitle(`${E('status_check')} Đã Xác Nhận Tiến Độ`)
         .setColor(0x57F287)
         .setDescription([
@@ -308,7 +309,7 @@ export async function execute(interaction) {
           `**Việc tiếp theo:** ${progress.nextAction === 'DISCONNECT' ? 'Ngắt gói khi hết hạn' : `Cấp kỳ ${progress.nextCycleNumber}/${progress.totalCycles} · tháng ${progress.nextCycleStartMonth}-${progress.nextCycleEndMonth}/${progress.totalMonths}`}`,
           `**Thời điểm:** ${nextTs}`,
         ].join('\n'))
-        .setTimestamp()] });
+        .setTimestamp()] }));
     }
 
     if (sub === 'disconnect') {
@@ -367,7 +368,7 @@ export async function execute(interaction) {
           `**Trạng thái:** ${updated.status}`,
         ].join('\n'))
         .setTimestamp();
-      return interaction.editReply({ embeds: [embed] });
+      return interaction.editReply(buildLegacyFeatureCard({ embeds: [embed] }));
     }
 
     if (sub === 'remove') {
@@ -420,7 +421,7 @@ export async function execute(interaction) {
         ));
       }
 
-      return interaction.editReply({ embeds: [embed], components });
+      return interaction.editReply(buildLegacyFeatureCard({ embeds: [embed], components }));
     }
   } catch (error) {
     console.error('[SUBSCRIPTION] Error:', error);

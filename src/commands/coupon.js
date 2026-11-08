@@ -1,4 +1,5 @@
 import { createEmojiResolver } from '../utils/emojiHelper.js';
+import { buildLegacyFeatureCard } from '../utils/featureCard.js';
 import { SlashCommandBuilder, EmbedBuilder, PermissionFlagsBits } from 'discord.js';
 import { createCoupon, listCoupons, deactivateCoupon, getCouponStats } from '../services/couponService.js';
 
@@ -68,7 +69,7 @@ export async function execute(interaction) {
         )
         .setTimestamp();
 
-      await interaction.reply({ embeds: [embed], ephemeral: true });
+      await interaction.reply(buildLegacyFeatureCard({ embeds: [embed], ephemeral: true }));
     } catch (e) {
       await interaction.reply({ content: `${E('status_cross')} Lỗi: ${e.message}`, ephemeral: true });
     }
@@ -93,7 +94,7 @@ export async function execute(interaction) {
       .setFooter({ text: `Tổng: ${coupons.length} coupon` })
       .setTimestamp();
 
-    await interaction.reply({ embeds: [embed], ephemeral: true });
+    await interaction.reply(buildLegacyFeatureCard({ embeds: [embed], ephemeral: true }));
   }
 
   else if (sub === 'delete') {
@@ -114,6 +115,6 @@ export async function execute(interaction) {
       )
       .setTimestamp();
 
-    await interaction.reply({ embeds: [embed], ephemeral: true });
+    await interaction.reply(buildLegacyFeatureCard({ embeds: [embed], ephemeral: true }));
   }
 }
