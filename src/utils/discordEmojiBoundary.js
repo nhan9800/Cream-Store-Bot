@@ -1,6 +1,7 @@
 import { config } from '../config.js';
 import { isMarketingWritePaused } from '../config/marketingAutomationPolicy.js';
 import { resolveLiveCustomEmoji, sanitizeCustomEmojiText } from '../services/emojiService.js';
+import { normalizeDiscordV2Layout } from './discordLayout.js';
 
 const installed = Symbol('cenar.liveEmojiBoundary');
 const CUSTOM_TOKEN = /<a?:[A-Za-z0-9_]+:\d+>/g;
@@ -50,12 +51,12 @@ export function normalizeMessagePresentation(payload,guildId) {
     if (result.author) result.author=identity(result.author,'name');
     return result;
   };
-  return {
+  return normalizeDiscordV2Layout({
     ...payload,
     ...(typeof payload.content==='string'?{content:text(payload.content)}:{}),
     ...(payload.embeds?{embeds:payload.embeds.map(embed)}:{}),
     ...(payload.components?{components:payload.components.map(component)}:{}),
-  };
+  });
 }
 export function installDiscordEmojiBoundary(client) {
   if (!client?.rest?.request || client.rest[installed]) return false;

@@ -49,7 +49,7 @@ function inspect(payload) {
   expect(serialized).not.toMatch(/[\u{1F000}-\u{1FAFF}\u2600-\u27BF]/u);
   expect(text).not.toMatch(/(^|[^<a]):[a-zA-Z0-9_]+:/);
   for (const match of text.matchAll(/<a?:\w+:(\d+)>/g)) expect(inventory.has(match[1])).toBe(true);
-  for (const line of text.split('\n').filter(Boolean)) expect(line).toMatch(/^(?:## |>-? |\-# )?<a?:\w+:\d+>/);
+  for (const line of text.split('\n').filter(Boolean)) expect(line).toMatch(/^(?:#{1,3} |>-? |\-# )?<a?:\w+:\d+>/);
   for (const button of components.filter((c) => c.type === 2)) expect(inventory.has(button.emoji?.id)).toBe(true);
   expect(payload.allowedMentions).toEqual({ parse: [] });
   return { text, components };
@@ -62,7 +62,8 @@ describe('compact premium Discord panels', () => {
     expect(components.some((c) => c.type === 12)).toBe(false);
     const section = components.find((c) => c.type === 9);
     expect(section.accessory).toMatchObject({ type: 11, media: { url: 'attachment://locket-gold-banner.webp' } });
-    expect(text.split('\n')).toHaveLength(7);
+    expect(text.split('\n').filter(Boolean)).toHaveLength(8);
+    expect(components.filter((c) => c.type === 14 && c.spacing === 2)).toHaveLength(2);
     expect(text).toContain('150.000đ');
     expect(text).toContain('12 tháng');
     expect(text).toContain('Không cần mật khẩu hoặc OTP');
@@ -91,9 +92,10 @@ describe('compact premium Discord panels', () => {
   });
   it.each(['features', 'policy'])('keeps Locket %s compact, private and accurate', (page) => {
     const payload = buildLocketDetails(guildId, page, { base_price: 167000 });
-    const { text } = inspect(payload);
+    const { text, components } = inspect(payload);
     expect(payload.flags).toBe(MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral);
-    expect(text.split('\n').length).toBeLessThanOrEqual(8);
+    expect(text.split('\n').filter(Boolean).length).toBeLessThanOrEqual(8);
+    expect(components.some((c) => c.type === 14 && c.spacing === 2)).toBe(true);
     if (page === 'features') expect(text).toContain('167.000đ');
     else expect(text).toContain('12 tháng từ ngày kích hoạt');
   });

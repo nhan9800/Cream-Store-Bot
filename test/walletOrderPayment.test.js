@@ -199,5 +199,9 @@ describe('atomic website wallet payment', () => {
     expect(serialized).toContain('VÍ CENAR');
     expect(serialized).toContain('25.000 VND');
     expect(serialized).toContain('CN_999999');
+    const blocks = payload.components[0].toJSON().components;
+    expect(blocks.filter((item) => item.type === 10)).toHaveLength(5);
+    expect(blocks.filter((item) => item.type === 14 && item.spacing === 2)).toHaveLength(2);
+    expect(payload.allowedMentions).toEqual({ parse: [] });
   });
 });

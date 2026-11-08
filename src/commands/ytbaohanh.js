@@ -10,6 +10,7 @@ import {
   TextInputStyle,
 } from 'discord.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
+import { buildLegacyFeatureCard } from '../utils/featureCard.js';
 import { config } from '../config.js';
 import { STAFF_DEFAULT_PERMISSIONS } from '../utils/permissions.js';
 import {
@@ -69,7 +70,7 @@ export function buildYoutubeWarrantyAdminPayload({ guildId, claims, stats, syncR
   const visibleClaims = claims.slice(0, MAX_DISPLAY);
   if (visibleClaims.length === 0) {
     embed.addFields({ name: 'Không có hồ sơ', value: 'Hiện không có đơn YouTube nào đang cần xử lý.' });
-    return { embeds: [embed], components: [], ephemeral: true };
+    return buildLegacyFeatureCard({ embeds: [embed], components: [], ephemeral: true });
   }
 
   visibleClaims.forEach((claim, index) => {
@@ -88,7 +89,7 @@ export function buildYoutubeWarrantyAdminPayload({ guildId, claims, stats, syncR
         : new ButtonBuilder().setCustomId(`ytw:resend:${claim.id}`).setLabel(`Nhắc ${claim.orderCode}`).setStyle(ButtonStyle.Primary)
     ))));
   }
-  return { embeds: [embed], components, ephemeral: true };
+  return buildLegacyFeatureCard({ embeds: [embed], components, ephemeral: true });
 }
 
 export async function execute(interaction) {

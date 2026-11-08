@@ -1,4 +1,5 @@
 import { createEmojiResolver } from '../utils/emojiHelper.js';
+import { buildLegacyFeatureCard } from '../utils/featureCard.js';
 import { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } from 'discord.js';
 import { getRevenueStatsRaw } from '../services/v11DbHelpers.js';
 
@@ -65,7 +66,7 @@ export async function execute(interaction) {
       { name: `${E('order_pending')} Chưa Thanh Toán`, value: `${stats.unpaid_orders || 0} đơn`, inline: true }
     );
 
-    await interaction.editReply({ embeds: [embed] });
+    await interaction.editReply(buildLegacyFeatureCard({ embeds: [embed] }));
   } catch (error) {
     console.error('[THONGKE] Error:', error);
     await interaction.editReply(`${E('status_cross')} Đã xảy ra lỗi khi tính toán thống kê.`);

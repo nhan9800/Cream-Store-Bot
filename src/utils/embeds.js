@@ -11,6 +11,8 @@ import {
   MediaGalleryBuilder,
   MediaGalleryItemBuilder,
   MessageFlags,
+  SectionBuilder,
+  ThumbnailBuilder,
 } from 'discord.js';
 import { config, getWebhookUrl, getPayOSReturnUrl, getPayOSCancelUrl } from '../config.js';
 import { decrypt } from './crypto.js';
@@ -103,7 +105,7 @@ export function buildTicketPanelV2(customConfig = {}) {
     );
   }
 
-  container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
+  container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Large));
 
   // Chỉ hiện services mặc định khi user CHƯA tuỳ chỉnh nội dung
   if (!hasCustomDesc) {
@@ -113,13 +115,13 @@ export function buildTicketPanelV2(customConfig = {}) {
       `${E('panel_complaint')} **Complaint** — Escalate an unresolved experience`,
       `${E('panel_partnership')} **Partnership** — Business and community proposals`,
       `${E('panel_warranty')} **Warranty** — Support for an eligible purchase`,
-    ].map((line) => line.trim()).join('\n') : [
+    ].map((line) => `- ${line.trim()}`).join('\n') : [
       `${E('panel_order')} **Mua hàng** — Netflix, Spotify, YouTube Premium và các dịch vụ số`,
       `${E('panel_support')} **Hỗ trợ** — Tài khoản lỗi hoặc cần hướng dẫn`,
       `${E('panel_complaint')} **Khiếu nại** — Phản ánh trải nghiệm chưa tốt`,
       `${E('panel_partnership')} **Hợp tác** — Đề xuất hợp tác kinh doanh`,
       `${E('panel_warranty')} **Bảo hành** — Yêu cầu bảo hành sản phẩm đã mua`,
-    ].map((line) => line.trim()).join('\n');
+    ].map((line) => `- ${line.trim()}`).join('\n');
     container.addTextDisplayComponents(new TextDisplayBuilder().setContent(normalizeV2Text(serviceLines)));
     container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
   }
@@ -356,6 +358,11 @@ export function buildTicketWelcomeV2(ticketCode, customerId, ticketType = 'ORDER
   container.addTextDisplayComponents(textDisplay(joinLines(
     `## ${E(meta.titleSlot)} ${meta.title}`,
     `> ${E('ticket_user')} ${international ? 'Welcome' : 'Xin chào'} ${/^\d+$/.test(customerId) ? fmt.user(customerId) : (international ? 'Web Customer' : 'Khách Vãng Lai (Web)')}!`,
+  )));
+  container.addSeparatorComponents(
+    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Large)
+  );
+  container.addTextDisplayComponents(textDisplay(joinLines(
     `> ${E('ticket_open')} ${fmt.b(international ? 'Ticket:' : 'Mã ticket:')} ${fmt.code(ticketCode)}`,
     relatedOrderCode ? `> ${E('order_id')} ${fmt.b(international ? 'Related order:' : 'Đơn liên quan:')} ${fmt.code(relatedOrderCode)}` : null,
     productName ? `> ${E('order_product')} ${fmt.b(international ? 'Product:' : 'Sản phẩm:')} ${fmt.b(productName)}` : null,
@@ -370,8 +377,12 @@ export function buildTicketWelcomeV2(ticketCode, customerId, ticketType = 'ORDER
   container.addTextDisplayComponents(textDisplay(joinLines(
     `### ${E('status_info')} ${international ? 'NEXT STEPS' : 'Hướng dẫn xử lý'}`,
     meta.intro,
-    '',
-    ...steps.map((s) => `${E(s.slot)} ${s.text}`),
+  )));
+  container.addSeparatorComponents(
+    new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small)
+  );
+  container.addTextDisplayComponents(textDisplay(joinLines(
+    ...steps.map((s) => `- ${E(s.slot)} ${s.text}`),
   )));
 
   container.addSeparatorComponents(
@@ -400,19 +411,22 @@ export function buildPaymentMethodSelector(order) {
     : `$${Number(order.total_amount || 0).toFixed(2)} USD`;
 
   container.addTextDisplayComponents(
-    new TextDisplayBuilder().setContent(
-      (international
-        ? h2(`${E('payment_payos')} SELECT A PAYMENT METHOD`) + '\n' +
-          `> ${E('order_product')} ${fmt.b('Product:')} ${order.quantity}x ${translateProductName(order.product_name)}\n` +
-          `> ${E('payment_money')} ${fmt.b('Amount:')} ${fmt.code(globalAmount)}\n` +
-          `> ${E('order_id')} ${fmt.b('Order:')} ${fmt.code(order.order_code)}\n\n` +
-          subtext('Choose a secure checkout option below. Crypto is confirmed only by a signed Binance webhook.')
-        : h2(`${E('payment_payos')}  Chọn Phương Thức Thanh Toán`) + '\n' +
-          `> ${E('order_product')} ${fmt.b('Sản phẩm:')} ${order.quantity}x ${order.product_name}\n` +
-          `> ${E('payment_money')} ${fmt.b('Số tiền:')} ${fmt.code(formatCurrency(order.total_amount))}\n` +
-          `> ${E('order_id')} ${fmt.b('Mã đơn:')} ${fmt.code(order.order_code)}\n\n` +
-          subtext('Chọn phương thức thanh toán phù hợp bên dưới'))
-    )
+    new TextDisplayBuilder().setContent(joinLines(
+      h2(`${E('payment_payos')} ${international ? 'SELECT A PAYMENT METHOD' : 'Chọn Phương Thức Thanh Toán'}`),
+      international
+        ? 'Choose a secure checkout option below. Crypto is confirmed only by a signed Binance webhook.'
+        : 'Chọn phương thức thanh toán phù hợp bên dưới.',
+    ))
+  );
+  container.addSeparatorComponents(
+    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Large)
+  );
+  container.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent(joinLines(
+      `${E('order_product')} ${fmt.b(international ? 'Product:' : 'Sản phẩm:')} ${order.quantity}x ${international ? translateProductName(order.product_name) : order.product_name}`,
+      `${E('payment_money')} ${fmt.b(international ? 'Amount:' : 'Số tiền:')} ${fmt.b(international ? globalAmount : formatCurrency(order.total_amount))}`,
+      `${E('order_id')} ${fmt.b(international ? 'Order:' : 'Mã đơn:')} ${fmt.code(order.order_code)}`,
+    ))
   );
 
   container.addSeparatorComponents(
@@ -431,11 +445,11 @@ export function buildPaymentMethodSelector(order) {
 
   const qrBtn = new ButtonBuilder()
     .setCustomId(`payment:method:payos:${order.order_code}`)
-    .setLabel(international ? 'Bank QR' : 'Lay Ma QR Thanh Toan')
+    .setLabel(international ? 'Bank QR' : 'Lấy Mã QR Thanh Toán')
     .setStyle(ButtonStyle.Primary);
   const cancelBtn = new ButtonBuilder()
     .setCustomId(`order:cancel_customer:${order.order_code}`)
-    .setLabel(international ? 'Cancel Order' : 'Huy Don')
+    .setLabel(international ? 'Cancel Order' : 'Hủy Đơn')
     .setStyle(ButtonStyle.Danger);
   const eQr = ec(em, 'payment_qr'); if (eQr) qrBtn.setEmoji(eQr);
   const eCancel = ec(em, 'order_cancel'); if (eCancel) cancelBtn.setEmoji(eCancel);
@@ -569,7 +583,7 @@ export function buildWarrantySelectV2(guildId = null) {
   );
 
   container.addSeparatorComponents(
-    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
+    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Large)
   );
 
   container.addTextDisplayComponents(
@@ -645,7 +659,7 @@ export function buildOrderCreatedV2(order, orderChannelId) {
   );
 
   container.addSeparatorComponents(
-    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
+    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Large)
   );
 
   container.addTextDisplayComponents(
@@ -653,6 +667,14 @@ export function buildOrderCreatedV2(order, orderChannelId) {
       `${E('order_product')} ${fmt.b('Sản phẩm:')} ${formatOrderProduct(order.quantity, order.product_name)}`,
       `${E('icon_duration')} ${fmt.b('Thời hạn:')} ${formatOrderDuration(order)}`,
       `${E('payment_money')} ${fmt.b('Số tiền:')} ${hasPay ? fmt.b(formatCurrency(order.total_amount)) : fmt.i('Miễn phí')}`,
+    ))
+  );
+  container.addSeparatorComponents(
+    new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Large)
+  );
+  container.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent(joinLines(
+      h3('Theo dõi đơn hàng'),
       `${fmt.b('Trạng thái:')} ${getOrderStatusLabel(order.status, order.guild_id)}`,
       `${E('icon_clock')} ${fmt.b('Tạo lúc:')} ${T.rel(order.created_at || new Date())}`,
       `${E('order_tracking')} ${fmt.b('Theo dõi:')} ${fmt.channel(orderChannelId)}`,
@@ -701,7 +723,7 @@ export function buildOrderLogV2Update(order) {
   );
 
   container.addSeparatorComponents(
-    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
+    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Large)
   );
 
   const lines = [
@@ -736,7 +758,7 @@ export function buildOrderCancelledCustomerV2(order, reason = null) {
     `> ${E('order_id')} ${international ? 'Order' : 'Mã đơn'}: ${fmt.code(order.order_code)}`,
   )));
   container.addSeparatorComponents(
-    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small),
+    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Large),
   );
   container.addTextDisplayComponents(new TextDisplayBuilder().setContent(joinLines(
     `${E('order_product')} ${fmt.b(international ? 'Product:' : 'Sản phẩm:')} ${formatOrderProduct(order.quantity, order.product_name)}`,
@@ -803,16 +825,21 @@ export function buildQueuePositionV2(order, position, totalInQueue) {
   );
 
   container.addSeparatorComponents(
-    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
+    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Large)
   );
 
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(joinLines(
       `${E('queue_position')} ${fmt.b('Vị trí:')} ${fmt.b(`${position} / ${totalInQueue}`)}`,
       `${E('queue_group')} ${fmt.b('Nhóm xử lý:')} ${fmt.code(groupName)}`,
-      subtext('Thứ tự xử lý theo ưu tiên và thời gian đặt hàng.'),
     ))
   );
+  container.addSeparatorComponents(
+    new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small)
+  );
+  container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
+    subtext('Thứ tự xử lý theo ưu tiên và thời gian đặt hàng.')
+  ));
 
   const viewBtn = new ButtonBuilder()
     .setCustomId(`queue:view:${order.order_code}`)
@@ -914,7 +941,7 @@ export function buildPaymentQrV2({ order, attachmentName = null, checkoutUrl = n
   );
 
   container.addSeparatorComponents(
-    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
+    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Large)
   );
 
   // Thông tin đơn
@@ -922,6 +949,14 @@ export function buildPaymentQrV2({ order, attachmentName = null, checkoutUrl = n
     new TextDisplayBuilder().setContent(joinLines(
       `${E('order_product')} ${fmt.b(international ? 'Product:' : 'Sản phẩm:')} ${formatOrderProduct(order.quantity, international ? translateProductName(order.product_name) : order.product_name)}`,
       `${E('payment_money')} ${fmt.b(international ? 'Amount:' : 'Số tiền:')} ${fmt.b(international ? formatInternationalPrice(order.total_amount, { includeSource: true }) : formatCurrency(order.total_amount))}`,
+    ))
+  );
+  container.addSeparatorComponents(
+    new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Large)
+  );
+  container.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent(joinLines(
+      h3(international ? 'Payment details' : 'Thông tin chuyển khoản'),
       `${E('payment_reference')} ${fmt.b(international ? 'Reference:' : 'Nội dung:')} ${fmt.code(order.payment_code ?? order.order_code)}`,
       `${E('icon_expire')} ${fmt.b(international ? 'Expires:' : 'Hết hạn:')} ${expireText}`,
     ))
@@ -929,6 +964,9 @@ export function buildPaymentQrV2({ order, attachmentName = null, checkoutUrl = n
 
   // QR inline qua MediaGallery (attachment://)
   if (hasImage && attachmentName) {
+    container.addSeparatorComponents(
+      new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Large)
+    );
     container.addMediaGalleryComponents(
       new MediaGalleryBuilder().addItems(
         new MediaGalleryItemBuilder().setURL(`attachment://${attachmentName}`)
@@ -986,7 +1024,7 @@ export function buildPaymentSuccessEmbed(order, amountText = null, transactionCo
   );
 
   container.addSeparatorComponents(
-    new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small).setDivider(true)
+    new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Large).setDivider(true)
   );
 
   container.addTextDisplayComponents(
@@ -994,6 +1032,16 @@ export function buildPaymentSuccessEmbed(order, amountText = null, transactionCo
       joinLines(
         `${E('payment_received')} ${fmt.b(international ? 'Received:' : 'Đã nhận:')} ${fmt.b(amountDisplay)}`,
         `${E('order_product')} ${fmt.b(international ? 'Product:' : 'Sản phẩm:')} ${productDisplay}`,
+      )
+    )
+  );
+  container.addSeparatorComponents(
+    new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Large)
+  );
+  container.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent(
+      joinLines(
+        h3(international ? 'Payment record' : 'Chi tiết xác nhận'),
         `${E('order_id')} ${fmt.b(international ? 'Order:' : 'Mã đơn:')} ${fmt.code(order.order_code)}`,
         `${E('payment_confirmed_at')} ${fmt.b(international ? 'Confirmed:' : 'Xác nhận lúc:')} ${T.rel(order.payment_confirmed_at || new Date())}`,
         ...(transactionContent ? [`${E('payment_transaction')} ${fmt.b(international ? 'Transaction:' : 'Mã GD:')} ${fmt.code(transactionContent)}`] : []),
@@ -1122,13 +1170,13 @@ export function buildOrderCompletedV2(order, staffId, supportId = null) {
   // Header — lời cảm ơn + mention khách (V2 mention trong TextDisplay)
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(joinLines(
-      `# ${E('order_complete')} **${international ? 'ORDER COMPLETED' : 'ĐƠN HÀNG HOÀN THÀNH'}** ${E('icon_gift')}`,
+      h2(`${E('order_complete')} ${international ? 'ORDER COMPLETED' : 'ĐƠN HÀNG HOÀN THÀNH'}`),
       `> ${E('icon_heart')} ${fmt.user(order.customer_id)} — ${international ? 'thank you for choosing **Cenar Global**!' : `cảm ơn bạn đã ủng hộ **${store}**!`}`,
     ))
   );
 
   container.addSeparatorComponents(
-    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
+    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Large)
   );
 
   // Thông tin đơn + xử lý
@@ -1136,6 +1184,14 @@ export function buildOrderCompletedV2(order, staffId, supportId = null) {
     new TextDisplayBuilder().setContent(joinLines(
       `> ${E('order_id')} **${international ? 'Order' : 'Mã Đơn'}:** \`${order.order_code}\``,
       `> ${E('order_product')} **${international ? 'Product' : 'Sản Phẩm'}:** ${formatOrderProduct(order.quantity, international ? translateProductName(order.product_name) : order.product_name)}`,
+    ))
+  );
+  container.addSeparatorComponents(
+    new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small)
+  );
+  container.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent(joinLines(
+      h3(international ? 'Delivery details' : 'Thông tin bàn giao'),
       `> ${E('ticket_staff')} **${international ? 'Handled by' : 'Nhân Viên'}:** ${fmt.user(staffId)}`,
       `> ${E('ticket_claim')} **${international ? 'Support' : 'Hỗ Trợ'}:** ${fmt.user(supportId || staffId)}`,
       `> ${E('icon_clock')} **${international ? 'Completed' : 'Hoàn thành'}:** ${T.rel(order.completed_at || new Date())}`,
@@ -1152,9 +1208,9 @@ export function buildOrderCompletedV2(order, staffId, supportId = null) {
   // Nhắc feedback + bảo hành (gộp tin thừa, chống spam)
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(joinLines(
-      `## ${E('icon_star')} ${order.feedback_submitted_at
+      `### ${E('icon_star')} ${order.feedback_submitted_at
         ? (international ? 'FEEDBACK RECEIVED' : 'ĐÃ NHẬN ĐÁNH GIÁ CỦA BẠN')
-        : (international ? 'SHARE YOUR EXPERIENCE' : 'HÃY ĐÁNH GIÁ TRẢI NGHIỆM MUA HÀNG CỦA BẠN!')}`,
+        : (international ? 'SHARE YOUR EXPERIENCE' : 'CHIA SẺ TRẢI NGHIỆM CỦA BẠN')}`,
       `> ${E('icon_sparkle')} ${order.feedback_submitted_at
         ? (international ? 'Thank you! Your original review is preserved.' : 'Cảm ơn bạn! Số sao và nhận xét đã được lưu nguyên vẹn.')
         : (international ? 'Your feedback helps us improve global service quality.' : 'Feedback giúp shop cải thiện dịch vụ — và bạn được **giảm giá đơn sau**.')}`,
@@ -1217,7 +1273,7 @@ export function buildPublicOrderLogV2(order) {
   );
 
   container.addSeparatorComponents(
-    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
+    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Large)
   );
 
   container.addTextDisplayComponents(
@@ -1356,7 +1412,7 @@ export function buildQuickFeedbackAckV2(order, stars, { onBehalf = false, actorI
     ))
   );
   container.addSeparatorComponents(
-    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
+    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Large)
   );
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(
@@ -1380,7 +1436,13 @@ export function buildFeedbackV2({ member, order, stars, content }) {
     new TextDisplayBuilder().setContent(joinLines(
       h2(`${E('review_header', E('icon_store'))} Đánh giá từ khách hàng`),
       `${starBar}  ${fmt.b(`${stars}/5 sao`)}`,
-      '',
+    ))
+  );
+  container.addSeparatorComponents(
+    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Large)
+  );
+  container.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent(joinLines(
       `${E('review_customer', E('ticket_user'))} ${fmt.b('Khách hàng:')} ${fmt.user(member.id)}`,
       `${E('review_order', E('order_id'))} ${fmt.b('Mã đơn:')} ${fmt.code(safeOrderCode)}`,
       `${E('review_product', E('order_product'))} ${fmt.b('Sản phẩm:')} ${formatOrderProduct(order?.quantity ?? 1, order?.product_name ?? 'Không xác định')}`,
@@ -1391,9 +1453,14 @@ export function buildFeedbackV2({ member, order, stars, content }) {
   );
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(joinLines(
-      `${E('review_comment', E('icon_edit'))} ${fmt.b('Khách hàng chia sẻ')}`,
-      `> ${safeContent}`,
+      h3(`${E('review_comment', E('icon_edit'))} Khách hàng chia sẻ`),
     ))
+  );
+  // Keep the customer's literal opinion in its own display; no layout parser
+  // should reinterpret its blank lines, Markdown, emoji or separator-like text.
+  container.addTextDisplayComponents(new TextDisplayBuilder().setContent(`> ${safeContent}`));
+  container.addSeparatorComponents(
+    new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small)
   );
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(
@@ -1460,7 +1527,7 @@ export function buildDeliveryNoticeV2(order) {
   );
 
   container.addSeparatorComponents(
-    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
+    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Large)
   );
 
   container.addTextDisplayComponents(
@@ -1589,7 +1656,7 @@ export function buildTranscriptSummaryV2({ ticket, closedById, messageCount, tra
     ].join('\n')),
   );
   container.addSeparatorComponents(
-    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small),
+    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Large),
   );
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent([
@@ -1614,12 +1681,23 @@ export function buildTranscriptCustomerV2({ ticket, messageCount, transcriptUrl,
     new TextDisplayBuilder().setContent([
       `## ${E('transcript_web')} Nội Dung Ticket Của Bạn`,
       `> ${E('status_info')} Ticket \`${ticket.ticket_code}\` đã đóng. Bạn có thể xem lại toàn bộ cuộc trao đổi bằng nút bên dưới.`,
-      '',
-      `${E('icon_doc')} **Số tin nhắn** — \`${messageCount}\``,
-      `${E('warranty_shield')} **Quyền riêng tư** — Liên kết chỉ được gửi trực tiếp cho bạn và đội ngũ Cenar.`,
-      subtext(`${E('icon_clock')} Bản lưu được duy trì dài hạn; hãy giữ liên kết riêng tư và không chia sẻ công khai.`),
     ].join('\n')),
   );
+  container.addSeparatorComponents(
+    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Large),
+  );
+  container.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent([
+      `${E('icon_doc')} **Số tin nhắn** — \`${messageCount}\``,
+      `${E('warranty_shield')} **Quyền riêng tư** — Liên kết chỉ được gửi trực tiếp cho bạn và đội ngũ Cenar.`,
+    ].join('\n')),
+  );
+  container.addSeparatorComponents(
+    new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small),
+  );
+  container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
+    subtext(`${E('icon_clock')} Bản lưu được duy trì dài hạn; hãy giữ liên kết riêng tư và không chia sẻ công khai.`),
+  ));
   return {
     components: [container, transcriptLinkRow(transcriptUrl, guildId)],
     flags: MessageFlags.IsComponentsV2,
@@ -1739,7 +1817,7 @@ export function buildCustomerProfileV2(user, profile, orders, points, guildId = 
   );
 
   container.addSeparatorComponents(
-    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
+    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Large)
   );
 
   container.addTextDisplayComponents(
@@ -2003,21 +2081,36 @@ export function buildCreditOfferV2(creditInfo, customerId, guildId = null) {
     new TextDisplayBuilder().setContent(joinLines(
       `## ${E('cenar_verified')} BẠN ĐỦ ĐIỀU KIỆN KÍCH HOẠT VÍ TRẢ SAU (BNPL)`,
       `> ${E('icon_heart_purple')} **Xin chúc mừng!** Dựa trên lịch sử tín nhiệm, bạn đã được cấp hạn mức mua trước trả sau 0% lãi suất.`,
+    ))
+  );
+  container.addSeparatorComponents(
+    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Large)
+  );
+  container.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent(joinLines(
       `> ${E('payment_payos')} ${fmt.b('Hạn mức được cấp:')} ${fmt.code(vnd(creditInfo.limit))}`,
       `> ${E('cenar_wallet')} ${fmt.b('Có thể dùng:')} ${fmt.code(vnd(creditInfo.available))}`,
-      '',
-      `### ${E('status_info')}  ${fmt.b('Quyền lợi & Yêu cầu:')}`,
-      `> - Nhận tài khoản/dịch vụ **ngay lập tức**, thanh toán phần còn lại sau 7 - 14 ngày.`,
-      `> - Có thể cần trả trước/cọc (30% - 50%) tùy theo loại sản phẩm.`,
-      `> - Quá hạn 14 ngày không thanh toán sẽ bị thu hồi tài khoản & vào Blacklist.`,
-      '',
-      `Bấm nút bên dưới nếu bạn muốn sử dụng đặc quyền này cho đơn hàng hiện tại.`
+    ))
+  );
+  container.addSeparatorComponents(
+    new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Large)
+  );
+  container.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent(joinLines(
+      h3(`${E('status_info')} Quyền lợi & Yêu cầu`),
+      `- Nhận tài khoản/dịch vụ **ngay lập tức**, thanh toán phần còn lại sau 7 - 14 ngày.`,
+      `- Có thể cần trả trước/cọc (30% - 50%) tùy theo loại sản phẩm.`,
+      `- Quá hạn 14 ngày không thanh toán sẽ bị thu hồi tài khoản & vào Blacklist.`,
     ))
   );
 
   container.addSeparatorComponents(
     new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
   );
+
+  container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
+    'Bấm nút bên dưới nếu bạn muốn sử dụng đặc quyền này cho đơn hàng hiện tại.'
+  ));
 
   const btnApply = new ButtonBuilder()
     .setCustomId('ticket:credit_apply')
@@ -2036,6 +2129,123 @@ export function buildCreditOfferV2(creditInfo, customerId, guildId = null) {
   const row = new ActionRowBuilder().addComponents(btnApply, btnRules);
 
   return { container, row, flags: MessageFlags.IsComponentsV2 };
+}
+
+// Explicit source-owned cards for new command replies. Legacy embed exports stay
+// available for existing edit/DM/credential contracts; no historical conversion.
+function buildCommandInfoV2({ title, subtitle, accent = 'info', sections, thumbnail = null, guildId = null, timestamp = true }) {
+  const E = createEmojiResolver(guildId);
+  const container = new ContainerBuilder().setAccentColor(accentFor(accent));
+  const header = new TextDisplayBuilder().setContent(joinLines(h2(title), subtitle));
+  if (thumbnail) {
+    container.addSectionComponents(new SectionBuilder()
+      .addTextDisplayComponents(header)
+      .setThumbnailAccessory(new ThumbnailBuilder().setURL(thumbnail)));
+  } else {
+    container.addTextDisplayComponents(header);
+  }
+  for (const section of sections) {
+    if (!section.content) continue;
+    container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Large));
+    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(joinLines(
+      section.title ? h3(section.title) : null,
+      section.content,
+    )));
+  }
+  container.addSeparatorComponents(new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small));
+  container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
+    joinLines(
+      subtext(`${E('icon_heart_purple')} ${config.storeFooter || brandName('store')}`),
+      timestamp ? subtext(T.dateTime(new Date())) : null,
+    ),
+  ));
+  return { components: [container], flags: MessageFlags.IsComponentsV2 };
+}
+
+export function buildAutomationGuideV2(guildId = null) {
+  const E = createEmojiResolver(guildId);
+  return buildCommandInfoV2({
+    title: `${E('icon_book')} Cơ Chế Bot Bán Hàng Tự Động`, guildId,
+    subtitle: 'Từ tạo ticket đến thanh toán, nhận hàng và bảo hành.',
+    sections: [
+      { title: `${E('panel_order')} Luồng mua hàng`, content: [
+        '1. Khách bấm **Mua Hàng** → Tạo ticket riêng tư',
+        '2. Staff dùng `/order` → Tạo đơn, gắn sản phẩm và giá',
+        '3. Bot tạo QR + link PayOS → Chờ thanh toán',
+        '4. PayOS webhook xác nhận → Bot tự cập nhật trạng thái',
+        '5. Staff dùng `/giaohang` → Giao tài khoản qua DM',
+        '6. Bot nhắc feedback → Lưu lịch sử khách hàng',
+      ].join('\n') },
+      { title: `${E('panel_warranty')} Bảo hành`, content: 'Khách bấm **Bảo Hành** → Chọn sản phẩm → Mở ticket bảo hành.' },
+      { title: `${E('ticket_staff')} Lệnh staff`, content: '`/order` `/giaohang` `/qr` `/hoanthanh` `/sua-don` `/renew`' },
+      { title: `${E('icon_settings')} Lệnh admin`, content: '`/setup-ticket` `/setup-payos` `/blacklist` `/mute-ticket` `/thongke`' },
+    ],
+  });
+}
+
+export function buildDashboardV2(summary, topProducts = [], recentLogs = [], guildId = null) {
+  const E = createEmojiResolver(guildId);
+  const medals = ['icon_gold', 'icon_silver', 'icon_bronze'];
+  return buildCommandInfoV2({
+    title: `${E('icon_chart')} Dashboard ${brandName('store')}`, guildId, timestamp: false,
+    subtitle: subtext(`Cập nhật ${T.rel(new Date())}`),
+    sections: [
+      { title: `${E('order_product')} Đơn hàng`, content: joinLines(
+        `**Tổng đơn:** ${fmt.code(summary.total_orders ?? 0)}`,
+        `${E('order_pending')} **Chờ thanh toán:** ${fmt.code(summary.pending_payment ?? 0)}`,
+        `${E('icon_cycle')} **Đang xử lý:** ${fmt.code(summary.processing ?? 0)}`,
+        `${E('status_check')} **Hoàn thành:** ${fmt.code(summary.completed ?? 0)}`,
+        `${E('panel_warranty')} **Bảo hành:** ${fmt.code(summary.warranty_open ?? 0)}`,
+      ) },
+      { title: `${E('icon_group')} Khách hàng`, content: joinLines(
+        `**Khách hàng:** ${fmt.code(summary.customers ?? 0)}`,
+        `${E('icon_block')} **Blacklist:** ${fmt.code(summary.blacklisted ?? 0)}`,
+      ) },
+      { title: `${E('payment_money')} Doanh thu`, content: fmt.b(formatCurrency(summary.revenue_paid ?? 0)) },
+      { title: `${E('icon_trophy')} Top sản phẩm`, content: topProducts.length ? topProducts.slice(0, 5).map((item, index) =>
+        `${medals[index] ? E(medals[index]) : `${index + 1}.`} ${fmt.b(item.product_name)} — ${fmt.code(item.total_orders + ' đơn')}`,
+      ).join('\n').slice(0, 1024) : null },
+      { title: `${E('icon_clipboard')} Nhật ký staff`, content: recentLogs.length ? recentLogs.slice(0, 8).map(item =>
+        `- ${fmt.b(item.action)} — ${item.detail ?? '—'}`,
+      ).join('\n').slice(0, 1024) : null },
+    ],
+  });
+}
+
+export function buildBlacklistV2(user, flag, guildId = null) {
+  const E = createEmojiResolver(guildId);
+  return buildCommandInfoV2({
+    title: `${E('icon_block')} Hồ Sơ Cảnh Báo Khách Hàng`, guildId,
+    subtitle: fmt.user(user.id), thumbnail: user.displayAvatarURL(),
+    accent: Number(flag?.is_blacklisted) ? 'danger' : 'warning',
+    sections: [
+      { title: `${E('status_warn')} Trạng thái`, content: joinLines(
+        `**Cảnh báo:** ${flag.warning_count ?? 0}`,
+        `${E('icon_lock')} **Blacklist:** ${Number(flag.is_blacklisted) ? '**Có**' : 'Không'}`,
+        `${E('ticket_close')} **Mute ticket:** ${Number(flag.is_ticket_muted ?? 0) ? '**Có**' : 'Không'}`,
+      ) },
+      { title: `${E('icon_doc')} Lý do blacklist`, content: flag.blacklist_reason ?? '_Chưa có_' },
+      { title: `${E('icon_edit')} Lý do mute`, content: flag.ticket_mute_reason || null },
+    ],
+  });
+}
+
+export function buildPayOSSetupV2(extraLines = [], guildId = null) {
+  const E = createEmojiResolver(guildId);
+  const webhookUrl = getWebhookUrl();
+  return buildCommandInfoV2({
+    title: `${E('payment_payos')} Cấu Hình PayOS`, guildId,
+    subtitle: 'Trạng thái cấu hình và địa chỉ nhận xác nhận thanh toán.',
+    sections: [
+      { title: `${E('icon_settings')} Kết nối`, content: joinLines(
+        `**Provider:** ${fmt.code(config.paymentProvider)}`,
+        `${E('order_id')} **Client ID:** ${config.payosClientId ? fmt.code(`${String(config.payosClientId).slice(0, 8)}...`) : '`Thiếu`'}`,
+        `${E('icon_key')} **API Key:** ${config.payosApiKey ? '`Đã cấu hình`' : '`Thiếu`'}`,
+      ) },
+      { title: `${E('icon_link')} Webhook URL`, content: webhookUrl ? fmt.code(webhookUrl) : '`Chưa cấu hình PUBLIC_BASE_URL`' },
+      { title: `${E('status_info')} Ghi chú`, content: extraLines.length ? extraLines.join('\n').slice(0, 1024) : null },
+    ],
+  });
 }
 
 // END OF FILE
