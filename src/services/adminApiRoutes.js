@@ -24,6 +24,7 @@ import { archiveTicketConversation } from './ticketClosureService.js';
 import { recordStaffLog } from './staffLogService.js';
 import { syncPublishedFeedbackMessage, syncOrderFeedbackMessages, inspectOrderFeedbackMessages } from './feedbackService.js';
 import { config } from '../config.js';
+import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { getAccountSecurity, getWebStaffMfaError, revokeAccountSessions, isWebAccountBanned, rejectBannedWebAccount } from './accountSecurityService.js';
 import {
   createSpotifyFamily,
@@ -679,7 +680,7 @@ export function registerAdminRoutes(app) {
             const channel = await guild.channels.fetch(result.order.ticket_channel_id).catch(() => null);
             if (channel?.isTextBased()) {
               await channel.send({
-                content: `### 🔄 Trạng thái đơn \`${result.order.order_code}\` đã cập nhật\n> **Trạng thái mới:** \`${result.order.status}\`\n> Thao tác từ Cenar Control Center.`,
+                content: `### ${createEmojiResolver(result.order.guild_id)('order_processing')} Trạng thái đơn \`${result.order.order_code}\` đã cập nhật\n> **Trạng thái mới:** \`${result.order.status}\`\n> Thao tác từ Cenar Control Center.`,
                 allowedMentions: { parse: [] },
               }).catch(() => null);
             }
@@ -2127,7 +2128,7 @@ const fetchWithTimeout = (promise, ms) => {
         };
         await user.send({
           content: [
-            `✨ **Cenar Quest · ${request.requestCode}**`,
+            `${createEmojiResolver(config.guildId)('icon_target')} **Cenar Quest · ${request.requestCode}**`,
             `Trạng thái: **${statusLabels[request.status] || request.status}** · Tiến độ **${request.progressPercent}%**`,
             `Bước hiện tại: ${request.currentStep}`,
             request.rejectionReason ? `Lý do: ${request.rejectionReason}` : '',

@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
 import { Collection } from 'discord.js';
@@ -21,7 +22,7 @@ vi.mock('../src/database/db.js', async () => {
 });
 
 import { db } from '../src/database/db.js';
-import { CORE_UI_EMOJI_ASSETS, CORE_UI_EMOJI_SLOTS } from '../src/config/coreEmojiPack2026.js';
+import { CORE_UI_EMOJI_ASSETS, CORE_UI_EMOJI_SLOTS, CORE_UI_EMOJI_DIRECTORY } from '../src/config/coreEmojiPack2026.js';
 import { EMOJI_SLOTS, getEmojiMap, resetAllEmojis } from '../src/services/emojiService.js';
 import { getCoreEmojiPackStatus, startCoreEmojiMaintenance, syncCoreEmojiPack } from '../src/services/coreEmojiPackService.js';
 
@@ -96,16 +97,30 @@ function setup({ preloaded = true } = {}) {
 }
 
 describe('fresh core emoji application pack', () => {
-  it('ships every declared asset as a real 128px PNG within the Discord upload limit and maps only declared semantic slots', async () => {
+  it('separates transaction states, fields and queue actions instead of reusing the same check or clock badge', () => {
+    const slots=['order_created','order_complete','payment_success','order_id','order_product',
+      'payment_money','payment_received','payment_transaction','payment_reference','payment_confirmed_at',
+      'icon_clock','icon_duration','icon_expire','order_queue','queue_position','queue_group','queue_view',
+      'payment_payos','payment_qr','payment_auto_confirm','payment_checkout','payment_regenerate'];
+    const names=slots.map(slot=>CORE_UI_EMOJI_SLOTS[slot]);
+    expect(names.every(Boolean)).toBe(true);expect(new Set(names).size).toBe(slots.length);
+  });
+  it('ships distinct sourced image files within the Discord upload limit with matching provenance hashes', async () => {
     expect(CORE_UI_EMOJI_ASSETS.length).toBeGreaterThan(50);
     const names = new Set();
+    const hashes = new Set();
     for (const asset of CORE_UI_EMOJI_ASSETS) {
       expect(names.has(asset.name)).toBe(false);
       names.add(asset.name);
-      const path = fileURLToPath(new URL(`../assets/emojis/ui26/${asset.fileName}`, import.meta.url));
+      const path = fileURLToPath(new URL(`../assets/emojis/${CORE_UI_EMOJI_DIRECTORY}/${asset.fileName}`, import.meta.url));
       expect(fs.statSync(path).size).toBeGreaterThan(0);
       expect(fs.statSync(path).size).toBeLessThanOrEqual(256 * 1024);
-      expect(await sharp(path).metadata()).toMatchObject({ format: 'png', width: 128, height: 128 });
+      const metadata=await sharp(path).metadata();
+      expect(['png','gif','webp','jpeg']).toContain(metadata.format);
+      expect(metadata.width).toBeGreaterThan(0);expect(metadata.height).toBeGreaterThan(0);
+      const hash=crypto.createHash('sha256').update(fs.readFileSync(path)).digest('hex');
+      expect(hash).toBe(asset.sha256);expect(hashes.has(hash)).toBe(false);hashes.add(hash);
+      expect(asset.sourceUrl).toMatch(/^https:\/\/(emoji\.gg\/emoji\/|discadia\.com\/emojis\/)/);
       for (const slot of asset.slots.filter((slot) => EMOJI_SLOTS[slot])) expect(CORE_UI_EMOJI_SLOTS[slot]).toBe(asset.name);
     }
   });
@@ -122,7 +137,7 @@ describe('fresh core emoji application pack', () => {
     const second = await syncCoreEmojiPack(state.client);
     expect(second.created).toBe(first.created);
     expect(state.manager.create).toHaveBeenCalledTimes(CORE_UI_EMOJI_ASSETS.length);
-    expect(getEmojiMap(targetGuildId).status_check).toMatch(/^<:cenar_ui26_check:\d+>$/);
+    expect(getEmojiMap(targetGuildId).status_check).toContain(`:${CORE_UI_EMOJI_SLOTS.status_check}:`);
     expect(state.unrelated.emojis.fetch).not.toHaveBeenCalled();
     expect(db.prepare('SELECT * FROM guild_settings WHERE guild_id = ?').get(state.unrelated.id)).toEqual(otherBefore);
     expect(db.prepare('SELECT sale_percent FROM guild_settings WHERE guild_id = ?').get(targetGuildId).sale_percent).toBe(15);
@@ -131,7 +146,7 @@ describe('fresh core emoji application pack', () => {
 
   it('evicts an icon deleted in the authoritative application inventory and recreates it with a new live ID', async () => {
     const state = setup();
-    const old = state.cache.find((item) => item.name === 'cenar_ui26_check');
+    const old = state.cache.find((item) => item.name === CORE_UI_EMOJI_SLOTS.status_check);
     state.live.delete(old.id);
     expect(state.cache.has(old.id)).toBe(true);
     await syncCoreEmojiPack(state.client);
@@ -193,7 +208,7 @@ describe('fresh core emoji application pack', () => {
     await vi.advanceTimersByTimeAsync(60000);
     expect(state.manager.fetch).toHaveBeenCalledTimes(2);
     expect(afterSync).toHaveBeenCalledTimes(1);
-    const deleted = state.live.find((item) => item.name === 'cenar_ui26_check');
+    const deleted = state.live.find((item) => item.name === CORE_UI_EMOJI_SLOTS.status_check);
     state.live.delete(deleted.id);
     await vi.advanceTimersByTimeAsync(60000);
     expect(state.manager.create).toHaveBeenCalledTimes(1);

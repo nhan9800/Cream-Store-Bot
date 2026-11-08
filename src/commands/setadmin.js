@@ -32,7 +32,7 @@ export async function execute(interaction) {
     const isGuildOwner = interaction.guild?.ownerId === interaction.user.id;
     const hasOwnerRole = hasConfiguredOwnerRole(interaction.member);
     if (!isBotDeveloper(interaction.user.id) && !isGuildOwner && !hasOwnerRole) {
-      return interaction.reply({ content: '❌ Lệnh này chỉ dành cho chủ server, role Owner hoặc Bot Developer.', ephemeral: true });
+      return interaction.reply({ content: `${E('status_cross')} Lệnh này chỉ dành cho chủ server, role Owner hoặc Bot Developer.`, ephemeral: true });
     }
 
     await interaction.deferReply({ ephemeral: true });

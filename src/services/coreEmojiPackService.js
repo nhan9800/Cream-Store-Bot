@@ -1,10 +1,10 @@
 import fs from 'node:fs';
 import { fileURLToPath } from 'node:url';
-import { CORE_UI_EMOJI_ASSETS, CORE_UI_EMOJI_REVISION } from '../config/coreEmojiPack2026.js';
+import { CORE_UI_EMOJI_ASSETS, CORE_UI_EMOJI_REVISION, CORE_UI_EMOJI_DIRECTORY } from '../config/coreEmojiPack2026.js';
 import { applyVerifiedEmojiMappings, autoSyncGuildEmojis, EMOJI_SLOTS } from './emojiService.js';
 import { config } from '../config.js';
 
-const assetRoot = fileURLToPath(new URL('../../assets/emojis/ui26/', import.meta.url));
+const assetRoot = fileURLToPath(new URL(`../../assets/emojis/${CORE_UI_EMOJI_DIRECTORY}/`, import.meta.url));
 const states = new WeakMap();
 let latestClient = null;
 const errorCode = (error) => /^\d{3,6}$/.test(String(error?.code || '')) ? String(error.code) : 'CORE_EMOJI_SYNC_FAILED';

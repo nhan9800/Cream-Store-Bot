@@ -92,7 +92,7 @@ import { getActiveProducts, getProductById, updateProduct, addProduct, getAllPro
 import { handlePremiumProductInteraction } from '../services/premiumProductSetupService.js';
 import { handleAiSupportInteraction } from '../services/aiSupportAutomationService.js';
 import { getCenarHub } from '../services/cenarHub.js';
-import { createEmojiResolver } from '../utils/emojiHelper.js';
+import { createEmojiResolver, withButtonEmoji } from '../utils/emojiHelper.js';
 import { isInternationalGuild } from '../utils/locale.js';
 import { buildVerificationPromptV2, buildVerificationUnavailableV2 } from '../services/verificationPanelService.js';
 import { getRecoveryStatus } from '../services/guildRecoveryService.js';
@@ -483,6 +483,7 @@ export function registerInteractionHandler(client, commands) {
       }
 
       if (interaction.isButton() && interaction.customId.startsWith('sub_order:renew:bill:')) {
+        const E = createEmojiResolver(interaction.guildId);
         const orderCode = interaction.customId.split(':')[3];
         const { getOrderByCodeRaw } = await import('../services/v11DbHelpers.js');
         const order = getOrderByCodeRaw(orderCode);
@@ -490,7 +491,6 @@ export function registerInteractionHandler(client, commands) {
           const customer = await client.users.fetch(order.customer_id).catch(() => null);
           if (customer) {
             const { ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, SeparatorSpacingSize, MessageFlags } = await import('discord.js');
-            const E = createEmojiResolver(interaction.guildId);
             
             const dmContainer = new ContainerBuilder().setAccentColor(0xED4245);
             dmContainer.addTextDisplayComponents(
@@ -506,9 +506,9 @@ export function registerInteractionHandler(client, commands) {
               )
             );
             await customer.send({ components: [dmContainer], flags: MessageFlags.IsComponentsV2 }).catch(() => null);
-            await interaction.reply({ content: '✅ Đã gửi DM nhắc khách gia hạn bằng giao diện Component V2!', ephemeral: true });
+            await interaction.reply({ content: `${E('status_check')} Đã gửi DM nhắc khách gia hạn bằng giao diện Component V2!`, ephemeral: true });
           } else {
-            await interaction.reply({ content: '❌ Không thể tìm thấy khách hàng để DM.', ephemeral: true });
+            await interaction.reply({ content: `${E('status_cross')} Không thể tìm thấy khách hàng để DM.`, ephemeral: true });
           }
         }
         return;
@@ -852,7 +852,7 @@ export function registerInteractionHandler(client, commands) {
 
         const modal = new ModalBuilder()
           .setCustomId(`shop:panel:edit:modal:${interaction.message.id}`)
-          .setTitle('✏️ Chỉnh Sửa Panel Shop');
+          .setTitle('Chỉnh Sửa Panel Shop');
 
         modal.addComponents(
           new ActionRowBuilder().addComponents(
@@ -1145,11 +1145,12 @@ export function registerInteractionHandler(client, commands) {
       }
 
       if (interaction.customId === 'announce:view_price') {
+        const E = createEmojiResolver(interaction.guildId);
         const guildConfig = getGuildConfig(interaction.guildId);
         if (guildConfig?.price_board_channel_id) {
-          return interaction.reply({ content: `👉 Xem Bảng Giá Đầy Đủ tại kênh <#${guildConfig.price_board_channel_id}>`, ephemeral: true });
+          return interaction.reply({ content: `${E('icon_next')} Xem Bảng Giá Đầy Đủ tại kênh <#${guildConfig.price_board_channel_id}>`, ephemeral: true });
         }
-        return interaction.reply({ content: '👉 Vui lòng xem kênh **BẢNG GIÁ** trong danh sách kênh của server.', ephemeral: true });
+        return interaction.reply({ content: `${E('icon_next')} Vui lòng xem kênh **BẢNG GIÁ** trong danh sách kênh của server.`, ephemeral: true });
       }
 
       // Xử lý duyệt bảo hành YouTube Premium - Đồng Ý
@@ -1756,11 +1757,11 @@ export function registerInteractionHandler(client, commands) {
                 `**Chào <@${ticket.customer_id}>,**`,
                 `*Yêu cầu kháng 12 tháng gia đình YouTube Premium của bạn đã được phê duyệt thành công.*`,
                 '',
-                `📬 **HƯỚNG DẪN:**`,
+                `${E('icon_mail')} **HƯỚNG DẪN:**`,
                 `* Vui lòng truy cập ngay vào hộp thư **Gmail** của bạn.`,
                 `* Tìm thư mời gia đình mới và bấm **Chấp nhận lời mời** để khôi phục Premium.`,
                 '',
-                `⚠️ **LƯU Ý QUAN TRỌNG:**`,
+                `${E('status_warn')} **LƯU Ý QUAN TRỌNG:**`,
                 `> <a:redload:1459179959158571119> Luồng hỗ trợ riêng tư này sẽ **tự động đóng và lưu trữ sau 1 phút**.`
               ].join('\n'))
               .setTimestamp()
@@ -1773,12 +1774,11 @@ export function registerInteractionHandler(client, commands) {
           await interaction.editReply({
             components: [
               new ActionRowBuilder().addComponents(
-                new ButtonBuilder()
+                withButtonEmoji(new ButtonBuilder()
                   .setCustomId('disabled_approved')
                   .setLabel('Đã Duyệt Kháng Thành Công')
                   .setStyle(ButtonStyle.Success)
-                  .setEmoji('1384069022831874169')
-                  .setDisabled(true)
+                  .setDisabled(true), E('status_check'))
               )
             ]
           }).catch(() => null);
@@ -1868,7 +1868,7 @@ export function registerInteractionHandler(client, commands) {
                 `Chào <@${ticket.customer_id}>,\n\n` +
                 `> <:cr_shop:1392749981332541501> **Mã Ticket:** \`${ticket.ticket_code}\`\n` +
                 `> <a:tick_red51:1384069065626222632> **Trạng thái:** Thất bại / Yêu cầu đổi Mail\n\n` +
-                `❌ Rất tiếc, lượt kháng cáo này không thành công.\n` +
+                `${E('status_cross')} Rất tiếc, lượt kháng cáo này không thành công.\n` +
                 `Bạn bắt buộc phải **đổi sang Gmail mới** hoặc **chờ 7 - 15 ngày** để bắt đầu lượt kháng tiếp theo.`
               )
               .setTimestamp()
@@ -1887,7 +1887,7 @@ export function registerInteractionHandler(client, commands) {
                 `Chào <@${ticket.customer_id}>,\n\n` +
                 `> <:cr_shop:1392749981332541501> **Mã Ticket:** \`${ticket.ticket_code}\`\n` +
                 `> <a:tick_red51:1384069065626222632> **Trạng thái:** Thất bại / Yêu cầu đổi Mail\n\n` +
-                `❌ Rất tiếc, lượt kháng cáo này không thành công.\n` +
+                `${E('status_cross')} Rất tiếc, lượt kháng cáo này không thành công.\n` +
                 `Bạn bắt buộc phải **đổi sang Gmail mới** hoặc **chờ 7 - 15 ngày** để bắt đầu lượt kháng tiếp theo.`
               )
               .setTimestamp()
@@ -1900,12 +1900,11 @@ export function registerInteractionHandler(client, commands) {
           await interaction.editReply({
             components: [
               new ActionRowBuilder().addComponents(
-                new ButtonBuilder()
+                withButtonEmoji(new ButtonBuilder()
                   .setCustomId('disabled_rejected')
                   .setLabel('Đã Từ Chối / Yêu Cầu Đổi Mail')
                   .setStyle(ButtonStyle.Danger)
-                  .setEmoji('1384069065626222632')
-                  .setDisabled(true)
+                  .setDisabled(true), E('status_cross'))
               )
             ]
           }).catch(() => null);

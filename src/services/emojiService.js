@@ -7,13 +7,18 @@
  */
 
 import { db, nowIso } from '../database/db.js';
-import { CORE_UI_EMOJI_SLOTS } from '../config/coreEmojiPack2026.js';
+import { CORE_UI_EMOJI_SLOTS, LEGACY_CORE_UI_EMOJI_SLOTS, LEGACY_CORE_UI_SLOT_NAMES } from '../config/coreEmojiPack2026.js';
 import { REVIEW_EMOJI_ASSETS } from '../config/reviewEmojiPack20261108.js';
 
 // ═══════════════════════════════════════════════
 // Định nghĩa các SLOT emoji và fallback mặc định
 // ═══════════════════════════════════════════════
 export const EMOJI_SLOTS = {
+  ...Object.fromEntries([
+    'order_status', 'order_tracking', 'queue_position', 'queue_group', 'queue_view',
+    'payment_reference', 'payment_received', 'payment_transaction', 'payment_confirmed_at',
+    'payment_auto_confirm', 'payment_checkout', 'payment_regenerate',
+  ].map(slot => [slot, { label: slot, default: '' }])),
   // Dedicated artwork: shared core UI badges must not replace review illustrations.
   ...Object.fromEntries(REVIEW_EMOJI_ASSETS.map(({ slot }) => [slot, { label: slot, default: '' }])),
   // Panel Ticket buttons
@@ -341,6 +346,14 @@ export const SLOT_ALIASES = {
 // Semantic aliases replace historical UI artwork without depending on an
 // emoji snowflake from an old deployment. Product brand logos remain brands.
 export const LEGACY_EMOJI_SLOTS = Object.freeze({
+  ...LEGACY_CORE_UI_EMOJI_SLOTS,
+  icon_lock: 'ticket_close', icon_info: 'status_info', icon_refresh: 'music_refresh',
+  icon_mail: 'icon_doc', icon_note: 'icon_edit', icon_member: 'ticket_user',
+  icon_shop: 'icon_store', icon_warn: 'status_warn', payment_card: 'payment_payos',
+  ticket_create: 'ticket_open',
+  cr_baohanh: 'panel_warranty', phone: 'panel_support',
+  ctv_sparkle: 'icon_sparkle', ctv_gift: 'icon_gift', ctv_notes: 'icon_doc', ctv_arrow: 'icon_next',
+  partner_sparkle: 'icon_sparkle', partner_gift: 'icon_gift', partner_notes: 'icon_doc', partner_arrow: 'icon_next',
   cenar_verified: 'status_check', cenar_support: 'panel_support',
   cenar_staff: 'ticket_staff', cenar_admin: 'admin_order_center',
   cenar_wallet: 'icon_wallet', cenar_partner: 'panel_partnership',
@@ -431,7 +444,7 @@ function clientForGuild(guild) {
 }
 
 function slotNameCandidates(slot) {
-  const names = [slot, ...(SLOT_ALIASES[slot] || []),
+  const names = [slot, ...(SLOT_ALIASES[slot] || []), ...(LEGACY_CORE_UI_SLOT_NAMES[slot] ? [LEGACY_CORE_UI_SLOT_NAMES[slot]] : []),
     ...Object.keys(LEGACY_EMOJI_SLOTS).filter((name) => LEGACY_EMOJI_SLOTS[name] === slot)];
   return [...new Set(names.flatMap((name) => [name, name.startsWith('cenar_') ? name : `cenar_${name}`]))];
 }

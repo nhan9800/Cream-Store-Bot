@@ -573,7 +573,7 @@ export async function handlePayOSWebhook({ client, body }) {
                 const E = createEmojiResolver(topupResult.guild_id);
                 const container = new ContainerBuilder().setAccentColor(0x2ECC71);
                 container.addTextDisplayComponents(
-                  new TextDisplayBuilder().setContent(`## ${E('tickgreen') || '✅'} NẠP TIỀN THÀNH CÔNG!\n\nBạn đã nạp thành công **${topupResult.amount.toLocaleString('vi-VN')}đ** vào ví.\n> ${E('status_check') || '✅'} Giao dịch: \`${topupResult.topup_code}\``)
+                  new TextDisplayBuilder().setContent(`## ${E('payment_success')} NẠP TIỀN THÀNH CÔNG!\n\nBạn đã nạp thành công **${topupResult.amount.toLocaleString('vi-VN')}đ** vào ví.\n> ${E('order_id')} Giao dịch: \`${topupResult.topup_code}\``)
                 );
                 await user.send({ components: [container], flags: MessageFlags.IsComponentsV2 });
               }

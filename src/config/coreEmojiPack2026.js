@@ -1,6 +1,8 @@
-export const CORE_UI_EMOJI_REVISION = 'CENAR-UI-ICONS-20261002';
-// Original Cenar badge treatment; Lucide glyphs retain their ISC attribution.
-// Product brands use their verified brand assets, separate from this UI pack.
+import { SOURCED_UI_EMOJI_ASSETS } from './sourcedUiEmojiPack20261109.js';
+export const CORE_UI_EMOJI_REVISION = 'CENAR-SOURCED-UI-20261109';
+export const CORE_UI_EMOJI_DIRECTORY = 'ui27';
+// Historical badges remain resolvable during rollout and in existing cards.
+// New UI uses distinct, sourced artwork; product/review artwork stays separate.
 const definition = [
   ['check', 'BadgeCheck', ['status_check','order_created','order_complete','payment_success','card_success','cenar_verified','cenar_partner_ok','icon_green']],
   ['cross', 'X', ['status_cross','order_cancel','payment_refund','music_disconnect','icon_red']],
@@ -60,7 +62,12 @@ const definition = [
   ['brain', 'Brain', ['icon_brain']],
   ['list', 'ListChecks', ['icon_clipboard','order_queue']],
 ];
-export const CORE_UI_EMOJI_ASSETS = Object.freeze(definition.map(([key,glyph,slots]) => Object.freeze({
-  key, glyph, name:`cenar_ui26_${key}`, fileName:`cenar_ui26_${key}.png`, slots:Object.freeze(slots),
-})));
+// Keep a reverse map so already-published cards can migrate in place.
+export const LEGACY_CORE_UI_EMOJI_SLOTS = Object.freeze(Object.fromEntries(
+  definition.map(([key,,slots]) => [`cenar_ui26_${key}`, slots[0]]),
+));
+export const LEGACY_CORE_UI_SLOT_NAMES = Object.freeze(Object.fromEntries(
+  definition.flatMap(([key,,slots]) => slots.map(slot => [slot, `cenar_ui26_${key}`])),
+));
+export const CORE_UI_EMOJI_ASSETS = SOURCED_UI_EMOJI_ASSETS;
 export const CORE_UI_EMOJI_SLOTS = Object.freeze(Object.fromEntries(CORE_UI_EMOJI_ASSETS.flatMap(asset => asset.slots.map(slot => [slot,asset.name]))));

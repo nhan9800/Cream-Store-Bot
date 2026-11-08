@@ -18,6 +18,8 @@ import {
   getEmojiMap,
   searchGuildEmojis,
   parseDiscordEmoji,
+  autoSyncGuildEmojis,
+  resolveVerifiedCustomEmoji,
 } from '../services/emojiService.js';
 import { refreshAllPanels } from '../services/panelRefreshService.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
@@ -166,19 +168,31 @@ export async function execute(interaction) {
   // ── /emoji-setup list ──
   if (sub === 'list') {
     const map = getEmojiMap(guildId);
-    const lines = Object.entries(EMOJI_SLOTS).map(([key, meta]) => {
+    const entries = Object.entries(EMOJI_SLOTS).map(([key, meta]) => {
       const cur = map[key];
-      const isCustom = cur !== meta.default;
-      return `${isCustom ? E('status_check') : '⬜'} **${meta.label}**\n> Slot: \`${key}\` | Emoji: ${cur}`;
-    }).join('\n\n');
-
-    const embed = new EmbedBuilder()
-      .setColor(0x6366f1)
-      .setTitle('🎨 Cấu Hình Custom Emoji — Cream Store')
-      .setDescription(lines)
-      .setFooter({ text: `${E('status_check')} = đang dùng custom | ⬜ = emoji mặc định` });
-
-    return interaction.editReply({ embeds: [embed] });
+      const isCustom = Boolean(parseDiscordEmoji(cur));
+      return `${E(isCustom ? 'status_check' : 'status_warn')} **${meta.label}**\n> Slot: \`${key}\` | Emoji: ${cur || 'Chưa có custom emoji khả dụng'}`;
+    });
+    const pages = [];
+    let page = '';
+    for (const entry of entries) {
+      if (page && page.length + entry.length + 2 > 3500) {
+        pages.push(page);
+        page = '';
+      }
+      page += `${page ? '\n\n' : ''}${entry}`;
+    }
+    if (page) pages.push(page);
+    for (const [index, description] of pages.entries()) {
+      const embed = new EmbedBuilder()
+        .setColor(0x6366f1)
+        .setTitle(`${E('icon_art')} Cấu Hình Custom Emoji — Cenar Store`)
+        .setDescription(description)
+        .setFooter({ text: `Trang ${index + 1}/${pages.length} · Chỉ hiển thị custom emoji đang khả dụng` });
+      if (index === 0) await interaction.editReply({ embeds: [embed] });
+      else await interaction.followUp({ embeds: [embed], ephemeral: true });
+    }
+    return;
   }
 
   // ── /emoji-setup reset ──
@@ -191,7 +205,7 @@ export async function execute(interaction) {
       setEmoji(guildId, slot, null);
       const refreshNote = await tryRefreshPanels(interaction.guild);
       return interaction.editReply(
-        `${E('status_check')} Slot **${EMOJI_SLOTS[slot].label}** đã reset về mặc định: ${EMOJI_SLOTS[slot].default}\n${refreshNote}`
+        `${E('status_check')} Slot **${EMOJI_SLOTS[slot].label}** đã trở về bộ custom hiện tại: ${E(slot) || 'Chưa có emoji khả dụng'}\n${refreshNote}`
       );
     } else {
       resetAllEmojis(guildId);
@@ -212,10 +226,10 @@ export async function execute(interaction) {
       return interaction.editReply(`${E('status_cross')} Không tìm thấy emoji phù hợp. Hãy thêm custom emoji vào server trước!`);
     }
 
-    const resolved = resolveEmoji(interaction.guild, emojiStr);
+    const resolved = resolveVerifiedCustomEmoji(guildId, emojiStr);
     if (!resolved) {
       return interaction.editReply(
-        `${E('status_cross')} Emoji không hợp lệ. Hãy dán Unicode emoji (e.g. 🛍️), định dạng custom emoji \`<:name:id>\` hoặc ID/tên emoji thuộc server này.`
+        `${E('status_cross')} Emoji không hợp lệ. Hãy dùng định dạng custom emoji \`<:name:id>\` hoặc ID/tên emoji đang có trong server hay ứng dụng bot.`
       );
     }
 
@@ -255,6 +269,6 @@ async function tryRefreshPanels(guild) {
     }
     return lines.join('\n') || '_Không có panel nào để refresh._';
   } catch (e) {
-    return `⚠️ Lỗi khi refresh panel: ${e.message}`;
+    return `${E('status_warn')} Lỗi khi refresh panel: ${e.message}`;
   }
 }

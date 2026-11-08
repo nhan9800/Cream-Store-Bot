@@ -378,7 +378,7 @@ export async function handleProductEditButton(interaction, productId) {
 
   const modal = new ModalBuilder()
     .setCustomId(`product:edit:modal:${product.id}:${interaction.message?.id || ''}`)
-    .setTitle(`✏️ Sửa: ${product.name}`.slice(0, 45));
+    .setTitle(`Sửa: ${String(product.name).replace(/<a?:[a-zA-Z0-9_]+:\d+>/g, '').trim()}`.slice(0, 45));
 
   modal.addComponents(
     new ActionRowBuilder().addComponents(

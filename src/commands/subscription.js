@@ -207,7 +207,7 @@ function buildSearchEmbed(subs, keyword, guildId) {
     lines.push(
       `${serviceEmoji(E, item.service_type)} **ID ${item.id}** · \`${item.gmail_email}\``,
       `> ${customer} · đơn \`${item.related_order_code || 'không có'}\``,
-      `> **${progress.fulfilledMonths}/${progress.totalMonths} tháng** · kỳ **${progress.completedCycles}/${progress.totalCycles}** · ${progress.needsReview ? '⚠️ cần xác minh' : progress.nextAction === 'DISCONNECT' ? 'ngắt gói' : `kỳ kế ${progress.nextCycleNumber}/${progress.totalCycles}`} · ${due}`,
+      `> **${progress.fulfilledMonths}/${progress.totalMonths} tháng** · kỳ **${progress.completedCycles}/${progress.totalCycles}** · ${progress.needsReview ? `${E('status_warn')} cần xác minh` : progress.nextAction === 'DISCONNECT' ? 'ngắt gói' : `kỳ kế ${progress.nextCycleNumber}/${progress.totalCycles}`} · ${due}`,
     );
   }
   return embed.setDescription(lines.join('\n').slice(0, 4000));

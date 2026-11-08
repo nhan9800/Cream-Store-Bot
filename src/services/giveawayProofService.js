@@ -63,9 +63,10 @@ export async function handleGiveawayProofMessage(message) {
     (emoji) => emoji.name === GIVEAWAY_PROOF.reactionEmojiName,
   );
   const E = createEmojiResolver(message.guildId);
-  const fallback = E('status_check', '✅');
+  const fallback = E('status_check');
   const fallbackMatch = String(fallback).match(/:(\d+)>$/);
-  const reaction = customEmoji?.id || fallbackMatch?.[1] || '✅';
+  const reaction = customEmoji?.id || fallbackMatch?.[1];
+  if (!reaction) return true;
   await message.react(reaction).catch((error) => {
     console.warn(`[GIVEAWAY-PROOF] Không thể reaction tin ${message.id}:`, error.message);
   });

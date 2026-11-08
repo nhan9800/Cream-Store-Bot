@@ -63,14 +63,11 @@ export async function createGiveaway(client, channel, hostUser, prize, winnersCo
     new ButtonBuilder()
       .setCustomId('giveaway:join')
       .setLabel('Tham Gia Ngay')
-      .setEmoji({ id: '1481134440725090315' }) 
       .setStyle(ButtonStyle.Success)
   );
 
-  const sparkleEmojiMatch = E('icon_sparkle', '<a:Dotyellow:1481134440725090315>').match(/:(\d+)>/);
-  if (sparkleEmojiMatch) {
-    row.components[0].setEmoji({ id: sparkleEmojiMatch[1] });
-  }
+  const joinEmoji = E.component('icon_gift');
+  if (joinEmoji) row.components[0].setEmoji(joinEmoji);
 
   const message = await channel.send({
     components: [container, row],
@@ -185,15 +182,12 @@ export async function endGiveaway(client, messageId) {
     new ButtonBuilder()
       .setCustomId('giveaway:ended')
       .setLabel(`Đã Kết Thúc (${entries.length} người tham gia)`)
-      .setEmoji({ id: '1392749981332541501' }) // Fallback icon ID
       .setStyle(ButtonStyle.Secondary)
       .setDisabled(true)
   );
 
-  const lockEmojiMatch = E('icon_warn', '<a:warn:1481134440725090315>').match(/:(\d+)>/);
-  if (lockEmojiMatch) {
-    row.components[0].setEmoji({ id: lockEmojiMatch[1] });
-  }
+  const endedEmoji = E.component('ticket_close');
+  if (endedEmoji) row.components[0].setEmoji(endedEmoji);
 
   if (message) {
     await message.edit({

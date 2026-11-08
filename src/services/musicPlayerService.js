@@ -1007,12 +1007,12 @@ export function buildMusicPanelPayload(guildId, { notice = null } = {}) {
       : `## ${E('music_now')} Chưa có bài hát đang phát`,
     current ? `**Kênh:** ${plain(current.author)} · **Yêu cầu:** ${plain(current.requestedBy)}` : '',
     current
-      ? `\`${state.progress.currentLabel}\` ${queueProgress(state.progress.percent)} \`${state.progress.totalLabel}\``
+      ? `\`${state.progress.currentLabel}\` ${queueProgress(state.progress.percent, E('music_play'))} \`${state.progress.totalLabel}\``
       : `Kết nối vào phòng thoại, nhấn **Thêm bài / playlist / Mix** rồi dán link YouTube.`,
     '',
     `**Trạng thái:** ${state.recovery.blocked ? 'Chờ thử phát lại' : state.paused ? 'Tạm dừng' : state.playing ? 'Đang phát' : state.buffering ? 'Đang tải âm thanh' : 'Sẵn sàng'} · **Âm lượng:** ${state.volume}% · **${repeatLabel}** · **Shuffle:** ${state.shuffle ? 'Bật' : 'Tắt'}`,
     `**Âm thanh:** ${plain(soundName)} · ${state.sound.live ? 'Áp dụng live' : 'Sẵn sàng cho bài tiếp theo'}`,
-    `**Phòng thoại:** ${state.voiceChannel ? `🔊 ${plain(state.voiceChannel.name)}` : 'Chưa kết nối'} · **Người nghe:** ${state.listeners.length} · **Ping:** ${state.ping}ms`,
+    `**Phòng thoại:** ${state.voiceChannel ? `${E('music_volume')} ${plain(state.voiceChannel.name)}` : 'Chưa kết nối'} · **Người nghe:** ${state.listeners.length} · **Ping:** ${state.ping}ms`,
     '',
     `### ${E('music_queue')} HÀNG ĐỢI · ${state.queue.length} BÀI`,
     ...queueLines,
@@ -1088,9 +1088,9 @@ export function buildMusicPanelPayload(guildId, { notice = null } = {}) {
   return { components: [container], flags: MessageFlags.IsComponentsV2, allowedMentions: { parse: [] } };
 }
 
-function queueProgress(percent) {
+function queueProgress(percent, marker = '') {
   const filled = clamp(Math.round(Number(percent || 0) / 10), 0, 10);
-  return `${'▬'.repeat(filled)}🔘${'▬'.repeat(10 - filled)}`;
+  return `${'▬'.repeat(filled)}${marker}${'▬'.repeat(10 - filled)}`;
 }
 
 function memberCanControl(interaction) {

@@ -101,7 +101,7 @@ export async function execute(interaction) {
           await sendVietQRPayment({ guild: interaction.guild, orderCode });
           await interaction.editReply(`${E('status_warn')} PayOS lỗi: _${payosError.message}_\n${E('status_check')} Đã **tự động chuyển sang VietQR** (chuyển khoản) cho đơn \`${orderCode}\`.`);
         } catch (vietqrError) {
-          await interaction.editReply(`${E('status_cross')} PayOS lỗi: ${payosError.message}\n${E('status_cross')} VietQR cũng lỗi: ${vietqrError.message}\n\n💡 Hãy dùng \`/setup-bank\` để cấu hình ngân hàng.`);
+          await interaction.editReply(`${E('status_cross')} PayOS lỗi: ${payosError.message}\n${E('status_cross')} VietQR cũng lỗi: ${vietqrError.message}\n\n${E('icon_tip')} Hãy dùng \`/setup-bank\` để cấu hình ngân hàng.`);
         }
       }
     }

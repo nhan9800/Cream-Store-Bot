@@ -19,6 +19,7 @@ import { getOrderByCode, markOrderCompleted } from '../services/orderService.js'
 import { sendCompletedFlow, updateOrderLogMessage } from '../services/notificationService.js';
 import { buildFeedbackModalPrompt, buildWarrantyPanelModalPrompt } from '../utils/embeds.js';
 import { sanitizeDiscordPayload } from '../utils/uiKit.js';
+import { createEmojiResolver } from '../utils/emojiHelper.js';
 
 export const FEEDBACK_TEXT_INPUT_ID = 'feedback_content';
 export const WARRANTY_ORDER_INPUT_ID = 'warranty_order_code';
@@ -297,34 +298,35 @@ export function parseCompactSecondaryPrice(description) {
   return value.toLocaleString('vi-VN') + ' VND';
 }
 
-export function getDefaultCategoryDetails(category) {
+export function getDefaultCategoryDetails(category, guildId) {
+  const E = createEmojiResolver(guildId);
   const cat = category.toLowerCase();
   if (cat === 'youtube') {
-    return { title: '📺 BẢNG GIÁ YOUTUBE PREMIUM (SIÊU ỔN ĐỊNH)', color: 'ED4245', name: 'YouTube Premium' };
+    return { title: `${E('brand_youtube')} BẢNG GIÁ YOUTUBE PREMIUM (SIÊU ỔN ĐỊNH)`, color: 'ED4245', name: 'YouTube Premium' };
   }
   if (cat === 'spotify') {
-    return { title: '🎵 BẢNG GIÁ SPOTIFY PREMIUM (SIÊU ỔN ĐỊNH)', color: '57F287', name: 'Spotify Premium' };
+    return { title: `${E('brand_spotify')} BẢNG GIÁ SPOTIFY PREMIUM (SIÊU ỔN ĐỊNH)`, color: '57F287', name: 'Spotify Premium' };
   }
   if (cat === 'netflix') {
-    return { title: '🍿 BẢNG GIÁ NETFLIX EXTRA PREMIUM', color: 'E50914', name: 'Netflix Premium' };
+    return { title: `${E('brand_netflix')} BẢNG GIÁ NETFLIX EXTRA PREMIUM`, color: 'E50914', name: 'Netflix Premium' };
   }
   if (cat === 'nitro') {
-    return { title: '💎 BẢNG GIÁ DISCORD NITRO PREMIUM', color: '5865F2', name: 'Discord Nitro' };
+    return { title: `${E('brand_nitro')} BẢNG GIÁ DISCORD NITRO PREMIUM`, color: '5865F2', name: 'Discord Nitro' };
   }
   if (cat === 'boost') {
-    return { title: '🚀 BẢNG GIÁ DISCORD BOOST SERVER', color: 'EB459E', name: 'Discord Boost' };
+    return { title: `${E('brand_boost')} BẢNG GIÁ DISCORD BOOST SERVER`, color: 'EB459E', name: 'Discord Boost' };
   }
   if (cat === 'decor') {
-    return { title: '⚙️ DECOR / NPL', color: 'EB459E', name: 'Decor Discord', display_mode: 'compact', subtitle: '⚙️ DEC/NPL ( LOG ACC )' };
+    return { title: `${E('icon_art')} DECOR / NPL`, color: 'EB459E', name: 'Decor Discord', display_mode: 'compact', subtitle: `${E('icon_settings')} DEC/NPL ( LOG ACC )` };
   }
   if (cat === 'ai') {
-    return { title: '🤖 BẢNG GIÁ AI & PHẦN MỀM PREMIUM', color: '9B59B6', name: 'AI & Phần Mềm' };
+    return { title: `${E('icon_brain')} BẢNG GIÁ AI & PHẦN MỀM PREMIUM`, color: '9B59B6', name: 'AI & Phần Mềm' };
   }
   if (cat === 'gearup') {
-    return { title: '🎮 BẢNG GIÁ GEARUP BOOSTER', color: '00E6FF', name: 'Gearup Booster' };
+    return { title: `${E('brand_gearup')} BẢNG GIÁ GEARUP BOOSTER`, color: '00E6FF', name: 'Gearup Booster' };
   }
   if (cat === 'service') {
-    return { title: '🛠️ DỊCH VỤ SETUP DISCORD & BOT CUSTOM & WEBSITE', color: '5865F2', name: 'Dịch Vụ Setup & Custom' };
+    return { title: `${E('icon_settings')} DỊCH VỤ SETUP DISCORD & BOT CUSTOM & WEBSITE`, color: '5865F2', name: 'Dịch Vụ Setup & Custom' };
   }
   return { title: `BẢNG GIÁ ${category.toUpperCase()}`, color: 'F3A6D7', name: category.toUpperCase() };
 }
@@ -354,24 +356,7 @@ export function parsePrefixCommand(content) {
 }
 
 export function resolveDecorEmoji(guildId, emojiName) {
-  const isServer1 = guildId === '1282637033340403754';
-  if (isServer1) {
-    switch (emojiName) {
-      case 'header': return '<a:ccjdeobt:1481142015994495059>';
-      case 'bullet': return '<a:chamxanh:1481124932447371374>';
-      case 'arrow': return '<a:69_Arrow:1448888143120957532>';
-      case 'check': return '<:verifybadge:1481127479702847646>';
-      case 'husky': return '<a:husky:1105033204114673675>';
-    }
-  } else {
-    switch (emojiName) {
-      case 'header': return '✨';
-      case 'bullet': return '🟢';
-      case 'arrow': return '➡️';
-      case 'check': return '🔵';
-      case 'husky': return '<a:husky:1105033204114673675>';
-    }
-  }
-  return '';
+  const slot = { header: 'icon_sparkle', bullet: 'icon_green', arrow: 'icon_next', check: 'verify_shield', husky: 'icon_heart' }[emojiName];
+  return slot ? createEmojiResolver(guildId)(slot) : '';
 }
 

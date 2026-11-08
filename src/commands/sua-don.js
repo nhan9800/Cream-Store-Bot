@@ -134,9 +134,9 @@ export async function execute(interaction) {
     });
 
     const expiryText = after.expiry_at
-      ? `\n🗓️ Hạn mới: <t:${Math.floor(new Date(after.expiry_at).getTime() / 1000)}:F>`
+      ? `\n${E('icon_expire')} Hạn mới: <t:${Math.floor(new Date(after.expiry_at).getTime() / 1000)}:F>`
       : Number(after.duration_months) === 0 && !Number(after.duration_days)
-        ? '\n♾️ Thời hạn mới: **Vĩnh viễn**'
+        ? `\n${E('icon_duration')} Thời hạn mới: **Vĩnh viễn**`
         : '';
     const completionText = completionSync.synced
       ? completionSync.status === 'dm_updated'
@@ -145,10 +145,10 @@ export async function execute(interaction) {
           ? `\n${E('status_check')} Đã phục hồi **thẻ hoàn thành** trong ticket.`
           : `\n${E('status_check')} Đã đồng bộ **thẻ hoàn thành** trong ticket.`
       : ['missing', 'channel_missing', 'missing_staff'].includes(completionSync.status)
-        ? '\n⚠️ Dữ liệu đã lưu nhưng không tìm thấy thẻ hoàn thành cũ để sửa.'
+        ? `\n${E('status_warn')} Dữ liệu đã lưu nhưng không tìm thấy thẻ hoàn thành cũ để sửa.`
         : '';
     const issueText = syncIssues.length
-      ? `\n⚠️ Chưa đồng bộ được: **${syncIssues.join(', ')}**. Dữ liệu đơn vẫn đã được lưu.`
+      ? `\n${E('status_warn')} Chưa đồng bộ được: **${syncIssues.join(', ')}**. Dữ liệu đơn vẫn đã được lưu.`
       : '';
     const feedbackText = feedbackSync.count > 0 ? `\n${E('status_check')} Đã đồng bộ **bài feedback**, giữ nguyên số sao và nhận xét.` : '';
     const retryText = syncIssues.length ? `\nThử lại bằng \`/sua-don ma_don:${after.order_code} dong_bo:true\`; nếu vẫn lỗi, kiểm tra quyền bot và DM của khách.` : '';

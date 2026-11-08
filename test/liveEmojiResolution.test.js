@@ -21,6 +21,7 @@ import {
 } from '../src/services/emojiService.js';
 import { createEmojiResolver, normalizeButtonEmoji, withButtonEmoji } from '../src/utils/emojiHelper.js';
 import { REVIEW_EMOJI_ASSETS } from '../src/config/reviewEmojiPack20261108.js';
+import { CORE_UI_EMOJI_SLOTS } from '../src/config/coreEmojiPack2026.js';
 
 const guildId = 'test-live-emoji-guild';
 const previousClient = global.discordClient;
@@ -39,6 +40,21 @@ afterEach(() => { global.discordClient = previousClient; });
 afterAll(() => db.close());
 
 describe('live verified emoji resolution', () => {
+  it('migrates historical core tokens to current semantic artwork even while the old emoji remains live', () => {
+    const old = emoji('1550000000000000201', 'cenar_ui26_receipt');
+    const fresh = emoji('1550000000000000202', CORE_UI_EMOJI_SLOTS.order_id);
+    app.set(old.id, old); app.set(fresh.id, fresh);
+    expect(resolveEmojiText(`<:${old.name}:${old.id}> Mã đơn: \`CN_TEST\``, guildId))
+      .toBe(`<:${fresh.name}:${fresh.id}> Mã đơn: \`CN_TEST\``);
+    expect(resolveEmojiText(`\`<:${old.name}:${old.id}>\``, guildId)).toBe(`\`<:${old.name}:${old.id}>\``);
+  });
+
+  it('resolves historical undeclared helper aliases to verified custom artwork', () => {
+    const fresh = emoji('1550000000000000203', CORE_UI_EMOJI_SLOTS.ticket_close);
+    app.set(fresh.id, fresh);
+    expect(getEmoji(guildId,'icon_lock')).toBe(`<:${fresh.name}:${fresh.id}>`);
+    expect(getEmoji(guildId,'ticket_close')).toBe(getEmoji(guildId,'icon_lock'));
+  });
   it('keeps the six sourced review illustrations distinct through the final text boundary', () => {
     app.set('1550000000000000090', emoji('1550000000000000090', 'cenar_ui26_star'));
     const mentions = REVIEW_EMOJI_ASSETS.map((asset, index) => {
@@ -96,7 +112,7 @@ describe('live verified emoji resolution', () => {
   it('prefers new semantic core artwork over an old icon that is still live, while retaining live product brands', () => {
     const old = emoji('1550000000000000005', 'cr_shop');
     const brand = emoji('1550000000000000006', 'cenar_spotify');
-    const fresh = emoji('1550000000000000007', 'cenar_ui26_store');
+    const fresh = emoji('1550000000000000007', CORE_UI_EMOJI_SLOTS.icon_store);
     guild.emojis.cache.set(old.id, old).set(brand.id, brand);
     app.set(fresh.id, fresh);
     expect(resolveLiveCustomEmoji(`<:cr_shop:${old.id}>`, guildId)).toBe(`<:${fresh.name}:${fresh.id}>`);
