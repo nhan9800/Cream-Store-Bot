@@ -1376,18 +1376,20 @@ export function buildFeedbackV2({ member, order, stars, content }) {
   const safeContent = content?.trim() || 'Không có ý kiến';
   const safeOrderCode = String(order?.order_code ?? order?.payment_code ?? '').trim() || 'KHONG_RO_MA_DON';
   const guildId = order?.guild_id ?? null;
-  const em = guildId ? getEmojiMap(guildId) : {};
   const E = createEmojiResolver(guildId);
-  const starBar = toStars(stars, guildId);
+  const reviewStar = E('review_star', E('icon_star'));
+  const starBar = reviewStar.repeat(Math.max(1, Math.min(5, Number(stars) || 1)));
   const accent = stars >= 4 ? 'success' : stars >= 3 ? 'warning' : 'danger';
 
   const container = new ContainerBuilder().setAccentColor(accentFor(accent));
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(joinLines(
-      h2(`${starBar}  Đánh Giá ${stars}/5 Sao`),
-      `> ${E('ticket_user')} ${fmt.b('Khách:')} ${fmt.user(member.id)}`,
-      `> ${E('order_id')} ${fmt.b('Mã Đơn:')} ${fmt.code(safeOrderCode)}`,
-      `> ${E('order_product')} ${fmt.b('Sản Phẩm:')} ${formatOrderProduct(order?.quantity ?? 1, order?.product_name ?? 'Không xác định')}`,
+      h2(`${E('review_header', E('icon_store'))} Đánh giá từ khách hàng`),
+      `${starBar}  ${fmt.b(`${stars}/5 sao`)}`,
+      '',
+      `${E('review_customer', E('ticket_user'))} ${fmt.b('Khách hàng:')} ${fmt.user(member.id)}`,
+      `${E('review_order', E('order_id'))} ${fmt.b('Mã đơn:')} ${fmt.code(safeOrderCode)}`,
+      `${E('review_product', E('order_product'))} ${fmt.b('Sản phẩm:')} ${formatOrderProduct(order?.quantity ?? 1, order?.product_name ?? 'Không xác định')}`,
     ))
   );
   container.addSeparatorComponents(
@@ -1395,9 +1397,14 @@ export function buildFeedbackV2({ member, order, stars, content }) {
   );
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(joinLines(
-      `${E('icon_doc')} ${fmt.b('Ý Kiến Khách Hàng:')}`,
+      `${E('review_comment', E('icon_edit'))} ${fmt.b('Khách hàng chia sẻ')}`,
       `> ${safeContent}`,
     ))
+  );
+  container.addTextDisplayComponents(
+    new TextDisplayBuilder().setContent(
+      subtext('Cenar Store · Trân trọng từng góp ý của bạn.')
+    )
   );
   return { container, flags: MessageFlags.IsComponentsV2 };
 }

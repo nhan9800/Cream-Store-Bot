@@ -20,6 +20,7 @@ import {
   sanitizeCustomEmojiText, setEmoji,
 } from '../src/services/emojiService.js';
 import { createEmojiResolver, normalizeButtonEmoji, withButtonEmoji } from '../src/utils/emojiHelper.js';
+import { REVIEW_EMOJI_ASSETS } from '../src/config/reviewEmojiPack20261108.js';
 
 const guildId = 'test-live-emoji-guild';
 const previousClient = global.discordClient;
@@ -38,6 +39,19 @@ afterEach(() => { global.discordClient = previousClient; });
 afterAll(() => db.close());
 
 describe('live verified emoji resolution', () => {
+  it('keeps the six sourced review illustrations distinct through the final text boundary', () => {
+    app.set('1550000000000000090', emoji('1550000000000000090', 'cenar_ui26_star'));
+    const mentions = REVIEW_EMOJI_ASSETS.map((asset, index) => {
+      const item = emoji(String(1550000000000000100n + BigInt(index)), asset.name, asset.file.endsWith('.gif'));
+      guild.emojis.cache.set(item.id, item);
+      const mention = `<${item.animated ? 'a' : ''}:${item.name}:${item.id}>`;
+      expect(getEmoji(guildId, asset.slot)).toBe(mention);
+      return mention;
+    });
+    expect(resolveEmojiText(mentions.join(' '), guildId)).toBe(mentions.join(' '));
+    expect(new Set(mentions).size).toBe(6);
+  });
+
   it('rejects stale raw and configured IDs while the cache is empty or unavailable', () => {
     db.prepare('INSERT INTO guild_settings (guild_id, custom_emojis) VALUES (?, ?)')
       .run(guildId, JSON.stringify({ icon_star: '<:old_star:1550000000000000001>' }));
