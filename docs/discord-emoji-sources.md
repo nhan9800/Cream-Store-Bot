@@ -45,3 +45,27 @@ a fallback. During the inventory pass, five unused name duplicates were
 removed after checking code and slot references (`15` animated, lowercase
 `gold`, the second `iron`, lowercase `diamond`, and the older `cr_grok`). The
 server now has 184 emoji and no byte-identical duplicate group.
+
+## Review card set (2026-11-08)
+
+Dedicated `review_*` slots keep the review illustrations separate from the shared
+core UI badges. Files live in `assets/emojis/review26/`; all six listings grant
+the Emoji.gg Basic License for use as platform emoji without charging for access.
+
+| Purpose | Server emoji | Source |
+| --- | --- | --- |
+| Review header | `cenar_review26_header` | https://emoji.gg/emoji/765447-message |
+| Rating | `cenar_review26_star` | https://emoji.gg/emoji/52260-yellow-star |
+| Customer | `cenar_review26_customer` | https://emoji.gg/emoji/9230-member |
+| Order code | `cenar_review26_order` | https://emoji.gg/emoji/82162-receipt |
+| Purchased product | `cenar_review26_product` | https://emoji.gg/emoji/79197-shopping-cart |
+| Customer opinion | `cenar_review26_comment` | https://emoji.gg/emoji/408875-pencil |
+
+Run `node scripts/sync-review-emojis.js --env-file <protected env path>` to inspect
+missing artwork; add `--apply` to upload only missing names to Store 1. Existing
+emoji are retained. The shared resolver verifies each ID against live inventory
+and emits no Unicode fallback. Other guilds retain verified shared custom icons
+when this dedicated pack has not been uploaded.
+
+Discadia remains a reference only for this change: its directory returned an
+anti-bot page and could not be safely validated or attributed automatically.

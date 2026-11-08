@@ -8,11 +8,14 @@
 
 import { db, nowIso } from '../database/db.js';
 import { CORE_UI_EMOJI_SLOTS } from '../config/coreEmojiPack2026.js';
+import { REVIEW_EMOJI_ASSETS } from '../config/reviewEmojiPack20261108.js';
 
 // ═══════════════════════════════════════════════
 // Định nghĩa các SLOT emoji và fallback mặc định
 // ═══════════════════════════════════════════════
 export const EMOJI_SLOTS = {
+  // Dedicated artwork: shared core UI badges must not replace review illustrations.
+  ...Object.fromEntries(REVIEW_EMOJI_ASSETS.map(({ slot }) => [slot, { label: slot, default: '' }])),
   // Panel Ticket buttons
   panel_order:        { label: 'Mua Hàng',             default: '🛍️' },
   panel_support:      { label: 'Hỗ Trợ',               default: '🆘' },
@@ -218,6 +221,7 @@ export const SLOT_ALIASES = {
   order_pending: ['order_pending', 'pending', 'cho_thanh_toan'],
   order_id: ['order_id', 'id_don', 'cenar_verified'],
   order_product: ['order_product', 'product', 'san_pham'],
+  ...Object.fromEntries(REVIEW_EMOJI_ASSETS.map(({ slot, name }) => [slot, [name]])),
   admin_order_center: ['cenar_order_center', 'order_center', 'admin_orders'],
   admin_order_week1: ['cenar_order_week1', 'order_week1', 'order_7d'],
   admin_order_week2: ['cenar_order_week2', 'order_week2', 'order_14d'],
