@@ -24,6 +24,7 @@ import {
 } from '../utils/embeds.js';
 import { formatCurrency } from '../utils/formatters.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
+import { buildLegacyFeatureCard } from '../utils/featureCard.js';
 import { deliverPaidOrder } from './autoDeliveryService.js';
 import { db } from '../database/db.js';
 
@@ -355,11 +356,13 @@ export async function sendVietQRPayment({ guild, orderCode }) {
     .setImage(`attachment://${attachmentName}`)
     .setFooter({ text: 'Lưu ý: Giao dịch sẽ hết hạn sau 10 phút nếu chưa thanh toán.' });
 
-  const sentMessage = await ticketChannel.send({
+  const sentMessage = await ticketChannel.send(buildLegacyFeatureCard({
     content: `<@${order.customer_id}>`,
     embeds: [embed],
     files: [new AttachmentBuilder(imageBuffer, { name: attachmentName })],
-  });
+    // Retain the invoice recipient, without activating mentions in product or bank text.
+    allowedMentions: { parse: [], users: [order.customer_id] },
+  }));
 
   // Lưu VietQR URL vào DB để website hiển thị QR code
   savePaymentLinkData(order.order_code, {

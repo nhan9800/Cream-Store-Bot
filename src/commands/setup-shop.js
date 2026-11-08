@@ -40,7 +40,7 @@ export async function execute(interaction) {
     // Convert pipe-separated features to newline-separated
     const features = rawFeatures ? rawFeatures.split('|').map(f => f.trim()).filter(Boolean).join('\n') : null;
 
-    const { embeds, components } = buildShopPanelV2({
+    const payload = buildShopPanelV2({
       guildId: interaction.guildId,
       category,
       title,
@@ -48,7 +48,7 @@ export async function execute(interaction) {
       features,
     });
 
-    const panelMessage = await interaction.channel.send({ embeds, components });
+    const panelMessage = await interaction.channel.send(payload);
 
     // Lưu vào DB để có thể edit sau
     createShopPanel({
