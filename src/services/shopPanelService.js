@@ -5,6 +5,7 @@ import {
   ButtonBuilder,
   ButtonStyle,
   EmbedBuilder,
+  MessageFlags,
 } from 'discord.js';
 import { getActiveProducts } from './productCatalogService.js';
 import { formatCurrency } from '../utils/formatters.js';
@@ -13,6 +14,8 @@ import { fmt, h2, subtext } from '../utils/embedHelpers.js';
 import { config } from '../config.js';
 import { isInternationalGuild } from '../utils/locale.js';
 import { formatInternationalPrice, translateProductName } from '../utils/internationalCatalog.js';
+import { buildLegacyFeatureCard } from '../utils/featureCard.js';
+import { createEmojiResolver } from '../utils/emojiHelper.js';
 
 // ═══════════════════════════════════════════════
 // CRUD — shop_panels
@@ -91,8 +94,7 @@ function accentForCategory(category) {
 // Build Components V2 Panel
 // ═══════════════════════════════════════════════
 
-export function buildShopPanelV2({ guildId, category, title, imageUrl, features }) {
-  const international = isInternationalGuild(guildId);
+function shopProducts(guildId, category) {
   let products = [];
   const activeProducts = getActiveProducts(guildId);
   const catLower = (category || '').toLowerCase();
@@ -109,6 +111,11 @@ export function buildShopPanelV2({ guildId, category, title, imageUrl, features 
     products = activeProducts.filter(p => p.service_type && p.service_type.toLowerCase() === catLower);
   }
 
+  return products;
+}
+
+function buildShopPanelSource({ guildId, category, title, imageUrl, features }, products) {
+  const international = isInternationalGuild(guildId);
   const em = getEmojiMap(guildId);
   const E = (slot, fallback = '') => em[slot] || fallback;
   const Ecomp = (slot) => {
@@ -129,6 +136,8 @@ export function buildShopPanelV2({ guildId, category, title, imageUrl, features 
   let desc = international
     ? `> ${E('icon_sparkle')} **Premium digital services with transparent delivery and warranty support from Cenar Global.**\n\n`
     : `> ${E('icon_sparkle')} **Dịch vụ số chính hãng — bảo hành uy tín tại ${config.storeName || 'Cenar Store'}**\n\n`;
+  const intro = desc.trim();
+  const groups = [];
 
   if (features) {
     const featureLines = features.split('\n').filter(l => l.trim());
@@ -140,20 +149,24 @@ export function buildShopPanelV2({ guildId, category, title, imageUrl, features 
     }).join('\n');
 
     desc += `### ${E('icon_sparkle')} ${international ? 'SERVICE BENEFITS' : 'Quyền Lợi Dịch Vụ'}\n${formatted}\n\n`;
+    groups.push({ name: `${E('icon_sparkle')} ${international ? 'SERVICE BENEFITS' : 'Quyền Lợi Dịch Vụ'}`, value: formatted });
   }
 
   if (products.length > 0) {
     const priceLines = products.map(p => {
       const priceText = international ? formatInternationalPrice(p.price) : Number(p.price).toLocaleString('vi-VN') + 'đ';
       const pEmoji = resolveProductEmoji(guildId, p.emoji) || E('muiten');
+      groups.push({ name: `${pEmoji} ${international ? translateProductName(p.name) : p.name}`.trim(),
+        value: `**${international ? 'Price:' : 'Giá:'}** \`${priceText}\` · **${international ? 'Duration:' : 'Thời hạn:'}** ${p.duration_months} ${international ? 'month(s)' : 'tháng'}` });
       return `${pEmoji} **${international ? translateProductName(p.name) : p.name}** — \`${priceText}\` / ${p.duration_months} ${international ? 'month(s)' : 'tháng'}`.trim();
     });
     desc += `### ${E('icon_price')} ${international ? 'LIVE PRICING' : 'Bảng Giá Dịch Vụ'}\n${priceLines.join('\n')}\n\n`;
   }
 
-  desc += international
+  const footer = international
     ? `-# ${E('icon_heart_purple')} Select a package below to order · Cenar Global`
     : `-# ${E('icon_heart_purple')} Chọn gói bên dưới để đặt hàng · ${config.storeName || 'Cenar Store'}`;
+  desc += footer;
 
   const embed = new EmbedBuilder()
     .setColor(accentColor || 0x2f3136)
@@ -178,7 +191,7 @@ export function buildShopPanelV2({ guildId, category, title, imageUrl, features 
     selectRow = new ActionRowBuilder().addComponents(
       new StringSelectMenuBuilder()
         .setCustomId('product:select')
-        .setPlaceholder(`${displayTitle} — ${international ? 'Select a package' : 'Chọn gói phù hợp với bạn'}`)
+        .setPlaceholder(`${displayTitle} — ${international ? 'Select a package' : 'Chọn gói phù hợp với bạn'}`.slice(0, 150))
         .addOptions(selectOptions)
     );
   }
@@ -196,7 +209,87 @@ export function buildShopPanelV2({ guildId, category, title, imageUrl, features 
   if (selectRow) components.push(selectRow);
   components.push(editRow);
 
-  return { embeds: [embed], components };
+  return { embeds: [embed], components, layout: { intro, groups, footer } };
+}
+
+export function buildShopPanelV2(options) {
+  const products = shopProducts(options.guildId, options.category);
+  const international = isInternationalGuild(options.guildId);
+  const E = createEmojiResolver(options.guildId);
+  const navigationButton = (button, slot) => {
+    const emoji = E.component(slot);
+    return emoji ? button.setEmoji(emoji) : button;
+  };
+  const renderPage = (items, page, total, showNavigation = true) => {
+    const { layout, ...legacy } = buildShopPanelSource(options, items);
+    const source = legacy.embeds[0].toJSON();
+    const components = [...legacy.components];
+    if (showNavigation) components.splice(components.length - 1, 0, new ActionRowBuilder().addComponents(
+      navigationButton(new ButtonBuilder().setCustomId(`shop:panel:page:${Math.max(0, page - 1)}`)
+        .setLabel(international ? 'Previous' : 'Trang trước').setStyle(ButtonStyle.Secondary).setDisabled(page === 0), 'icon_prev'),
+      navigationButton(new ButtonBuilder().setCustomId(`shop:panel:current:${page}`)
+        .setLabel(`${international ? 'Page' : 'Trang'} ${page + 1}/${total}`).setStyle(ButtonStyle.Secondary).setDisabled(true), 'icon_doc'),
+      navigationButton(new ButtonBuilder().setCustomId(`shop:panel:page:${page + 1}`)
+        .setLabel(international ? 'Next' : 'Trang sau').setStyle(ButtonStyle.Secondary).setDisabled(page >= total - 1), 'icon_next'),
+    ));
+    const converted = buildLegacyFeatureCard({
+      embeds: [{ ...source, description: layout.intro, fields: layout.groups,
+        footer: { text: layout.footer.replace(/^-# /, '') } }],
+      components, allowedMentions: { parse: [] },
+    });
+    return converted.flags & MessageFlags.IsComponentsV2 ? converted : null;
+  };
+
+  // Bound both text and controls, so every product remains selectable even in
+  // large categories. Recompute from the current catalog on every navigation.
+  const pages = [];
+  let current = [];
+  let unsupported = false;
+  for (const product of products) {
+    const next = [...current, product];
+    let fits = false;
+    try { fits = next.length <= 6 && Boolean(renderPage(next, 0, products.length || 1)); } catch { /* use the full-fidelity fallback below */ }
+    if (!fits && current.length) {
+      pages.push(current);
+      current = [];
+    }
+    current.push(product);
+    try { if (!renderPage(current, 0, products.length || 1)) unsupported = true; } catch { unsupported = true; }
+  }
+  if (current.length || !pages.length) pages.push(current);
+  if (!unsupported) {
+    const page = Math.min(Math.max(0, Number.isSafeInteger(options.page) ? options.page : 0), pages.length - 1);
+    const rendered = renderPage(pages[page], page, pages.length, pages.length > 1);
+    if (rendered) return rendered;
+  }
+  // Unsupported metadata is never truncated. Existing V2 messages must reject
+  // a downgrade; callers enforce that before editing the persistent panel.
+  const { layout, ...original } = buildShopPanelSource(options, products);
+  return { ...original, allowedMentions: { parse: [] } };
+}
+
+export function shopPanelEditPayload(message, payload) {
+  const existingFlags = Number(message.flags?.bitfield ?? message.flags ?? 0);
+  if ((existingFlags & MessageFlags.IsComponentsV2) && !(payload.flags & MessageFlags.IsComponentsV2)) {
+    throw new Error('Nội dung panel vượt giới hạn giao diện. Vui lòng rút gọn tiêu đề hoặc quyền lợi.');
+  }
+  return payload.flags & MessageFlags.IsComponentsV2
+    ? { ...payload, content: null, embeds: [] }
+    : payload;
+}
+
+export async function handleShopPanelPage(interaction) {
+  const panel = getShopPanelByMessageId(interaction.message.id);
+  if (!panel || panel.guild_id !== interaction.guildId || panel.channel_id !== interaction.channelId) {
+    await interaction.reply({ content: 'Panel không còn khả dụng. Vui lòng mở bảng giá mới.', ephemeral: true });
+    return;
+  }
+  const payload = buildShopPanelV2({
+    guildId: interaction.guildId, category: panel.category, title: panel.title,
+    imageUrl: panel.image_url, features: panel.features,
+    page: Number(interaction.customId.split(':').at(-1)),
+  });
+  await interaction.update(shopPanelEditPayload(interaction.message, payload));
 }
 
 // ═══════════════════════════════════════════════
@@ -215,7 +308,7 @@ export async function refreshAllShopPanels(client, guildId) {
       const msg = await channel.messages.fetch(panel.message_id).catch(() => null);
       if (!msg) continue;
 
-      const { embeds, components } = buildShopPanelV2({
+      const payload = buildShopPanelV2({
         guildId,
         category: panel.category,
         title: panel.title || panel.category,
@@ -223,7 +316,7 @@ export async function refreshAllShopPanels(client, guildId) {
         features: panel.features,
       });
 
-      await msg.edit({ embeds, components }).catch(() => null);
+      await msg.edit(shopPanelEditPayload(msg, payload)).catch(() => null);
     } catch (e) {
       // Panel bị xóa hoặc lỗi → bỏ qua
     }

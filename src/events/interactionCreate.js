@@ -838,6 +838,13 @@ export function registerInteractionHandler(client, commands) {
         return;
       }
 
+      // Public shop pages keep the same persistent message and product action.
+      if (interaction.isButton() && /^shop:panel:page:\d+$/.test(interaction.customId)) {
+        const { handleShopPanelPage } = await import('../services/shopPanelService.js');
+        await handleShopPanelPage(interaction);
+        return;
+      }
+
       // ═══════ Shop Panel Edit Button ═══════
       if (interaction.isButton() && interaction.customId === 'shop:panel:edit') {
         const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
@@ -914,11 +921,11 @@ export function registerInteractionHandler(client, commands) {
           return;
         }
 
-        const { getShopPanelByMessageId, updateShopPanel, buildShopPanelV2 } = await import('../services/shopPanelService.js');
+        const { getShopPanelByMessageId, updateShopPanel, buildShopPanelV2, shopPanelEditPayload } = await import('../services/shopPanelService.js');
         const panel = getShopPanelByMessageId(messageId);
 
         // Rebuild panel V2
-        const { components, flags } = buildShopPanelV2({
+        const payload = buildShopPanelV2({
           guildId: interaction.guildId,
           category,
           title: title || category,
@@ -929,12 +936,9 @@ export function registerInteractionHandler(client, commands) {
         try {
           // Tìm và edit message gốc
           const channel = await interaction.guild.channels.fetch(interaction.channelId).catch(() => null);
-          if (channel) {
-            const msg = await channel.messages.fetch(messageId).catch(() => null);
-            if (msg) {
-              await msg.edit({ components, flags });
-            }
-          }
+          const msg = channel ? await channel.messages.fetch(messageId).catch(() => null) : null;
+          if (!msg) throw new Error('Không tìm thấy panel gốc.');
+          await msg.edit(shopPanelEditPayload(msg, payload));
 
           // Cập nhật DB
           if (panel) {

@@ -35,9 +35,67 @@ import {
 } from '../services/ownerPingGuardService.js';
 import { emitAutomationLog } from '../services/automationLogService.js';
 import { handleGiveawayProofMessage } from '../services/giveawayProofService.js';
+import { buildLegacyFeatureCard } from '../utils/featureCard.js';
+
+export function buildGmailNitroGuidePayload(guildId, attachment) {
+  const E = createEmojiResolver(guildId);
+  const embedColor = guildId === '1282637033340403754' ? 0x7C3AED : 0xF472B6;
+  const brandName = guildId === '1282637033340403754' ? 'Cenar Store 1' : 'Cenar Store 2';
+
+  const embed = new EmbedBuilder()
+    .setColor(embedColor)
+    .setTitle(`${E('verify_shield')} HƯỚNG DẪN BẢO MẬT & DUY TRÌ GMAIL NITRO`)
+    .setDescription([
+      `${E('ticket_user')} Chào quý khách!`,
+      'Dưới đây là các bước **cực kỳ quan trọng** giúp bạn bảo mật tối đa tài khoản Gmail liên kết Nitro, tránh tình trạng bị quét hoặc khóa tài khoản đáng tiếc từ Google:',
+      '',
+      `### ${E('icon_key')} 1. DUY TRÌ TRẠNG THÁI ĐĂNG NHẬP`,
+      `> * ${E('status_check')} Sau khi đăng nhập thành công, bạn vui lòng **LOG OUT - LOG IN** thường xuyên để kiểm tra.`,
+      `> * ${E('status_info')} *Chú ý:* Gmail bị khóa (die) trên điện thoại và PC nhiều khi không hiển thị thông báo lỗi trực tiếp.`,
+      '',
+      `### ${E('recovery_restore')} 2. CẬP NHẬT THÔNG TIN KHÔI PHỤC (Làm ngay lập tức)`,
+      '> *Sau khi login, hãy bổ sung ngay số điện thoại & mail khôi phục để tránh Google quét xác minh:*',
+      `> * ${E('icon_settings')} **Thêm Số điện thoại khôi phục (Recovery Phone):**`,
+      `>   ${E('icon_link')} [Bấm vào đây để thiết lập](https://myaccount.google.com/signinoptions/rescuephone)`,
+      `> * ${E('icon_mail')} **Thêm Email khôi phục (Recovery Gmail):**`,
+      `>   ${E('icon_link')} [Bấm vào đây để thiết lập](https://myaccount.google.com/intro/recovery/email)`,
+      '',
+      `### ${E('icon_lock')} 3. THAY ĐỔI THÔNG TIN BẢO MẬT (Nên làm sau 7 - 14 ngày)`,
+      '> *Đợi mail sống ổn định từ 7-14 ngày trên thiết bị mới rồi mới tiến hành thay đổi các thông tin sau để tránh bị Google khóa tài khoản:*',
+      `> * ${E('icon_edit')} **Thay đổi Số xác minh (Verification Phone):** Cực kỳ quan trọng - **NÊN ĐỔI + XÓA SỐ LẠ**.`,
+      `>   ${E('icon_link')} [Bấm vào đây để thay đổi](https://myaccount.google.com/phone)`,
+      `> * ${E('ticket_user')} **Xác minh khuôn mặt (Video Verification):** Giúp tăng 200% độ bảo mật cho tài khoản.`,
+      `>   ${E('icon_link')} [Bấm vào đây để xác minh](https://myaccount.google.com/video-verification/signin/precollection)`,
+      '',
+      `### ${E('status_warn')} PHÁT HIỆN THIẾT BỊ LẠ ĐĂNG NHẬP ≫ ĐỔI PASSWORD + 2FA NGAY LẬP TỨC!`,
+      '',
+      `-# ${E('panel_support')} *Nếu cần hỗ trợ thêm, bạn hãy nhắn trực tiếp tại ticket này để staff ${brandName} hỗ trợ ngay nhé!*`
+    ].join('\n'))
+    .setImage('attachment://gmail_update.png')
+    .setFooter({ text: `${brandName} — Phục Vụ Uy Tín & Tận Tâm` })
+    .setTimestamp();
+
+  return groupGmailNitroGuide(embed, attachment);
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+// Source-owned guide: sections are separated natively, while the attachment and
+// all service instructions remain available in the legacy fallback as well.
+function groupGmailNitroGuide(embed, attachment) {
+  const source = embed.toJSON();
+  const [intro, ...sections] = source.description.split(/(?=^### )/m);
+  const fields = sections.map(section => {
+    const [heading, ...lines] = section.trim().split('\n');
+    return { name: heading.replace(/^### /, ''), value: lines.join('\n').trim() };
+  });
+  const original = { embeds: [embed], files: [attachment], allowedMentions: { parse: [] } };
+  const grouped = { ...source, description: intro.trim(), fields };
+  const result = buildLegacyFeatureCard({ ...original, embeds: [grouped] });
+  // A V2 limit must not turn the original valid embed into oversized fields.
+  return result.flags & MessageFlags.IsComponentsV2 ? result : original;
+}
 
 
 export const name = Events.MessageCreate;
@@ -267,48 +325,7 @@ export async function execute(message) {
         const imagePath = path.resolve(__dirname, '../assets/gmail_update.png');
         const attachment = new AttachmentBuilder(imagePath, { name: 'gmail_update.png' });
         
-        const embedColor = message.guildId === '1282637033340403754' ? 0x7C3AED : 0xF472B6;
-        const brandName = message.guildId === '1282637033340403754' ? 'Cenar Store 1' : 'Cenar Store 2';
-
-        const embed = new EmbedBuilder()
-          .setColor(embedColor)
-          .setTitle(`${E('verify_shield')} HƯỚNG DẪN BẢO MẬT & DUY TRÌ GMAIL NITRO`)
-          .setDescription([
-            `${E('ticket_user')} Chào quý khách!`,
-            'Dưới đây là các bước **cực kỳ quan trọng** giúp bạn bảo mật tối đa tài khoản Gmail liên kết Nitro, tránh tình trạng bị quét hoặc khóa tài khoản đáng tiếc từ Google:',
-            '━━━━━━━━━━━━━━',
-            '',
-            `### ${E('icon_key')} 1. DUY TRÌ TRẠNG THÁI ĐĂNG NHẬP`,
-            `> * ${E('status_check')} Sau khi đăng nhập thành công, bạn vui lòng **LOG OUT - LOG IN** thường xuyên để kiểm tra.`,
-            `> * ${E('status_info')} *Chú ý:* Gmail bị khóa (die) trên điện thoại và PC nhiều khi không hiển thị thông báo lỗi trực tiếp.`,
-            '',
-            `### ${E('recovery_restore')} 2. CẬP NHẬT THÔNG TIN KHÔI PHỤC (Làm ngay lập tức)`,
-            '> *Sau khi login, hãy bổ sung ngay số điện thoại & mail khôi phục để tránh Google quét xác minh:*',
-            `> * ${E('icon_settings')} **Thêm Số điện thoại khôi phục (Recovery Phone):**`,
-            `>   ${E('icon_link')} [Bấm vào đây để thiết lập](https://myaccount.google.com/signinoptions/rescuephone)`,
-            `> * ${E('icon_mail')} **Thêm Email khôi phục (Recovery Gmail):**`,
-            `>   ${E('icon_link')} [Bấm vào đây để thiết lập](https://myaccount.google.com/intro/recovery/email)`,
-            '',
-            `### ${E('icon_lock')} 3. THAY ĐỔI THÔNG TIN BẢO MẬT (Nên làm sau 7 - 14 ngày)`,
-            '> *Đợi mail sống ổn định từ 7-14 ngày trên thiết bị mới rồi mới tiến hành thay đổi các thông tin sau để tránh bị Google khóa tài khoản:*',
-            `> * ${E('icon_edit')} **Thay đổi Số xác minh (Verification Phone):** Cực kỳ quan trọng - **NÊN ĐỔI + XÓA SỐ LẠ**.`,
-            `>   ${E('icon_link')} [Bấm vào đây để thay đổi](https://myaccount.google.com/phone)`,
-            `> * ${E('ticket_user')} **Xác minh khuôn mặt (Video Verification):** Giúp tăng 200% độ bảo mật cho tài khoản.`,
-            `>   ${E('icon_link')} [Bấm vào đây để xác minh](https://myaccount.google.com/video-verification/signin/precollection)`,
-            '',
-            '━━━━━━━━━━━━━━',
-            `${E('status_warn')} **PHÁT HIỆN THIẾT BỊ LẠ ĐĂNG NHẬP ≫ ĐỔI PASSWORD + 2FA NGAY LẬP TỨC!**`,
-            '',
-            `-# ${E('panel_support')} *Nếu cần hỗ trợ thêm, bạn hãy nhắn trực tiếp tại ticket này để staff ${brandName} hỗ trợ ngay nhé!*`
-          ].join('\n'))
-          .setImage('attachment://gmail_update.png')
-          .setFooter({ text: `${brandName} — Phục Vụ Uy Tín & Tận Tâm` })
-          .setTimestamp();
-
-        await message.channel.send({
-          embeds: [embed],
-          files: [attachment]
-        });
+        await message.channel.send(buildGmailNitroGuidePayload(message.guildId, attachment));
         console.log(`[Auto-Gmail-Guide] Sent safety guide for order in channel ${message.channel.name}`);
       } catch (err) {
         console.error('[Auto-Gmail-Guide-Err]', err);
