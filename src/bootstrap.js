@@ -109,7 +109,9 @@ export async function buildClient() {
     const supplierProbe = Promise.resolve().then(() => supplierAutobuyRuntime.start({
       guildId: config.guildId,
       envFile: process.env.ENV_FILE,
-      apiKey: process.env.DAIPHUC_PARTNER_API_KEY,
+      provider: process.env.SUPPLIER_AUTOBUY_PROVIDER || 'daiphuc',
+      apiKey: process.env.SUPPLIER_AUTOBUY_PROVIDER === 'dopermind'
+        ? process.env.DOPERMIND_API_KEY : process.env.DAIPHUC_PARTNER_API_KEY,
     })).catch(() => {
       console.warn('[SUPPLIER-AUTOBUY] STARTUP_PROBE_FAILED');
       return null;

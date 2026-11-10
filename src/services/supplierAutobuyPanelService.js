@@ -32,6 +32,7 @@ function checkedLine(snapshot) {
 }
 
 function stateLine(snapshot) {
+  if (snapshot?.status === 'CONNECTED' && snapshot?.provider === 'dopermind') return 'Nguồn hàng mới đã kết nối thành công. Shop đang hoàn thiện giá bán và điều kiện từng sản phẩm.';
   if (snapshot?.status === 'HTTP_OK_SCHEMA_UNVERIFIED') return 'Đã nhận phản hồi kết nối. Shop đang kiểm tra danh mục và điều kiện bán.';
   if (snapshot?.status === 'CHECKING') return 'Shop đang kiểm tra kết nối nguồn hàng.';
   return 'Shop đang hoàn thiện kết nối nguồn hàng và bảng giá.';
@@ -48,7 +49,7 @@ function containerWithTitle(title, text, accent = 0x41B899) {
 export function buildSupplierAutobuyPanel({ client, snapshot, supportChannelId } = {}) {
   const E = createEmojiResolver(STORE_ONE_GUILD_ID);
   const container = containerWithTitle(`## ${E('panel_order')} CENAR AUTOBUY`.trim(), [
-    `### ${E('status_loading')} Đang chuẩn bị mở bán`,
+    `### ${E(snapshot?.status === 'CONNECTED' ? 'status_check' : 'status_loading')} ${snapshot?.status === 'CONNECTED' ? 'Đã kết nối nguồn hàng mới' : 'Đang chuẩn bị mở bán'}`,
     stateLine(snapshot),
     '',
     'Danh mục, giá bán và bảo hành sẽ được công bố sau khi kiểm tra đầy đủ.',
@@ -69,8 +70,10 @@ export function buildSupplierAutobuyReply({ client, snapshot, action } = {}) {
   const E = createEmojiResolver(STORE_ONE_GUILD_ID);
   const catalog = action === 'catalog';
   const title = catalog ? `## ${E('icon_doc')} Danh mục đang được chuẩn bị` : `## ${E('status_loading')} Tình trạng autobuy`;
+  const count = snapshot?.status === 'CONNECTED' && Number.isSafeInteger(snapshot?.productCount) && snapshot.productCount >= 0
+    ? `Shop đã kiểm tra kết nối danh mục **${snapshot.productCount} sản phẩm**. Giá bán và điều kiện từng gói đang được hoàn thiện.\n\n` : '';
   const text = catalog
-    ? 'Shop chưa công bố sản phẩm hoặc giá bán autobuy. Giá, thời hạn và bảo hành sẽ hiển thị rõ trước khi khách xác nhận mua.\n\n**Hiện chưa nhận tiền hoặc tạo đơn ở kênh này.**'
+    ? `${count}Shop chưa công bố sản phẩm hoặc giá bán autobuy. Giá, thời hạn và bảo hành sẽ hiển thị rõ trước khi khách xác nhận mua.\n\n**Hiện chưa nhận tiền hoặc tạo đơn ở kênh này.**`
     : `${stateLine(snapshot)}\n\n${checkedLine(snapshot)}\nĐây là kết quả kiểm tra đã lưu; thao tác này không tạo giao dịch.\n\n**Autobuy chưa mở bán.**`;
   return { components: [containerWithTitle(title, text)], flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral, allowedMentions: { ...NO_MENTIONS } };
 }

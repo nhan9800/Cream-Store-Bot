@@ -43,6 +43,20 @@ function fixture({ existing = false, messages = [] } = {}) {
 beforeEach(() => { state.settings.clear(); state.emojis = true; vi.clearAllMocks(); });
 
 describe('supplier autobuy preparing panels', () => {
+  it('shows verified new-provider connection without publishing costs or accepting payments', () => {
+    const snapshot = { status: 'CONNECTED', provider: 'dopermind', productCount: 101, schemaMapped: true,
+      checkedAt: '2026-11-10T16:00:00Z', balance: 1234567, products: ['private-cost'] };
+    const payload = buildSupplierAutobuyPanel({ snapshot, supportChannelId: state.support });
+    const json = JSON.stringify(payload);
+    expect(json).toContain('Đã kết nối nguồn hàng mới');
+    expect(json).toContain('chưa nhận thanh toán');
+    expect(json).toContain('status_check');
+    const reply = JSON.stringify(buildSupplierAutobuyReply({ snapshot, action: 'catalog' }));
+    expect(reply).toContain('101 sản phẩm');
+    expect(reply).toContain('chưa nhận tiền');
+    expect(json + reply).not.toMatch(/1234567|private-cost|Bearer|sk_live/);
+    expect(payload.allowedMentions.parse).toEqual([]);
+  });
   it('uses native separators/custom emoji, no payment or invented catalog, and safe mentions', () => {
     const payload = buildSupplierAutobuyPanel({ snapshot: context.snapshot, supportChannelId: state.support });
     const json = JSON.stringify(payload);
