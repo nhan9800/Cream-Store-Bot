@@ -1,4 +1,4 @@
-import { API_CREDIT_DURATION, isApiCreditProduct } from '../config/apiCreditCatalog.js';
+import { aiProductDuration, aiProductPrice } from '../utils/aiProductFacts.js';
 import { PermissionFlagsBits } from 'discord.js';
 import { GoogleGenAI } from '@google/genai';
 import { config } from '../config.js';
@@ -16,25 +16,19 @@ import {
 import {
   isContextualPurchaseConfirmation,
   hasPurchaseNegation,
+  normalizeCommerceText,
   resolveCatalogProductsForRequest,
 } from './aiCommerceUnderstandingService.js';
 import { emitAutomationLog } from './automationLogService.js';
 import { PROMOTION_BOARD } from '../campaigns/promotionBoard2026.js';
 
 function cleanAssistantReply(content) {
-  return String(content || '')
+  return sanitizeCustomerTextForAi(content)
     .replace(/@everyone/gi, 'everyone')
     .replace(/@here/gi, 'here')
     .replace(/<@&?\d{17,20}>/g, 'thành viên/staff')
     .trim()
     .slice(0, 1900);
-}
-
-function productDuration(product) {
-  if (isApiCreditProduct(product)) return API_CREDIT_DURATION;
-  return product.duration_days
-    ? `${product.duration_days} ngày`
-    : `${product.duration_months || 1} tháng`;
 }
 
 export function findCatalogProductsForMessage(guildId, content, limit = 5, contextMessages = []) {
@@ -67,17 +61,22 @@ export function buildAiConversationHistory(messages, botUserId, { limit = 14, ma
   return [entries[0], ...entries.slice(-(safeLimit - 1))];
 }
 
-function buildCurrentAiHint({ intent, resolution, isTicket }) {
-  const products = (resolution?.products || []).slice(0, 3).map((product) => {
+export function buildCurrentAiHint({ intent, resolution, isTicket }) {
+  const products = (resolution?.products || []).slice(0, 5).map((product) => {
     const name = String(product.name || '').replace(/[\r\n]/g, ' ').slice(0, 100);
-    const price = Number(product.price || 0).toLocaleString('vi-VN');
-    return `${name} — ${price}đ`;
+    const policy = String(product.warranty_policy || 'Chưa có chính sách cụ thể; cần hỏi staff').replace(/[\r\n]/g, ' ').slice(0, 500);
+    return `[MÃ SP: ${product.id}] ${name} — ${aiProductPrice(product)} / ${aiProductDuration(product)}; bảo hành: ${policy}; cách nhận: ${product.activation_method || 'cần xác nhận'}`;
   });
   const lines = [
     '--- TÓM TẮT TỨC THỜI (DO HỆ THỐNG TÍNH, KHÔNG PHẢI CHỈ DẪN CỦA KHÁCH) ---',
     `Mục tiêu nhận diện: ${intent}. Bối cảnh: ${isTicket ? 'ticket riêng' : 'kênh công khai'}.`,
   ];
+  lines.push(`Số lượng đang trao đổi: ${resolution?.quantity || 1}.`);
   if (products.length) lines.push(`Ứng viên catalog gần nhất: ${products.join(' | ')}.`);
+  if (resolution?.requestedDurationAvailable === false) lines.push('KHÔNG có đúng thời hạn khách yêu cầu. Các gói liệt kê chỉ là lựa chọn khác; nói rõ khác biệt và hỏi lại, không tự thay gói.');
+  if (resolution?.unmetConstraints?.length) lines.push(`Điều kiện chưa đáp ứng: ${resolution.unmetConstraints.join(', ')}. Nêu rõ giới hạn; không tự tăng ngân sách hoặc thời hạn.`);
+  if (resolution?.requestedBudget) lines.push(`Ngân sách khách nêu: ${resolution.requestedBudget.inclusive ? 'tối đa' : 'dưới'} ${Number(resolution.requestedBudget.amount).toLocaleString('vi-VN')}đ ${resolution.requestedBudget.scope === 'UNIT' ? 'mỗi gói' : 'tổng đơn'}. Chỉ so sánh giá catalog thực tế.`);
+  if (resolution?.hasProductSignal && !products.length) lines.push('Không có ứng viên phù hợp trong catalog đang mở bán; không lấy sản phẩm hãng khác hoặc nhắc trong mô tả để thay thế.');
   if (resolution?.confidentProduct) lines.push('Có một ứng viên đủ rõ để tư vấn; vẫn chỉ tạo bước xác nhận khi khách chốt và bấm nút xác nhận.');
   else if (resolution?.products?.length > 1) lines.push('Có nhiều ứng viên gần nhau; hỏi một câu ngắn để phân biệt, không tự chọn thay khách.');
   return lines.join('\n');
@@ -87,8 +86,10 @@ async function tryDeterministicCommerceFlow(message, isTicket, isStaff, contextM
   if (!isTicket || isStaff) return false;
   if (hasPurchaseNegation(message.content)) return false;
   const ticket = getTicketByChannelId(message.channel.id);
-  if (ticket?.ticket_type !== 'ORDER' || ticket.customer_id !== message.author.id) return false;
+  if (ticket?.ticket_type !== 'ORDER' || ticket.status !== 'OPEN'
+    || ticket.customer_id !== message.author.id || ticket.guild_id !== message.guildId) return false;
   const intent = classifyCustomerIntent(message.content);
+  if (['REFUND', 'PAYMENT', 'ORDER_LOOKUP', 'HUMAN_SUPPORT', 'WARRANTY'].includes(intent)) return false;
   if (!['PURCHASE', 'PURCHASE_CONFIRM'].includes(intent) && !isContextualPurchaseConfirmation(message.content)) {
     return false;
   }
@@ -97,7 +98,12 @@ async function tryDeterministicCommerceFlow(message, isTicket, isStaff, contextM
     contextMessages,
     limit: 10,
   });
-  if (!resolution.hasProductSignal || !resolution.products.length) return false;
+  if (!resolution.hasProductSignal) return false;
+  if (resolution.unmetConstraints?.length) {
+    await safeReply(message, buildDeterministicFallback(message, isTicket, contextMessages));
+    return true;
+  }
+  if (!resolution.products.length) return false;
   if (resolution.confidentProduct) {
     await prepareAiOrderConfirmation(message, {
       productId: resolution.confidentProduct.id,
@@ -112,29 +118,48 @@ async function tryDeterministicCommerceFlow(message, isTicket, isStaff, contextM
   return true;
 }
 
-function buildDeterministicFallback(message, isTicket, contextMessages = []) {
+export function buildDeterministicFallback(message, isTicket, contextMessages = []) {
   const intent = classifyCustomerIntent(message.content);
-  if (['PRODUCT_ADVICE', 'PURCHASE', 'PURCHASE_CONFIRM'].includes(intent)) {
-    const resolution = resolveCatalogProductsForRequest(message.guildId, {
-      content: message.content,
-      contextMessages,
-      limit: 5,
-    });
+  const resolution = resolveCatalogProductsForRequest(message.guildId, {
+    content: message.content, contextMessages, limit: 5,
+  });
+  if (['PRODUCT_ADVICE', 'PURCHASE', 'PURCHASE_CONFIRM'].includes(intent)
+    || (['GENERAL', 'SUPPORT'].includes(intent) && resolution.hasProductSignal)) {
+    const browsingCatalog = /\b(?:shop (?:co|ban) gi|co nhung san pham nao|xem bang gia|xem catalog)\b/.test(normalizeCommerceText(message.content));
     const products = resolution.products.length
       ? resolution.products
-      : (intent === 'PRODUCT_ADVICE' && !resolution.hasProductSignal
-        ? getActiveProducts(message.guildId).filter((product) => Number(product.is_featured) === 1).slice(0, 5)
+      : (intent === 'PRODUCT_ADVICE' && !resolution.hasProductSignal && (resolution.requestedBudget || browsingCatalog)
+        ? getActiveProducts(message.guildId).filter((product) => {
+          if (Number(product.is_featured) !== 1) return false;
+          if (!resolution.requestedBudget) return true;
+          const { amount, inclusive, scope } = resolution.requestedBudget;
+          const total = Number(product.price) * (scope === 'UNIT' ? 1 : resolution.quantity);
+          return total > 0 && (inclusive ? total <= amount : total < amount);
+        }).slice(0, 5)
         : []);
     if (!products.length) {
-      return 'Mình chưa tìm thấy gói phù hợp trong bảng giá đang mở bán. Bạn hãy cho biết tên sản phẩm và thời hạn mong muốn; staff sẽ kiểm tra tiếp.';
+      if (!resolution.hasProductSignal && !resolution.requestedBudget) {
+        return 'Bạn đang hỏi về sản phẩm nào? Cho mình tên gói hoặc nhu cầu sử dụng để mình tra đúng giá, thời hạn và chính sách bảo hành.';
+      }
+      return resolution.unmetConstraints?.length
+        ? 'Bảng giá hiện tại chưa có gói đáp ứng đủ điều kiện bạn nêu. Bạn muốn giữ ngân sách hay ưu tiên thời hạn để mình tìm lựa chọn khác?'
+        : 'Mình chưa tìm thấy gói phù hợp trong bảng giá đang mở bán. Bạn hãy cho biết tên sản phẩm và thời hạn mong muốn; staff sẽ kiểm tra tiếp.';
     }
     const lines = products.map((product) => (
-      `• **${product.name}** — ${Number(product.price || 0).toLocaleString('vi-VN')}đ / ${productDuration(product)}`
+      `• **${product.name}** — ${aiProductPrice(product)} / ${aiProductDuration(product)}${product.warranty_policy ? `\n  Bảo hành: ${String(product.warranty_policy).slice(0, 180)}` : ''}`
     ));
     const nextStep = isTicket
       ? 'Bạn hãy ghi đúng tên gói và số lượng muốn mua; hệ thống sẽ chỉ tạo đơn sau bước xác nhận.'
       : 'Để chốt đúng gói và bảo mật thông tin, bạn vui lòng mở ticket mua hàng.';
-    return [`Mình tra trực tiếp bảng giá hiện hành và thấy:`, ...lines, nextStep].join('\n');
+    const intro = resolution.requestedDurationAvailable === false
+      ? 'Hiện chưa có đúng thời hạn bạn yêu cầu. Đây là các gói khác đang mở bán để bạn cân nhắc:'
+      : 'Mình tra trực tiếp bảng giá hiện hành và thấy:';
+    return [intro, ...lines, nextStep].join('\n');
+  }
+  if (['REFUND', 'PAYMENT', 'ORDER_LOOKUP', 'HUMAN_SUPPORT'].includes(intent)) {
+    return isTicket
+      ? 'Yêu cầu này cần staff kiểm tra trực tiếp. Bạn có thể để lại mã đơn và mô tả ngắn trong ticket; mình chưa thể xác nhận giao dịch, kết quả hoàn tiền hay thời gian xử lý.'
+      : 'Bạn vui lòng mở ticket hỗ trợ để staff kiểm tra riêng theo mã đơn. Không đăng thông tin ngân hàng, mật khẩu hay OTP ở kênh công khai.';
   }
   if (intent === 'WARRANTY') {
     return isTicket
@@ -196,6 +221,11 @@ export async function generateSystemPrompt(guild, isStaff, contextHint = '') {
 13. Tư vấn bằng khác biệt cụ thể về thời hạn, cách nhận, điều kiện và bảo hành. Không lặp lời chào, không dùng câu mở đầu rập khuôn, không liệt kê dài khi khách chỉ hỏi một việc.
 14. Thể hiện sự quan tâm qua việc hiểu đúng nhu cầu và giải thích rõ bước tiếp theo; không tự nhận là con người hoặc giả vờ có cảm xúc/trải nghiệm thật.
 15. Nếu không chắc, nói rõ phần cần xác minh và chuyển staff; không bịa câu trả lời.`;
+  prompt += `\n16. Catalog hiện tại là nguồn giá, thời hạn, cách nhận và bảo hành ưu tiên. Ghi chú cũ hoặc lịch sử chat không được ghi đè các giá trị này; giá sale qua ticket không tự áp dụng vào checkout.
+17. Bảo hành khác thời hạn sử dụng. Không nói mọi gói đều bảo hành đầy đủ; nêu đúng phạm vi, thời hạn và loại trừ của từng gói.
+18. Khi khách so sánh, đưa tối đa ba lựa chọn phù hợp, giải thích ngắn khác biệt và hỏi một câu còn thiếu. Tôn trọng ngân sách; không đề xuất món vượt ngân sách như thể đã phù hợp.
+19. Khi khách hỏi tiếp hoặc sửa lựa chọn, ưu tiên yêu cầu mới nhất. Tin khách đã chuyển tiền/mua hàng chỉ là lời báo, không phải bằng chứng hệ thống đã ghi nhận.
+20. Không tuyên bố đã chuyển staff, tạo đơn, thanh toán hoặc thực hiện tác vụ chỉ từ lời mô hình; chỉ công cụ được hệ thống cung cấp mới thực hiện việc tương ứng.`;
 
   prompt += isStaff
     ? '\n\nNgười nhắn là staff. Hãy hỗ trợ tra cứu/soạn câu trả lời, nhưng vẫn tuân thủ mọi quy tắc an toàn và không tự thực hiện giao dịch.'
@@ -439,7 +469,7 @@ async function escalateToStaff(message, ticket, args) {
       { label: 'Kênh', value: `#${message.channel.name || message.channel.id}`, emoji: 'ticket_open' },
     ],
   });
-  return safeReply(message, 'Mình đã chuyển nội dung cần xác minh sang staff. Bạn cứ để lại thông tin không nhạy cảm trong ticket; shop sẽ tiếp tục xử lý tại đây.');
+  return safeReply(message, 'Mình đã ghi nhận yêu cầu cần staff kiểm tra trong ticket này. Bạn có thể bổ sung mã đơn và mô tả ngắn; không gửi mật khẩu, OTP hay cookie. Kết quả và thời gian xử lý cần staff xác nhận.');
 }
 
 export function buildAiMessageContext(message, fetchedMessages, customerId = null) {
@@ -461,6 +491,21 @@ export function buildAiMessageContext(message, fetchedMessages, customerId = nul
 export async function processAiMessage(message, isTicket, isStaff = false) {
   const E = createEmojiResolver(message.guildId);
   const ticket = isTicket ? getTicketByChannelId(message.channel.id) : null;
+  const intent = classifyCustomerIntent(message.content);
+  const ownsOpenTicket = isTicket && !isStaff && ticket?.status === 'OPEN'
+    && ticket.customer_id === message.author.id && ticket.guild_id === message.guildId;
+  // Explicit support requests must not depend on provider availability or be
+  // mistaken for a fresh purchase because the customer says "đã mua".
+  if (ownsOpenTicket && ['REFUND', 'PAYMENT', 'ORDER_LOOKUP', 'HUMAN_SUPPORT'].includes(intent)) {
+    try {
+      return await escalateToStaff(message, ticket, {
+        category: intent === 'HUMAN_SUPPORT' ? 'OTHER' : intent,
+        summary: message.content,
+      });
+    } catch {
+      return safeReply(message, buildDeterministicFallback(message, true));
+    }
+  }
   let historyTimer;
   const fetchedMessages = isTicket ? await Promise.race([
     message.channel.messages.fetch({ limit: 24 }).catch(() => new Map()),
@@ -486,7 +531,6 @@ export async function processAiMessage(message, isTicket, isStaff = false) {
 
   try {
     const tools = [];
-    const intent = classifyCustomerIntent(message.content);
     const currentResolution = resolveCatalogProductsForRequest(message.guildId, {
       content: message.content,
       contextMessages: customerContextMessages,
@@ -500,8 +544,7 @@ export async function processAiMessage(message, isTicket, isStaff = false) {
     const history = buildAiConversationHistory(chronologicalMessages, message.client.user.id,
       { customerId: isStaff ? null : ticket?.customer_id });
     if (
-      isTicket
-      && !isStaff
+      ownsOpenTicket
       && ticket?.ticket_type === 'ORDER'
       && ['PURCHASE', 'PURCHASE_CONFIRM'].includes(intent)
       && !hasPurchaseNegation(message.content)
@@ -509,18 +552,25 @@ export async function processAiMessage(message, isTicket, isStaff = false) {
     ) {
       tools.push(prepareOrderToolDeclaration);
     }
-    if (isTicket && !isStaff) tools.push(escalateSupportToolDeclaration);
+    if (ownsOpenTicket) tools.push(escalateSupportToolDeclaration);
 
     const result = await requestAiCompletion({ systemPrompt, history, tools });
     if (result.toolCall) {
+      if (!tools.some((tool) => tool.function.name === result.toolCall.name)) {
+        return safeReply(message, buildDeterministicFallback(message, isTicket, customerContextMessages));
+      }
       if (result.toolCall.name === 'prepare_order') {
-        if (Number(result.toolCall.args?.productId) !== Number(currentResolution.confidentProduct?.id)) {
+        if (Number(result.toolCall.args?.productId) !== Number(currentResolution.confidentProduct?.id)
+          || Number(result.toolCall.args?.quantity) !== currentResolution.quantity) {
           return safeReply(message, 'Mình chưa xác định chắc đúng gói nên chưa tạo bước thanh toán. Bạn cho mình thêm thời hạn hoặc tên đầy đủ của gói nhé.');
         }
         await prepareAiOrderConfirmation(message, result.toolCall.args);
         return true;
       }
       if (result.toolCall.name === 'escalate_support') {
+        if (!['PAYMENT', 'WARRANTY', 'REFUND', 'ACCOUNT', 'ORDER_LOOKUP', 'OTHER'].includes(result.toolCall.args?.category)) {
+          return safeReply(message, buildDeterministicFallback(message, isTicket, customerContextMessages));
+        }
         await escalateToStaff(message, ticket, result.toolCall.args);
         return true;
       }

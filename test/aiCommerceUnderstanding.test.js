@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   extractRequestedDuration,
+  extractRequestedBudget,
   extractRequestedQuantity,
   isContextualPurchaseConfirmation,
   rankCatalogProducts,
@@ -46,6 +47,13 @@ const products = [
 ];
 
 describe('AI commerce understanding', () => {
+  it('preserves explicit budget and quantity before a same-message product correction', () => {
+    const result = rankCatalogProducts(products, { content: '2 gói Netflix ngân sách 100k, đổi sang YouTube 1 tháng' });
+    expect(result.quantity).toBe(2);
+    expect(result.requestedBudget.amount).toBe(100000);
+    expect(result.products).toEqual([]);
+    expect(result.confidentProduct).toBeNull();
+  });
   it('carries product, duration and quantity across a natural multi-turn confirmation', () => {
     const result = rankCatalogProducts(products, {
       content: 'Ok lấy gói này nhé',
@@ -68,6 +76,7 @@ describe('AI commerce understanding', () => {
 
     expect(result.products.map((product) => product.id)).toEqual([2, 4]);
     expect(result.confidentProduct).toBeNull();
+    expect(rankCatalogProducts(variants, { content: 'YouTube 3 tháng', limit: 1 }).confidentProduct).toBeNull();
   });
 
   it('does not silently choose the first duration when the customer compares two plans', () => {
@@ -153,6 +162,143 @@ describe('AI commerce understanding', () => {
     const result = rankCatalogProducts([products[0]], { content: 'Chốt YouTube 12 tháng' });
     expect(result.confidentProduct).toBeNull();
     expect(result.requestedDuration.months).toBe(12);
+    expect(result.requestedDurationAvailable).toBe(false);
+    expect(result.unmetConstraints).toContain('DURATION');
+  });
+
+  it('separates Nitro subscriptions, server boosts, decor eligibility and development services', () => {
+    const discord = [
+      { ...products[0], id: 20, name: 'Discord Nitro Boost Trial 3 Tháng', duration_months: 3 },
+      { ...products[0], id: 21, name: 'Discord Server Boost 14 Boosts (3 Tháng)', duration_months: 3 },
+      { ...products[0], id: 22, name: 'Decor Discord (Acc Có Nitro) - Gói 25k', duration_months: 0 },
+      { ...products[0], id: 23, name: 'Setup Discord Store + Bot Custom + Hosting 3 Tháng', duration_months: 3 },
+    ];
+    for (const [content, expected] of [
+      ['Nitro 3 tháng', 20], ['boost server 3 tháng', 21],
+      ['decor cho acc có Nitro', 22], ['setup Discord', 23],
+    ]) {
+      const result = rankCatalogProducts(discord, { content });
+      expect(result.products.map(({ id }) => id)).toEqual([expected]);
+      expect(result.confidentProduct?.id).toBe(expected);
+    }
+    const broad = rankCatalogProducts(discord, { content: 'Discord có gì?' });
+    expect(broad.products).toHaveLength(4);
+    expect(broad.confidentProduct).toBeNull();
+    const compare = rankCatalogProducts(discord, { content: 'Decor hay Nitro?' });
+    expect(compare.products.map(({ id }) => id).sort()).toEqual([20, 22]);
+    expect(compare.confidentProduct).toBeNull();
+  });
+
+  it('does not treat bundle benefits or comparison descriptions as product identity', () => {
+    const catalog = [
+      ...products,
+      { ...products[0], id: 30, name: 'Gemini Pro 2 Năm', description: 'Có Claude Opus và YouTube Premium 1 tháng', duration_months: 24 },
+      { ...products[0], id: 31, name: 'Claude Pro 1 Tháng', description: 'Lựa chọn thay cho ChatGPT' },
+    ];
+    expect(rankCatalogProducts(catalog, { content: 'YouTube' }).products.map(({ id }) => id)).toEqual([1, 2]);
+    expect(rankCatalogProducts(catalog, { content: 'Claude 1 tháng' }).confidentProduct?.id).toBe(31);
+    expect(rankCatalogProducts(catalog, { content: 'ChatGPT' }).products).toEqual([]);
+  });
+
+  it('recognizes Locket, Windows shorthand and bot/website requests using current names', () => {
+    const catalog = [
+      { ...products[0], id: 40, name: 'Locket Gold — 1 năm', duration_months: 12 },
+      { ...products[0], id: 41, name: 'Windows 11 / 10 Pro', duration_months: 0 },
+      { ...products[0], id: 42, name: 'Bot Booking / Bảng Giá / Store Custom', duration_months: 3 },
+      { ...products[0], id: 43, name: 'Discord Store + Bot Custom + Website Đồng Bộ', duration_months: 3 },
+    ];
+    expect(rankCatalogProducts(catalog, { content: 'Locket 1 năm' }).confidentProduct?.id).toBe(40);
+    expect(rankCatalogProducts(catalog, { content: 'win 11' }).confidentProduct?.id).toBe(41);
+    expect(rankCatalogProducts(catalog, { content: 'làm bot' }).products.map(({ id }) => id).sort()).toEqual([42, 43]);
+  });
+
+  it('keeps different named products ambiguous even if only one alternative is available', () => {
+    const result = rankCatalogProducts(products, { content: 'YouTube hay Spotify 3 tháng?' });
+    expect(result.products.map(({ id }) => id)).toEqual([2]);
+    expect(result.confidentProduct).toBeNull();
+  });
+
+  it('uses an explicit correction instead of reviving the abandoned product family', () => {
+    const result = rankCatalogProducts(products, {
+      content: 'Không lấy YouTube, đổi sang Netflix 1 tháng',
+      contextMessages: ['YouTube 3 tháng số lượng 2'],
+    });
+    expect(result.products.map(({ id }) => id)).toEqual([3]);
+    expect(result.requestedDuration.months).toBe(1);
+    expect(result.quantity).toBe(1);
+    const revised = rankCatalogProducts(products, {
+      content: 'YouTube số lượng 2 ngân sách 200k đổi sang Netflix số lượng 1 tối đa 100k',
+    });
+    expect(revised.quantity).toBe(1);
+    expect(revised.requestedBudget.amount).toBe(100000);
+    expect(revised.confidentProduct?.id).toBe(3);
+    const followup = rankCatalogProducts(products, {
+      content: 'Ok chốt', contextMessages: ['YouTube 3 tháng', 'Không lấy YouTube, đổi sang Netflix 1 tháng'],
+    });
+    expect(followup.confidentProduct?.id).toBe(3);
+  });
+
+  it('parses only explicit budget caps, including Vietnamese decimal and grouped amounts', () => {
+    expect(extractRequestedBudget('ngân sách 200k')).toEqual({ amount: 200000, inclusive: true, scope: 'TOTAL' });
+    expect(extractRequestedBudget('tối đa 1,5 triệu mỗi gói')).toEqual({ amount: 1500000, inclusive: true, scope: 'UNIT' });
+    expect(extractRequestedBudget('dưới 150.000đ')).toEqual({ amount: 150000, inclusive: false, scope: 'TOTAL' });
+    expect(extractRequestedBudget('tầm 200k')).toBeNull();
+    expect(extractRequestedBudget('gói 200k')).toBeNull();
+  });
+
+  it('filters by total budget and quantity, preserving the cap through follow-up confirmation', () => {
+    const result = rankCatalogProducts(products, { content: 'YouTube số lượng 2 ngân sách 200k' });
+    expect(result.products.map(({ id }) => id)).toEqual([1]);
+    expect(result.quantity).toBe(2);
+    expect(result.requestedBudget.amount).toBe(200000);
+    const followup = rankCatalogProducts(products, { content: 'Ok chốt',
+      contextMessages: ['YouTube số lượng 2', 'ngân sách 200k'] });
+    expect(followup.products.map(({ id }) => id)).toEqual([1]);
+    expect(followup.quantity).toBe(2);
+    const unitBudget = rankCatalogProducts(products, { content: 'YouTube số lượng 2 tối đa 150k mỗi gói' });
+    expect(unitBudget.products.map(({ id }) => id).sort()).toEqual([1, 2]);
+  });
+
+  it('returns explicit mismatch without silently exceeding budget or reviving inactive offers', () => {
+    const result = rankCatalogProducts(products, { content: 'YouTube 3 tháng dưới 150k' });
+    expect(result.products).toEqual([]);
+    expect(result.unmetConstraints).toEqual(['BUDGET']);
+    expect(result.confidentProduct).toBeNull();
+    expect(rankCatalogProducts([{ ...products[0], is_active: 0 }], { content: 'YouTube 1 tháng' }).products).toEqual([]);
+  });
+
+  it('does not infer a product from only a duration or budget without usable context', () => {
+    for (const content of ['3 tháng nhé', 'ngân sách 200k', 'gói rẻ nhất']) {
+      const result = rankCatalogProducts(products, { content });
+      expect(result.hasProductSignal).toBe(false);
+      expect(result.products).toEqual([]);
+      expect(result.confidentProduct).toBeNull();
+    }
+  });
+
+  it('retains the named product for concise price and warranty-policy follow-ups', () => {
+    const catalog = [
+      { ...products[0], id: 40, name: 'Locket Gold — 1 năm', duration_months: 12, price: 80000 },
+      { ...products[0], id: 41, name: 'Gemini Pro 2 Năm (Antigravity · BH 12 Tháng)', duration_months: 24, price: 250000 },
+    ];
+    for (const content of ['giá sao?', 'giá nhiêu?', 'bao nhiêu?', 'giá thế nào?']) {
+      const result = rankCatalogProducts(catalog, { content, contextMessages: ['Locket 1 năm'] });
+      expect(result.usedContext).toBe(true);
+      expect(result.confidentProduct?.id).toBe(40);
+      expect(result.requestedDuration.months).toBe(12);
+    }
+    for (const content of ['bh?', 'bh bao lâu?', 'bảo hành thế nào?', 'chính sách ra sao?']) {
+      const result = rankCatalogProducts(catalog, { content, contextMessages: ['Gemini Pro 2 năm giá sao?'] });
+      expect(result.usedContext).toBe(true);
+      expect(result.confidentProduct?.id).toBe(41);
+      expect(result.requestedDuration.months).toBe(24);
+    }
+    for (const content of ['bh bao lâu?', 'giá sao?', 'bao nhiêu?', 'chính sách thế nào?']) {
+      const result = rankCatalogProducts(catalog, { content });
+      expect(result.hasProductSignal).toBe(false);
+      expect(result.products).toEqual([]);
+      expect(result.confidentProduct).toBeNull();
+    }
   });
 
   it('does not mistake refusal for confirmation or infer a subscription from warranty months', () => {
