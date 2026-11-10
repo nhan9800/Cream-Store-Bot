@@ -6,7 +6,11 @@ const PRODUCT_GROUPS = Object.freeze([
   ['youtube', ['youtube', 'yt premium', 'premium youtube', 'ytb', 'yout', 'yt']],
   ['netflix', ['netflix']],
   ['spotify', ['spotify', 'spoti']],
-  ['discord', ['discord', 'nitro', 'nichu', 'boost server', 'server boost']],
+  ['discord', ['discord']],
+  ['nitro', ['nitro', 'nichu']],
+  ['boost', ['boost server', 'server boost', 'boost may chu', 'nang cap may chu']],
+  ['decor', ['decor', 'trang tri ho so', 'avatar decoration', 'profile effect', 'nameplate']],
+  ['development', ['setup discord', 'setup server', 'bot custom', 'bot booking', 'dev bot', 'lam bot', 'fix bot', 'thiet ke web', 'website', 'dev web']],
   ['chatgpt', ['chatgpt', 'chat gpt', 'gpt plus', 'gpt']],
   ['gemini', ['gemini', 'google one']],
   ['capcut', ['capcut']],
@@ -15,6 +19,8 @@ const PRODUCT_GROUPS = Object.freeze([
   ['claude', ['claude']],
   ['adobe', ['adobe']],
   ['gearup', ['gearup', 'booster']],
+  ['locket', ['locket', 'locket gold']],
+  ['windows', ['windows', 'win 10', 'win 11']],
 ]);
 
 const GENERIC_TOKENS = new Set([
@@ -37,16 +43,48 @@ export function normalizeCommerceText(value) {
 
 function signaledGroups(value) {
   const text = normalizeCommerceText(value);
-  return PRODUCT_GROUPS
+  let groups = PRODUCT_GROUPS
     .filter(([, aliases]) => aliases.some((alias) => ` ${text} `.includes(` ${normalizeCommerceText(alias)} `)))
     .map(([group]) => group);
+  // "Decor cho acc có Nitro" describes the decoration's eligibility, not a
+  // request for a Nitro subscription. Generic Discord alone remains broad.
+  if (groups.includes('decor') && /\b(?:acc|tai khoan)\s+(?:da\s+)?(?:co|khong|chua(?: co)?)\s+nitro\b/.test(text)) {
+    groups = groups.filter((group) => group !== 'nitro');
+  }
+  if (groups.some((group) => ['nitro', 'boost', 'decor', 'development'].includes(group))) {
+    groups = groups.filter((group) => group !== 'discord');
+  }
+  return groups;
 }
 
 function productMatchesGroup(product, group) {
   if (group === 'api_credit') return isApiCreditProduct(product);
-  const text = normalizeCommerceText(`${product.name} ${product.description || ''} ${product.service_type || ''}`);
-  const aliases = PRODUCT_GROUPS.find(([name]) => name === group)?.[1] || [group];
-  return aliases.some((alias) => ` ${text} `.includes(` ${normalizeCommerceText(alias)} `));
+  if (isApiCreditProduct(product)) return false;
+  // Identity must come from the product itself. Benefits/descriptions can
+  // mention other brands (Gemini includes Claude models or YouTube bonuses).
+  const groups = signaledGroups(product.name);
+  if (group === 'discord') return groups.some((name) => ['discord', 'nitro', 'boost', 'decor', 'development'].includes(name));
+  if (groups.includes('decor')) return group === 'decor';
+  return groups.includes(group);
+}
+
+function selectionText(value) {
+  // A direct correction replaces the previous choice. Leave general
+  // comparisons intact rather than guessing which half the customer prefers.
+  return String(value || '').split(/(?:đổi sang|doi sang|chuyển sang|chuyen sang|thay bằng|thay bang)\s+/i).at(-1);
+}
+
+export function extractRequestedBudget(value) {
+  const text = String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/gi, 'd').toLowerCase();
+  const match = text.match(/\b(ngan sach(?: cua minh)?(?: la| chi co)?|toi da|khong qua|duoi)\s*[:=]?\s*(\d+(?:[.,]\d+)*)\s*(trieu|tr|k|nghin|ngan|vnd|dong|d)\b/);
+  if (!match) return null;
+  const [, qualifier, digits, unit] = match;
+  const isMillion = ['trieu', 'tr'].includes(unit);
+  const isThousand = ['k', 'nghin', 'ngan'].includes(unit);
+  const numeric = Number(isMillion || isThousand ? digits.replace(',', '.') : digits.replace(/[.,]/g, ''));
+  const amount = numeric * (isMillion ? 1_000_000 : isThousand ? 1_000 : 1);
+  if (!Number.isFinite(amount) || amount <= 0 || amount > 1_000_000_000) return null;
+  return { amount, inclusive: qualifier !== 'duoi', scope: /\b(?:moi goi|moi acc|moi tai khoan|mot goi)\b/.test(text) ? 'UNIT' : 'TOTAL' };
 }
 
 function extractExplicitRequestedQuantity(content) {
@@ -105,8 +143,8 @@ function durationText(content) {
 
 export function isCommerceFollowup(content) {
   const text = normalizeCommerceText(content);
-  return Boolean(extractRequestedDurations(text).length || extractExplicitRequestedQuantity(text))
-    || /\b(?:goi nay|goi do|cai nay|cai do|nhu tren|chinh chu|cap acc|cap tai khoan|bao hanh|khong bh|full bh)\b/.test(text);
+  return Boolean(extractRequestedDurations(text).length || extractExplicitRequestedQuantity(text) || extractRequestedBudget(content))
+    || /\b(?:goi nay|goi do|cai nay|cai do|nhu tren|chinh chu|cap acc|cap tai khoan|bao hanh|bh|re nhat|re hon|gia sao|gia the nao|gia ra sao|gia nhieu|gia nhiu|bao nhieu|may tien|chinh sach the nao|chinh sach ra sao)\b/.test(text);
 }
 
 export function isContextualPurchaseConfirmation(content) {
@@ -145,13 +183,14 @@ function requestedApiCredit(value) {
  * message refers to a prior recommendation such as "ok, lấy gói này".
  */
 export function rankCatalogProducts(products, { content, contextMessages = [], limit = 5 } = {}) {
-  const current = normalizeCommerceText(content);
+  const selectedContent = selectionText(content);
+  const current = normalizeCommerceText(selectedContent);
   const currentGroups = signaledGroups(current);
   const currentDuration = extractRequestedDuration(current);
   const currentDurationOptions = extractRequestedDurations(current);
   const canUseContext = currentGroups.length === 0 && (
     isContextualPurchaseConfirmation(current)
-    || isCommerceFollowup(current)
+    || isCommerceFollowup(content)
     || /\b(?:goi nay|cai nay|goi do|cai do|nhu tren)\b/.test(current)
   );
 
@@ -161,10 +200,13 @@ export function rankCatalogProducts(products, { content, contextMessages = [], l
   let contextQuantity = null;
   let contextCredit = null;
   let contextDurationOptions = [];
+  let contextBudget = null;
   if (canUseContext) {
     for (const item of [...contextMessages].reverse().slice(0, 8)) {
-      const normalized = normalizeCommerceText(item);
+      const selectedText = selectionText(item);
+      const normalized = normalizeCommerceText(selectedText);
       if (hasPurchaseNegation(normalized)) break;
+      if (!contextBudget) contextBudget = extractRequestedBudget(selectedText);
       if (contextQuantity === null) contextQuantity = extractExplicitRequestedQuantity(normalized);
       if (!contextDurationOptions.length) {
         contextDurationOptions = extractRequestedDurations(normalized);
@@ -173,7 +215,7 @@ export function rankCatalogProducts(products, { content, contextMessages = [], l
       const groups = signaledGroups(normalized);
       if (!groups.length) continue;
       context = normalized;
-      contextCredit = requestedApiCredit(item);
+      contextCredit = requestedApiCredit(selectedText);
       contextGroups = groups;
       break;
     }
@@ -181,13 +223,15 @@ export function rankCatalogProducts(products, { content, contextMessages = [], l
 
   const signaled = currentGroups.length ? currentGroups : contextGroups;
   const groups = signaled.includes('api_credit') ? ['api_credit'] : signaled;
-  const credit = requestedApiCredit(content) ?? contextCredit;
+  const credit = requestedApiCredit(selectedContent) ?? contextCredit;
   const duration = currentDuration.days || currentDuration.months ? currentDuration : contextDuration;
+  const quantity = extractExplicitRequestedQuantity(selectedContent) || extractExplicitRequestedQuantity(content) || contextQuantity || 1;
+  const budget = extractRequestedBudget(selectedContent) || extractRequestedBudget(content) || contextBudget;
   const tokenSource = [currentGroups.length ? current : '', context].filter(Boolean).join(' ');
   const tokens = usefulTokens(tokenSource);
-  const normalizedCurrent = normalizeCommerceText(content);
+  const normalizedCurrent = current;
 
-  let ranked = (Array.isArray(products) ? products : []).map((product) => {
+  let ranked = (Array.isArray(products) ? products : []).filter((product) => Number(product.is_active ?? 1) === 1).map((product) => {
     const productText = normalizeCommerceText(`${product.name} ${product.description || ''} ${product.service_type || ''}`);
     const normalizedName = normalizeCommerceText(product.name);
     let score = 0;
@@ -198,13 +242,14 @@ export function rankCatalogProducts(products, { content, contextMessages = [], l
     }
     score += tokens.filter((token) => productText.includes(token)).length * 12;
     if (Number(product.is_featured) === 1) score += 2;
-    return { product, score };
+    return { product, score, identityMatched: Boolean(normalizedName && normalizedCurrent.includes(normalizedName))
+      || tokens.some((token) => productText.includes(token)) };
   });
 
   if (groups.length) {
     ranked = ranked.filter(({ product }) => groups.some((group) => productMatchesGroup(product, group)));
   } else {
-    ranked = ranked.filter(({ score }) => score > 2);
+    ranked = ranked.filter(({ identityMatched }) => identityMatched);
   }
   // When a customer compares plans ("1 tháng hay 3 tháng"), retaining only
   // the first duration would make the assistant appear decisive while
@@ -227,21 +272,37 @@ export function rankCatalogProducts(products, { content, contextMessages = [], l
     ranked = ranked.filter(({ product }) => Number(product.quota_value) === credit);
     for (const item of ranked) item.score += 180;
   }
+  const unmetConstraints = [];
+  if (!requestedDurationAvailable) unmetConstraints.push('DURATION');
+  if (budget) {
+    const beforeBudget = ranked.length;
+    ranked = ranked.filter(({ product }) => {
+      const amount = Number(product.price) * (budget.scope === 'UNIT' ? 1 : quantity);
+      return Number.isFinite(amount) && amount > 0 && (budget.inclusive ? amount <= budget.amount : amount < budget.amount);
+    });
+    if (beforeBudget && !ranked.length) unmetConstraints.push('BUDGET');
+  }
+  const cheapestRequested = /\b(?:re nhat|gia thap nhat)\b/.test(current);
   ranked.sort((left, right) => right.score - left.score
     || Number(right.product.is_featured || 0) - Number(left.product.is_featured || 0)
     || Number(left.product.sort_order || 0) - Number(right.product.sort_order || 0)
     || Number(left.product.id || 0) - Number(right.product.id || 0));
+  if (cheapestRequested) ranked.sort((left, right) => Number(left.product.price) - Number(right.product.price));
 
   const selected = ranked.slice(0, Math.max(1, Math.min(10, Number(limit) || 5)));
   const first = selected[0];
-  const second = selected[1];
-  const confident = !hasConflictingDuration && requestedDurationAvailable
+  const second = ranked[1];
+  const confident = groups.length <= 1 && !hasConflictingDuration && requestedDurationAvailable
     && Boolean(first && first.score >= 100 && (!second || first.score - second.score >= 40));
   return {
     products: selected.map(({ product }) => product),
     confidentProduct: confident ? first.product : null,
-    quantity: extractExplicitRequestedQuantity(content) || contextQuantity || 1,
+    quantity,
     requestedDuration: duration,
+    requestedDurationAvailable,
+    hasConflictingDuration,
+    requestedBudget: budget,
+    unmetConstraints,
     usedContext: Boolean(context),
     hasProductSignal: groups.length > 0,
   };

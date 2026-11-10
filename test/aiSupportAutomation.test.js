@@ -58,7 +58,80 @@ describe('AI support automation safety', () => {
     expect(classifyCustomerIntent('Shop ơi, mình đang phân vân YouTube 1 hay 3 tháng, tư vấn giúp mình với')).toBe('PRODUCT_ADVICE');
     expect(classifyCustomerIntent('ytb 3 tháng giá sao shop?')).toBe('PRODUCT_ADVICE');
     expect(classifyCustomerIntent('Mình muốn mua gói này, nhưng chưa chốt thời hạn')).toBe('PURCHASE');
-    expect(classifyCustomerIntent('Mình đã chuyển khoản rồi, kiểm tra giúp mình với')).toBe('SUPPORT');
+    expect(classifyCustomerIntent('Mình đã chuyển khoản rồi, kiểm tra giúp mình với')).toBe('PAYMENT');
+  });
+
+  it.each([
+    ['Mình đã chốt Nitro hôm qua, hoàn tiền giúp mình', 'REFUND'],
+    ['Xin refund đơn CN_123456, không lấy gói nữa', 'REFUND'],
+    ['Bao giờ shop hoàn tiền cho đơn đã mua?', 'REFUND'],
+    ['Shop chưa hoàn tiền cho mình', 'REFUND'],
+    ['Tôi đã chuyển khoản mua Nitro, kiểm tra giao dịch giúp', 'PAYMENT'],
+    ['em ck roi, len don luc nay sao chua nhan?', 'PAYMENT'],
+    ['Thanh toán lỗi nhưng đã trừ tiền', 'PAYMENT'],
+    ['QR hết hạn, lấy gói Canva thế nào?', 'PAYMENT'],
+    ['Đơn CN_123456 xử lý tới đâu rồi?', 'ORDER_LOOKUP'],
+    ['Tôi đã chốt Locket 1 năm rồi', 'ORDER_LOOKUP'],
+    ['Check đơn Nitro, bao giờ giao hàng?', 'ORDER_LOOKUP'],
+    ['Cho mình gặp nhân viên, mình muốn mua Nitro', 'HUMAN_SUPPORT'],
+    ['Chuyển sang staff giúp mình với', 'HUMAN_SUPPORT'],
+    ['Mình cần nói chuyện với người thật', 'HUMAN_SUPPORT'],
+  ])('routes an existing request instead of preparing another order: %s', (content, intent) => {
+    expect(classifyCustomerIntent(content)).toBe(intent);
+    expect(hasExplicitPurchaseConfirmation(content)).toBe(false);
+    expect(shouldAiReplyInTicket({
+      author: { id: 'customer' }, content, client: { user: { id: 'bot' } },
+    }, { status: 'OPEN', customer_id: 'customer' })).toBe(true);
+  });
+
+  it.each([
+    ['Locket có bảo hành không?', 'PRODUCT_ADVICE'],
+    ['Nếu Gemini bị quét thì có được bảo hành không?', 'PRODUCT_ADVICE'],
+    ['Nếu tài khoản bị khóa có được hoàn tiền không?', 'PRODUCT_ADVICE'],
+    ['Chính sách refund thế nào?', 'PRODUCT_ADVICE'],
+    ['Locket của mình bị mất gói rồi', 'WARRANTY'],
+    ['win 11 loi khong dung duoc', 'WARRANTY'],
+    ['Gemini đang bị quét, có được bảo hành không?', 'WARRANTY'],
+    ['spoti acc die roi shop', 'WARRANTY'],
+    ['Mình đã thanh toán YouTube tuần trước, hôm nay bị out fam', 'WARRANTY'],
+    ['Đơn CN_123456 bảo hành YouTube bị out fam xử lý tới đâu?', 'WARRANTY'],
+    ['Cho mình Locket Gold 12 tháng', 'PURCHASE'],
+    ['Chốt Windows 11 Pro cho mình', 'PURCHASE_CONFIRM'],
+    ['Mình muốn mua thêm Canva', 'PURCHASE'],
+    ['Locket giá sao?', 'PRODUCT_ADVICE'],
+    ['win 11 bao nhiêu tiền?', 'PRODUCT_ADVICE'],
+    ['Nitro tối đa 100k', 'PRODUCT_ADVICE'],
+    ['Locket dưới 90k', 'PRODUCT_ADVICE'],
+    ['Canva không quá 200k', 'PRODUCT_ADVICE'],
+    ['Giá sao?', 'PRODUCT_ADVICE'],
+    ['gia sao shop', 'PRODUCT_ADVICE'],
+    ['Mình có cần gọi admin để thanh toán không?', 'SUPPORT'],
+    ['Không cần gặp staff, cho mình hỏi Locket giá sao?', 'PRODUCT_ADVICE'],
+    ['Không muốn refund, cho mình hỏi Locket giá sao?', 'PRODUCT_ADVICE'],
+    ['Chưa muốn hoàn tiền, cho mình hỏi Locket giá sao?', 'PRODUCT_ADVICE'],
+    ['internet hôm nay chậm ghê', 'GENERAL'],
+  ])('distinguishes a policy or new purchase from an actual fault: %s', (content, intent) => {
+    expect(classifyCustomerIntent(content)).toBe(intent);
+  });
+
+  it('redacts labelled credentials and common API key formats while retaining the order reference', () => {
+    const credentialText = [
+      'CN_123456 mình bị lỗi đăng nhập',
+      'Authorization: Bearer syntheticBearerCredential',
+      'access_token: syntheticAccessCredential',
+      'refresh-token="syntheticRefreshCredential"',
+      'api_key=syntheticApiCredential',
+      'client_secret: syntheticClientSecret',
+      'Cookie: session=syntheticSession; other=syntheticCookie',
+      'sk-proj-syntheticKeyValue1234567890',
+      'gsk_syntheticKeyValue1234567890',
+      'AIzaSyntheticKeyValue1234567890',
+    ].join('\n');
+    const sanitized = sanitizeCustomerTextForAi(credentialText);
+    expect(sanitized).toContain('CN_123456');
+    expect(sanitized).toContain('mình bị lỗi đăng nhập');
+    expect(sanitized).not.toMatch(/synthetic/i);
+    expect(sanitized).toContain('[COOKIE ĐÃ ẨN]');
   });
 
   it('extracts only supported Cenar order codes', () => {
@@ -145,6 +218,19 @@ describe('AI support automation safety', () => {
     expect(selection).toContain('ai:support:order_select:88:2');
     expect(selection).toContain('YouTube Premium 3 Tháng');
     expect(selection).toContain('YouTube Premium 6 Tháng');
+  });
+
+  it.each([
+    [{ name: 'Windows 11 Pro Vĩnh Viễn', service_type: 'windows', duration_months: null }, 'Vĩnh viễn'],
+    [{ name: 'Bot Custom + Hosting 3 tháng', service_type: 'service', duration_months: null }, 'Theo phạm vi dự án'],
+    [{ name: 'CapCut Pro 7 ngày', service_type: 'capcut', duration_days: 7 }, '7 ngày'],
+  ])('shows the product duration without inventing a monthly subscription: %o', (facts, duration) => {
+    const product = { id: 7, price: 120_000, is_active: 1, ...facts };
+    const confirmation = JSON.stringify(buildAiOrderConfirmationPayload({
+      guildId: GUILD_ID, ticket: { id: 88 }, product,
+    }));
+    expect(confirmation).toContain(duration);
+    expect(confirmation).not.toContain('1 tháng');
   });
 
   it('limits proactive public replies to configured channels and meaningful intent', () => {

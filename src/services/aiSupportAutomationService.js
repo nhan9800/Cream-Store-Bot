@@ -1,4 +1,4 @@
-import { API_CREDIT_DURATION, isApiCreditProduct } from '../config/apiCreditCatalog.js';
+import { aiProductDuration } from '../utils/aiProductFacts.js';
 import {
   ActionRowBuilder,
   ButtonBuilder,
@@ -40,11 +40,11 @@ const PRODUCT_HINT_GROUPS = Object.freeze([
   // Customers commonly shorten YouTube to "ytb" in Discord. Keep the
   // shorthand here so a price/advice question still reaches the commerce
   // resolver instead of falling through to a generic support reply.
-  ['youtube', ['youtube', 'yt premium', 'ytb', 'yout']],
+  ['youtube', ['youtube', 'yt premium', 'ytb', 'yout', 'yt']],
   ['netflix', ['netflix', 'net']],
-  ['spotify', ['spotify', 'spot']],
-  ['discord', ['discord', 'nitro', 'boost server']],
-  ['chatgpt', ['chatgpt', 'chat gpt', 'gpt plus']],
+  ['spotify', ['spotify', 'spot', 'spoti']],
+  ['discord', ['discord', 'nitro', 'nichu', 'boost server', 'server boost', 'decor']],
+  ['chatgpt', ['chatgpt', 'chat gpt', 'gpt plus', 'gpt']],
   ['gemini', ['gemini', 'google one']],
   ['capcut', ['capcut']],
   ['canva', ['canva']],
@@ -52,6 +52,9 @@ const PRODUCT_HINT_GROUPS = Object.freeze([
   ['claude', ['claude']],
   ['adobe', ['adobe']],
   ['gearup', ['gearup', 'booster']],
+  ['locket', ['locket', 'locket gold']],
+  ['windows', ['windows', 'win 10', 'win 11']],
+  ['development', ['thiet ke website', 'design website', 'setup server', 'bot custom', 'dev bot', 'dev web']],
 ]);
 
 function normalize(value) {
@@ -100,15 +103,50 @@ export function extractOrderCode(content) {
 }
 
 export function classifyCustomerIntent(content) {
-  const text = normalize(content);
+  const text = normalize(content).replace(/[^a-z0-9_?]+/g, ' ').replace(/\s+/g, ' ').trim();
   if (!text.trim()) return 'GENERAL';
-  const productMentioned = PRODUCT_HINT_GROUPS.some(([, hints]) => hints.some((hint) => text.includes(hint)));
+  const productMentioned = PRODUCT_HINT_GROUPS.some(([, hints]) => hints.some((hint) => ` ${text} `.includes(` ${hint} `)));
+  // Support requests take precedence over words such as "mua" or "chot" in
+  // the customer's description of an existing order. None of these intents
+  // is evidence that a payment, refund or warranty has been approved.
+  const humanRequest = /\b(?:gap|noi chuyen voi|chuyen (?:cho|toi|sang)|goi|nho)\s+(?:staff|admin|nhan vien|nguoi that)\b/;
+  const humanRequestText = text
+    .replace(/\b(?:khong|chua|dung|khoan|co can|co phai)\s+(?:can\s+)?(?:gap|noi chuyen voi|chuyen (?:cho|toi|sang)|goi|nho)\s+(?:staff|admin|nhan vien|nguoi that)\b/g, '');
+  if (humanRequest.test(humanRequestText)) return 'HUMAN_SUPPORT';
+
+  const refundText = text.replace(/\b(?:(?:khong|dung|khoan)\s+(?:(?:muon|can|yeu cau|doi)\s+)?|chua\s+(?:muon|can|yeu cau|doi)\s+)(?:hoan tien|refund|tra lai tien|tra tien lai)\b/g, '');
+  const refundSignal = /\b(?:hoan tien|refund|tra lai tien|tra tien lai)\b/.test(refundText);
+  const refundPolicy = /\b(?:chinh sach (?:hoan tien|refund)|(?:hoan tien|refund) (?:the nao|ra sao)|co (?:duoc )?(?:hoan tien|refund))\b/.test(refundText)
+    || (/\b(?:neu|gia su)\b/.test(refundText) && refundSignal);
+  const refundRequest = /\b(?:muon|can|xin|yeu cau|doi|nho|hay)\s+(?:shop\s+)?(?:hoan tien|refund|tra lai tien)\b/.test(refundText)
+    || /\b(?:hoan tien|refund|tra lai tien)\s+(?:cho|giup|dum|minh|em|toi|don)\b/.test(refundText)
+    || /\b(?:chua|cham|doi|bao gio|khi nao)\b.*\b(?:hoan tien|refund)\b/.test(refundText);
+  if (refundSignal && (refundRequest || !refundPolicy)) return 'REFUND';
+
+  const paymentProblem = /\b(?:tru tien|chuyen nham|chuyen thieu|chuyen du|thanh toan (?:loi|that bai)|loi thanh toan|qr (?:loi|het han)|quet qr khong duoc)\b/.test(text)
+    || /\b(?:kiem tra|check)\s+(?:giao dich|thanh toan|chuyen khoan)\b/.test(text);
+  if (paymentProblem) return 'PAYMENT';
+  const paymentSignal = /\b(?:da|vua)\s+(?:chuyen khoan|ck|bank|thanh toan)\b/.test(text)
+    || /\b(?:chuyen khoan|ck|bank|thanh toan)\s+(?:xong|roi)\b/.test(text)
+    || /\b(?:chuyen khoan|thanh toan)\s+chua (?:nhan|cap nhat|xac nhan)\b/.test(text);
+  const orderStatusSignal = /\b(?:tra don|kiem tra don|check don|tien do|trang thai don|don hang (?:den dau|the nao)|bao gio (?:giao|nhan|co) hang|khi nao (?:giao|nhan|co) hang|chua (?:giao|nhan duoc) hang)\b/.test(text)
+    || /\b(?:don (?:nay|cua minh|cua em|cua toi)|cn_\d{6}|cr_\d{6})\b.*\b(?:den dau|xong chua|xu ly|giao chua|cho lau|sao roi)\b/.test(text)
+    || /^(?:ma don )?(?:cn|cr)_\d{6}$/.test(text);
+
   const warrantyPolicyQuestion = /\b(?:bao hanh|bh)\b/.test(text)
-    && /chinh sach|bao lau|the nao|ra sao|may (ngay|thang|gio|tieng)|co (?:duoc )?bao hanh|full bh|khong bh|(?:bao hanh|bh)\s+\d+\s+(?:ngay|thang|gio|tieng)/.test(text);
-  const actualFault = /mat premium|bi out|out fam|het han som|sai (pass|mat khau)|khong dang nhap|tai khoan (loi|die|hong)|bi khoa/.test(text)
-    || (productMentioned && /\bloi\b|\bhong\b|khong dung duoc|khong vao duoc|mat quyen/.test(text.replace(/\bquyen loi\b/g, ' ')));
+    && /chinh sach|bao lau|the nao|ra sao|may (ngay|thang|gio|tieng)|co (?:duoc )?(?:bao hanh|bh)|full bh|khong bh|(?:bao hanh|bh)\s+\d+\s+(?:ngay|thang|gio|tieng)/.test(text);
+  const hypotheticalFault = (warrantyPolicyQuestion || refundPolicy) && /\b(?:neu|lo|gia su|trong truong hop)\b/.test(text)
+    && !/\b(?:da|dang|vua|hom qua|hom nay|hien tai)\b/.test(text);
+  const actualFault = !hypotheticalFault && (/mat premium|bi out|out fam|het han som|sai (pass|mat khau)|khong dang nhap|(?:tai khoan|acc) (loi|die|hong)|bi khoa|bi quet|mat goi/.test(text)
+    || (productMentioned && /\bloi\b|\bhong\b|\bdie\b|khong dung duoc|khong vao duoc|mat quyen/.test(text.replace(/\bquyen loi\b/g, ' '))));
   const warrantySignal = (!warrantyPolicyQuestion && /bao hanh/.test(text)) || actualFault;
   if (warrantySignal) return 'WARRANTY';
+  if (paymentSignal) return 'PAYMENT';
+  if (orderStatusSignal) return 'ORDER_LOOKUP';
+  if (refundPolicy) return 'PRODUCT_ADVICE';
+  // A retrospective statement is not an instruction to order a second time.
+  if (/\b(?:da|hom qua|hom truoc)\s+(?:chot|mua|dat mua|lay goi|len don)\b/.test(text)
+    && !/\b(?:muon|can)\s+mua (?:them|tiep)\b/.test(text)) return 'ORDER_LOOKUP';
   // A customer can mention a confirmation word while explicitly saying they
   // have not decided yet (for example, "chưa chốt thời hạn"). Treat that as
   // an open purchase conversation so the bot asks one useful follow-up
@@ -119,9 +157,9 @@ export function classifyCustomerIntent(content) {
   if (unresolvedConfirmation && !/\b(?:muon mua|can mua)\b/.test(text)) return productMentioned ? 'PRODUCT_ADVICE' : 'SUPPORT';
   if (/\b(muon mua|can mua|mua goi|dat hang|dat giup|lay giup)\b/.test(text)
     || (productMentioned && /\bcho minh\b/.test(text) && !/\bcho minh hoi\b/.test(text))) return 'PURCHASE';
-  if (warrantyPolicyQuestion || /gia bao nhieu|bao nhieu tien|con hang|goi nao|san pham nao|bang gia/.test(text)
+  if (warrantyPolicyQuestion || /gia bao nhieu|gia sao|bao nhieu tien|con hang|goi nao|san pham nao|bang gia|ngan sach/.test(text)
     || /tu van/.test(text)
-    || (productMentioned && /gia|mua|thang|goi|bao nhieu/.test(text))) return 'PRODUCT_ADVICE';
+    || (productMentioned && /gia|mua|thang|goi|bao nhieu|\b(?:toi da|duoi|khong qua)\b/.test(text))) return 'PRODUCT_ADVICE';
   if (/shop oi|ho tro|giup|minh hoi|cho hoi|lam sao|the nao|tai sao|khong biet/.test(text) || /\?$/.test(text.trim())) return 'SUPPORT';
   return 'GENERAL';
 }
@@ -132,6 +170,10 @@ export function hasExplicitPurchaseConfirmation(content) {
 
 export function sanitizeCustomerTextForAi(content) {
   return String(content || '')
+    .replace(/\b(?:authorization\s*[:=]\s*)?bearer\s+[a-z0-9._~+\/-]+=*/gi, '[TOKEN ĐÃ ẨN]')
+    .replace(/\b(?:cookie|set-cookie)\s*[:=]\s*[^\r\n]+/gi, '[COOKIE ĐÃ ẨN]')
+    .replace(/\b(?:access[_ -]?token|refresh[_ -]?token|token|api[_ -]?key|client[_ -]?secret|session[_ -]?(?:id|token))\s*["']?\s*[:=]\s*["']?[^\s"',;]+/gi, '[THÔNG TIN XÁC THỰC ĐÃ ẨN]')
+    .replace(/\b(?:sk-(?:proj-)?[a-z0-9_-]{16,}|gsk_[a-z0-9_-]{16,}|AIza[a-z0-9_-]{20,})\b/gi, '[API KEY ĐÃ ẨN]')
     .replace(/https?:\/\/\S+/gi, '[LIÊN KẾT ĐÃ ẨN]')
     .replace(/[a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,}/gi, '[EMAIL ĐÃ ẨN]')
     .replace(/\b(password|pass|mật khẩu|mat khau)\s*[:=]\s*\S+/gi, '$1: [ĐÃ ẨN]')
@@ -324,10 +366,7 @@ function resolveOrderProduct(guildId, productId) {
 }
 
 function productDurationLabel(product) {
-  if (isApiCreditProduct(product)) return API_CREDIT_DURATION;
-  return product.duration_days
-    ? `${product.duration_days} ngày`
-    : `${product.duration_months || 1} tháng`;
+  return aiProductDuration(product);
 }
 
 function productQuoteRevision(product) {
