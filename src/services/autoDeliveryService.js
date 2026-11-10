@@ -107,6 +107,10 @@ function reserveItems(order, routing) {
 
 export async function deliverPaidOrder(client, orderCode) {
   if (!client?.users) return { delivered: false };
+  if (getOrderByCode(orderCode)?.fulfillment_mode === 'SUPPLIER') {
+    const { fulfillSupplierOrder } = await import('./supplierAutobuyOrderService.js');
+    return fulfillSupplierOrder(client, orderCode);
+  }
   const lease = randomUUID();
   let reservation;
   try {
@@ -215,6 +219,7 @@ export async function processPendingDeliveries(client, limit = 10) {
     WHERE f.status IN ('PENDING', 'WAITING_STOCK', 'FAILED', 'SENDING')
       AND f.retry_at <= ? AND (f.lease_until IS NULL OR f.lease_until <= ?)
       AND o.payment_status = 'PAID' AND o.status = 'PROCESSING'
+      AND COALESCE(o.fulfillment_mode,'LEGACY') != 'SUPPLIER'
     ORDER BY f.retry_at LIMIT ?`).all(now, now, limit);
   for (const { order_code: orderCode } of pending) {
     try {

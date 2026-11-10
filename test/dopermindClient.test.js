@@ -23,7 +23,7 @@ afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); });
 describe('Dopermind fixed-origin read-only transport', () => {
   it('exposes only balance and stock operations and performs no work on construction', () => {
     const { client, fetchImpl } = setup({});
-    expect(Object.keys(client).sort()).toEqual(['getBalance', 'getStock']);
+    expect(Object.keys(client).sort()).toEqual(['createOrder', 'getBalance', 'getStock']);
     expect(Object.isFrozen(client)).toBe(true);
     expect(fetchImpl).not.toHaveBeenCalled();
   });

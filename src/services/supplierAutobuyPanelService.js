@@ -1,6 +1,7 @@
 import {
   ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, ContainerBuilder,
   MessageFlags, PermissionFlagsBits, SeparatorBuilder, SeparatorSpacingSize, TextDisplayBuilder,
+  StringSelectMenuBuilder,
 } from 'discord.js';
 import { db } from '../database/db.js';
 import { createEmojiResolver, withButtonEmoji } from '../utils/emojiHelper.js';
@@ -32,6 +33,7 @@ function checkedLine(snapshot) {
 }
 
 function stateLine(snapshot) {
+  if (snapshot?.purchasesEnabled === true) return 'Chọn gói phù hợp, kiểm tra điều kiện rồi thanh toán. Hàng được giao riêng cho đúng tài khoản đặt mua.';
   if (snapshot?.status === 'CONNECTED' && snapshot?.provider === 'dopermind') return 'Nguồn hàng mới đã kết nối thành công. Shop đang hoàn thiện giá bán và điều kiện từng sản phẩm.';
   if (snapshot?.status === 'HTTP_OK_SCHEMA_UNVERIFIED') return 'Đã nhận phản hồi kết nối. Shop đang kiểm tra danh mục và điều kiện bán.';
   if (snapshot?.status === 'CHECKING') return 'Shop đang kiểm tra kết nối nguồn hàng.';
@@ -48,12 +50,13 @@ function containerWithTitle(title, text, accent = 0x41B899) {
 
 export function buildSupplierAutobuyPanel({ client, snapshot, supportChannelId } = {}) {
   const E = createEmojiResolver(STORE_ONE_GUILD_ID);
+  const opened = snapshot?.purchasesEnabled === true;
   const container = containerWithTitle(`## ${E('panel_order')} CENAR AUTOBUY`.trim(), [
-    `### ${E(snapshot?.status === 'CONNECTED' ? 'status_check' : 'status_loading')} ${snapshot?.status === 'CONNECTED' ? 'Đã kết nối nguồn hàng mới' : 'Đang chuẩn bị mở bán'}`,
+    `### ${E(snapshot?.status === 'CONNECTED' || opened ? 'status_check' : 'status_loading')} ${opened ? 'Chọn gói · Thanh toán · Nhận hàng riêng' : snapshot?.status === 'CONNECTED' ? 'Đã kết nối nguồn hàng mới' : 'Đang chuẩn bị mở bán'}`,
     stateLine(snapshot),
     '',
-    'Danh mục, giá bán và bảo hành sẽ được công bố sau khi kiểm tra đầy đủ.',
-    '**Kênh hiện chưa nhận thanh toán hoặc tạo đơn autobuy.**',
+    opened ? 'Giá, thời hạn, hình thức tài khoản và bảo hành được ghi rõ trước khi bạn xác nhận.' : 'Danh mục, giá bán và bảo hành sẽ được công bố sau khi kiểm tra đầy đủ.',
+    opened ? '**Bấm Danh mục & giá để bắt đầu.**' : '**Kênh hiện chưa nhận thanh toán hoặc tạo đơn autobuy.**',
   ].join('\n'));
   container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
   container.addTextDisplayComponents(new TextDisplayBuilder().setContent(`-# ${E('status_info')} ${checkedLine(snapshot)}\n-# Các đơn đang có vẫn được shop hỗ trợ theo chính sách đã mua.`));
@@ -66,7 +69,7 @@ export function buildSupplierAutobuyPanel({ client, snapshot, supportChannelId }
   return { components: [container, row], flags: MessageFlags.IsComponentsV2 | MessageFlags.SuppressNotifications, allowedMentions: { ...NO_MENTIONS } };
 }
 
-export function buildSupplierAutobuyReply({ client, snapshot, action } = {}) {
+export function buildSupplierAutobuyReply({ client, snapshot, action, customerId } = {}) {
   const E = createEmojiResolver(STORE_ONE_GUILD_ID);
   const catalog = action === 'catalog';
   const title = catalog ? `## ${E('icon_doc')} Danh mục đang được chuẩn bị` : `## ${E('status_loading')} Tình trạng autobuy`;
@@ -74,8 +77,158 @@ export function buildSupplierAutobuyReply({ client, snapshot, action } = {}) {
     ? `Shop đã kiểm tra kết nối danh mục **${snapshot.productCount} sản phẩm**. Giá bán và điều kiện từng gói đang được hoàn thiện.\n\n` : '';
   const text = catalog
     ? `${count}Shop chưa công bố sản phẩm hoặc giá bán autobuy. Giá, thời hạn và bảo hành sẽ hiển thị rõ trước khi khách xác nhận mua.\n\n**Hiện chưa nhận tiền hoặc tạo đơn ở kênh này.**`
-    : `${stateLine(snapshot)}\n\n${checkedLine(snapshot)}\nĐây là kết quả kiểm tra đã lưu; thao tác này không tạo giao dịch.\n\n**Autobuy chưa mở bán.**`;
-  return { components: [containerWithTitle(title, text)], flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral, allowedMentions: { ...NO_MENTIONS } };
+    : `${stateLine(snapshot)}\n\n${checkedLine(snapshot)}\nĐây là kết quả kiểm tra đã lưu; thao tác này không tạo giao dịch.\n\n**${snapshot?.purchasesEnabled === true ? 'Autobuy đã sẵn sàng. Xem giá và điều kiện trước khi mua.' : 'Autobuy chưa mở bán.'}**`;
+  const components = [containerWithTitle(title, text)];
+  if (ownerId(customerId)) components.push(row(button(`supplier-autobuy:orders:${customerId}`, 'Đơn của tôi', 'icon_doc')));
+  return { components, flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral, allowedMentions: { ...NO_MENTIONS } };
+}
+
+const PAGE_SIZE = 8;
+const ownerId = value => typeof value === 'string' && /^\d{17,20}$/.test(value);
+const identifier = value => typeof value === 'string' && /^[A-Za-z0-9_.:-]{1,100}$/.test(value);
+const clean = (value, limit = 200) => String(value ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, limit);
+const markdown = (value, limit = 200) => clean(value, limit).replace(/@/g, '＠').replace(/([\\`*_{}\[\]()#+\-.!>|~])/g, '\\$1');
+const money = amount => Number.isSafeInteger(amount) && amount >= 0 ? `${new Intl.NumberFormat('vi-VN').format(amount)}đ` : 'Đang cập nhật';
+const priceOf = offer => offer?.unitPriceVnd ?? offer?.priceVnd;
+function productIcon(name) {
+  const value = clean(name, 500).toLowerCase();
+  for (const [pattern, slot] of [[/capcut/, 'brand_capcut'], [/adobe/, 'brand_adobe'], [/chatgpt|gpt/, 'brand_chatgpt'], [/spotify/, 'brand_spotify'], [/gemini/, 'brand_gemini'], [/office/, 'brand_office']]) if (pattern.test(value)) return slot;
+  if (/vpn|proxy/.test(value)) return 'icon_key';
+  if (/udemy|coursera|duolingo|autodesk/.test(value)) return 'icon_book';
+  if (/zoom/.test(value)) return 'icon_group';
+  if (/grok|perplexity|elevenlabs|wispr/.test(value)) return 'icon_brain';
+  return 'icon_doc';
+}
+function categoryIcon(name) {
+  const value = clean(name, 100).normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  if (/vpn|bao mat|security/.test(value)) return 'icon_key';
+  if (/ai|tri tue/.test(value)) return 'icon_brain';
+  if (/sang tao|creative|design/.test(value)) return 'icon_art';
+  if (/hoc|education|learning/.test(value)) return 'icon_book';
+  if (/office|van phong|productivity/.test(value)) return 'brand_office';
+  if (/giai tri|entertainment|stream/.test(value)) return 'icon_gift';
+  return 'icon_settings';
+}
+function selectEmoji(E, slot) { const emoji = E.component?.(slot); return emoji ? { emoji } : {}; }
+const validOffer = offer => typeof offer?.productKey === 'string' && /^[A-Za-z0-9_.-]{1,100}$/.test(offer.productKey) && clean(offer?.name).length > 0
+  && Number.isSafeInteger(priceOf(offer)) && priceOf(offer) > 0 && offer.available === true;
+const privatePayload = components => ({ components, flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral, allowedMentions: { ...NO_MENTIONS } });
+const button = (id, label, slot = 'icon_doc', style = ButtonStyle.Secondary) => {
+  const E = createEmojiResolver(STORE_ONE_GUILD_ID);
+  return withButtonEmoji(new ButtonBuilder().setCustomId(id).setLabel(label).setStyle(style), E(slot));
+};
+const row = (...buttons) => new ActionRowBuilder().addComponents(buttons);
+const nav = customerId => row(button(`supplier-autobuy:page:${customerId}:0:0`, 'Danh mục', 'icon_store'), button(`supplier-autobuy:orders:${customerId}`, 'Đơn của tôi', 'icon_doc'));
+function requireOwner(customerId) { if (!ownerId(customerId)) throw new Error('INVALID_CUSTOMER'); }
+
+export function buildSupplierCatalogView({ catalog, customerId, page = 0, category = 0 } = {}) {
+  requireOwner(customerId);
+  const E = createEmojiResolver(STORE_ONE_GUILD_ID);
+  const offers = Array.isArray(catalog?.offers) ? catalog.offers.filter(validOffer) : [];
+  const categories = [...new Set(offers.map(offer => clean(offer.category, 60) || 'Khác'))].sort().slice(0, 24);
+  const categoryIndex = Number.isInteger(category) && category >= 0 && category <= categories.length ? category : 0;
+  const filtered = categoryIndex === 0 ? offers : offers.filter(offer => (clean(offer.category, 60) || 'Khác') === categories[categoryIndex - 1]);
+  const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const currentPage = Number.isInteger(page) ? Math.max(0, Math.min(page, pages - 1)) : 0;
+  const visible = filtered.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
+  const text = visible.length ? visible.map(offer => `${E(productIcon(offer.name))} **${markdown(offer.name, 90)}**\n${E('icon_price')} **${money(priceOf(offer))}** · ${markdown(offer.termLabel || 'Xem điều kiện gói', 65)}`).join('\n\n')
+    : 'Chưa có gói phù hợp còn hàng. Bạn có thể quay lại sau hoặc tạo ticket để shop kiểm tra.';
+  const container = containerWithTitle(`## ${E('icon_store')} Chọn gói bạn cần`, `${text}\n\n-# Trang ${currentPage + 1}/${pages} · ${filtered.length} gói đang có hàng. Giá và tồn kho được kiểm tra lại trước khi tạo đơn.`);
+  const components = [container];
+  if (categories.length > 1) {
+    components.push(new ActionRowBuilder().addComponents(new StringSelectMenuBuilder()
+      .setCustomId(`supplier-autobuy:category:${customerId}`).setPlaceholder('Lọc theo nhu cầu')
+      .addOptions([{ label: 'Tất cả sản phẩm', value: '0', default: categoryIndex === 0, ...selectEmoji(E, 'icon_store') },
+        ...categories.map((name, index) => ({ label: clean(name, 100), value: String(index + 1), default: categoryIndex === index + 1, ...selectEmoji(E, categoryIcon(name)) }))])));
+  }
+  if (visible.length) {
+    components.push(new ActionRowBuilder().addComponents(new StringSelectMenuBuilder()
+      .setCustomId(`supplier-autobuy:select:${customerId}`).setPlaceholder('Chọn sản phẩm để xem điều kiện')
+      .addOptions(visible.map(offer => ({ label: clean(offer.name, 100), value: offer.productKey,
+        description: `${money(priceOf(offer))} · ${clean(offer.warrantyLabel || 'Xem bảo hành', 55)}`.slice(0, 100), ...selectEmoji(E, productIcon(offer.name)) })))));
+  }
+  const controls = [];
+  if (currentPage > 0) controls.push(button(`supplier-autobuy:page:${customerId}:${categoryIndex}:${currentPage - 1}`, 'Trang trước', 'icon_prev'));
+  if (currentPage + 1 < pages) controls.push(button(`supplier-autobuy:page:${customerId}:${categoryIndex}:${currentPage + 1}`, 'Trang sau', 'icon_next'));
+  controls.push(button(`supplier-autobuy:orders:${customerId}`, 'Đơn của tôi', 'icon_doc'));
+  components.push(row(...controls));
+  return privatePayload(components);
+}
+
+export function buildSupplierQuoteView({ quote, customerId, manager = false } = {}) {
+  requireOwner(customerId);
+  if (!identifier(quote?.quoteId) || !identifier(quote?.productKey)) throw new Error('INVALID_QUOTE');
+  const E = createEmojiResolver(STORE_ONE_GUILD_ID);
+  const expiry = Date.parse(quote.expiresAt);
+  const text = [
+    `### ${markdown(quote.productName, 150)}`,
+    `${E('icon_price')} **${money(quote.totalPriceVnd)}** · ${Number.isSafeInteger(quote.quantity) ? quote.quantity : 1} sản phẩm`,
+    `${E('icon_duration')} Thời hạn: **${markdown(quote.termLabel || 'Theo mô tả gói', 100)}**`,
+    `${E('panel_warranty')} Bảo hành: ${markdown(quote.warrantyLabel || 'Chưa có thông tin', 160)}`,
+    `${E('ticket_user')} Hình thức: ${markdown(quote.accountForm || 'Xem mô tả gói', 130)}`,
+    quote.comparisonDisclosure ? `-# ${markdown(quote.comparisonDisclosure, 240)}` : '',
+    Number.isFinite(expiry) ? `-# Báo giá hết hạn <t:${Math.floor(expiry / 1000)}:R>. Nếu giá hoặc tồn kho thay đổi, shop sẽ yêu cầu bạn xem lại.` : '',
+    '**Kiểm tra đúng gói và điều kiện trước khi xác nhận tạo đơn.**',
+  ].filter(Boolean).join('\n\n');
+  const controls = [button(`supplier-autobuy:confirm:${customerId}:${quote.quoteId}`, 'Xác nhận tạo đơn', 'icon_cart', ButtonStyle.Success)];
+  const quantityId = `supplier-autobuy:qty:${customerId}:${quote.productKey}`;
+  if (quantityId.length <= 100) controls.push(button(quantityId, 'Đổi số lượng', 'icon_edit'));
+  const priceId = `supplier-autobuy:editprice:${customerId}:${quote.productKey}`;
+  if (manager && priceId.length <= 100) controls.push(button(priceId, 'Admin · Sửa giá', 'panel_edit'));
+  return privatePayload([containerWithTitle(`## ${E('status_info')} Kiểm tra gói đã chọn`, text), row(...controls), nav(customerId)]);
+}
+
+const STATUSES = Object.freeze({ PENDING_PAYMENT: 'Chờ thanh toán', UNPAID: 'Chờ thanh toán', PROCESSING: 'Đang xử lý', PAID: 'Đã thanh toán', COMPLETED: 'Đã hoàn thành', DELIVERED: 'Đã giao hàng', READY: 'Có hàng để nhận', UNKNOWN: 'Đang đối soát với nguồn', RECONCILING: 'Đang đối soát với nguồn', REVIEW_REQUIRED: 'Shop đang kiểm tra', REVIEW: 'Shop đang kiểm tra đơn', BLOCKED: 'Shop đang kiểm tra đơn', WAITING_STOCK: 'Đang chờ nguồn bổ sung hàng', WAITING_SUPPLIER_FUNDS: 'Shop đang xử lý nguồn hàng', SUBMITTING: 'Đang lấy hàng', PURCHASED: 'Đã có hàng · Đang giao riêng', DELIVERY_PENDING: 'Đang chờ gửi hàng riêng', DELIVERING: 'Đang gửi hàng riêng', PENDING: 'Đang chờ lấy hàng', FAILED: 'Cần shop hỗ trợ', CANCELLED: 'Đã hủy', REFUNDED: 'Đã hoàn tiền' });
+function orderCodeOf(order) { return order?.orderCode ?? order?.order_code; }
+function publicOrderText(order, nameLimit = 150) {
+  const terminal = ['COMPLETED', 'CANCELLED', 'REFUNDED'].includes(order?.status);
+  const paid = ['PAID', 'FREE'].includes(order?.paymentStatus ?? order?.payment_status);
+  const status = (terminal ? STATUSES[order.status] : paid ? STATUSES[order?.deliveryStatus] : null) || STATUSES[order?.status] || 'Đang cập nhật';
+  const name = order?.productName ?? order?.product_name ?? 'Đơn autobuy';
+  const amount = order?.totalPriceVnd ?? order?.totalAmount ?? order?.total_amount;
+  return `**${markdown(name, nameLimit)}**\nMã đơn: \`${orderCodeOf(order)}\`\nTổng tiền: **${money(amount)}**\nTrạng thái: **${status}**`;
+}
+
+export function buildSupplierOrderView({ order, customerId, payment = null } = {}) {
+  requireOwner(customerId);
+  const code = orderCodeOf(order) ?? payment?.orderCode;
+  if (!/^CN_\d{6,12}$/.test(code || '')) throw new Error('INVALID_ORDER');
+  const E = createEmojiResolver(STORE_ONE_GUILD_ID);
+  const text = `${publicOrderText({ ...order, orderCode: code })}\n\n${payment?.paid ? 'Thanh toán đã được ghi nhận. Bạn có thể bấm Nhận hàng để xem kết quả hoặc quay lại khi hệ thống xử lý xong.' : 'Thanh toán cho đúng mã đơn. Mọi lần kiểm tra và nhận lại hàng đều sử dụng đơn này.'}`;
+  const controls = [];
+  const unpaid = !payment?.paid && !['PAID', 'FREE'].includes(order?.paymentStatus ?? order?.payment_status)
+    && !['COMPLETED', 'REFUNDED', 'CANCELLED'].includes(order?.status);
+  if (unpaid) controls.push(button(`supplier-autobuy:pay:${customerId}:${code}:payos`, 'Thanh toán QR / PayOS', 'payment_payos', ButtonStyle.Primary),
+    button(`supplier-autobuy:pay:${customerId}:${code}:wallet`, 'Dùng ví Cenar', 'icon_wallet'));
+  const link = payment?.checkoutUrl;
+  if (typeof link === 'string') {
+    let url;
+    try { url = new URL(link); } catch { url = null; }
+    if (url?.protocol === 'https:' && ['pay.payos.vn', 'payos.vn'].includes(url.hostname) && !url.username && !url.password) {
+      controls.push(withButtonEmoji(new ButtonBuilder().setLabel('Mở trang thanh toán').setStyle(ButtonStyle.Link).setURL(url.href), E('payment_payos')));
+    }
+  }
+  controls.push(button(`supplier-autobuy:order:${customerId}:${code}`, 'Kiểm tra đơn', 'icon_refresh'),
+    button(`supplier-autobuy:delivery:${customerId}:${code}`, 'Nhận hàng riêng', 'icon_gift'));
+  return privatePayload([containerWithTitle(`## ${E('panel_order')} Đơn autobuy của bạn`, text), row(...controls), nav(customerId)]);
+}
+
+export function buildSupplierOrderListView({ orders, customerId } = {}) {
+  requireOwner(customerId);
+  const E = createEmojiResolver(STORE_ONE_GUILD_ID);
+  const safe = Array.isArray(orders) ? orders.filter(order => /^CN_\d{6,12}$/.test(orderCodeOf(order) || '')).slice(0, 10) : [];
+  const text = safe.length ? safe.map(order => publicOrderText(order, 70)).join('\n\n') : 'Bạn chưa có đơn autobuy. Vào Danh mục để chọn gói và xem điều kiện.';
+  const components = [containerWithTitle(`## ${E('icon_doc')} Đơn autobuy của tôi`, text)];
+  if (safe.length) components.push(new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId(`supplier-autobuy:orderselect:${customerId}`)
+    .setPlaceholder('Chọn đơn để kiểm tra hoặc nhận hàng').addOptions(safe.map(order => ({ label: orderCodeOf(order), value: orderCodeOf(order), description: clean(order.productName ?? order.product_name ?? 'Đơn autobuy', 100) })))));
+  components.push(nav(customerId));
+  return privatePayload(components);
+}
+
+export function buildSupplierNoticeView({ title = 'Thông tin autobuy', text, customerId, warning = false } = {}) {
+  requireOwner(customerId);
+  const E = createEmojiResolver(STORE_ONE_GUILD_ID);
+  return privatePayload([containerWithTitle(`## ${E(warning ? 'status_warn' : 'status_check')} ${markdown(title, 100)}`, markdown(text, 1200), warning ? 0xDDAA55 : 0x41B899), nav(customerId)]);
 }
 
 function readSetting(name) { return db.prepare('SELECT value FROM system_settings WHERE key = ?').get(`${PREFIX}${name}`)?.value ?? null; }

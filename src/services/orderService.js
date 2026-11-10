@@ -342,6 +342,7 @@ export function queueOrderDelivery(orderCode) {
   db.prepare(`INSERT INTO order_fulfillments (order_code, retry_at, updated_at)
     SELECT order_code, ?, ? FROM orders
     WHERE order_code = ? AND payment_status = 'PAID' AND status = 'PROCESSING'
+      AND COALESCE(fulfillment_mode,'LEGACY') != 'SUPPLIER'
       AND delivered_at IS NULL
     ON CONFLICT(order_code) DO NOTHING`).run(timestamp, timestamp, orderCode);
 }
@@ -414,6 +415,12 @@ export function payOrderWithWallet({ orderCode, guildId, customerId, amount }) {
     }
     if (ensureAmountValue(order.total_amount) !== safeAmount) {
       throw new WalletPaymentError('AMOUNT_MISMATCH', 'Giá đơn hàng đã thay đổi. Vui lòng thử lại.');
+    }
+    if (order.fulfillment_mode === 'SUPPLIER') {
+      // A PayOS invoice and a wallet debit must not race for the same supplier
+      // order. The dedicated checkout chooses one method durably first.
+      const method = db.prepare('SELECT method FROM supplier_autobuy_payment_methods WHERE order_code=?').get(orderCode);
+      if (method?.method !== 'WALLET') throw new WalletPaymentError('PAYMENT_METHOD_LOCKED', 'Vui lòng thanh toán từ bảng AutoBuy của đơn này.');
     }
 
     const existingPayment = db.prepare(`

@@ -36,6 +36,8 @@ import { startCoreEmojiMaintenance, getCoreEmojiPackStatus } from './services/co
 import { refreshBotInterfaces } from './services/botInterfaceRefreshService.js';
 import { pauseAutomaticMarketing } from './services/marketingPauseService.js';
 import { supplierAutobuyRuntime } from './services/supplierAutobuyRuntime.js';
+import { getSupplierOffers, supplierSalesConfigured } from './services/supplierAutobuyCatalogService.js';
+import { startSupplierAutobuyWorker } from './services/supplierAutobuyOrderService.js';
 import { ensureSupplierAutobuyChannel } from './services/supplierAutobuyPanelService.js';
 
 export async function buildClient() {
@@ -116,6 +118,15 @@ export async function buildClient() {
       console.warn('[SUPPLIER-AUTOBUY] STARTUP_PROBE_FAILED');
       return null;
     });
+    const supplierSalesSetup = supplierProbe.then(async snapshot => {
+      if (!supplierSalesConfigured()) return snapshot;
+      const catalog = await getSupplierOffers();
+      const worker = await startSupplierAutobuyWorker(readyClient);
+      return supplierAutobuyRuntime.setSalesEnabled(worker.workerRunning === true && catalog.offers.some(offer => offer.available));
+    }).catch(() => {
+      console.warn('[SUPPLIER-AUTOBUY] SALES_NOT_READY');
+      return supplierAutobuyRuntime.setSalesEnabled(false);
+    });
 
     // Chỉ một tiến trình giữ được cổng HTTP production mới được chạy
     // scheduler. Điều này loại bỏ cửa sổ vài giây mà một bot trùng phiên có
@@ -129,7 +140,7 @@ export async function buildClient() {
     const iconSetup=startCoreEmojiMaintenance(readyClient,{guildId:config.guildId,afterSync:refreshBotInterfaces});
     // The owner requested this dedicated channel. Persist and reuse its one
     // panel; other marketing and price-board publication stays paused.
-    void Promise.all([supplierProbe, iconSetup]).then(([snapshot]) => {
+    void Promise.all([supplierSalesSetup, iconSetup]).then(([snapshot]) => {
       if (getCoreEmojiPackStatus(readyClient).status !== 'ready') return;
       return ensureSupplierAutobuyChannel(readyClient, {
         guildId: config.guildId, envFile: process.env.ENV_FILE, snapshot,

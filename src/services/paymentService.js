@@ -207,6 +207,21 @@ async function renderPaymentQrImage(order) {
 export async function createOrLoadPayOSLink(order) {
   assertPaymentConfig();
 
+  const supplierCode = order.orderCode ?? order.order_code;
+  const persisted = typeof supplierCode === 'string' ? getOrderByCode(supplierCode) : null;
+  if (order.fulfillment_mode === 'SUPPLIER' || persisted?.fulfillment_mode === 'SUPPLIER') {
+    const methodTable = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='supplier_autobuy_payment_methods'").get();
+    const chosen = methodTable && db.prepare('SELECT method FROM supplier_autobuy_payment_methods WHERE order_code=?').get(supplierCode);
+    if (!persisted || chosen?.method !== 'PAYOS' || persisted.status !== 'PENDING_PAYMENT' || persisted.payment_status !== 'UNPAID') {
+      const error = new Error('Vui lòng dùng phương thức thanh toán đã chọn trong bảng AutoBuy.');
+      error.code = 'PAYMENT_METHOD_LOCKED'; throw error;
+    }
+    const { validateSupplierOrderForPayment } = await import('./supplierAutobuyOrderService.js');
+    await validateSupplierOrderForPayment({ guildId: persisted.guild_id, customerId: persisted.customer_id, orderCode: supplierCode });
+    // Use the immutable server order, never a caller-supplied amount/name.
+    order = persisted;
+  }
+
   const payment_link_id = order.paymentLinkId ?? order.payment_link_id;
   const payment_checkout_url = order.paymentCheckoutUrl ?? order.payment_checkout_url;
   const order_code = order.orderCode ?? order.order_code;
@@ -303,6 +318,11 @@ export function buildVietQRUrl({ bankBin, accountNo, amount, content, accountNam
 export async function sendVietQRPayment({ guild, orderCode }) {
   const order = getOrderByCode(orderCode);
   if (!order) throw new Error('Không tìm thấy đơn hàng.');
+  if (order.fulfillment_mode === 'SUPPLIER') {
+    const error = new Error('Đơn AutoBuy cần thanh toán bằng phương thức đã chọn trong bảng AutoBuy.');
+    error.code = 'PAYMENT_METHOD_LOCKED';
+    throw error;
+  }
   if (!(Number(order.total_amount) > 0)) throw new Error('Đơn này không có số tiền cần thanh toán.');
   if (order.payment_status === 'PAID') throw new Error('Đơn này đã thanh toán rồi.');
 
@@ -453,6 +473,13 @@ export async function regeneratePaymentQr({ guild, orderCode }) {
 
   const current = getOrderByCode(orderCode);
   if (!current) throw new Error('Không tìm thấy đơn hàng.');
+  // An uncertain supplier invoice must retain its existing payment identity.
+  // The dedicated checkout can reload it after checking source funds.
+  if (current.fulfillment_mode === 'SUPPLIER') {
+    const error = new Error('Vui lòng kiểm tra hóa đơn hiện có trong bảng AutoBuy.');
+    error.code = 'PAYMENT_METHOD_LOCKED';
+    throw error;
+  }
   if (!(Number(current.total_amount) > 0)) throw new Error('Đơn này không có số tiền cần thanh toán.');
   if (current.payment_status === 'PAID') throw new Error('Đơn này đã thanh toán rồi.');
 
@@ -705,15 +732,23 @@ export async function syncPaymentStatusFromPayOS({ client, orderCode = null, pay
     return { order: result.updated, state: 'PAID', synced: true, repairedNotification: needsNotificationRepair };
   }
 
-  if (state === 'CANCELLED' && order.status === 'PENDING_PAYMENT') {
-    const updated = setOrderStatus(order.order_code, 'CANCELLED');
+  if (['CANCELLED', 'EXPIRED'].includes(state) && order.status === 'PENDING_PAYMENT') {
+    // Only an authoritative matching provider result releases a pending order.
+    // A webhook may have committed payment while this lookup was in flight.
+    const updated = db.transaction(() => {
+      const fresh = getOrderByCode(order.order_code);
+      return fresh?.status === 'PENDING_PAYMENT' && fresh.payment_status === 'UNPAID'
+        && Number(fresh.payos_order_code) === Number(info.orderCode)
+        && (!fresh.payment_link_id || String(fresh.payment_link_id) === String(info.id || ''))
+        ? setOrderStatus(order.order_code, 'CANCELLED') : null;
+    }).immediate();
     if (updated && client?.guilds?.fetch) {
       const guild = await client.guilds.fetch(updated.guild_id).catch(() => null);
       if (guild) {
         await updateOrderLogMessage(guild, updated).catch(() => null);
       }
     }
-    return { order: updated, state, synced: true };
+    return { order: updated || getOrderByCode(order.order_code), state, synced: Boolean(updated) };
   }
 
   return { order, state, synced: false };
