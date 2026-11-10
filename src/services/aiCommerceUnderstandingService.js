@@ -1,5 +1,6 @@
 import { getActiveProducts } from './productCatalogService.js';
 import { isApiCreditProduct } from '../config/apiCreditCatalog.js';
+import { aiProductSubscriptionDuration } from '../utils/aiProductFacts.js';
 
 const PRODUCT_GROUPS = Object.freeze([
   ['api_credit', ['codex', 'api claude', 'claude api', 'api credit', 'credit api', 'api codex']],
@@ -137,6 +138,7 @@ function durationText(content) {
   return normalizeCommerceText(content)
     .replace(/\b(\d{1,2})\s*t\b/g, '$1 thang')
     .replace(/\b(\d{1,2})\s*(?:y|yr)\b/g, '$1 nam')
+    .replace(/\bgiu\s+(?:mail|email)\s+(?:toi thieu\s+)?\d{1,3}\s*(?:ngay|days?|thang|months?)\b/g, ' ')
     .replace(/\b(?:bh|bao hanh)\s+(?:trong\s+)?\d{1,3}\s*(?:ngay|day|days|thang|month|months|nam|year|years)\b/g, ' ')
     .replace(/\b(\d{1,3})\s+(?:hay|hoac)\s+(\d{1,3})\s+(ngay|thang|nam|months?|years?|days?)\b/g, '$1 $3 hay $2 $3');
 }
@@ -166,8 +168,9 @@ function usefulTokens(value) {
 }
 
 function productDurationMatches(product, duration) {
-  if (duration.days) return Number(product.duration_days) === duration.days;
-  if (duration.months) return !product.duration_days && Number(product.duration_months ?? 1) === duration.months;
+  const actual = aiProductSubscriptionDuration(product);
+  if (duration.days) return actual.days === duration.days;
+  if (duration.months) return !actual.days && actual.months === duration.months;
   return false;
 }
 
@@ -260,8 +263,10 @@ export function rankCatalogProducts(products, { content, contextMessages = [], l
   let requestedDurationAvailable = true;
   if (hasConflictingDuration) {
     const options = currentDurationOptions.length ? currentDurationOptions : contextDurationOptions;
-    ranked = ranked.filter(({ product }) => options.includes(product.duration_days
-      ? `d:${Number(product.duration_days)}` : `m:${Number(product.duration_months ?? 1)}`));
+    ranked = ranked.filter(({ product }) => {
+      const actual = aiProductSubscriptionDuration(product);
+      return options.includes(actual.days ? `d:${actual.days}` : `m:${actual.months}`);
+    });
   }
   if ((duration.days || duration.months) && !hasConflictingDuration) {
     const exactDuration = ranked.filter(({ product }) => productDurationMatches(product, duration));

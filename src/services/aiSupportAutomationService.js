@@ -1,4 +1,4 @@
-import { aiProductDuration } from '../utils/aiProductFacts.js';
+import { aiProductDuration, aiProductSubscriptionDuration } from '../utils/aiProductFacts.js';
 import {
   ActionRowBuilder,
   ButtonBuilder,
@@ -493,6 +493,7 @@ async function createVerifiedOrderFromInteraction(interaction, ticket, product, 
     throw new Error(`Ticket đã có đơn ${existing.order_code} đang xử lý.`);
   }
   const total = Number(product.price) * quantity;
+  const effectiveDays = aiProductSubscriptionDuration(product).days;
   const order = createOrder({
     guildId: interaction.guildId,
     ticketId: ticket.id,
@@ -504,8 +505,8 @@ async function createVerifiedOrderFromInteraction(interaction, ticket, product, 
     quantity,
     note: `AI hỗ trợ · catalog #${product.id} · khách xác nhận bằng nút`,
     totalAmount: total,
-    durationMonths: product.duration_months ?? 1,
-    durationDays: product.duration_days || null,
+    durationMonths: effectiveDays ? 0 : (product.duration_months ?? 1),
+    durationDays: effectiveDays || null,
     orderLogChannelId: guildConfig.order_log_channel_id,
     createdById: interaction.client.user.id,
   });

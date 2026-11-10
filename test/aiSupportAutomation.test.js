@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   buildAiOrderConfirmationPayload,
   buildAiProductSelectionPayload,
@@ -8,13 +8,23 @@ import {
   extractOrderCode,
   evaluateCatalogOrderQuote,
   hasExplicitPurchaseConfirmation,
+  handleAiSupportInteraction,
   matchWarrantyOrders,
+  prepareAiOrderConfirmation,
   sanitizeCustomerTextForAi,
   shouldAiReplyInPublic,
   shouldAiReplyInTicket,
 } from '../src/services/aiSupportAutomationService.js';
 import { canTicketAiRespond } from '../src/services/ticketService.js';
 import { buildAiConversationHistory, buildAiMessageContext, getConfiguredAiProviders } from '../src/services/aiService.js';
+import * as orderService from '../src/services/orderService.js';
+import * as ticketService from '../src/services/ticketService.js';
+import * as productCatalogService from '../src/services/productCatalogService.js';
+import * as guildConfigService from '../src/services/guildConfigService.js';
+import * as paymentService from '../src/services/paymentService.js';
+import * as staffLogService from '../src/services/staffLogService.js';
+import * as orderEmbeds from '../src/utils/embeds.js';
+import * as orderFormatters from '../src/utils/formatters.js';
 
 const GUILD_ID = '1282637033340403754';
 
@@ -231,6 +241,60 @@ describe('AI support automation safety', () => {
     }));
     expect(confirmation).toContain(duration);
     expect(confirmation).not.toContain('1 tháng');
+  });
+
+  it.each([
+    [154, 'CapCut Pro 7 Ngày (2 Thiết Bị - Cấp Acc)', 'AI', 1, null, 0, 7],
+    [153, 'CapCut Pro 1 Tháng (2 Thiết Bị - Cấp Acc)', 'AI', 1, null, 1, null],
+    [184, 'Setup Discord + Hosting 3 Tháng', 'SERVICE', 3, null, 3, null],
+    [119, 'Decor Discord Gói 25k', 'decor', 1, null, 1, null],
+  ])('creates the confirmed SKU %i with its effective day plan and unchanged commercial values', async (
+    id, name, serviceType, rawMonths, rawDays, orderMonths, orderDays,
+  ) => {
+    const ticket = { id: 800 + id, guild_id: GUILD_ID, channel_id: `synthetic-ticket-${id}`,
+      customer_id: `synthetic-customer-${id}`, ticket_type: 'ORDER', status: 'OPEN' };
+    const product = { id, name, service_type: serviceType, guild_id: 'WEB', is_active: 1,
+      price: 15000, duration_months: rawMonths, duration_days: rawDays };
+    const create = vi.spyOn(orderService, 'createOrder').mockReturnValue({
+      order_code: 'CN_123456', product_name: name, total_amount: 30000,
+    });
+    const qr = vi.spyOn(paymentService, 'sendOrRefreshPaymentQr').mockResolvedValue({});
+    vi.spyOn(orderService, 'getLatestOrderByTicketChannel').mockReturnValue(null);
+    vi.spyOn(orderService, 'saveOrderLogMessage').mockReturnValue(true);
+    vi.spyOn(orderService, 'getQueuePosition').mockReturnValue({ position: 1, total: 1 });
+    vi.spyOn(ticketService, 'getTicketById').mockReturnValue(ticket);
+    vi.spyOn(ticketService, 'getTicketByChannelId').mockReturnValue(ticket);
+    vi.spyOn(productCatalogService, 'getProductById').mockReturnValue(product);
+    vi.spyOn(guildConfigService, 'getGuildConfig').mockReturnValue({ order_log_channel_id: 'synthetic-log' });
+    vi.spyOn(staffLogService, 'emitStaffLog').mockResolvedValue({});
+    vi.spyOn(orderEmbeds, 'buildOrderCreatedV2').mockReturnValue({ container: {}, actionRow: {}, flags: 32768 });
+    vi.spyOn(orderEmbeds, 'buildQueuePositionV2').mockReturnValue({ container: {}, actionRow: {} });
+    vi.spyOn(orderFormatters, 'buildOrderLogContent').mockReturnValue('Synthetic order log');
+    const channel = { id: ticket.channel_id, send: vi.fn().mockResolvedValue({ id: 'synthetic-message' }) };
+    const interaction = {
+      guildId: GUILD_ID, inGuild: () => true, user: { id: ticket.customer_id },
+      client: { user: { id: 'synthetic-bot' } },
+      customId: `ai:support:order_confirm:${ticket.id}:${product.id}:2:30000:catalog`,
+      guild: { channels: { fetch: vi.fn().mockResolvedValue({ send: vi.fn().mockResolvedValue({ id: 'synthetic-log-message' }) }) } },
+      channel, deferReply: vi.fn().mockResolvedValue(), editReply: vi.fn().mockResolvedValue(),
+      message: { edit: vi.fn().mockResolvedValue() }, reply: vi.fn().mockResolvedValue(),
+    };
+    try {
+      await prepareAiOrderConfirmation({ guildId: GUILD_ID, channel, author: { id: ticket.customer_id } }, { productId: id, quantity: 2 });
+      expect(create).not.toHaveBeenCalled();
+      expect(qr).not.toHaveBeenCalled();
+      if (orderDays) expect(JSON.stringify(channel.send.mock.calls[0][0])).toContain('7 ngày');
+      expect(await handleAiSupportInteraction(interaction)).toBe(true);
+      expect(create).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({
+        guildId: GUILD_ID, ticketId: ticket.id, customerId: ticket.customer_id,
+        productId: id, productName: name, quantity: 2, totalAmount: 30000,
+        durationMonths: orderMonths, durationDays: orderDays,
+      }));
+      expect(qr).toHaveBeenCalledOnce();
+      expect(interaction.editReply).toHaveBeenCalledWith(expect.stringContaining('CN_123456'));
+    } finally {
+      vi.restoreAllMocks();
+    }
   });
 
   it('limits proactive public replies to configured channels and meaningful intent', () => {
