@@ -26,7 +26,7 @@ describe('supplier one-shot read-only runtime', () => {
     expect(runtime.getHealth()).toMatchObject({ status: 'NOT_STARTED', readOnly: true, purchasesEnabled: false, schemaMapped: false });
     expect(runtime.getHealth()).toBe(runtime.getHealth());
     expect(clientFactory).not.toHaveBeenCalled();
-    expect(Object.keys(runtime).sort()).toEqual(['getHealth', 'start']);
+    expect(Object.keys(runtime).sort()).toEqual(['getHealth', 'setSalesEnabled', 'start']);
   });
 
   it.each([

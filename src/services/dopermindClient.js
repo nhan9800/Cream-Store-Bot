@@ -1,5 +1,7 @@
-// Read-only transport. Importing this module never performs requests and the
-// returned client has no purchase capability. Credentials belong server-side.
+import { createHash } from 'node:crypto';
+
+// Importing this transport never performs requests. Purchases require an exact
+// durable caller-owned request ID; no retry or new ID is generated here.
 export const DOPERMIND_ORIGIN = 'https://api-gateway-production-be99.up.railway.app';
 
 const MESSAGES = Object.freeze({
@@ -18,17 +20,52 @@ const MESSAGES = Object.freeze({
   INVALID_RESPONSE: 'Supplier response was not valid JSON.',
   PROVIDER_REJECTED: 'Supplier did not confirm a successful response.',
   INVALID_SCHEMA: 'Supplier response did not match its verified schema.',
+  PRICE_LIMIT_EXCEEDED: 'Supplier charged above the confirmed cost limit.',
 });
 
+const PROVIDER_CODES = new Set(['INVALID_REQUEST_ID', 'INVALID_JSON', 'INVALID_API_KEY', 'PAYLOAD_TOO_LARGE',
+  'UNSUPPORTED_MEDIA_TYPE', 'PRODUCT_NOT_FOUND', 'NOT_ENOUGH_STOCK', 'INSUFFICIENT_BALANCE', 'PRICE_CHANGED',
+  'API_REQUEST_CONFLICT', 'API_ORDER_MANUALLY_FULFILLED', 'ORDER_FULFILLMENT_PENDING', 'ORDER_HISTORY_PENDING', 'RATE_LIMITED']);
+const DEFINITIVE_REJECTIONS = new Set(['INVALID_REQUEST_ID', 'INVALID_JSON', 'INVALID_API_KEY', 'PAYLOAD_TOO_LARGE',
+  'UNSUPPORTED_MEDIA_TYPE', 'PRODUCT_NOT_FOUND', 'NOT_ENOUGH_STOCK', 'INSUFFICIENT_BALANCE', 'PRICE_CHANGED', 'RATE_LIMITED']);
+const rateSlots = new Map();
+const privateReadCache = new Map();
+function cacheState(identity) {
+  if (!privateReadCache.has(identity)) privateReadCache.set(identity, { generation: 0, balance: null, stock: null });
+  if (privateReadCache.size > 1000) privateReadCache.delete(privateReadCache.keys().next().value);
+  return privateReadCache.get(identity);
+}
+
+async function rateSlot(key, operation, controller, timeoutMs, fail) {
+  const identity = createHash('sha256').update(key).digest('hex');
+  const state = rateSlots.get(identity) || { read: 0, balance: 0, stock: 0, purchase: 0 };
+  const field = operation === 'createOrder' ? 'purchase' : operation === 'getBalance' ? 'balance' : 'stock';
+  const time = Date.now();
+  const at = Math.max(time, state[field], field === 'purchase' ? 0 : state.read);
+  const delay = at - time;
+  if (delay > Math.max(0, timeoutMs - 250)) throw fail('RATE_LIMITED');
+  state[field] = at + (field === 'stock' ? 2100 : 5100);
+  if (field !== 'purchase') state.read = at + 1450;
+  rateSlots.set(identity, state);
+  if (rateSlots.size > 1000) rateSlots.delete(rateSlots.keys().next().value);
+  if (delay > 0) await new Promise((resolve, reject) => {
+    const onAbort = () => { clearTimeout(timer); reject(fail('TIMEOUT')); };
+    const timer = setTimeout(() => { controller.signal.removeEventListener('abort', onAbort); resolve(); }, delay);
+    controller.signal.addEventListener('abort', onAbort, { once: true });
+    if (controller.signal.aborted) onAbort();
+  });
+}
+
 export class DopermindError extends Error {
-  constructor(code, { operation = 'configure', status = null } = {}) {
+  constructor(code, { operation = 'configure', status = null, outcome = 'NOT_SUBMITTED', providerCode = null } = {}) {
     const safeCode = Object.hasOwn(MESSAGES, code) ? code : 'NETWORK_ERROR';
     super(MESSAGES[safeCode]);
     this.name = 'DopermindError';
     this.code = safeCode;
-    this.operation = ['configure', 'getBalance', 'getStock'].includes(operation) ? operation : 'configure';
+    this.operation = ['configure', 'getBalance', 'getStock', 'createOrder'].includes(operation) ? operation : 'configure';
     this.status = Number.isInteger(status) && status >= 100 && status <= 599 ? status : null;
-    this.outcome = 'NOT_SUBMITTED';
+    this.outcome = ['NOT_SUBMITTED', 'UNKNOWN', 'REJECTED', 'FULFILLED_REVIEW'].includes(outcome) ? outcome : 'UNKNOWN';
+    this.providerCode = PROVIDER_CODES.has(providerCode) ? providerCode : null;
   }
 }
 
@@ -81,6 +118,23 @@ function productsFrom(envelope, fail, filter) {
   return Object.freeze(products);
 }
 
+function purchaseFrom(envelope, fail, request) {
+  const data = dataFrom(envelope, fail);
+  if (data.request_id !== request.requestId || data.product_key !== request.productKey || data.quantity !== request.quantity
+    || !text(data.order_code, 200) || !integer(data.unit_price, 1) || !integer(data.total_amount, 1)
+    || !integer(data.balance_after) || !date(data.created_at) || typeof data.idempotent !== 'boolean'
+    || !Array.isArray(data.items) || data.items.length !== request.quantity
+    || data.items.some(item => typeof item !== 'string' || !item.trim() || !item.isWellFormed() || item.length > 128000)
+    || Buffer.byteLength(JSON.stringify(data.items), 'utf8') > 512 * 1024
+    || BigInt(data.unit_price) * BigInt(request.quantity) !== BigInt(data.total_amount)) throw fail('INVALID_SCHEMA');
+  // Keep the validated receipt even if an upstream race exceeded the local cost
+  // ceiling. The engine must retain/encrypt it for staff review, never re-buy.
+  return Object.freeze({ requestId: data.request_id, orderCode: data.order_code, productKey: data.product_key,
+    quantity: data.quantity, unitPriceVnd: data.unit_price, totalAmountVnd: data.total_amount,
+    balanceAfterVnd: data.balance_after, createdAt: data.created_at, idempotent: data.idempotent,
+    overCostLimit: data.unit_price > request.maxUnitCostVnd, items: Object.freeze([...data.items]) });
+}
+
 async function readJson(response, { maxResponseBytes, fail, controller }) {
   const declared = response.headers.get('content-length');
   if (declared && /^\d+$/.test(declared) && Number(declared) > maxResponseBytes) throw fail('RESPONSE_TOO_LARGE');
@@ -116,18 +170,44 @@ export function createDopermindClient({
   fetchImpl = globalThis.fetch,
   timeoutMs = 10000,
   maxResponseBytes = 1024 * 1024,
+  enforceRateLimits = fetchImpl === globalThis.fetch,
 } = {}) {
   if (typeof fetchImpl !== 'function' || !Number.isInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > 30000
-    || !Number.isInteger(maxResponseBytes) || maxResponseBytes < 1 || maxResponseBytes > 4 * 1024 * 1024) {
+    || !Number.isInteger(maxResponseBytes) || maxResponseBytes < 1 || maxResponseBytes > 4 * 1024 * 1024
+    || typeof enforceRateLimits !== 'boolean') {
     throw new DopermindError('INVALID_CONFIGURATION');
   }
-
-  async function request(operation, path, normalize) {
-    const fail = (code, status = null) => new DopermindError(code, { operation, status });
+  const credential = operation => {
     const raw = apiKey === undefined ? process.env.DOPERMIND_API_KEY : apiKey;
-    if (typeof raw !== 'string' || !raw.trim()) throw fail('NOT_CONFIGURED');
+    if (typeof raw !== 'string' || !raw.trim()) throw new DopermindError('NOT_CONFIGURED', { operation });
     const key = raw.trim();
-    if (key.length > 4096 || /[^\x21-\x7e]/.test(key)) throw fail('INVALID_CONFIGURATION');
+    if (key.length > 4096 || /[^\x21-\x7e]/.test(key)) throw new DopermindError('INVALID_CONFIGURATION', { operation });
+    return key;
+  };
+  const identity = operation => createHash('sha256').update(credential(operation)).digest('hex');
+  async function cachedRead(operation, path, normalize, filter = undefined) {
+    if (!enforceRateLimits) return request(operation, path, normalize);
+    const state = cacheState(identity(operation));
+    const entry = operation === 'getBalance' ? state.balance : state.stock;
+    const ttl = operation === 'getBalance' ? 5500 : 2500;
+    if (entry && Date.now() - entry.at >= 0 && Date.now() - entry.at < ttl) {
+      return filter === undefined ? entry.value : Object.freeze(entry.value.filter(item => item.productKey === filter));
+    }
+    const generation = state.generation;
+    const value = await request(operation, path, normalize);
+    // Filtered reads cannot stand in for the full stock catalog.
+    if (generation === state.generation && (operation === 'getBalance' || filter === undefined)) {
+      state[operation === 'getBalance' ? 'balance' : 'stock'] = { at: Date.now(), value };
+    }
+    return value;
+  }
+
+  async function request(operation, path, normalize, purchase = null) {
+    let attempted = false;
+    const fail = (code, status = null, extra = {}) => new DopermindError(code, {
+      operation, status, outcome: purchase && attempted ? 'UNKNOWN' : 'NOT_SUBMITTED', ...extra,
+    });
+    const key = credential(operation);
     const url = new URL(path, DOPERMIND_ORIGIN);
     if (url.origin !== DOPERMIND_ORIGIN || url.protocol !== 'https:') throw fail('INVALID_REQUEST');
     const controller = new AbortController();
@@ -137,14 +217,27 @@ export function createDopermindClient({
       timer = setTimeout(() => { controller.abort(); reject(fail('TIMEOUT')); }, timeoutMs);
     });
     const run = async () => {
+      if (enforceRateLimits) await rateSlot(key, operation, controller, timeoutMs, fail);
+      if (controller.signal.aborted) throw fail('TIMEOUT');
+      attempted = true;
       response = await fetchImpl(url.href, {
-        method: 'GET', redirect: 'error', signal: controller.signal,
-        headers: { Accept: 'application/json', Authorization: `Bearer ${key}` },
+        method: purchase ? 'POST' : 'GET', redirect: 'error', signal: controller.signal,
+        headers: { Accept: 'application/json', Authorization: `Bearer ${key}`,
+          ...(purchase ? { 'Content-Type': 'application/json' } : {}) },
+        ...(purchase ? { body: JSON.stringify({ product_key: purchase.productKey, quantity: purchase.quantity, request_id: purchase.requestId }) } : {}),
       });
       if (controller.signal.aborted) throw fail('TIMEOUT');
       if (response.redirected || (response.status >= 300 && response.status < 400)
         || (response.url && response.url !== url.href)) throw fail('REDIRECT_REJECTED', response.status);
-      if (response.status === 401 || response.status === 403) throw fail('AUTHENTICATION_FAILED', response.status);
+      if (response.status === 401 || response.status === 403) throw fail('AUTHENTICATION_FAILED', response.status, { outcome: 'NOT_SUBMITTED' });
+      if (purchase && response.status >= 400) {
+        const body = await readJson(response, { maxResponseBytes, fail, controller });
+        const candidate = body?.error?.code ?? body?.code;
+        const providerCode = PROVIDER_CODES.has(candidate) ? candidate : null;
+        throw fail(response.status === 429 ? 'RATE_LIMITED' : response.status >= 500 ? 'UPSTREAM_ERROR' : 'REQUEST_REJECTED', response.status, {
+          providerCode, outcome: DEFINITIVE_REJECTIONS.has(providerCode) ? 'REJECTED' : 'UNKNOWN',
+        });
+      }
       if (response.status === 429) throw fail('RATE_LIMITED', response.status);
       if (response.status >= 500) throw fail('UPSTREAM_ERROR', response.status);
       if (response.status >= 400) throw fail('REQUEST_REJECTED', response.status);
@@ -165,11 +258,29 @@ export function createDopermindClient({
   }
 
   return Object.freeze({
-    getBalance: () => request('getBalance', '/v1/balance', balanceFrom),
+    getBalance: () => cachedRead('getBalance', '/v1/balance', balanceFrom),
     getStock: ({ productKey: filter } = {}) => {
       if (filter !== undefined) productKey(filter);
       const path = filter === undefined ? '/v1/stock' : `/v1/stock?${new URLSearchParams({ product_key: filter })}`;
-      return request('getStock', path, (envelope, fail) => productsFrom(envelope, fail, filter));
+      return cachedRead('getStock', path, (envelope, fail) => productsFrom(envelope, fail, filter), filter);
+    },
+    createOrder: ({ productKey: key, quantity, requestId, maxUnitCostVnd } = {}) => {
+      productKey(key, 'createOrder');
+      if (!integer(quantity, 1) || quantity > 1000 || typeof requestId !== 'string'
+        || !/^[A-Za-z0-9._:-]{8,96}$/.test(requestId) || !integer(maxUnitCostVnd, 1)) {
+        throw new DopermindError('INVALID_REQUEST', { operation: 'createOrder' });
+      }
+      const purchase = { productKey: key, quantity, requestId, maxUnitCostVnd };
+      const execute = async () => {
+        const state = enforceRateLimits ? cacheState(identity('createOrder')) : null;
+        if (state) { state.generation++; state.balance = null; state.stock = null; }
+        const receipt = await request('createOrder', '/v1/orders', (envelope, fail) => purchaseFrom(envelope, fail, purchase), purchase);
+        if (state && receipt.idempotent === false && Math.abs(Date.now() - Date.parse(receipt.createdAt)) <= 30000) {
+          state.balance = { at: Date.now(), value: Object.freeze({ balanceVnd: receipt.balanceAfterVnd, currency: 'VND', updatedAt: receipt.createdAt }) };
+        }
+        return receipt;
+      };
+      return execute();
     },
   });
 }

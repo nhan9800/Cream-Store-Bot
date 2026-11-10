@@ -145,7 +145,14 @@ export function createSupplierAutobuyRuntime({
     return startPromise;
   }
 
-  return Object.freeze({ start, getHealth: () => snapshot });
+  function setSalesEnabled(enabled) {
+    // Called only by trusted startup after reviewed offers and the worker are
+    // ready. An authentication failure or another store can never be promoted.
+    const ready = enabled === true && snapshot.provider === 'dopermind' && snapshot.status === 'CONNECTED';
+    snapshot = Object.freeze({ ...snapshot, purchasesEnabled: ready, readOnly: !ready });
+    return snapshot;
+  }
+  return Object.freeze({ start, getHealth: () => snapshot, setSalesEnabled });
 }
 
 export const supplierAutobuyRuntime = createSupplierAutobuyRuntime();

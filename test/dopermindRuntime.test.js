@@ -33,7 +33,7 @@ describe('Dopermind provider migration runtime', () => {
     expect(Object.isFrozen(health.checks.products)).toBe(true);
     for (let index = 0; index < 10; index++) runtime.getHealth();
     expect(client.getStock).toHaveBeenCalledTimes(1);
-    expect(Object.keys(runtime).sort()).toEqual(['getHealth', 'start']);
+    expect(Object.keys(runtime).sort()).toEqual(['getHealth', 'setSalesEnabled', 'start']);
   });
 
   it.each([{ envFile: '.env.store2' }, { guildId: 'other' }, { envFile: undefined }])('never leaks inherited credentials to Store2 %j', async patch => {
@@ -67,6 +67,28 @@ describe('Dopermind provider migration runtime', () => {
   it('does not call a partially failed schema connected', async () => {
     const { runtime } = setup({ getStock: vi.fn().mockRejectedValue(new DopermindError('INVALID_RESPONSE')) });
     expect(await runtime.start(context)).toMatchObject({ status: 'CHECK_FAILED', schemaMapped: false, productCount: null });
+  });
+
+  it('enables reviewed sales only after a successful same-provider probe and can pause them', async () => {
+    const { runtime, client } = setup();
+    expect(runtime.setSalesEnabled(true).purchasesEnabled).toBe(false);
+    await runtime.start(context);
+    const active = runtime.setSalesEnabled(true);
+    expect(active).toMatchObject({ status: 'CONNECTED', readOnly: false, purchasesEnabled: true });
+    expect(Object.isFrozen(active)).toBe(true);
+    expect(runtime.setSalesEnabled(false)).toMatchObject({ readOnly: true, purchasesEnabled: false });
+    expect(client.createOrder).not.toHaveBeenCalled();
+  });
+
+  it.each([{ envFile: '.env.store2' }, { apiKey: '' }])('cannot promote a disabled runtime %j', async patch => {
+    const { runtime } = setup(); await runtime.start({ ...context, ...patch });
+    expect(runtime.setSalesEnabled(true).purchasesEnabled).toBe(false);
+  });
+
+  it('cannot promote a failed authentication probe', async () => {
+    const { runtime } = setup({ getBalance: vi.fn().mockRejectedValue(new DopermindError('AUTHENTICATION_FAILED', { status: 401 })) });
+    await runtime.start(context);
+    expect(runtime.setSalesEnabled(true)).toMatchObject({ status: 'AUTH_REJECTED', purchasesEnabled: false, readOnly: true });
   });
 
   it('bounds a stalled new-provider call without blocking the process', async () => {
