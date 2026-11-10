@@ -46,7 +46,7 @@ function setup(options = {}) {
     database.prepare("UPDATE orders SET status='COMPLETED',delivered_at=? WHERE order_code=?").run(new Date(time).toISOString(), code);
     return database.prepare('SELECT * FROM orders WHERE order_code=?').get(code);
   });
-  const provider = { getStock: vi.fn(async () => [{ productKey: PRODUCT, priceVnd: cost, stock: 20, unlimited: false }]),
+  const provider = { getStock: vi.fn(async () => [{ productKey: PRODUCT, name: 'Subscription 1 tháng', priceVnd: cost, stock: 20, unlimited: false }]),
     getBalance: vi.fn(async () => ({ currency: 'VND', balanceVnd: 1000000 })),
     createOrder: vi.fn(async request => ({ requestId: request.requestId, productKey: request.productKey, quantity: request.quantity,
       orderCode: 'API_TEST_1', unitPriceVnd: cost, totalAmountVnd: cost * request.quantity, createdAt: new Date(time).toISOString(),
@@ -192,6 +192,37 @@ describe('durable supplier checkout and ownership', () => {
     t.database.prepare("UPDATE supplier_autobuy_intents SET encrypted_payload=NULL WHERE order_code=?").run(a.order_code);
     t.database.prepare("UPDATE orders SET status='CANCELLED',payment_status='CANCELLED' WHERE order_code=?").run(a.order_code);
     await expect(t.service.validateSupplierOrderForPayment({ ...t.context, orderCode: b.order_code })).resolves.toBeTruthy();
+  });
+  it('holds the last finite item for the first selected invoice before any second customer payment', async () => {
+    const t = setup(); const a = await t.create(); const b = await t.create();
+    t.database.exec('CREATE TABLE supplier_autobuy_payment_methods(order_code TEXT PRIMARY KEY,method TEXT,created_at TEXT)');
+    const choose = code => t.database.prepare("INSERT INTO supplier_autobuy_payment_methods VALUES(?,'PAYOS','2026-11-10T16:00:00Z')").run(code);
+    t.provider.getStock.mockResolvedValue([{ productKey: PRODUCT, name: 'Subscription 1 tháng', priceVnd: 42000, stock: 1, unlimited: false }]);
+    choose(a.order_code);
+    await expect(t.service.validateSupplierOrderForPayment({ ...t.context, orderCode: a.order_code })).resolves.toBeTruthy();
+    choose(b.order_code); t.provider.getBalance.mockClear();
+    await expect(t.service.validateSupplierOrderForPayment({ ...t.context, orderCode: b.order_code })).rejects.toMatchObject({ code: 'OUT_OF_STOCK' });
+    expect(t.provider.getBalance).not.toHaveBeenCalled(); expect(t.provider.createOrder).not.toHaveBeenCalled();
+    expect(t.database.prepare('SELECT DISTINCT payment_status FROM orders').all()).toEqual([{ payment_status: 'UNPAID' }]);
+    expect(t.database.prepare('SELECT COUNT(*) AS n FROM wallet_transactions').get().n).toBe(0);
+  });
+  it('retains unknown purchase quantities conservatively, allows unlimited stock, and releases verified cancellations', async () => {
+    const t = setup(); const a = await t.create(); const b = await t.create(); t.pay(a.order_code);
+    t.database.prepare("UPDATE supplier_autobuy_intents SET status='UNKNOWN' WHERE order_code=?").run(a.order_code);
+    const stock = { productKey: PRODUCT, name: 'Subscription 1 tháng', priceVnd: 42000, stock: 1, unlimited: false };
+    t.provider.getStock.mockResolvedValue([stock]);
+    await expect(t.service.validateSupplierOrderForPayment({ ...t.context, orderCode: b.order_code })).rejects.toMatchObject({ code: 'OUT_OF_STOCK' });
+    t.provider.getStock.mockResolvedValue([{ ...stock, stock: -1, unlimited: true }]);
+    await expect(t.service.validateSupplierOrderForPayment({ ...t.context, orderCode: b.order_code })).resolves.toBeTruthy();
+    t.provider.getStock.mockResolvedValue([stock]);
+    t.database.prepare("UPDATE orders SET status='CANCELLED',payment_status='CANCELLED' WHERE order_code=?").run(a.order_code);
+    await expect(t.service.validateSupplierOrderForPayment({ ...t.context, orderCode: b.order_code })).resolves.toBeTruthy();
+  });
+  it.each([{ name: 'Replaced product' }, { priceVnd: 43000 }, { priceVnd: NaN }])('rejects a fresh source name/cost mismatch before accepting payment: %j', async patch => {
+    const t = setup(); const o = await t.create();
+    t.provider.getStock.mockResolvedValue([{ productKey: PRODUCT, name: 'Subscription 1 tháng', priceVnd: 42000, stock: 1, unlimited: false, ...patch }]);
+    await expect(t.service.validateSupplierOrderForPayment({ ...t.context, orderCode: o.order_code })).rejects.toMatchObject({ code: 'QUOTE_CHANGED' });
+    expect(t.provider.getBalance).not.toHaveBeenCalled(); expect(t.provider.createOrder).not.toHaveBeenCalled();
   });
 });
 

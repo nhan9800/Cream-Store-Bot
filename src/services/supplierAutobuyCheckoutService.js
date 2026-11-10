@@ -105,7 +105,8 @@ export function createSupplierAutobuyCheckout({
           { id: client.user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.AttachFiles, PermissionFlagsBits.EmbedLinks, PermissionFlagsBits.ManageChannels] },
         ];
         if (snowflake(settings.support_role_id)) overwrites.push({ id: settings.support_role_id, allow: TICKET_MEMBER_PERMISSIONS });
-        database.prepare('INSERT INTO supplier_autobuy_ticket_creates (ticket_id,attempted) VALUES (?,1) ON CONFLICT(ticket_id) DO UPDATE SET attempted=1').run(ticket.id);
+        const createClaim = database.prepare('INSERT INTO supplier_autobuy_ticket_creates (ticket_id,attempted) VALUES (?,1) ON CONFLICT(ticket_id) DO NOTHING').run(ticket.id);
+        if (!createClaim.changes) deny('TICKET_CREATION_UNCERTAIN');
         try {
           channel = await guild.channels.create({ name: `autobuy-${ticket.ticket_code.toLowerCase()}`, type: ChannelType.GuildText,
             parent: parent.id, topic, permissionOverwrites: overwrites, reason: 'Customer confirmed an AutoBuy quote' });
