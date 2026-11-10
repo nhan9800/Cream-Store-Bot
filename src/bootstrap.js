@@ -36,6 +36,7 @@ import { startCoreEmojiMaintenance, getCoreEmojiPackStatus } from './services/co
 import { refreshBotInterfaces } from './services/botInterfaceRefreshService.js';
 import { pauseAutomaticMarketing } from './services/marketingPauseService.js';
 import { supplierAutobuyRuntime } from './services/supplierAutobuyRuntime.js';
+import { ensureSupplierAutobuyChannel } from './services/supplierAutobuyPanelService.js';
 
 export async function buildClient() {
   initDatabase();
@@ -105,11 +106,14 @@ export async function buildClient() {
     // Probe from this hosting process only after it owns the HTTP port. The
     // runtime restricts credentials to Store 1 and never submits a purchase.
     // Supplier downtime must not block commerce or Discord startup.
-    void Promise.resolve().then(() => supplierAutobuyRuntime.start({
+    const supplierProbe = Promise.resolve().then(() => supplierAutobuyRuntime.start({
       guildId: config.guildId,
       envFile: process.env.ENV_FILE,
       apiKey: process.env.DAIPHUC_PARTNER_API_KEY,
-    })).catch(() => console.warn('[SUPPLIER-AUTOBUY] STARTUP_PROBE_FAILED'));
+    })).catch(() => {
+      console.warn('[SUPPLIER-AUTOBUY] STARTUP_PROBE_FAILED');
+      return null;
+    });
 
     // Chỉ một tiến trình giữ được cổng HTTP production mới được chạy
     // scheduler. Điều này loại bỏ cửa sổ vài giây mà một bot trùng phiên có
@@ -121,6 +125,14 @@ export async function buildClient() {
     // Restore the owned application icon set independently of slow optional
     // setup. Partial uploads/Discord failures retry; commerce stays available.
     const iconSetup=startCoreEmojiMaintenance(readyClient,{guildId:config.guildId,afterSync:refreshBotInterfaces});
+    // The owner requested this dedicated channel. Persist and reuse its one
+    // panel; other marketing and price-board publication stays paused.
+    void Promise.all([supplierProbe, iconSetup]).then(([snapshot]) => {
+      if (getCoreEmojiPackStatus(readyClient).status !== 'ready') return;
+      return ensureSupplierAutobuyChannel(readyClient, {
+        guildId: config.guildId, envFile: process.env.ENV_FILE, snapshot,
+      });
+    }).catch(() => console.warn('[SUPPLIER-AUTOBUY] PANEL_SETUP_FAILED'));
     void iconSetup.then(() => import('./services/storeForumAdoptionService.js'))
       .then(({ adoptStoreForums }) => adoptStoreForums(readyClient))
       .catch(error => console.error('[FORUM-ADOPTION]', error.message));

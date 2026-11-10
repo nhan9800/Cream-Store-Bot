@@ -11,6 +11,7 @@ vi.hoisted(() => Object.assign(process.env, {
 import { db, initDatabase } from '../src/database/db.js';
 import { registerBotApiRoutes } from '../src/services/botApiRoutes.js';
 import { supplierAutobuyRuntime } from '../src/services/supplierAutobuyRuntime.js';
+import { getSupplierAutobuyPanelHealth } from '../src/services/supplierAutobuyPanelService.js';
 
 let server, base, providerCalls = 0, ready = true;
 const originalFetch = globalThis.fetch;
@@ -60,6 +61,7 @@ describe('supplier startup evidence in public bot health', () => {
         supplierAutobuy: { readOnly: true, purchasesEnabled: false, schemaMapped: false },
       });
       expect(payloads[index].supplierAutobuy).toEqual(supplierAutobuyRuntime.getHealth());
+      expect(payloads[index].supplierAutobuyPanel).toEqual(getSupplierAutobuyPanelHealth());
       expect(JSON.stringify(payloads[index])).not.toContain('supplier-private');
     }
     expect(payloads[0].supplierAutobuy).toEqual(payloads[1].supplierAutobuy);
