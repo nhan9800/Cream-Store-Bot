@@ -35,6 +35,7 @@ import { installDiscordEmojiBoundary } from './utils/discordEmojiBoundary.js';
 import { startCoreEmojiMaintenance, getCoreEmojiPackStatus } from './services/coreEmojiPackService.js';
 import { refreshBotInterfaces } from './services/botInterfaceRefreshService.js';
 import { pauseAutomaticMarketing } from './services/marketingPauseService.js';
+import { supplierAutobuyRuntime } from './services/supplierAutobuyRuntime.js';
 
 export async function buildClient() {
   initDatabase();
@@ -101,6 +102,15 @@ export async function buildClient() {
       setTimeout(() => process.exit(1), 50).unref();
       return;
     }
+    // Probe from this hosting process only after it owns the HTTP port. The
+    // runtime restricts credentials to Store 1 and never submits a purchase.
+    // Supplier downtime must not block commerce or Discord startup.
+    void Promise.resolve().then(() => supplierAutobuyRuntime.start({
+      guildId: config.guildId,
+      envFile: process.env.ENV_FILE,
+      apiKey: process.env.DAIPHUC_PARTNER_API_KEY,
+    })).catch(() => console.warn('[SUPPLIER-AUTOBUY] STARTUP_PROBE_FAILED'));
+
     // Chỉ một tiến trình giữ được cổng HTTP production mới được chạy
     // scheduler. Điều này loại bỏ cửa sổ vài giây mà một bot trùng phiên có
     // thể gửi reminder trước khi bị cơ chế khóa launcher dừng lại.

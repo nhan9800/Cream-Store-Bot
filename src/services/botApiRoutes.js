@@ -74,6 +74,7 @@ import {
 } from './youtubeWarrantyClaimService.js';
 import { buildPublicFeedbackView } from './publicFeedbackView.js';
 import { getMusicRuntimeStatus } from './musicPlayerService.js';
+import { supplierAutobuyRuntime } from './supplierAutobuyRuntime.js';
 
 let storeInviteCache = { url: '', expiresAt: 0 };
 const websiteSupportProvisioning = new Map();
@@ -498,6 +499,9 @@ export function registerBotApiRoutes(app) {
             service: 'cenar-store-bot',
             commitSha: runtimeCommitSha,
             discordReady,
+            // Cached, status-only startup probe; reading health never calls
+            // the supplier or changes the store's Discord readiness.
+            supplierAutobuy: supplierAutobuyRuntime.getHealth(),
             // Aggregate-only media readiness; never expose extractor paths,
             // subprocess output, cookies or proxy credentials on public health.
             music: (() => {

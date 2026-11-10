@@ -1,6 +1,6 @@
-# DaiPhuc supplier autobuy — preparation
+# DaiPhuc supplier autobuy — hosting connection diagnostics
 
-Status: **not enabled**. The owner requested an additional Discord autobuy channel on 2026-11-10. Existing products, orders, manual fulfillment and website checkout remain unchanged.
+Status: **read-only connection integrated; purchasing disabled**. The owner requested an additional Discord autobuy channel and explicitly authorized deployment and testing from hosting on 2026-11-10. Existing products, orders, manual fulfillment and website checkout remain unchanged.
 
 ## Verified provider contract
 
@@ -11,23 +11,34 @@ Source: [DaiPhuc Partner Purchase API](https://docs-tele.ryan-zola.dev/docs), [O
 - Purchase `POST /v1/orders` with `product_id` (1–100 characters), `quantity` (1–100, default 1), `inputs` object. The documented optional `Idempotency-Key` is mandatory in our client.
 - Purchases use a prepaid Telegram wallet. The provider issues no webhooks; order status must be polled.
 - The schema does **not** define response properties, currency, status enum, price guarantees, idempotency retention, product input schemas or delivered payload format. Do not invent these mappings.
-- Provider health returned 200. The owner's supplied identifier returned 401 `Invalid or revoked API key` for the two read-only account/catalog endpoints. No paid purchase was sent.
+- Before deployment, public health returned200 and the exact owner-supplied value returned401 `Invalid or revoked API key` for account/catalog. The same account rejection was reproduced directly through the provider's Swagger UI. This establishes rejection, not whether the value is expired, revoked or an identifier. No paid purchase was sent.
 
 ## Credential setup and read-only diagnostics
 
-Configure the full secret in hosting environment `DAIPHUC_PARTNER_API_KEY`, or a gitignored environment file. Do not pass it in CLI arguments, source, Discord messages or issue bodies. Configuring this variable does not enable a checkout or worker.
+The owner-supplied value is already stored under `DAIPHUC_PARTNER_API_KEY` in hosting `/home/container/.env` and was freshly verified without exposing it. Do not pass credentials in CLI arguments, source, Discord messages or issue bodies. Configuring this variable does not enable a checkout or purchase worker.
 
 Run `npm run check:autobuy-api` from the bot repository. It reads only account/catalog and prints bounded structural metadata, not account values, balances, product inputs or raw provider errors. An authenticated response proves connectivity, not purchase/delivery readiness.
+
+After the bot acquires its HTTP port, `supplierAutobuyRuntime` starts one asynchronous probe per process. It requires both the canonical Store1 guild and `ENV_FILE=.env`. This double guard matters: the launcher passes root environment variables to both child stores, even when Store2 loads its own file. Store2 must report out-of-scope and make no supplier requests.
+
+The hosted probe calls only fixed-origin GET `/health`, `/v1/me` and `/v1/products`, once each, with bounded timeouts and no retries. It does not depend on the result of another endpoint. A401 or supplier outage does not interrupt Discord startup or commerce.
+
+Read `/api/health` and `/store2/api/health` for the cached `supplierAutobuy` snapshot and exact `commitSha`. Public output contains only fixed status codes, timestamps and request outcomes. It excludes credentials, balances, customer details, raw provider errors and catalog data. Reading health never sends another supplier request. `purchasesEnabled:false` and `schemaMapped:false` remain explicit even when all three GETs succeed.
+
+Environment files are read at process startup; editing them is not a hot reload. The existing VibeHost Console input targets running-process stdin, not a verified shell. Do not claim a hosting network test from a local CLI invocation. The startup probe's completed timestamp on the deployed revision provides the hosting execution evidence.
 
 ## Code prepared
 
 - `src/services/daiphucPartnerClient.js`: fixed-origin bounded requests, safe errors, required purchase idempotency key and no automatic retries. Response objects remain uninterpreted until the real contract is confirmed.
 - `src/services/supplierPricingService.js`: pure integer-VND margin/fee/comparable-retail policy, stale-quote handling and price reconfirmation. It creates no catalog rows or invoices.
 - `scripts/check-daiphuc-partner.js`: read-only credential and response-shape diagnostics, no Discord/SQLite startup.
+- `src/services/supplierAutobuyRuntime.js`: Store1-only, one-time startup connection probe and immutable public status snapshot; no purchase operation is exposed.
 
-These modules are deliberately not connected to scheduler/payment callbacks. Do not advertise this preparation as a functioning autobuy channel.
+Only the read-only runtime is connected to startup and health. No supplier purchase is connected to scheduler/payment callbacks. Do not advertise this connection diagnostic as a functioning autobuy sales channel.
 
-Validation on 2026-11-10: `npm test -- test/daiphucPartnerClient.test.js test/supplierPricingService.test.js test/daiphucPartnerDiagnostic.test.js` passed all137 tests (67 transport,54 pricing,16 diagnostics). Requests in tests are mocked. Independent review caught and fixed arbitrary dictionary-key leakage in the diagnostic report. `git diff --check` and the diagnostic CLI help also passed. No Discord channel, catalog mapping, production deployment or paid supplier request has been made in this preparation.
+The foundation has137 mocked tests for transport, margin rules and CLI diagnostics. Runtime tests additionally cover store isolation, bounded failures, private-data exclusion, concurrent starts and cached health reads. Startup and Express integration tests verify that a stalled/rejected supplier probe cannot block commerce or alter Discord readiness. Deployment must pass the repository's full CI and exact-SHA production promotion gates; verify both live health endpoints after rollout. No channel/catalog mutation or paid test purchase is part of this release.
+
+Rollback uses a tested source revert through normal `main` promotion. There is no database migration to reverse; preserve databases and environment files. The supervisor backs up both databases and rolls back installation failures, but post-boot runtime failures require an explicit source rollback rather than assuming automatic recovery.
 
 ## Pricing rules for actual offers
 
