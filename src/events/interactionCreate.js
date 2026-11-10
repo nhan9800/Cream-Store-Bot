@@ -91,6 +91,7 @@ import { keepTicketOpen, scheduleTicketAutoClose } from '../services/ticketServi
 import { getActiveProducts, getProductById, updateProduct, addProduct, getAllProducts, getProductByName } from '../services/productCatalogService.js';
 import { handlePremiumProductInteraction } from '../services/premiumProductSetupService.js';
 import { handleAiSupportInteraction } from '../services/aiSupportAutomationService.js';
+import { handleSupplierAutobuyInteraction } from './supplierAutobuyHandlers.js';
 import { getCenarHub } from '../services/cenarHub.js';
 import { createEmojiResolver, withButtonEmoji } from '../utils/emojiHelper.js';
 import { isInternationalGuild } from '../utils/locale.js';
@@ -381,6 +382,10 @@ export function registerInteractionHandler(client, commands) {
       if (interaction.customId && interaction.customId.startsWith('ai:support:')) {
         const handled = await handleAiSupportInteraction(interaction);
         if (handled) return;
+      }
+
+      if (interaction.customId && interaction.customId.startsWith('supplier-autobuy:')) {
+        if (await handleSupplierAutobuyInteraction(interaction)) return;
       }
 
       if (interaction.isChatInputCommand()) {

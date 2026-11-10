@@ -2,6 +2,16 @@
 
 Status: **read-only connection integrated; purchasing disabled**. The owner requested an additional Discord autobuy channel and explicitly authorized deployment and testing from hosting on 2026-11-10. Existing products, orders, manual fulfillment and website checkout remain unchanged.
 
+## Discord channel
+
+The owner also requested the Discord entry point immediately. `supplierAutobuyPanelService` creates one dedicated AutoBuy text channel under the existing Cửa hàng Cenar category, after the Store1 startup probe and sourced custom emoji are ready. Customer messages are disabled; the panel offers **Xem sản phẩm**, **Trạng thái kết nối** and a link to the existing ticket channel.
+
+The card clearly says **Đang chuẩn bị mở bán**. Both buttons return private status/pending-catalog replies using the cached hosting check; they cannot create an order, charge a wallet, activate offers or retry the supplier. Even successful HTTP reads do not turn this preparation card into a functioning purchase flow.
+
+Channel and panel IDs are stored in guild-scoped `system_settings` entries. Startup reuses the exact bot-owned panel, preserves history and avoids duplicate creation. A previously saved but inaccessible/deleted/foreign target degrades safely rather than recreating another channel or overwriting a message. Store2 remains out of scope. A public `supplierAutobuyPanel` health snapshot reports only setup status and channel/message IDs.
+
+The dedicated interaction handler accepts only Store1 buttons on that persisted channel/message by the current bot. It acknowledges privately before building the response, rejects stale/foreign cards and never exposes credentials or raw provider errors. Publishing this owner-requested feature does not resume automatic marketing, price-board resends or everyone mentions.
+
 ## Verified provider contract
 
 Source: [DaiPhuc Partner Purchase API](https://docs-tele.ryan-zola.dev/docs), [OpenAPI](https://docs-tele.ryan-zola.dev/openapi.json), read 2026-11-10.
@@ -34,9 +44,9 @@ Environment files are read at process startup; editing them is not a hot reload.
 - `scripts/check-daiphuc-partner.js`: read-only credential and response-shape diagnostics, no Discord/SQLite startup.
 - `src/services/supplierAutobuyRuntime.js`: Store1-only, one-time startup connection probe and immutable public status snapshot; no purchase operation is exposed.
 
-Only the read-only runtime is connected to startup and health. No supplier purchase is connected to scheduler/payment callbacks. Do not advertise this connection diagnostic as a functioning autobuy sales channel.
+The read-only runtime and dedicated pending Discord panel are connected to startup and health. No supplier purchase is connected to scheduler/payment callbacks. Do not advertise this preparation as a functioning autobuy sales channel.
 
-The foundation has137 mocked tests for transport, margin rules and CLI diagnostics. Runtime tests additionally cover store isolation, bounded failures, private-data exclusion, concurrent starts and cached health reads. Startup and Express integration tests verify that a stalled/rejected supplier probe cannot block commerce or alter Discord readiness. Deployment must pass the repository's full CI and exact-SHA production promotion gates; verify both live health endpoints after rollout. No channel/catalog mutation or paid test purchase is part of this release.
+The foundation has137 mocked tests for transport, margin rules and CLI diagnostics. Runtime tests additionally cover store isolation, bounded failures, private-data exclusion, concurrent starts and cached health reads. Startup and Express integration tests verify that a stalled/rejected supplier probe cannot block commerce or alter Discord readiness. Panel/setup and interaction tests cover persisted ownership, duplicate prevention, permissions, private replies and failure handling. Deployment must pass the repository's full CI and exact-SHA production promotion gates; verify both live health endpoints and the actual Discord channel/panel after rollout. No sellable catalog mutation or paid test purchase is part of this release.
 
 Rollback uses a tested source revert through normal `main` promotion. There is no database migration to reverse; preserve databases and environment files. The supervisor backs up both databases and rolls back installation failures, but post-boot runtime failures require an explicit source rollback rather than assuming automatic recovery.
 

@@ -13,6 +13,7 @@ const state = vi.hoisted(() => ({
   refreshInterfaces: vi.fn(),
   pauseMarketing: vi.fn(() => ({ paused: true })),
   supplierStart: vi.fn(),
+  supplierPanel: vi.fn(),
 }));
 
 vi.mock('discord.js', async (importOriginal) => ({
@@ -34,6 +35,7 @@ vi.mock('../src/database/db.js', () => ({ initDatabase: vi.fn() }));
 vi.mock('../src/services/reminderRoutingService.js', () => ({ adoptStoreOneReminderRouting: vi.fn() }));
 vi.mock('../src/services/marketingPauseService.js', () => ({ pauseAutomaticMarketing: state.pauseMarketing }));
 vi.mock('../src/services/supplierAutobuyRuntime.js', () => ({ supplierAutobuyRuntime: { start: state.supplierStart } }));
+vi.mock('../src/services/supplierAutobuyPanelService.js', () => ({ ensureSupplierAutobuyChannel: state.supplierPanel }));
 vi.mock('../src/events/interactionCreate.js', () => ({ getClientOptions: () => ({}), loadCommands: async () => new Map(), registerInteractionHandler: vi.fn() }));
 vi.mock('../src/services/schedulerService.js', () => ({ startScheduler: state.scheduler }));
 vi.mock('../src/services/webhookServer.js', () => ({ startWebhookServer: state.webhook }));
@@ -86,6 +88,7 @@ beforeEach(() => {
   state.icons.mockResolvedValue({ status: 'ready' });
   state.iconStatus.mockReturnValue({ status: 'ready', available: 57, created: 0 });
   state.supplierStart.mockResolvedValue({ status: 'OUT_OF_SCOPE' });
+  state.supplierPanel.mockResolvedValue({ status: 'DISABLED_OTHER_STORE' });
   vi.stubEnv('ENV_FILE', '.env.test-startup-not-present');
 });
 afterEach(() => {
@@ -176,6 +179,7 @@ describe('independent price-board publication at startup', () => {
     expect(state.scheduler).not.toHaveBeenCalled();
     expect(state.icons).not.toHaveBeenCalled();
     expect(state.supplierStart).not.toHaveBeenCalled();
+    expect(state.supplierPanel).not.toHaveBeenCalled();
   });
 
   it('keeps commerce running while the hosting supplier probe is pending', async () => {
@@ -191,6 +195,7 @@ describe('independent price-board publication at startup', () => {
     expect(state.scheduler).toHaveBeenCalledWith(client);
     expect(state.otp).toHaveBeenCalledWith(client);
     expect(state.destroy).not.toHaveBeenCalled();
+    expect(state.supplierPanel).not.toHaveBeenCalled();
   });
 
   it('isolates an unexpected supplier startup failure without logging private error data', async () => {
@@ -202,5 +207,27 @@ describe('independent price-board publication at startup', () => {
     expect(JSON.stringify(warn.mock.calls)).not.toContain('supplier-private');
     expect(state.scheduler).toHaveBeenCalledTimes(1);
     expect(state.destroy).not.toHaveBeenCalled();
+  });
+
+  it('sets up the requested supplier panel after the probe and icons finish without waiting for optional cleanup', async () => {
+    const snapshot = { status: 'AUTH_REJECTED', purchasesEnabled: false };
+    state.supplierStart.mockResolvedValue(snapshot);
+    const client = await buildClient();
+    void state.handlers.get('clientReady')(client);
+    await vi.waitFor(() => expect(state.supplierPanel).toHaveBeenCalledExactlyOnceWith(client, {
+      guildId: '1070676180103086132', envFile: '.env.test-startup-not-present', snapshot,
+    }));
+    expect(state.scheduler).toHaveBeenCalledWith(client);
+    expect(state.otp).toHaveBeenCalledWith(client);
+  });
+
+  it('contains supplier channel setup errors without logging raw Discord payloads', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    state.supplierPanel.mockRejectedValue(new Error('private-supplier-channel-payload'));
+    const client = await buildClient();
+    void state.handlers.get('clientReady')(client);
+    await vi.waitFor(() => expect(warn).toHaveBeenCalledWith('[SUPPLIER-AUTOBUY] PANEL_SETUP_FAILED'));
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('private-supplier-channel');
+    expect(state.scheduler).toHaveBeenCalledTimes(1);
   });
 });
