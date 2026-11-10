@@ -90,6 +90,7 @@ beforeEach(() => {
   state.supplierStart.mockResolvedValue({ status: 'OUT_OF_SCOPE' });
   state.supplierPanel.mockResolvedValue({ status: 'DISABLED_OTHER_STORE' });
   vi.stubEnv('ENV_FILE', '.env.test-startup-not-present');
+  vi.stubEnv('SUPPLIER_AUTOBUY_PROVIDER', '');
 });
 afterEach(() => {
   vi.clearAllTimers();
@@ -189,7 +190,7 @@ describe('independent price-board publication at startup', () => {
     void state.handlers.get('clientReady')(client);
     await vi.waitFor(() => expect(state.supplierStart).toHaveBeenCalledTimes(1));
     expect(state.supplierStart).toHaveBeenCalledWith({
-      guildId: '1070676180103086132', envFile: '.env.test-startup-not-present', apiKey: 'supplier-test-only',
+      guildId: '1070676180103086132', envFile: '.env.test-startup-not-present', apiKey: 'supplier-test-only', provider: 'daiphuc',
     });
     expect(state.webhook.mock.invocationCallOrder[0]).toBeLessThan(state.supplierStart.mock.invocationCallOrder[0]);
     expect(state.scheduler).toHaveBeenCalledWith(client);
@@ -207,6 +208,20 @@ describe('independent price-board publication at startup', () => {
     expect(JSON.stringify(warn.mock.calls)).not.toContain('supplier-private');
     expect(state.scheduler).toHaveBeenCalledTimes(1);
     expect(state.destroy).not.toHaveBeenCalled();
+  });
+
+  it('routes only the new secret when Dopermind is selected without blocking commerce', async () => {
+    vi.stubEnv('SUPPLIER_AUTOBUY_PROVIDER', 'dopermind');
+    vi.stubEnv('DOPERMIND_API_KEY', 'new-provider-test-only');
+    vi.stubEnv('DAIPHUC_PARTNER_API_KEY', 'old-provider-test-only');
+    const client = await buildClient();
+    void state.handlers.get('clientReady')(client);
+    await vi.waitFor(() => expect(state.supplierStart).toHaveBeenCalledTimes(1));
+    expect(state.supplierStart).toHaveBeenCalledExactlyOnceWith({
+      guildId: '1070676180103086132', envFile: '.env.test-startup-not-present',
+      provider: 'dopermind', apiKey: 'new-provider-test-only',
+    });
+    expect(state.scheduler).toHaveBeenCalledWith(client);
   });
 
   it('sets up the requested supplier panel after the probe and icons finish without waiting for optional cleanup', async () => {

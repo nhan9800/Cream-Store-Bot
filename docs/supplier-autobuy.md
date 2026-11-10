@@ -1,4 +1,18 @@
-# DaiPhuc supplier autobuy — hosting connection diagnostics
+# Supplier autobuy — hosting connection diagnostics
+
+## Current supplier: Dopermind (2026-11-10)
+
+Owner switched the connection to https://api-gateway-production-be99.up.railway.app/api-docs. Set `SUPPLIER_AUTOBUY_PROVIDER=dopermind` and protected `DOPERMIND_API_KEY` in Store1 hosting `.env`. Values are read at startup; retain the exact guild plus ENV_FILE Store1 guard. The new key is never sent to the legacy provider; unknown providers fail closed.
+
+`dopermindClient.js` has a fixed HTTPS origin and only GET `/v1/balance` and `/v1/stock`: Bearer authentication, no redirects/retries, body-inclusive10second deadline and1MiB limit. Validate `success:true`, integer VND balance and flat product-key/price/stock schema. Preserve distinct keys for duplicate names; `unlimited:true` permits stock -1. Whitelist normalized fields.
+
+`npm run check:autobuy-api -- --json` now uses `check-dopermind.js`; `check:dopermind-api` is an explicit alias. Legacy diagnostic is `check:daiphuc-api` and uses only its old key. Reports contain status/counts/currency, never wallet amounts, raw errors, keys or import prices.
+
+Runtime performs one cached pair of reads after HTTP bind. `CONNECTED` / `schemaMapped:true` confirms the two read contracts, **not** purchase/fulfillment validation. Public health includes provider/productCount/safe request outcomes only; no wallet amount/catalog or new network work on health reads. Retain existing Discord channel/panel IDs and private cached controls; acknowledge connection while keeping payments closed.
+
+Local authenticated reads succeeded with101products/78available. No POST or wallet debit was used. Purchase worker, durable customer/payment/request binding, exact item delivery, recovery/idempotency and verified sale margins/retail equivalence remain separate gates; connection success must not enable checkout.
+
+Legacy notes below describe the previous provider and remain for rollback reference.
 
 Status: **read-only connection integrated; purchasing disabled**. The owner requested an additional Discord autobuy channel and explicitly authorized deployment and testing from hosting on 2026-11-10. Existing products, orders, manual fulfillment and website checkout remain unchanged.
 
