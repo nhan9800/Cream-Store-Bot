@@ -19,7 +19,7 @@ vi.mock('../src/services/adminOrderCenterService.js', () => ({
 }));
 
 import { db, initDatabase } from '../src/database/db.js';
-import { createOrder, getOrderByCode, markOrderCompleted, payOrderWithWallet, saveDelivery } from '../src/services/orderService.js';
+import { createOrder, getOrderByCode, markOrderCompleted, payOrderWithWallet, saveDelivery, savePaymentLinkData, recordOrderPayment } from '../src/services/orderService.js';
 import { createTicket, getOpenTicketByCustomer } from '../src/services/ticketService.js';
 import { addWalletBalance, getWalletBalance } from '../src/services/walletService.js';
 import { encrypt, decrypt } from '../src/utils/crypto.js';
@@ -28,6 +28,7 @@ import { createSupplierAutobuyOrderService } from '../src/services/supplierAutob
 import { createSupplierAutobuyCheckout } from '../src/services/supplierAutobuyCheckoutService.js';
 import { createDopermindClient, DOPERMIND_ORIGIN } from '../src/services/dopermindClient.js';
 import { STORE_ONE_GUILD_ID } from '../src/utils/locale.js';
+import { buildSupplierPaymentView } from '../src/services/supplierAutobuyPanelService.js';
 
 const NOW = Date.parse('2026-11-10T16:30:00Z');
 const PRODUCT = 'desc_integration-product';
@@ -155,6 +156,32 @@ afterAll(() => {
 });
 
 describe('supplier autobuy real commerce integration without external I/O', () => {
+  it('persists a private PayOS invoice and re-renders its QR without duplicate creation, then hides it after payment', async () => {
+    const t = fixture();
+    const { order } = await t.confirm();
+    const qrCode = '000201010212' + '1234567890'.repeat(6);
+    const expiresAt = new Date(Date.now() + 3600000).toISOString();
+    t.payosLink.mockImplementationOnce(async current => savePaymentLinkData(current.order_code, {
+      paymentLinkId: 'synthetic-link', checkoutUrl: 'https://pay.payos.vn/web/synthetic-link',
+      qrCode, qrText: qrCode, expiredAt: expiresAt,
+    }));
+    const payment = await t.checkout.payment({ client: t.client, ...t.context, orderCode: order.orderCode, method: 'payos' });
+    expect(payment).toMatchObject({ totalAmount: 61000, qrCode, expiresAt });
+    const reopened = await t.checkout.status({ ...t.context, orderCode: order.orderCode });
+    expect(reopened.payment).toEqual(payment);
+    const card = await buildSupplierPaymentView({ order: reopened, customerId: t.context.customerId });
+    expect(card.files[0].attachment.subarray(0, 8).toString('hex')).toBe('89504e470d0a1a0a');
+    expect(card.files[0].name).toBe(`payos-${order.orderCode}.png`);
+    expect(JSON.stringify(card.components)).toContain('61.000đ');
+    expect(t.payosLink).toHaveBeenCalledOnce(); expect(ledgerFor(order.orderCode)).toHaveLength(0);
+    expect(t.requests.filter(request => request.method === 'POST')).toHaveLength(0);
+    recordOrderPayment({ orderCode: order.orderCode, provider: 'PAYOS', transactionId: 'synthetic-invoice-receipt', amount: 61000, content: order.orderCode });
+    const paid = await t.checkout.status({ ...t.context, orderCode: order.orderCode });
+    expect(paid.payment).toBeUndefined();
+    expect((await buildSupplierPaymentView({ order: paid, customerId: t.context.customerId, payment })).files).toBeUndefined();
+    expect(t.payosLink).toHaveBeenCalledOnce(); expect(t.dmSend).not.toHaveBeenCalled();
+  });
+
   it('quotes, creates one private ticket, debits once, persists encrypted receipt before private DM and survives repeated actions', async () => {
     const t = fixture();
     const offers = await t.catalog.getOffers();

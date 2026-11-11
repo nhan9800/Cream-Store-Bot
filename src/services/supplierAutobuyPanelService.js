@@ -1,8 +1,9 @@
 import {
   ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, ContainerBuilder,
   MessageFlags, PermissionFlagsBits, SeparatorBuilder, SeparatorSpacingSize, TextDisplayBuilder,
-  StringSelectMenuBuilder,
+  StringSelectMenuBuilder, AttachmentBuilder, MediaGalleryBuilder, MediaGalleryItemBuilder,
 } from 'discord.js';
+import QRCode from 'qrcode';
 import { db } from '../database/db.js';
 import { createEmojiResolver, withButtonEmoji } from '../utils/emojiHelper.js';
 import { STORE_ONE_GUILD_ID } from '../utils/locale.js';
@@ -189,28 +190,85 @@ function publicOrderText(order, nameLimit = 150) {
   return `**${markdown(name, nameLimit)}**\nMã đơn: \`${orderCodeOf(order)}\`\nTổng tiền: **${money(amount)}**\nTrạng thái: **${status}**`;
 }
 
-export function buildSupplierOrderView({ order, customerId, payment = null } = {}) {
+function payosUrl(value) {
+  if (typeof value !== 'string' || value.length > 2048) return null;
+  try {
+    const url = new URL(value);
+    return url.protocol === 'https:' && ['pay.payos.vn', 'payos.vn'].includes(url.hostname)
+      && !url.username && !url.password && !url.port ? url.href : null;
+  } catch { return null; }
+}
+function paymentExpiry(payment) {
+  const value = payment?.expiresAt;
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T[\d:.]+(?:Z|[+-]\d{2}:\d{2})$/.test(value)) return null;
+  const time = Date.parse(value);
+  return Number.isFinite(time) ? time : null;
+}
+function paymentState(order, payment) {
+  const unpaid = !payment?.paid && !['PAID', 'FREE'].includes(order?.paymentStatus ?? order?.payment_status)
+    && !['COMPLETED', 'REFUNDED', 'CANCELLED'].includes(order?.status);
+  const expiresAt = paymentExpiry(payment);
+  return { unpaid, expiresAt, expired: expiresAt !== null && expiresAt <= Date.now() };
+}
+
+export function buildSupplierOrderView({ order, customerId, payment = order?.payment ?? null, qrAttachmentName = null, qrUnavailable = false } = {}) {
   requireOwner(customerId);
   const code = orderCodeOf(order) ?? payment?.orderCode;
   if (!/^CN_\d{6,12}$/.test(code || '')) throw new Error('INVALID_ORDER');
   const E = createEmojiResolver(STORE_ONE_GUILD_ID);
-  const text = `${publicOrderText({ ...order, orderCode: code })}\n\n${payment?.paid ? 'Thanh toán đã được ghi nhận. Bạn có thể bấm Nhận hàng để xem kết quả hoặc quay lại khi hệ thống xử lý xong.' : 'Thanh toán cho đúng mã đơn. Mọi lần kiểm tra và nhận lại hàng đều sử dụng đơn này.'}`;
+  const { unpaid, expiresAt, expired } = paymentState(order, payment);
+  const text = [publicOrderText({ ...order, orderCode: code }), '',
+    !unpaid ? 'Thanh toán và trạng thái đơn được ghi nhận ở trên. Bấm Nhận hàng riêng khi đơn đã có kết quả.'
+      : expired ? 'Hóa đơn đã hết hạn. Vui lòng kiểm tra đơn hoặc tạo ticket hỗ trợ; không chuyển tiền vào mã QR cũ.'
+      : qrAttachmentName ? 'Quét mã QR bên dưới hoặc bấm Mở trang thanh toán. Bot tự xác nhận khi nhận được tiền.'
+      : qrUnavailable ? 'Chưa hiển thị được ảnh QR. Bạn có thể dùng trang thanh toán PayOS hoặc bấm Kiểm tra đơn để xem lại hóa đơn hiện có.'
+      : 'Thanh toán cho đúng mã đơn. Mọi lần kiểm tra và nhận lại hàng đều sử dụng đơn này.',
+    unpaid && expiresAt !== null ? `${E('icon_expire')} **${expired ? 'Đã hết hạn' : 'Hạn thanh toán'}:** <t:${Math.floor(expiresAt / 1000)}:f> · <t:${Math.floor(expiresAt / 1000)}:R>` : null,
+  ].filter(line => line !== null).join('\n');
   const controls = [];
-  const unpaid = !payment?.paid && !['PAID', 'FREE'].includes(order?.paymentStatus ?? order?.payment_status)
-    && !['COMPLETED', 'REFUNDED', 'CANCELLED'].includes(order?.status);
-  if (unpaid) controls.push(button(`supplier-autobuy:pay:${customerId}:${code}:payos`, 'Thanh toán QR / PayOS', 'payment_payos', ButtonStyle.Primary),
+  if (unpaid && !expired) controls.push(button(`supplier-autobuy:pay:${customerId}:${code}:payos`, 'Thanh toán QR / PayOS', 'payment_payos', ButtonStyle.Primary),
     button(`supplier-autobuy:pay:${customerId}:${code}:wallet`, 'Dùng ví Cenar', 'icon_wallet'));
-  const link = payment?.checkoutUrl;
-  if (typeof link === 'string') {
-    let url;
-    try { url = new URL(link); } catch { url = null; }
-    if (url?.protocol === 'https:' && ['pay.payos.vn', 'payos.vn'].includes(url.hostname) && !url.username && !url.password) {
-      controls.push(withButtonEmoji(new ButtonBuilder().setLabel('Mở trang thanh toán').setStyle(ButtonStyle.Link).setURL(url.href), E('payment_payos')));
-    }
-  }
+  const link = unpaid && !expired ? payosUrl(payment?.checkoutUrl) : null;
+  if (link) controls.push(withButtonEmoji(new ButtonBuilder().setLabel('Mở trang thanh toán').setStyle(ButtonStyle.Link).setURL(link), E('payment_payos')));
   controls.push(button(`supplier-autobuy:order:${customerId}:${code}`, 'Kiểm tra đơn', 'icon_refresh'),
     button(`supplier-autobuy:delivery:${customerId}:${code}`, 'Nhận hàng riêng', 'icon_gift'));
-  return privatePayload([containerWithTitle(`## ${E('panel_order')} Đơn autobuy của bạn`, text), row(...controls), nav(customerId)]);
+  const container = containerWithTitle(`## ${E('panel_order')} Đơn autobuy của bạn`, text);
+  if (unpaid && !expired && qrAttachmentName === `payos-${code}.png`) {
+    container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
+    container.addMediaGalleryComponents(new MediaGalleryBuilder().addItems(new MediaGalleryItemBuilder()
+      .setURL(`attachment://${qrAttachmentName}`).setDescription(`Mã QR thanh toán PayOS cho đơn ${code}`)));
+  }
+  return privatePayload([container, row(...controls), nav(customerId)]);
+}
+
+/** Render locally; payment data must already be resolved by the owned order. */
+export async function buildSupplierPaymentView({ order, customerId, payment = order?.payment ?? null } = {}) {
+  requireOwner(customerId);
+  const code = orderCodeOf(order) ?? payment?.orderCode;
+  if (!/^CN_\d{6,12}$/.test(code || '')) throw new Error('INVALID_ORDER');
+  const { unpaid, expired } = paymentState(order, payment);
+  const method = typeof payment?.method === 'string' ? payment.method.toUpperCase() : null;
+  let qrAttachmentName = null, files;
+  const payos = unpaid && !expired && method === 'PAYOS';
+  if (payos) {
+    const raw = payment?.qrCode;
+    // PayOS returns an EMV/VietQR payload. Never fetch remote image URLs or
+    // encode arbitrary supplier URLs; only the verified PayOS link is fallback.
+    const data = typeof raw === 'string' && raw.length <= 4096 && /^000201[\x20-\x7e]{20,}$/.test(raw)
+      && !/(?:https?|data|javascript|file|ftp):/i.test(raw)
+      ? raw : payosUrl(payment?.checkoutUrl);
+    if (data) {
+      try {
+        const image = await QRCode.toBuffer(data, { type: 'png', width: 720, margin: 2,
+          errorCorrectionLevel: 'M', color: { dark: '#111827', light: '#FFFFFFFF' } });
+        if (Buffer.isBuffer(image) && image.length <= 1024 * 1024) {
+          qrAttachmentName = `payos-${code}.png`;
+          files = [new AttachmentBuilder(image, { name: qrAttachmentName })];
+        }
+      } catch { /* Keep the existing invoice link; never create another one. */ }
+    }
+  }
+  return { ...buildSupplierOrderView({ order, customerId, payment, qrAttachmentName, qrUnavailable: payos && !qrAttachmentName }), ...(files ? { files } : {}) };
 }
 
 export function buildSupplierOrderListView({ orders, customerId } = {}) {

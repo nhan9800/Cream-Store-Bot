@@ -16,6 +16,21 @@ export class SupplierCheckoutError extends Error {
 const deny = code => { throw new SupplierCheckoutError(code); };
 const snowflake = value => typeof value === 'string' && /^\d{17,20}$/.test(value);
 
+function privatePaymentMetadata(order) {
+  let checkoutUrl = null;
+  try {
+    const url = new URL(order.payment_checkout_url);
+    if (url.protocol === 'https:' && ['pay.payos.vn', 'payos.vn'].includes(url.hostname)
+      && !url.username && !url.password && !url.port) checkoutUrl = url.href;
+  } catch { /* An invalid stored URL never becomes a payment link. */ }
+  const raw = order.payment_qr_code || order.payment_qr_text;
+  const qrCode = typeof raw === 'string' && /^000201[\x20-\x7e]{0,4090}$/.test(raw) ? raw : null;
+  const expiresAt = typeof order.payment_expired_at === 'string' && Number.isFinite(Date.parse(order.payment_expired_at))
+    ? new Date(order.payment_expired_at).toISOString() : null;
+  return { orderCode: order.order_code, method: 'PAYOS', paid: false, status: 'PENDING_PAYMENT',
+    totalAmount: order.total_amount, checkoutUrl, qrCode, expiresAt };
+}
+
 async function publishSupplierOrderLog(client, order) {
   const guild = await client?.guilds.fetch(order.guild_id).catch(() => null);
   const channel = await guild?.channels.fetch(order.order_log_channel_id).catch(() => null);
@@ -177,7 +192,7 @@ export function createSupplierAutobuyCheckout({
         return { orderCode, method, paid: true, status: result.updated?.status || order.status };
       }
       const linked = await payosLink(order);
-      return { orderCode, method, paid: false, status: 'PENDING_PAYMENT', checkoutUrl: linked.payment_checkout_url, qrCode: linked.payment_qr_code || linked.payment_qr_text };
+      return privatePaymentMetadata(linked);
     }).finally(() => paymentFlights.delete(key));
     paymentTurn = task.catch(() => {});
     paymentFlights.set(key, task);
@@ -191,7 +206,15 @@ export function createSupplierAutobuyCheckout({
     if (client && current?.status === 'PENDING_PAYMENT' && current.payment_link_id) {
       await syncPayos({ client, orderCode }).catch(() => null);
     }
-    return orders.getSupplierOrderForCustomer({ guildId, customerId, orderCode });
+    const owned = await orders.getSupplierOrderForCustomer({ guildId, customerId, orderCode });
+    const fresh = readOrder(orderCode);
+    if (!fresh || fresh.guild_id !== guildId || fresh.customer_id !== customerId || fresh.fulfillment_mode !== 'SUPPLIER') deny('ORDER_NOT_FOUND');
+    const chosen = database.prepare('SELECT method FROM supplier_autobuy_payment_methods WHERE order_code=?').get(orderCode);
+    // Recover only the customer's already-created invoice. This path never
+    // creates a link, debits a wallet, or reads the supplier to buy anything.
+    const payment = fresh.status === 'PENDING_PAYMENT' && fresh.payment_status === 'UNPAID'
+      && chosen?.method === 'PAYOS' && fresh.payment_link_id ? privatePaymentMetadata(fresh) : null;
+    return { ...owned, ...(payment ? { payment } : {}) };
   }
   return { confirm, payment, status };
 }

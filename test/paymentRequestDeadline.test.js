@@ -100,6 +100,24 @@ describe('payment provider request deadlines', () => {
     expect(vi.getTimerCount()).toBe(0);
   });
 
+  it('persists the submitted invoice expiry when create response omits it', async () => {
+    const order = pendingOrder();
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ code: '00', data: { id: 'new-invoice', checkoutUrl: 'https://pay.payos.vn/web/new-invoice', qrCode: '000201fixture' } }));
+    const saved = await createOrLoadPayOSLink(order);
+    const submitted = JSON.parse(fetchMock.mock.calls[0][1].body);
+    expect(saved.payment_expired_at).toBe(new Date(submitted.expiredAt * 1000).toISOString());
+    expect(Date.parse(saved.payment_expired_at)).toBeGreaterThan(Date.now());
+  });
+
+  it('retains original expiry on duplicate lookup rather than inventing a fresh lifetime', async () => {
+    const order = pendingOrder();
+    const original = new Date(Date.now() - 3600000).toISOString();
+    db.prepare('UPDATE orders SET payment_expired_at=? WHERE order_code=?').run(original, order.order_code);
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(Response.json({ code: '231', desc: 'Đơn thanh toán đã tồn tại' }))
+      .mockResolvedValueOnce(Response.json({ code: '00', data: { id: 'old-invoice', status: 'EXPIRED' } }));
+    expect((await createOrLoadPayOSLink(getOrderByCode(order.order_code))).payment_expired_at).toBe(original);
+  });
+
   it('bounds a stalled VietQR image before sending a message or saving link data', async () => {
     const order = pendingOrder();
     db.prepare(`INSERT INTO guild_settings (guild_id, ticket_category_id, order_log_channel_id, feedback_channel_id,

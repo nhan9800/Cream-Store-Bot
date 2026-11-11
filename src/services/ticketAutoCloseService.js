@@ -1,6 +1,6 @@
 import { db, nowIso } from '../database/db.js';
 import { cancelOrder } from './orderService.js';
-import { closeTicket, getTicketById } from './ticketService.js';
+import { closeTicket, closeTicketIfOpen, getTicketById } from './ticketService.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { emitStaffLog } from './staffLogService.js';
 import { archiveTicketConversation } from './ticketClosureService.js';
@@ -37,10 +37,12 @@ export function buildNoticeV2({ accent, headerEmoji, headerText, bodyLines }) {
   return { components: [container], flags: MessageFlags.IsComponentsV2 };
 }
 
-export function buildPaymentReminderV2({ guildId, customerId, orderCode, stage = 'first' }) {
+export function buildPaymentReminderV2({ guildId, customerId, orderCode, stage = 'first', deadlineAt = null }) {
   const E = createEmojiResolver(guildId);
   const isFinal = stage === 'final';
-  const deadlineMinutes = isFinal ? 10 : 20;
+  const deadlineMinutes = deadlineAt === null ? config.unpaidOrderTicketHours * 60
+    : Math.max(1, Math.ceil((Number(deadlineAt) - Date.now()) / 60000));
+  const deadlineText = deadlineAt === null ? null : `<t:${Math.floor(Number(deadlineAt) / 1000)}:R>`;
   const international = isInternationalGuild(guildId);
 
   return buildNoticeV2({
@@ -53,24 +55,26 @@ export function buildPaymentReminderV2({ guildId, customerId, orderCode, stage =
       `${E('ticket_user')} Hi <@${customerId}>, payment has not been confirmed for your order yet.`,
       '',
       `> ${E('order_id')} **Order:** \`${orderCode}\``,
-      `> ${E('icon_clock')} **Time remaining:** **${deadlineMinutes} minutes**`,
+      `> ${E('icon_clock')} **Ticket closes:** ${deadlineText || `**${config.unpaidOrderTicketHours} hours**`} (${deadlineMinutes} minutes)`,
       `> ${E('payment_money')} **Action required:** ${isFinal ? 'Complete payment or reply in this ticket now.' : 'Pay or send a short reply to keep the ticket open.'}`,
       '',
       isFinal
         ? `${E('order_cancel')} **After this deadline, the order is cancelled and the ticket closes automatically.**`
         : `${E('status_info')} A short message such as \`I am paying now\` confirms that you still need assistance.`,
+      `${E('status_info')} An unpaid ticket stays open for at least ${config.unpaidOrderTicketHours} hours after the latest order or ticket activity. QR/payment links may expire earlier; ask for a current invoice if needed.`,
       '',
       `-# ${E('ticket_open')} Automated ticket monitoring · You do not need to mention staff or the Owner`,
     ] : [
       `${E('ticket_user')} Chào <@${customerId}>, hệ thống vẫn chưa ghi nhận thanh toán cho đơn hàng của bạn.`,
       '',
       `> ${E('order_id')} **Mã đơn:** \`${orderCode}\``,
-      `> ${E('icon_clock')} **Thời hạn còn lại:** **${deadlineMinutes} phút**`,
+      `> ${E('icon_clock')} **Ticket đóng:** ${deadlineText || `**${config.unpaidOrderTicketHours} giờ**`} (${deadlineMinutes} phút)`,
       `> ${E('payment_money')} **Cần thực hiện:** ${isFinal ? 'Hoàn tất thanh toán hoặc phản hồi ngay trong ticket.' : 'Thanh toán hoặc gửi một phản hồi để giữ ticket mở.'}`,
       '',
       isFinal
         ? `${E('order_cancel')} **Sau thời hạn trên, đơn sẽ tự động hủy và ticket sẽ được đóng.**`
         : `${E('status_info')} Chỉ cần gửi một tin nhắn ngắn như \`mình đang thanh toán\` để hệ thống ghi nhận bạn vẫn cần hỗ trợ.`,
+      `${E('status_info')} Ticket chưa thanh toán được giữ ít nhất ${config.unpaidOrderTicketHours} giờ từ đơn mới nhất hoặc hoạt động trong ticket. QR/liên kết thanh toán có thể hết hạn sớm hơn; liên hệ shop để nhận hóa đơn hiện hành khi cần.`,
       '',
       `-# ${E('ticket_open')} Ticket được theo dõi tự động · Không cần ping nhân viên hoặc Owner`,
     ],
@@ -96,318 +100,117 @@ function findOrderTicket(order) {
     || null;
 }
 
-export async function processPendingPaymentTickets(client) {
-  try {
-    const pendingOrders = db.prepare(`
-      SELECT * FROM orders 
-      WHERE guild_id = ?
-        AND status = 'PENDING_PAYMENT' 
-        and payment_status IN ('UNPAID', 'CANCELLED')
-    `).all(config.guildId);
+function paymentTicketState(ticket, now = Date.now()) {
+  if (!ticket || ticket.guild_id !== config.guildId || ticket.status !== 'OPEN'
+    || ticket.ticket_type !== 'ORDER' || Number(ticket.keep_open_requested) === 1) return null;
+  const linked = db.prepare(`SELECT * FROM orders WHERE guild_id=? AND
+    (ticket_id=? OR ticket_channel_id=? OR order_code=?)`).all(ticket.guild_id, ticket.id,
+    ticket.channel_id, ticket.related_order_code || '');
+  if (!linked.length || linked.some(order => ['PAID', 'FREE'].includes(order.payment_status)
+    || !['PENDING_PAYMENT', 'CANCELLED', 'REFUNDED'].includes(order.status))) return null;
+  const pending = linked.filter(order => ['UNPAID', 'CANCELLED'].includes(order.payment_status) && order.status === 'PENDING_PAYMENT'
+    || ['UNPAID', 'CANCELLED'].includes(order.payment_status) && order.status === 'CANCELLED'
+      && (order.payment_link_id && !order.payment_cancel_reason
+        || /^(Thanh toán (?:PayOS )?bị hủy|Thanh toán.*hết hạn|Tự động hủy.*(thanh toán|phản hồi)|Tự động đóng ticket chưa thanh toán)/i.test(order.payment_cancel_reason || '')));
+  if (!pending.length) return null;
+  const anchors = [ticket.created_at, ticket.last_activity_at, ...pending.map(order => order.created_at)]
+    .filter(Boolean).map(value => Date.parse(value));
+  if (!anchors.length || anchors.some(value => !Number.isFinite(value))) return null;
+  const deadline = Math.max(...anchors) + config.unpaidOrderTicketHours * 3600000;
+  return { ticket, pending, deadline, due: now >= deadline };
+}
 
-    const now = Date.now();
+export function getPendingPaymentTicketPolicy() {
+  return { idleHours: config.unpaidOrderTicketHours, activityBasis: 'LATEST_ORDER_OR_HUMAN_TICKET_ACTIVITY', invoiceExpirySeparate: true };
+}
 
-    for (const order of pendingOrders) {
-      const createdTime = new Date(order.created_at).getTime();
-      const ageMinutes = (now - createdTime) / (60 * 1000);
-
-      // Nếu không có kênh ticket Discord, tự động hủy đơn sau 15 phút
-      if (!order.ticket_channel_id) {
-        if (ageMinutes >= 15 || order.payment_status === 'CANCELLED') {
-          await cancelPendingOrderEverywhere({
-            client,
-            order,
-            reason: order.payment_cancel_reason || 'Tự động hủy đơn hàng không có kênh ticket',
-          });
-        }
-        continue;
-      }
-
-      // Bỏ qua các đơn WEB - ticket_channel_id không phải Discord snowflake
-      // Ví dụ: 'web-cn-854625' là ID đơn web, không thể fetch từ Discord API
-      if (
-        typeof order.ticket_channel_id === 'string' &&
-        (order.ticket_channel_id.startsWith('web-') || !/^\d+$/.test(order.ticket_channel_id))
-      ) {
-        continue; // Đơn web không có Discord channel, bỏ qua silently
-      }
-
-      // Lấy kênh Discord tương ứng
-      let channel = null;
+let pendingPaymentRun = null;
+export function processPendingPaymentTickets(client) {
+  if (pendingPaymentRun) return pendingPaymentRun;
+  pendingPaymentRun = (async () => {
+    const orders = db.prepare(`SELECT * FROM orders WHERE guild_id=?
+      AND payment_status IN ('UNPAID','CANCELLED') AND status IN ('PENDING_PAYMENT','CANCELLED')`).all(config.guildId);
+    const seen = new Set();
+    for (const order of orders) {
       try {
-        channel = await client.channels.fetch(order.ticket_channel_id);
-      } catch (err) {
-        // Chỉ hủy đơn nếu Discord API trả về mã lỗi 10003 (Unknown Channel) - tức là kênh thực sự đã bị xóa!
-        if (err.code === 10003) {
-          cancelOrder(order.order_code, 'Kênh ticket đã bị xóa bên ngoài');
-        } else {
-          console.error(`[PENDING-PAYMENT-TICKETS] Lỗi tạm thời khi fetch channel ${order.ticket_channel_id} (Đơn ${order.order_code}):`, err.message);
+        // Preserve the separate legacy no-ticket cleanup; a web pseudo-channel
+        // is never a Discord channel and is not part of this policy.
+        if (!order.ticket_channel_id) {
+          if (order.status === 'PENDING_PAYMENT' && (Date.now() - Date.parse(order.created_at) >= 15 * 60000
+            || order.payment_status === 'CANCELLED')) await cancelPendingOrderEverywhere({ client, order,
+              reason: order.payment_cancel_reason || 'Tự động hủy đơn hàng không có kênh ticket' });
+          continue;
         }
-        continue;
-      }
-
-      const E = createEmojiResolver(order.guild_id);
-
-      // Nếu trạng thái thanh toán đã bị hủy hoặc hết hạn, xử lý hủy đơn và đóng ticket ngay lập tức
-      if (order.payment_status === 'CANCELLED') {
-        const payload = buildNoticeV2({
-          accent: 0xED4245, // Đỏ
-          headerEmoji: E('order_cancel'),
-          headerText: 'ĐƠN HÀNG BỊ HỦY',
-          bodyLines: [
-            `${E('status_cross')} Đơn hàng **${order.order_code}** đã bị hủy do liên kết thanh toán đã hết hạn hoặc bị hủy.`,
-            '',
-            `${E('ticket_close')} **Ticket này sẽ tự động đóng và xóa kênh sau 5 giây.**`,
-          ],
-        });
-
-        await channel.send(payload).catch(() => null);
-
-        const cancellationReason = order.payment_cancel_reason || 'Thanh toán bị hủy hoặc hết hạn';
-        await cancelPendingOrderEverywhere({ client, guild: channel.guild, order, reason: cancellationReason });
-
-        setTimeout(async () => {
-          try {
-            const ticket = findOrderTicket(order);
-            if (ticket) {
-              const archiveResult = await archiveTicketConversation({
-                guild: channel.guild,
-                ticket,
-                channel,
-                closedById: client.user.id,
-              });
-              if (!archiveResult.archived) {
-                console.error(`[AUTO CLOSE] Giữ kênh ${ticket.ticket_code} vì transcript chưa lưu được.`);
-                return;
-              }
-              closeTicket(ticket.id, client.user.id);
-
-              await emitStaffLog(client, {
-                guildId: order.guild_id,
-                actorId: client.user.id,
-                targetId: order.customer_id,
-                action: 'TICKET_CLOSE',
-                detail: `Auto-close ticket do thanh toán bị hủy/hết hạn`,
-                relatedTicketCode: ticket.ticket_code,
-                relatedOrderCode: order.order_code,
-              });
-
-            } else return;
-            await channel.delete('Auto-close ticket do thanh toán bị hủy/hết hạn').catch(() => null);
-          } catch (err) {
-            console.error('[AUTO CLOSE TICKET ERR CANCELLED]', err);
-          }
-        }, 5000);
-        continue;
-      }
-
-      // CASE 1: Chưa gửi nhắc nhở lần 1
-      if (!order.payment_reminder_sent_at) {
-        if (ageMinutes >= 15) {
-          const payload = buildPaymentReminderV2({
-            guildId: order.guild_id,
-            customerId: order.customer_id,
-            orderCode: order.order_code,
-            stage: 'first',
-          });
-
-          await channel.send({
-            ...payload,
-            allowedMentions: { users: [order.customer_id] },
-          }).catch(() => null);
-
-          db.prepare(`
-            UPDATE orders
-            SET payment_reminder_sent_at = ?, updated_at = ?
-            WHERE order_code = ?
-          `).run(nowIso(), nowIso(), order.order_code);
+        if (!/^\d{17,20}$/.test(String(order.ticket_channel_id))) continue;
+        const ticket = findOrderTicket(order);
+        if (!ticket || seen.has(ticket.id)) continue;
+        seen.add(ticket.id);
+        let state = paymentTicketState(ticket);
+        if (!state) continue;
+        // Missing access/Unknown Channel alone is not proof a transcript exists.
+        const channel = await client.channels.fetch(ticket.channel_id).catch(() => null);
+        if (!channel || channel.guild?.id !== ticket.guild_id) continue;
+        state = paymentTicketState(getTicketById(ticket.id));
+        if (!state) continue;
+        if (!state.due) {
+          const remaining = state.deadline - Date.now();
+          const reminder = state.pending.find(item => item.status === 'PENDING_PAYMENT'
+            && (!item.payment_reminder_sent_at && Date.now() - Date.parse(item.created_at) >= 15 * 60000
+              || remaining <= 10 * 60000 && (!item.processing_reminder_sent_at
+                || Date.parse(item.processing_reminder_sent_at) < state.deadline - 10 * 60000)));
+          if (!reminder) continue;
+          const stage = remaining <= 10 * 60000 ? 'final' : 'first';
+          const sent = await channel.send({ ...buildPaymentReminderV2({ guildId: order.guild_id,
+            customerId: reminder.customer_id, orderCode: reminder.order_code, stage, deadlineAt: state.deadline }),
+            allowedMentions: { parse: [], users: [reminder.customer_id] } }).catch(() => null);
+          if (sent) db.prepare(`UPDATE orders SET ${stage === 'final' ? 'processing_reminder_sent_at' : 'payment_reminder_sent_at'}=?,updated_at=?
+            WHERE order_code=? AND status='PENDING_PAYMENT' AND payment_status='UNPAID'`).run(nowIso(), nowIso(), reminder.order_code);
+          continue;
         }
-        continue;
-      }
-
-      // CASE 2: Đã gửi nhắc nhở lần 1, đang đợi 20 phút
-      if (order.payment_reminder_sent_at && !order.processing_reminder_sent_at) {
-        const firstWarnTime = new Date(order.payment_reminder_sent_at).getTime();
-        const minsSinceFirstWarn = (now - firstWarnTime) / (60 * 1000);
-
-        if (minsSinceFirstWarn >= 20) {
-          // Kiểm tra xem khách hàng có tin nhắn mới nào sau firstWarnTime không
-          const msgs = await channel.messages.fetch({ limit: 50 }).catch(() => null);
-          let customerReplied = false;
-          let latestReplyTimestamp = 0;
-
-          if (msgs) {
-            const customerMsgs = msgs.filter(
-              m => m.author.id === order.customer_id && m.createdTimestamp > firstWarnTime
-            );
-            if (customerMsgs.size > 0) {
-              customerReplied = true;
-              latestReplyTimestamp = Math.max(...customerMsgs.map(m => m.createdTimestamp));
-            }
+        const deadline = state.deadline;
+        const archive = await archiveTicketConversation({ guild: channel.guild, ticket: state.ticket, channel,
+          closedById: client.user.id, minimumCreatedAt: new Date().toISOString() });
+        if (!archive?.archived) continue;
+        state = paymentTicketState(getTicketById(ticket.id));
+        if (!state?.due || state.deadline !== deadline) continue;
+        const reason = `Tự động đóng ticket chưa thanh toán sau ${config.unpaidOrderTicketHours} giờ không hoạt động`;
+        // Recheck all linked orders synchronously after transcript I/O. Payment,
+        // Keep Open, warranty work or a new order must cancel this closure.
+        const claim = db.transaction(() => {
+          const fresh = paymentTicketState(getTicketById(ticket.id));
+          if (!fresh?.due || fresh.deadline !== deadline) return null;
+          const cancelled = fresh.pending.filter(item => item.status === 'PENDING_PAYMENT').map(item => cancelOrder(item.order_code, reason));
+          // A new purchase must see a closed ticket while Discord DELETE is in
+          // flight, rather than bind to a channel already being removed.
+          const closure = closeTicketIfOpen(ticket.id, client.user.id);
+          return closure.closed ? { cancelled, ticket: closure.ticket } : null;
+        }).immediate();
+        if (!claim) continue;
+        try { await channel.delete(reason); }
+        catch (error) {
+          if (Number(error?.code) !== 10003) {
+            // Undo only our exact closure claim; never overwrite a later admin
+            // transition or clear a Keep Open request recorded during DELETE.
+            db.prepare(`UPDATE tickets SET status='OPEN',closed_at=NULL,closed_by_id=NULL WHERE id=? AND status='CLOSED'
+              AND closed_at=? AND closed_by_id=? AND channel_id=?`).run(ticket.id, claim.ticket.closed_at, client.user.id, ticket.channel_id);
+            continue;
           }
-
-          if (!customerReplied) {
-            // Không phản hồi -> Tự động hủy đơn & đóng ticket
-            const payload = buildNoticeV2({
-              accent: 0xED4245, // Đỏ
-              headerEmoji: E('order_cancel'),
-              headerText: 'ĐƠN HÀNG BỊ HỦY TỰ ĐỘNG',
-              bodyLines: [
-                `${E('status_cross')} Đơn hàng **${order.order_code}** đã bị hủy tự động do quá **20 phút** không nhận được phản hồi hoặc thanh toán kể từ lần nhắc thứ 1.`,
-                '',
-                `${E('ticket_close')} **Ticket này sẽ tự động đóng và xóa kênh sau 5 giây.**`,
-              ],
-            });
-
-            await channel.send(payload).catch(() => null);
-
-            const cancellationReason = 'Tự động hủy do quá 20 phút không phản hồi/thanh toán lần 1';
-            await cancelPendingOrderEverywhere({ client, guild: channel.guild, order, reason: cancellationReason });
-            
-            setTimeout(async () => {
-              try {
-                const ticket = findOrderTicket(order);
-                if (ticket) {
-                  const archiveResult = await archiveTicketConversation({
-                    guild: channel.guild,
-                    ticket,
-                    channel,
-                    closedById: client.user.id,
-                  });
-                  if (!archiveResult.archived) {
-                    console.error(`[AUTO CLOSE] Giữ kênh ${ticket.ticket_code} vì transcript chưa lưu được.`);
-                    return;
-                  }
-                  closeTicket(ticket.id, client.user.id);
-
-                  await emitStaffLog(client, {
-                    guildId: order.guild_id,
-                    actorId: client.user.id,
-                    targetId: order.customer_id,
-                    action: 'TICKET_CLOSE',
-                    detail: `Auto-close ticket do không thanh toán/phản hồi`,
-                    relatedTicketCode: ticket.ticket_code,
-                    relatedOrderCode: order.order_code,
-                  });
-
-                } else return;
-                await channel.delete('Auto-close ticket do quá thời hạn thanh toán').catch(() => null);
-              } catch (err) {
-                console.error('[AUTO CLOSE TICKET ERR]', err);
-              }
-            }, 5000);
-
-          } else {
-            // Khách có phản hồi -> Check xem đã quá 5 phút kể từ tin nhắn cuối cùng chưa
-            const minsSinceReply = (now - latestReplyTimestamp) / (60 * 1000);
-            if (minsSinceReply >= 5) {
-              // Nhắc nhở lần 2 (Đợi 10 phút)
-              const payload = buildPaymentReminderV2({
-                guildId: order.guild_id,
-                customerId: order.customer_id,
-                orderCode: order.order_code,
-                stage: 'final',
-              });
-
-              await channel.send({
-                ...payload,
-                allowedMentions: { users: [order.customer_id] },
-              }).catch(() => null);
-
-              db.prepare(`
-                UPDATE orders 
-                SET processing_reminder_sent_at = ?, updated_at = ? 
-                WHERE order_code = ?
-              `).run(nowIso(), nowIso(), order.order_code);
-            }
-          }
+          // Unknown Channel confirms the already-archived channel is gone.
         }
-        continue;
-      }
-
-      // CASE 3: Đã nhắc nhở lần 2, đang đợi 10 phút
-      if (order.processing_reminder_sent_at) {
-        const secondWarnTime = new Date(order.processing_reminder_sent_at).getTime();
-        const minsSinceSecondWarn = (now - secondWarnTime) / (60 * 1000);
-
-        if (minsSinceSecondWarn >= 10) {
-          // Kiểm tra xem khách có nhắn gì mới sau secondWarnTime không
-          const msgs = await channel.messages.fetch({ limit: 50 }).catch(() => null);
-          let customerRepliedAfterSecond = false;
-
-          if (msgs) {
-            const customerMsgs = msgs.filter(
-              m => m.author.id === order.customer_id && m.createdTimestamp > secondWarnTime
-            );
-            if (customerMsgs.size > 0) {
-              customerRepliedAfterSecond = true;
-            }
-          }
-
-          if (!customerRepliedAfterSecond) {
-            // Không phản hồi lần 2 -> Đóng ticket
-            const payload = buildNoticeV2({
-              accent: 0xED4245, // Đỏ
-              headerEmoji: E('order_cancel'),
-              headerText: 'ĐƠN HÀNG BỊ HỦY TỰ ĐỘNG (LẦN CUỐI)',
-              bodyLines: [
-                `${E('status_cross')} Đơn hàng **${order.order_code}** đã bị hủy tự động do quá **10 phút** không nhận được phản hồi hoặc thanh toán kể từ lần nhắc cuối cùng.`,
-                '',
-                `${E('ticket_close')} **Ticket này sẽ tự động đóng và xóa kênh sau 5 giây.**`,
-              ],
-            });
-
-            await channel.send(payload).catch(() => null);
-
-            const cancellationReason = 'Tự động hủy do quá 10 phút không phản hồi/thanh toán lần 2';
-            await cancelPendingOrderEverywhere({ client, guild: channel.guild, order, reason: cancellationReason });
-
-            setTimeout(async () => {
-              try {
-                const ticket = findOrderTicket(order);
-                if (ticket) {
-                  const archiveResult = await archiveTicketConversation({
-                    guild: channel.guild,
-                    ticket,
-                    channel,
-                    closedById: client.user.id,
-                  });
-                  if (!archiveResult.archived) {
-                    console.error(`[AUTO CLOSE] Giữ kênh ${ticket.ticket_code} vì transcript chưa lưu được.`);
-                    return;
-                  }
-                  closeTicket(ticket.id, client.user.id);
-
-                  await emitStaffLog(client, {
-                    guildId: order.guild_id,
-                    actorId: client.user.id,
-                    targetId: order.customer_id,
-                    action: 'TICKET_CLOSE',
-                    detail: `Auto-close ticket lần 2 do không thanh toán/phản hồi`,
-                    relatedTicketCode: ticket.ticket_code,
-                    relatedOrderCode: order.order_code,
-                  });
-
-                } else return;
-                await channel.delete('Auto-close ticket lần 2 do quá thời hạn thanh toán').catch(() => null);
-              } catch (err) {
-                console.error('[AUTO CLOSE TICKET ERR 2]', err);
-              }
-            }, 5000);
-          } else {
-            // Khách lại có phản hồi tiếp -> Reset status để cho phép nhắc nhở tiếp sau 5 phút nếu vẫn chưa trả tiền
-            db.prepare(`
-              UPDATE orders 
-              SET processing_reminder_sent_at = NULL, updated_at = ? 
-              WHERE order_code = ?
-            `).run(nowIso(), order.order_code);
-          }
+        for (const cancelledOrder of claim.cancelled) {
+          if (!cancelledOrder) continue;
+          await updateOrderLogMessage(channel.guild, cancelledOrder).catch(() => null);
+          await sendOrderCancelledFlow({ guild: channel.guild, order: cancelledOrder, reason }).catch(() => null);
         }
+        await emitStaffLog(client, { guildId: ticket.guild_id, actorId: client.user.id, targetId: ticket.customer_id,
+          action: 'TICKET_CLOSE', detail: reason, relatedTicketCode: ticket.ticket_code,
+          relatedOrderCode: order.order_code }).catch(() => null);
+      } catch (error) {
+        console.error('[PENDING-PAYMENT-TICKETS] Giữ ticket để thử lại:', error?.code || error?.name || 'CLOSE_FAILED');
       }
     }
-  } catch (error) {
-    console.error('[TICKET AUTO CLOSE SERVICE] Lỗi:', error);
-  }
+  })().finally(() => { pendingPaymentRun = null; });
+  return pendingPaymentRun;
 }
 
 export async function processCompletedFeedbackTickets(client) {
