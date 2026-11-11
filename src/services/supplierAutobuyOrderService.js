@@ -349,7 +349,8 @@ export function createSupplierAutobuyOrderService({
           if (typeof provider.getOrder !== 'function') return pending('REVIEW', 'DELIVERY_REVIEW');
           const source = await provider.getOrder({ orderId: initial.supplier_order_code });
           const expectedId = /^cdkvietnam:(\d+)$/.exec(initial.product_key)?.[1];
-          if (source.status !== 'delivered' || source.quantity !== initial.quantity || !Array.isArray(source.items)
+          if (source.orderCode !== initial.supplier_order_code || source.status !== 'delivered'
+            || source.quantity !== initial.quantity || !Array.isArray(source.items)
             || source.items.length !== initial.quantity) return pending('RECONCILING', 'DELIVERY_REVIEW', 3);
           if (expectedId && String(source.productId) !== expectedId) return pending('REVIEW', 'RECEIPT_INVALID');
           if (!integer(source.unitPriceVnd, 1) || !integer(source.totalAmountVnd, 1)
