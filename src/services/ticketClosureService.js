@@ -16,13 +16,18 @@ export async function archiveTicketConversation({
   closedById,
   exportOptions = {},
   deliver = deliverTranscript,
+  minimumCreatedAt = null,
 } = {}) {
   if (!ticket?.id) {
     return { archived: false, reused: false, error: 'Ticket is missing a persisted id' };
   }
 
   const existing = getLatestTicketTranscriptMetadata({ ticketId: ticket.id, ticketCode: ticket.ticket_code });
-  if (existing) {
+  const minimumMs = minimumCreatedAt === null ? null : Date.parse(minimumCreatedAt);
+  if (minimumMs !== null && !Number.isFinite(minimumMs)) {
+    return { archived: false, reused: false, error: 'Transcript freshness boundary is invalid' };
+  }
+  if (existing && (minimumMs === null || Date.parse(existing.createdAt) >= minimumMs)) {
     return { archived: true, reused: true, transcript: existing, delivery: null };
   }
 

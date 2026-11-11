@@ -1,11 +1,12 @@
 import { describe, expect, it, vi } from 'vitest';
 import { MessageFlags } from 'discord.js';
+import QRCode from 'qrcode';
 vi.mock('../src/database/db.js', () => ({ db: { prepare: () => { throw new Error('No database in presentation test'); } } }));
 vi.mock('../src/utils/emojiHelper.js', () => ({
   createEmojiResolver: () => { const E = name => '<:' + name + ':1382729296724099132>'; E.component = name => ({ id: '1382729296724099132', name }); return E; },
   withButtonEmoji: (button, emoji) => button.setEmoji({ name: emoji.match(/^<:(\w+):/)?.[1] || 'test', id: '1382729296724099132' }),
 }));
-import { buildSupplierCatalogView, buildSupplierQuoteView, buildSupplierOrderView, buildSupplierOrderListView, buildSupplierAutobuyPanel, buildSupplierAutobuyReply } from '../src/services/supplierAutobuyPanelService.js';
+import { buildSupplierCatalogView, buildSupplierQuoteView, buildSupplierOrderView, buildSupplierPaymentView, buildSupplierOrderListView, buildSupplierAutobuyPanel, buildSupplierAutobuyReply } from '../src/services/supplierAutobuyPanelService.js';
 const user = '111111111111111111';
 const quoteId = 'b9d30c1d-cb9a-4321-95dc-2994ac587ac1';
 const productKey = 'desc_12345678-abcd-abcd-abcd-123456789012';
@@ -76,6 +77,78 @@ describe('supplier autobuy commerce presentation', () => {
     const paid = buildSupplierOrderView({ order: { orderCode: 'CN_123456', paymentStatus: 'PAID', status: 'PROCESSING' }, customerId: user });
     expect(ids(paid).some(id => id.includes(':pay:'))).toBe(false);
     expect(ids(paid)).toContain('supplier-autobuy:delivery:' + user + ':CN_123456');
+  });
+  it('renders the exact PayOS QR material into a local PNG attachment with private native gallery, total and expiry', async () => {
+    const qrCode = '00020101021238570010A00000072701270006970422011301234567890125204599953037045405550005802VN6304BEEF';
+    const expiresAt = new Date(Date.now() + 3600000).toISOString();
+    const order = { orderCode: 'CN_123456', productName: 'CapCut', totalAmount: 55000, paymentStatus: 'UNPAID', status: 'PENDING_PAYMENT',
+      payment: { method: 'PAYOS', paid: false, checkoutUrl: 'https://pay.payos.vn/web/safe', qrCode, expiresAt } };
+    const payload = await buildSupplierPaymentView({ order, customerId: user });
+    const expected = await QRCode.toBuffer(qrCode, { type: 'png', width: 720, margin: 2,
+      errorCorrectionLevel: 'M', color: { dark: '#111827', light: '#FFFFFFFF' } });
+    expect(payload.files).toHaveLength(1);
+    expect(payload.files[0].name).toBe('payos-CN_123456.png');
+    expect(payload.files[0].attachment).toEqual(expected);
+    expect(payload.files[0].attachment.subarray(0, 8).toString('hex')).toBe('89504e470d0a1a0a');
+    expect(payload.files[0].attachment.readUInt32BE(16)).toBe(720);
+    expect(payload.files[0].attachment.readUInt32BE(20)).toBe(720);
+    expect(nodes(payload).find(node => node.type === 12).items[0].media.url).toBe('attachment://payos-CN_123456.png');
+    const content = JSON.stringify(payload.components);
+    expect(content).toContain('55.000đ');
+    expect(content).toContain('Hạn thanh toán');
+    expect(content).toContain(`<t:${Math.floor(Date.parse(expiresAt) / 1000)}:R>`);
+    expect(content).not.toContain(qrCode);
+    expect(payload.flags & MessageFlags.Ephemeral).toBeTruthy();
+    expect(payload.allowedMentions.parse).toEqual([]);
+  });
+  it('uses only the safe PayOS link as local QR fallback and never requests an external QR image', async () => {
+    const order = { orderCode: 'CN_123456', totalAmount: 55000, paymentStatus: 'UNPAID', status: 'PENDING_PAYMENT' };
+    const external = 'https://private-data.attacker.invalid/qr?token=private';
+    const fetch = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('External request forbidden'));
+    try {
+      const fallback = await buildSupplierPaymentView({ order, customerId: user,
+        payment: { method: 'PAYOS', qrCode: external, checkoutUrl: 'https://pay.payos.vn/web/safe' } });
+      expect(fallback.files[0].attachment).toEqual(await QRCode.toBuffer('https://pay.payos.vn/web/safe', {
+        type: 'png', width: 720, margin: 2, errorCorrectionLevel: 'M', color: { dark: '#111827', light: '#FFFFFFFF' },
+      }));
+      for (const checkoutUrl of [external, 'https://user:private@pay.payos.vn/web/x', 'https://pay.payos.vn:8443/x', 'http://pay.payos.vn/x']) {
+        const denied = await buildSupplierPaymentView({ order, customerId: user,
+          payment: { method: 'PAYOS', qrCode: '00020100000000000000000000000000' + external, checkoutUrl } });
+        expect(denied.files).toBeUndefined();
+        expect(nodes(denied).some(node => node.type === 12 || node.url)).toBe(false);
+        expect(JSON.stringify(denied.components)).not.toMatch(/attacker|private/);
+        expect(JSON.stringify(denied.components)).toContain('Chưa hiển thị được ảnh QR');
+      }
+      expect(fetch).not.toHaveBeenCalled();
+    } finally { fetch.mockRestore(); }
+  });
+  it('never renders stale QR or checkout links after payment, cancellation, refund or expiry', async () => {
+    const base = { orderCode: 'CN_123456', totalAmount: 55000, paymentStatus: 'UNPAID', status: 'PENDING_PAYMENT' };
+    const payment = { method: 'PAYOS', paid: false, checkoutUrl: 'https://pay.payos.vn/web/safe' };
+    for (const patch of [{ paymentStatus: 'PAID' }, { status: 'CANCELLED' }, { status: 'REFUNDED' }, { status: 'COMPLETED' }]) {
+      const view = await buildSupplierPaymentView({ order: { ...base, ...patch }, customerId: user, payment });
+      expect(view.files).toBeUndefined();
+      expect(nodes(view).some(node => node.type === 12 || node.url)).toBe(false);
+      expect(ids(view).some(id => id.includes(':pay:'))).toBe(false);
+    }
+    const expired = await buildSupplierPaymentView({ order: base, customerId: user, payment: { ...payment, expiresAt: '2020-01-01T00:00:00Z' } });
+    expect(expired.files).toBeUndefined();
+    expect(nodes(expired).some(node => node.type === 12 || node.url)).toBe(false);
+    expect(ids(expired).some(id => id.includes(':pay:'))).toBe(false);
+    expect(JSON.stringify(expired.components)).toContain('Hóa đơn đã hết hạn');
+  });
+  it('keeps the original safe invoice link usable if local QR rendering fails', async () => {
+    const render = vi.spyOn(QRCode, 'toBuffer').mockRejectedValue(new Error('private-render-error'));
+    try {
+      const payload = await buildSupplierPaymentView({ customerId: user,
+        order: { orderCode: 'CN_123456', totalAmount: 55000, paymentStatus: 'UNPAID', status: 'PENDING_PAYMENT' },
+        payment: { method: 'PAYOS', paid: false, checkoutUrl: 'https://pay.payos.vn/web/existing' } });
+      expect(payload.files).toBeUndefined();
+      expect(nodes(payload).some(node => node.type === 12)).toBe(false);
+      expect(nodes(payload).some(node => node.url === 'https://pay.payos.vn/web/existing')).toBe(true);
+      expect(JSON.stringify(payload.components)).toContain('Chưa hiển thị được ảnh QR');
+      expect(JSON.stringify(payload.components)).not.toContain('private-render-error');
+    } finally { render.mockRestore(); }
   });
   it('shows paid unknown/review delivery states and never overrides terminal/refunded status', () => {
     const order = { orderCode: 'CN_123456', paymentStatus: 'PAID', status: 'PROCESSING', deliveryStatus: 'UNKNOWN' };

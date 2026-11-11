@@ -11,8 +11,9 @@ const ticketChannelId = '1569729564115206214', categoryId = '1514606994256957600
 const databases = [];
 function fixture(options = {}) {
   const database = new Database(':memory:'); databases.push(database);
-  database.exec(`CREATE TABLE orders(order_code TEXT PRIMARY KEY,guild_id TEXT,customer_id TEXT,fulfillment_mode TEXT,payment_status TEXT,status TEXT,total_amount INTEGER,quantity INTEGER,payment_link_id TEXT);
-    INSERT INTO orders VALUES('CN_123456','${guildId}','${customerId}','SUPPLIER','UNPAID','PENDING_PAYMENT',61000,1,NULL);
+  database.exec(`CREATE TABLE orders(order_code TEXT PRIMARY KEY,guild_id TEXT,customer_id TEXT,fulfillment_mode TEXT,payment_status TEXT,status TEXT,total_amount INTEGER,quantity INTEGER,payment_link_id TEXT,
+    payment_checkout_url TEXT,payment_qr_code TEXT,payment_qr_text TEXT,payment_expired_at TEXT);
+    INSERT INTO orders(order_code,guild_id,customer_id,fulfillment_mode,payment_status,status,total_amount,quantity) VALUES('CN_123456','${guildId}','${customerId}','SUPPLIER','UNPAID','PENDING_PAYMENT',61000,1);
     CREATE TABLE tickets(id INTEGER PRIMARY KEY,ticket_code TEXT,guild_id TEXT,customer_id TEXT,channel_id TEXT,status TEXT);`);
   const readOrder = vi.fn(code => database.prepare('SELECT * FROM orders WHERE order_code=?').get(code));
   const safeOrder = () => ({ orderCode: 'CN_123456', productName: 'CapCut Pro', status: readOrder('CN_123456').status });
@@ -93,6 +94,50 @@ describe('supplier checkout payment boundaries', () => {
     database.prepare('UPDATE orders SET status=?').run(status);
     await expect(facade.payment(payment)).rejects.toMatchObject({ code: 'ORDER_NOT_PAYABLE' });
     expect(debitWallet).not.toHaveBeenCalled(); expect(payosLink).not.toHaveBeenCalled();
+  });
+});
+
+describe('supplier owned invoice recovery', () => {
+  function saveInvoice(t, overrides = {}) {
+    // Initialize additive checkout tables without making a payment.
+    const ready = t.facade.status({ guildId, customerId, orderCode: payment.orderCode });
+    return ready.then(() => {
+      t.database.prepare("INSERT INTO supplier_autobuy_payment_methods VALUES (?,'PAYOS',?)").run(payment.orderCode, new Date().toISOString());
+      t.database.prepare(`UPDATE orders SET payment_link_id='owned-link',payment_checkout_url=?,payment_qr_code=?,payment_expired_at=? WHERE order_code=?`)
+        .run(overrides.url || 'https://pay.payos.vn/web/owned-link', overrides.qr || '000201synthetic-emv-invoice', '2026-11-12T12:00:00Z', payment.orderCode);
+    });
+  }
+  it('restores the existing owner-bound QR, expiry and amount without new invoice/debit/purchase', async () => {
+    const t = fixture(); await saveInvoice(t);
+    const result = await t.facade.status({ guildId, customerId, orderCode: payment.orderCode });
+    expect(result.payment).toEqual({ orderCode: payment.orderCode, method: 'PAYOS', paid: false, status: 'PENDING_PAYMENT',
+      totalAmount: 61000, checkoutUrl: 'https://pay.payos.vn/web/owned-link', qrCode: '000201synthetic-emv-invoice', expiresAt: '2026-11-12T12:00:00.000Z' });
+    expect(t.payosLink).not.toHaveBeenCalled(); expect(t.debitWallet).not.toHaveBeenCalled();
+    expect(t.engine.validateSupplierOrderForPayment).not.toHaveBeenCalled(); expect(t.engine.fulfillSupplierOrder).not.toHaveBeenCalled();
+  });
+  it('checks ownership before returning any stored invoice', async () => {
+    const t = fixture(); await saveInvoice(t);
+    await expect(t.facade.status({ guildId, customerId: '1070676180103086132', orderCode: payment.orderCode })).rejects.toMatchObject({ code: 'ORDER_NOT_FOUND' });
+  });
+  it('removes the QR when authoritative status sync changes an invoice to paid', async () => {
+    const syncPayos = vi.fn(async () => t.database.prepare("UPDATE orders SET status='PROCESSING',payment_status='PAID'").run());
+    const t = fixture({ syncPayos }); await saveInvoice(t);
+    const result = await t.facade.status({ client: t.client, guildId, customerId, orderCode: payment.orderCode });
+    expect(result.payment).toBeUndefined(); expect(syncPayos).toHaveBeenCalledOnce();
+  });
+  it.each(['CANCELLED', 'REFUNDED', 'COMPLETED'])('does not restore a QR for terminal order %s', async status => {
+    const t = fixture(); await saveInvoice(t); t.database.prepare('UPDATE orders SET status=?').run(status);
+    expect((await t.facade.status({ guildId, customerId, orderCode: payment.orderCode })).payment).toBeUndefined();
+  });
+  it('does not expose arbitrary URLs or image addresses as payment data', async () => {
+    const t = fixture(); await saveInvoice(t, { url: 'https://pay.payos.vn.evil.invalid/steal', qr: 'https://images.invalid/qr.png' });
+    const result = await t.facade.status({ guildId, customerId, orderCode: payment.orderCode });
+    expect(result.payment).toMatchObject({ checkoutUrl: null, qrCode: null });
+  });
+  it('allows existing invoice recovery while new sales are paused', async () => {
+    let enabled = true;
+    const t = fixture({ enabled: () => enabled }); await saveInvoice(t); enabled = false;
+    expect((await t.facade.status({ guildId, customerId, orderCode: payment.orderCode })).payment.qrCode).toMatch(/^000201/);
   });
 });
 

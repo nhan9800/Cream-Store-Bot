@@ -64,7 +64,7 @@ function errorText(error) {
   if (code === 'INVALID_QUANTITY') return 'Số lượng hợp lệ từ 1 đến 10 sản phẩm. Vui lòng chọn lại số lượng trước khi xem báo giá.';
   if (/QUOTE.*(?:EXPIRED|CHANGED)|PRICE_CHANGED|QUOTE_EXPIRED|QUOTE_CHANGED/.test(code)) return 'Báo giá đã hết hạn hoặc thay đổi. Vui lòng chọn lại sản phẩm và xác nhận giá mới; đơn đã thanh toán giữ nguyên số tiền được ghi nhận.';
   if (/STOCK|PRODUCT_UNAVAILABLE|PRODUCT_NOT_FOUND|NOT_AVAILABLE/.test(code)) return 'Gói vừa hết hàng hoặc tạm dừng bán. Vui lòng quay lại Danh mục để chọn gói khác.';
-  if (code === 'SUPPLIER_UNFUNDED') return 'Nguồn hàng tạm thời chưa sẵn sàng thanh toán. Lần thử này chưa tạo hóa đơn hoặc trừ ví. Bạn có thể quay lại sau hoặc mở ticket để shop hỗ trợ.';
+  if (code === 'SUPPLIER_UNFUNDED') return 'Nguồn hàng tạm thời chưa sẵn sàng nên chưa tạo mã QR hoặc trừ Ví Cenar. Vui lòng quay lại sau hoặc tạo ticket để shop hỗ trợ.';
   if (code === 'PAYMENT_METHOD_LOCKED') return 'Đơn đã chọn một phương thức thanh toán. Vui lòng dùng phương thức đó hoặc bấm Kiểm tra đơn; tránh thanh toán lại qua phương thức khác.';
   if (/INSUFFICIENT.*BALANCE|WALLET.*(?:LOW|INSUFFICIENT)|INSUFFICIENT_FUNDS/.test(code)) return 'Số dư ví chưa đủ hoặc nguồn hàng chưa thể xử lý. Bạn có thể kiểm tra đơn, chọn phương thức thanh toán phù hợp hoặc tạo ticket hỗ trợ.';
   if (/NOT_READY|NOT_DELIVERED|DELIVERY_PENDING|DELIVERY_UNAVAILABLE|FULFILLMENT_PENDING|PAYMENT_REQUIRED|UNPAID/.test(code)) return 'Đơn chưa có hàng để nhận. Nếu đã thanh toán, hệ thống đang xử lý hoặc đối soát; bấm Kiểm tra đơn để xem trạng thái. Không cần tạo đơn mới cho cùng lần thanh toán.';
@@ -163,14 +163,19 @@ export function createSupplierAutobuyInteractionHandler(dependencies = {}) {
         } else if (action === 'pay') {
           const orderCode = args[0];
           const payment = await deps.createPayment({ client: interaction.client, ...context, orderCode, method: args[1] });
-          const order = await deps.getOrder({ client: interaction.client, ...context, orderCode });
-          payload = presentation.buildSupplierOrderView({ order, customerId: context.customerId, payment });
+          // A successful invoice must remain visible even if its subsequent
+          // status lookup fails. The server payment result contains no client price.
+          const order = await deps.getOrder({ client: interaction.client, ...context, orderCode }).catch(() => ({
+            orderCode, totalAmount: payment.totalAmount, status: payment.status,
+            paymentStatus: payment.paid ? 'PAID' : 'UNPAID',
+          }));
+          payload = await presentation.buildSupplierPaymentView({ order, customerId: context.customerId, payment });
         } else if (action === 'orders') {
           payload = presentation.buildSupplierOrderListView({ orders: await deps.listOrders({ ...context, limit: 10 }), customerId: context.customerId });
         } else if (action === 'order' || action === 'orderselect') {
           const orderCode = action === 'orderselect' ? interaction.values?.[0] : args[0];
           if ((action === 'orderselect' && interaction.values?.length !== 1) || !ORDER_CODE.test(orderCode || '')) throw new Error('INVALID_ORDER');
-          payload = presentation.buildSupplierOrderView({ order: await deps.getOrder({ client: interaction.client, ...context, orderCode }), customerId: context.customerId });
+          payload = await presentation.buildSupplierPaymentView({ order: await deps.getOrder({ client: interaction.client, ...context, orderCode }), customerId: context.customerId });
         } else if (action === 'delivery') {
           const delivery = await deps.getDelivery({ ...context, orderCode: args[0] });
           if (!Array.isArray(delivery?.items) || !delivery.items.length || !delivery.items.every(item => typeof item === 'string' && item.length > 0)) throw new Error('DELIVERY_PENDING');
@@ -199,7 +204,8 @@ export function createSupplierAutobuyInteractionHandler(dependencies = {}) {
       files = undefined;
     }
     try {
-      const receipt = await interaction.editReply({ components: payload.components, flags: MessageFlags.IsComponentsV2, allowedMentions: NO_MENTIONS, ...(files ? { files } : {}) });
+      const attachments = [...(payload.files || []), ...(files || [])];
+      const receipt = await interaction.editReply({ components: payload.components, flags: MessageFlags.IsComponentsV2, allowedMentions: NO_MENTIONS, ...(attachments.length ? { files: attachments } : {}) });
       if (action === 'delivery' && files?.length) {
         await deps.acknowledgeDelivery({ ...dataContext(interaction), orderCode: args[0], messageId: receipt?.id, channelId: interaction.channelId });
       }

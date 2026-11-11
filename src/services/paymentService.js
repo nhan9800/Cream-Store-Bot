@@ -243,7 +243,7 @@ export async function createOrLoadPayOSLink(order) {
       qrCode: created.qrCode ?? null,
       qrUrl: created.checkoutUrl ?? buildCheckoutUrlFromLinkId(created.paymentLinkId ?? created.id),
       qrText: created.qrCode ?? null,
-      expiredAt: created.expiredAt ? new Date(Number(created.expiredAt) * 1000).toISOString() : null,
+      expiredAt: new Date(Number(created.expiredAt ?? payload.expiredAt) * 1000).toISOString(),
     });
   } catch (error) {
     const knownDuplicate = /đơn thanh toán đã tồn tại|already exists/i.test(error.message);
@@ -256,7 +256,8 @@ export async function createOrLoadPayOSLink(order) {
       qrCode: payment_qr_code ?? null,
       qrUrl: payment_checkout_url ?? buildCheckoutUrlFromLinkId(info.id),
       qrText: payment_qr_text ?? null,
-      expiredAt: info.expiredAt ? new Date(Number(info.expiredAt) * 1000).toISOString() : null,
+      expiredAt: info.expiredAt ? new Date(Number(info.expiredAt) * 1000).toISOString()
+        : order.payment_expired_at ?? order.paymentExpiredAt ?? null,
     });
   }
 }
@@ -737,10 +738,13 @@ export async function syncPaymentStatusFromPayOS({ client, orderCode = null, pay
     // A webhook may have committed payment while this lookup was in flight.
     const updated = db.transaction(() => {
       const fresh = getOrderByCode(order.order_code);
-      return fresh?.status === 'PENDING_PAYMENT' && fresh.payment_status === 'UNPAID'
+      const matches = fresh?.status === 'PENDING_PAYMENT' && fresh.payment_status === 'UNPAID'
         && Number(fresh.payos_order_code) === Number(info.orderCode)
-        && (!fresh.payment_link_id || String(fresh.payment_link_id) === String(info.id || ''))
-        ? setOrderStatus(order.order_code, 'CANCELLED') : null;
+        && (!fresh.payment_link_id || String(fresh.payment_link_id) === String(info.id || ''));
+      if (!matches) return null;
+      db.prepare('UPDATE orders SET payment_cancel_reason=? WHERE order_code=?')
+        .run(state === 'EXPIRED' ? 'Thanh toán PayOS đã hết hạn' : 'Thanh toán bị hủy (PayOS)', order.order_code);
+      return setOrderStatus(order.order_code, 'CANCELLED');
     }).immediate();
     if (updated && client?.guilds?.fetch) {
       const guild = await client.guilds.fetch(updated.guild_id).catch(() => null);

@@ -296,6 +296,7 @@ export const config = {
   orderCreateBurstWindowSeconds: Number.parseInt(getEnv('ORDER_CREATE_BURST_WINDOW_SECONDS', '30'), 10),
   orderCreateBurstLimit: Number.parseInt(getEnv('ORDER_CREATE_BURST_LIMIT', '2'), 10),
   autoCloseCompletedTicketMinutes: Number.parseInt(getEnv('AUTO_CLOSE_COMPLETED_TICKET_MINUTES', '2'), 10),
+  unpaidOrderTicketHours: Math.min(168, Math.max(24, Number.parseInt(getEnv('UNPAID_ORDER_TICKET_HOURS', '24'), 10) || 24)),
   defaultOrderDurationMonths: Number.parseInt(getEnv('DEFAULT_ORDER_DURATION_MONTHS', '1'), 10),
   expiryReminderDaysBeforeFirst: Number.parseInt(getEnv('EXPIRY_REMINDER_DAYS_BEFORE_FIRST', '2'), 10),
   expiryReminderDaysBeforeSecond: Number.parseInt(getEnv('EXPIRY_REMINDER_DAYS_BEFORE_SECOND', '1'), 10),

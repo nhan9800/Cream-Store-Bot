@@ -33,6 +33,7 @@ import { getMemberRecoveryHealth } from './memberRecoveryHealthService.js';
 import { getReminderRoutingHealth } from './reminderRoutingService.js';
 import { getPremiumLayoutHealth, getStoreChannelRoutingHealth } from './storeLayoutHealthService.js';
 import { getFeedbackTicketAutoCloseStatus } from './feedbackTicketAutoCloseService.js';
+import { getPendingPaymentTicketPolicy } from './ticketAutoCloseService.js';
 import { getDiscordNitroEligibility } from '../utils/discordNitro.js';
 import { isInternationalGuild } from '../utils/locale.js';
 import { internationalizeProduct } from '../utils/internationalCatalog.js';
@@ -508,6 +509,7 @@ export function registerBotApiRoutes(app) {
             supplierAutobuyPanel: getSupplierAutobuyPanelHealth(),
             supplierAutobuyCatalog: getSupplierCatalogHealth(),
             supplierAutobuyOrders: getSupplierAutobuyOrderHealth(),
+            unpaidTicketPolicy: getPendingPaymentTicketPolicy(),
             // Aggregate-only media readiness; never expose extractor paths,
             // subprocess output, cookies or proxy credentials on public health.
             music: (() => {

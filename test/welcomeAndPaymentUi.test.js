@@ -32,7 +32,7 @@ function textContent(payload) {
 function expectCustomEmojiOnly(payload) {
   const content = textContent(payload);
   expect(content).not.toMatch(NATIVE_EMOJI);
-  expect(content).not.toMatch(RAW_EMOJI_NAME);
+  expect(content.replace(/<t:\d+:[a-zA-Z]>/g, '')).not.toMatch(RAW_EMOJI_NAME);
   expect(content).toMatch(/<a?:[a-zA-Z0-9_]+:\d+>/);
   return content;
 }
@@ -57,7 +57,7 @@ describe('welcome and payment Components V2', () => {
   });
 
   it.each([
-    ['first', 'PAYMENT REMINDER • 1/2', '20 minutes'],
+    ['first', 'PAYMENT REMINDER • 1/2', '1440 minutes'],
     ['final', 'PAYMENT REMINDER • FINAL NOTICE', '10 minutes'],
   ])('renders the %s payment reminder with an explicit deadline', (stage, heading, deadline) => {
     const payload = buildPaymentReminderV2({
@@ -65,6 +65,7 @@ describe('welcome and payment Components V2', () => {
       customerId: '123456789012345678',
       orderCode: 'CN_213802',
       stage,
+      deadlineAt: Date.now() + (stage === 'final' ? 10 : 1440) * 60000,
     });
 
     const content = expectCustomEmojiOnly(payload);
@@ -72,6 +73,7 @@ describe('welcome and payment Components V2', () => {
     expect(content).toContain(heading);
     expect(content).toContain('CN_213802');
     expect(content).toContain(deadline);
+    expect(content).toContain('QR/payment links may expire earlier');
     expect(content).not.toMatch(/(<a?:[^>]+>){2,}/);
   });
 });
