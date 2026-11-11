@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createSupplierAutobuyOrderService } from '../src/services/supplierAutobuyOrderService.js';
 import { DopermindError } from '../src/services/dopermindClient.js';
+import { CdkVietnamError } from '../src/services/cdkVietnamClient.js';
 import { STORE_ONE_GUILD_ID } from '../src/utils/locale.js';
 
 const CUSTOMER = '111111111111111111';
@@ -401,6 +402,17 @@ describe('paid-only supplier fulfillment and recovery', () => {
     const before = t.intent(o.order_code).request_id;
     expect((await t.service.fulfillSupplierOrder({}, o.order_code)).status).toBe(expected);
     expect(t.intent(o.order_code).request_id).toBe(before); expect(t.sendDelivery).not.toHaveBeenCalled();
+  });
+  it('does not replay a CDK order that the provider marked for delivery review', async () => {
+    const t = setup(); const o = await t.create(); t.pay(o.order_code);
+    t.provider.createOrder.mockRejectedValue(new CdkVietnamError('REQUEST_REJECTED', {
+      operation: 'createOrder', status: 409, outcome: 'UNKNOWN', providerCode: 'DELIVERY_REVIEW',
+    }));
+    expect((await t.service.fulfillSupplierOrder({}, o.order_code)).status).toBe('REVIEW');
+    expect(t.intent(o.order_code)).toMatchObject({ status: 'REVIEW', last_error: 'DELIVERY_REVIEW', attempts: 1 });
+    t.advance(600001);
+    await t.service.processPendingSupplierOrders({}, 3);
+    expect(t.provider.createOrder).toHaveBeenCalledTimes(1);
   });
   it('blocks a higher fresh cost before purchase and stores an unexpected higher-charge receipt for review', async () => {
     const t = setup(); const o = await t.create(); t.pay(o.order_code); t.setCost(45000);

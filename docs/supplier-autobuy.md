@@ -1,4 +1,4 @@
-# Supplier AutoBuy — Dopermind
+# Supplier AutoBuy — Dopermind / CDK Việt Nam
 
 This describes the implementation and owner's updated prepayment policy as of 2026-11-11. It does not establish that a revision is deployed, the production flag is enabled, or a real paid purchase has been tested. Verify the release record, exact live commit, health and Discord panel separately. Read-only connection success is distinct from purchase/delivery evidence.
 
@@ -13,12 +13,15 @@ Store1 hosting configuration uses:
 ```dotenv
 SUPPLIER_AUTOBUY_PROVIDER=dopermind
 DOPERMIND_API_KEY=
+# For the CDK Việt Nam source instead:
+# SUPPLIER_AUTOBUY_PROVIDER=cdkvietnam
+# CDKVIETNAM_API_KEY=
 SUPPLIER_AUTOBUY_ENABLED=false
 ```
 
 Keep the key in protected hosting configuration, never source, CLI arguments or Discord. The example deliberately defaults to closed sales. After release checks, `SUPPLIER_AUTOBUY_ENABLED=true` explicitly opts in. Both canonical Store1 guild `1282637033340403754` and `ENV_FILE=.env` are required. Store2 stays disabled despite inherited launcher environment. Missing keys, unsupported providers and a false flag do not enable this purchase flow. Environment-file edits require a normal restart; editing the file is not a hot reload.
 
-After the process owns its HTTP port, `src/bootstrap.js` starts one bounded read-only balance/stock probe. If sales are configured, it loads reviewed offers and starts the durable worker. `setSalesEnabled()` promotes the panel only with a `CONNECTED` Dopermind probe, a running worker and an available reviewed offer. A valid zero balance does not prevent prepayment. Supplier failure does not block Discord, HTTP or legacy commerce startup. This readiness snapshot is a startup result; payment rechecks stock, prices, terms and safe storage, while supplier funds are checked before first purchase submission.
+After the process owns its HTTP port, `src/bootstrap.js` starts one bounded read-only balance/stock probe. If sales are configured, it loads reviewed offers and starts the durable worker. `setSalesEnabled()` promotes the panel only with a `CONNECTED` provider probe, a running worker and an available reviewed offer. A valid zero balance does not prevent prepayment. Supplier failure does not block Discord, HTTP or legacy commerce startup. This readiness snapshot is a startup result; payment rechecks stock, prices, terms and safe storage, while supplier funds are checked before first purchase submission.
 
 The existing bot-owned read-only channel/panel is persisted and reused under Cửa hàng Cenar. Inaccessible, foreign or ambiguous saved targets degrade instead of creating duplicates. Closed mode shows preparation/status information; open mode exposes **Danh mục & giá** and a private commerce flow. Automatic marketing, price-board resends and role/everyone pings remain paused.
 
@@ -26,7 +29,7 @@ The existing bot-owned read-only channel/panel is persisted and reused under C�
 
 | Layer | Responsibility |
 | --- | --- |
-| `dopermindClient.js` | Fixed-origin bounded transport, rate spacing/private cache and strict read/purchase schemas. No generated purchase IDs or automatic POST retry. |
+| `dopermindClient.js` / `cdkVietnamClient.js` | Fixed-origin bounded transports, strict read/purchase schemas, provider-specific idempotency and no generated purchase IDs or automatic POST retry. |
 | `supplierAutobuyRuntime.js` | One cached Store1 startup probe and safe readiness metadata. |
 | `supplierAutobuyCatalogService.js` | Reviewed policy plus live cost/stock; integer sale prices, expiring private quotes and audited Admin overrides. |
 | `supplierAutobuyCheckoutService.js` | Private owned ticket, durable payment-method choice, current terms/stock/storage preflight and wallet/PayOS prepayment integration. |
@@ -39,26 +42,33 @@ Interactions require Store1, the saved channel, current bot and current customer
 
 ## Provider and diagnostics
 
-Current documentation: [Dopermind API](https://api-gateway-production-be99.up.railway.app/api-docs). The fixed HTTPS origin uses Bearer authentication:
+Current documentation: [Dopermind API](https://api-gateway-production-be99.up.railway.app/api-docs) and [CDK Việt Nam API](https://api.cdkvietnam.com/docs?lang=vi). Both fixed HTTPS origins use Bearer authentication:
 
 - `GET /v1/balance`: integer VND balance/timestamp, retained privately.
 - `GET /v1/stock`, optionally `product_key`: normalized variants. Duplicate names retain distinct keys; `unlimited:true` permits stock `-1` without inventing a finite quantity.
 - `POST /v1/orders`: documented `product_key`, `quantity`, persisted `request_id`. Shop checkout limits quantity to 10. Receipts must match product/request/quantity, one nonempty item per unit and consistent integer costs.
 
-The default deadline is 10 seconds including body reads, with a 1 MiB limit and redirects rejected. Per-key spacing, short private read caches and post-purchase invalidation bound traffic. Cached stock/balance is not a provider reservation. No separate order-lookup endpoint or provider webhook is used; unknown results use the documented same-ID replay.
+CDK Việt Nam uses numeric provider products exposed internally as namespaced keys (`cdkvietnam:<id>`):
 
-`npm run check:autobuy-api -- --json` and `check:dopermind-api` are read-only diagnostics. They report safe statuses/counts/currency, not wallet values, credentials, costs, goods or raw errors. They neither purchase nor enable sales. `check:daiphuc-api` and `DAIPHUC_PARTNER_API_KEY` are historical-provider diagnostics only; neither credential may be sent to the other provider.
+- `GET /v1/products?after=0&limit=100`: paged VND catalog with live stock, delivery mode and quantity prices.
+- `GET /v1/balance`: read-only VND wallet check.
+- `POST /v1/orders`: `{product_id, quantity, max_total}` with the persisted `Idempotency-Key` header. HTTP 201 is a delivered receipt; HTTP 202 or `DELIVERY_REVIEW` is stopped in shop review and is never replaced by a new purchase.
+- `GET /v1/orders/ord_...`: provider order lookup is available for a future reconciliation path; the current engine fails closed when a receipt does not contain deliverable items.
+
+The default deadline is 10 seconds including body reads, with a 4 MiB limit and redirects rejected. Per-key short private stock caches bound traffic. Cached stock/balance is not a provider reservation. Dopermind unknown results use its documented same-ID replay; CDK Việt Nam unknown delivery-review results stop without a replacement order to prevent duplicate charges.
+
+`npm run check:autobuy-api -- --json` and `check:dopermind-api` are read-only diagnostics. They report safe statuses/counts/currency, not wallet values, credentials, costs, goods or raw errors. They neither purchase nor enable sales. `check:daiphuc-api` and `DAIPHUC_PARTNER_API_KEY` are historical-provider diagnostics only; neither credential may be sent to the other provider. The CDK adapter is read-only until the reviewed Store1 flag is enabled and still does not perform a purchase during diagnostics.
 
 ## Reviewed prices and disclosure
 
 [supplierAutobuyPricingPolicy.json](../src/data/supplierAutobuyPricingPolicy.json) and the [dated pricing review](supplier-autobuy-pricing-20261110.md) record all 101 key decisions, official sources, FX and comparison caveats. The initial review approves 31 SKUs and closes 70; stock remains dynamic. Earlier exclusions of Claude API/Gateway, Gemini 18 months and Spotify 3 months remain. Opaque credits, free/trial/Edu offers and unclear licenses/activation conditions are not opened merely because the supplier lists them.
 
 ```text
-sale = ceil_to_1,000_VND((live_import_cost + product_markup + handling_reserve) / 0.97)
-net_profit = sale - live_import_cost - handling_reserve - ceil(sale * 0.03)
+sale = ceil_to_1,000_VND((live_import_cost + product_markup + handling_reserve) / (1 - fee_reserve_rate))
+net_profit = sale - live_import_cost - handling_reserve - ceil(sale * fee_reserve_rate)
 ```
 
-The 3% is a shop reserve, not a claim about PayOS's actual fee. Fixed per-product markups follow reviewed tiers of 20k/30k/50k/100k/150k/250k, with separate handling reserves. Sale prices must retain at least 20,000đ net profit after both reserves and stay strictly below the dated reference cap and commerce amount limit. Cost changes recalculate the price or close the offer; new keys or changed source names require review.
+The Dopermind policy currently uses a 3% reserve; the CDK Việt Nam policy uses a separate 1% reserve. These are shop planning reserves, not claims about PayOS's actual fee. Fixed per-product markups follow reviewed tiers of 20k/30k/50k/100k/150k/250k, with separate handling reserves. Sale prices must retain at least 20,000đ net profit after both reserves and stay strictly below the dated reference cap and commerce amount limit. Cost changes recalculate the price or close the offer; new keys or changed source names require review.
 
 All current references are **BENCHMARK**, not verified identical retail SKUs. Supplied accounts, links, region, short access periods and personal direct subscriptions differ. Preserve the comparison disclosure in confirmation. Never turn a benchmark into the crossed-out original price of the same item, claim an exact discount percentage, promise matching account ownership, or fabricate official daily pricing by dividing a monthly fee. Period differences are explicit. BHF/BH2T/KBH retain the source label; unspecified warranty does not become BHF. Proton 14–28 days uses only the minimum 14 days for expiry handling.
 

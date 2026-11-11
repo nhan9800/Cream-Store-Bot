@@ -85,13 +85,13 @@ function priceForQuantity(prices, quantity = 1, fail = code => new CdkVietnamErr
   return selected;
 }
 
-function productsFrom(body, fail, filterId = null) {
+function productsFrom(body, fail) {
   const payload = envelopeBody(body, fail);
   if (!Array.isArray(payload.products) || payload.products.length > MAX_PRODUCTS) throw fail('INVALID_SCHEMA');
   const seen = new Set();
   const products = payload.products.map(item => {
     if (!record(item) || !integer(item.id, 1) || seen.has(item.id) ||
-      (filterId !== null && item.id !== filterId) || !text(item.name, 500) ||
+      !text(item.name, 500) ||
       !text(item.currency, 8) || item.currency !== 'VND' || !integer(item.stock) ||
       typeof item.locked !== 'boolean' || !['automatic', 'manual'].includes(item.delivery)) {
       throw fail('INVALID_SCHEMA');
@@ -266,12 +266,13 @@ export function createCdkVietnamClient({
     for (let page = 0; page < 100; page += 1) {
       const query = new URLSearchParams({ after: String(after), limit: '100' });
       const response = await request('getStock', `/v1/products?${query}`);
-      const rows = productsFrom(response.body, code => new CdkVietnamError(code, { operation: 'getStock' }), filterId);
+      const rows = productsFrom(response.body, code => new CdkVietnamError(code, { operation: 'getStock' }));
       all.push(...rows);
-      if (filterId !== null || !Number.isSafeInteger(response.body?.next_after) || response.body.next_after <= after) break;
+      if ((filterId !== null && all.some(row => row.providerProductId === filterId))
+        || !Number.isSafeInteger(response.body?.next_after) || response.body.next_after <= after) break;
       after = response.body.next_after;
     }
-    const value = Object.freeze(all);
+    const value = Object.freeze(filterId === null ? all : all.filter(row => row.providerProductId === filterId));
     cache.set(cacheKey, { value, expiresAt: Date.now() + 2500 });
     return value;
   }

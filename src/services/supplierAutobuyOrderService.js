@@ -398,7 +398,12 @@ export function createSupplierAutobuyOrderService({
         if (providerCode === 'NOT_ENOUGH_STOCK' || providerCode === 'OUT_OF_STOCK') return pending('WAITING_STOCK', 'INSUFFICIENT_STOCK', 5);
         if (providerCode === 'INSUFFICIENT_BALANCE') return pending('WAITING_SUPPLIER_FUNDS', 'INSUFFICIENT_SUPPLIER_BALANCE', 5);
         if (['PRICE_CHANGED', 'API_REQUEST_CONFLICT', 'API_ORDER_MANUALLY_FULFILLED', 'PRODUCT_LOCKED', 'IDEMPOTENCY_CONFLICT'].includes(providerCode)) return pending('REVIEW', providerCode);
-        if (['ORDER_HISTORY_PENDING', 'ORDER_FULFILLMENT_PENDING', 'DELIVERY_REVIEW'].includes(providerCode)) return pending('RECONCILING', providerCode, 3);
+        // CDK Việt Nam explicitly says DELIVERY_REVIEW must not be replaced by
+        // another order. The adapter cannot safely recover a 202/409 receipt
+        // without a persisted provider order code, so stop in review instead of
+        // replaying the purchase and risking a duplicate charge.
+        if (providerCode === 'DELIVERY_REVIEW') return pending('REVIEW', providerCode);
+        if (['ORDER_HISTORY_PENDING', 'ORDER_FULFILLMENT_PENDING'].includes(providerCode)) return pending('RECONCILING', providerCode, 3);
         if (error.outcome === 'NOT_SUBMITTED') return pending('PENDING', 'PROVIDER_UNAVAILABLE', 2);
         if (error.outcome === 'REJECTED') return pending('REVIEW', 'PROVIDER_REJECTED');
       }

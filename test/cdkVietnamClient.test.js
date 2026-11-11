@@ -51,6 +51,19 @@ describe('CDK Việt Nam fixed-origin transport', () => {
     expect(JSON.stringify(rows)).not.toContain(SECRET);
   });
 
+  it('continues pagination when a requested SKU is not on the first page', async () => {
+    const first = product({ id: 1, name: 'First product' });
+    const second = product({ id: 6 });
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ products: [first], next_after: 1 }))
+      .mockResolvedValueOnce(jsonResponse({ products: [second], next_after: null }));
+    const client = createCdkVietnamClient({ apiKey: SECRET, fetchImpl });
+    const rows = await client.getStock({ productKey: 'cdkvietnam:6' });
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ productKey: 'cdkvietnam:6', providerProductId: 6 });
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
   it('sends the documented purchase body, idempotency header and maps a delivered receipt', async () => {
     const { client, fetchImpl } = setup({ replayed: false, order: order() }, { status: 201 });
     const result = await client.createOrder(request);
