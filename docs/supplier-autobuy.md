@@ -52,10 +52,10 @@ CDK Việt Nam uses numeric provider products exposed internally as namespaced k
 
 - `GET /v1/products?after=0&limit=100`: paged VND catalog with live stock, delivery mode and quantity prices.
 - `GET /v1/balance`: read-only VND wallet check.
-- `POST /v1/orders`: `{product_id, quantity, max_total}` with the persisted `Idempotency-Key` header. HTTP 201 is a delivered receipt; HTTP 202 or `DELIVERY_REVIEW` is stopped in shop review and is never replaced by a new purchase.
+- `POST /v1/orders`: `{product_id, quantity, max_total}` with the persisted `Idempotency-Key` header. HTTP 201 is a delivered receipt. HTTP 202/`DELIVERY_REVIEW` keeps the exact provider order ID, then the worker polls `GET /v1/orders/ord_...` before any further purchase; a response without an order ID stays in shop review and is never replaced by a new purchase.
 - `GET /v1/orders/ord_...`: provider order lookup is available for a future reconciliation path; the current engine fails closed when a receipt does not contain deliverable items.
 
-The default deadline is 10 seconds including body reads, with a 4 MiB limit and redirects rejected. Per-key short private stock caches bound traffic. Cached stock/balance is not a provider reservation. Dopermind unknown results use its documented same-ID replay; CDK Việt Nam unknown delivery-review results stop without a replacement order to prevent duplicate charges.
+The default deadline is 10 seconds including body reads, with a 4 MiB limit and redirects rejected. Per-key short private stock caches bound traffic. Cached stock/balance is not a provider reservation. Dopermind unknown results use its documented same-ID replay; CDK Việt Nam delivery-review results are reconciled by exact provider order ID when available, with no replacement purchase.
 
 `npm run check:autobuy-api -- --json` and `check:dopermind-api` are read-only diagnostics. They report safe statuses/counts/currency, not wallet values, credentials, costs, goods or raw errors. They neither purchase nor enable sales. `check:daiphuc-api` and `DAIPHUC_PARTNER_API_KEY` are historical-provider diagnostics only; neither credential may be sent to the other provider. The CDK adapter is read-only until the reviewed Store1 flag is enabled and still does not perform a purchase during diagnostics.
 

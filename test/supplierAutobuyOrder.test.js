@@ -414,6 +414,23 @@ describe('paid-only supplier fulfillment and recovery', () => {
     await t.service.processPendingSupplierOrders({}, 3);
     expect(t.provider.createOrder).toHaveBeenCalledTimes(1);
   });
+  it('persists a CDK provider order ID and polls it before delivery', async () => {
+    const t = setup(); const o = await t.create(); t.pay(o.order_code);
+    const providerOrderCode = 'ord_0123456789abcdef0123456789abcdef';
+    t.provider.createOrder.mockRejectedValueOnce(new CdkVietnamError('DELIVERY_PENDING', {
+      operation: 'createOrder', status: 202, outcome: 'UNKNOWN', providerCode: 'DELIVERY_REVIEW', providerOrderCode,
+    }));
+    expect((await t.service.fulfillSupplierOrder({}, o.order_code)).status).toBe('RECONCILING');
+    expect(t.intent(o.order_code)).toMatchObject({ status: 'RECONCILING', supplier_order_code: providerOrderCode, last_error: 'DELIVERY_REVIEW' });
+    t.provider.getOrder = vi.fn(async () => ({ orderCode: providerOrderCode, productId: 6, productName: 'Subscription 1 tháng',
+      quantity: 1, unitPriceVnd: 42000, totalAmountVnd: 42000, status: 'delivered', items: ['private-user-0|private-password'] }));
+    t.advance(3 * 60000 + 1);
+    await t.service.processPendingSupplierOrders({}, 3);
+    expect(t.provider.createOrder).toHaveBeenCalledTimes(1);
+    expect(t.provider.getOrder).toHaveBeenCalledWith({ orderId: providerOrderCode });
+    expect(t.sendDelivery).toHaveBeenCalledTimes(1);
+    expect(t.intent(o.order_code).status).toBe('DELIVERED');
+  });
   it('blocks a higher fresh cost before purchase and stores an unexpected higher-charge receipt for review', async () => {
     const t = setup(); const o = await t.create(); t.pay(o.order_code); t.setCost(45000);
     expect((await t.service.fulfillSupplierOrder({}, o.order_code)).status).toBe('REVIEW'); expect(t.provider.createOrder).not.toHaveBeenCalled();

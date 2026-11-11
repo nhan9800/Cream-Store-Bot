@@ -84,7 +84,7 @@ describe('CDK Việt Nam fixed-origin transport', () => {
 
   it('keeps a 202 awaiting-delivery outcome uncertain instead of inventing a delivery', async () => {
     const { client } = setup({ replayed: false, order: order({ status: 'awaiting_delivery', items: [] }) }, { status: 202 });
-    await expect(client.createOrder(request)).rejects.toMatchObject({ name: 'CdkVietnamError', code: 'DELIVERY_PENDING', outcome: 'UNKNOWN', providerCode: 'DELIVERY_REVIEW' });
+    await expect(client.createOrder(request)).rejects.toMatchObject({ name: 'CdkVietnamError', code: 'DELIVERY_PENDING', outcome: 'UNKNOWN', providerCode: 'DELIVERY_REVIEW', providerOrderCode: order().id });
   });
 
   it.each([[401, 'AUTHENTICATION_FAILED'], [403, 'AUTHENTICATION_FAILED'], [402, 'REQUEST_REJECTED'], [409, 'REQUEST_REJECTED'], [500, 'UPSTREAM_ERROR']])(
