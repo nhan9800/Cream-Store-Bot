@@ -1,11 +1,13 @@
 import { STORE_ONE_GUILD_ID } from '../utils/locale.js';
 import { createDaiphucPartnerClient, DaiphucPartnerError } from './daiphucPartnerClient.js';
 import { createDopermindClient, DopermindError } from './dopermindClient.js';
+import { createCdkVietnamClient, CdkVietnamError } from './cdkVietnamClient.js';
 
 const OPERATIONS = Object.freeze([
   ['health', 'getHealth'], ['account', 'getMe'], ['products', 'getProducts'],
 ]);
 const DOPERMIND_OPERATIONS = Object.freeze([['account', 'getBalance'], ['products', 'getStock']]);
+const CDK_VIETNAM_OPERATIONS = Object.freeze([['account', 'getBalance'], ['products', 'getStock']]);
 const ERROR_CODES = new Set([
   'INVALID_CONFIGURATION', 'NOT_CONFIGURED', 'INVALID_REQUEST', 'TIMEOUT',
   'NETWORK_ERROR', 'REDIRECT_REJECTED', 'AUTHENTICATION_FAILED', 'RATE_LIMITED',
@@ -23,7 +25,7 @@ function freezeSnapshot(status, startedAt = null, checkedAt = null, checks = emp
   for (const result of Object.values(checks)) Object.freeze(result);
   return Object.freeze({
     status, readOnly: true, purchasesEnabled: false, schemaMapped: metadata.schemaMapped === true,
-    provider: metadata.provider === 'dopermind' ? 'dopermind' : metadata.provider === 'unsupported' ? 'unsupported' : 'daiphuc',
+    provider: metadata.provider === 'dopermind' ? 'dopermind' : metadata.provider === 'cdkvietnam' ? 'cdkvietnam' : metadata.provider === 'unsupported' ? 'unsupported' : 'daiphuc',
     productCount: Number.isSafeInteger(metadata.productCount) && metadata.productCount >= 0 ? metadata.productCount : null,
     startedAt, checkedAt, checks: Object.freeze(checks),
   });
@@ -35,7 +37,7 @@ function safeFailure(error) {
   let code = 'REQUEST_FAILED';
   let httpStatus = null;
   try {
-    if (error instanceof DaiphucPartnerError || error instanceof DopermindError) {
+    if (error instanceof DaiphucPartnerError || error instanceof DopermindError || error instanceof CdkVietnamError) {
       if (ERROR_CODES.has(error.code)) code = error.code;
       if (Number.isInteger(error.status) && error.status >= 400 && error.status <= 599) httpStatus = error.status;
     }
@@ -55,10 +57,11 @@ function safeFailure(error) {
 export function createSupplierAutobuyRuntime({
   clientFactory = createDaiphucPartnerClient,
   dopermindClientFactory = createDopermindClient,
+  cdkVietnamClientFactory = createCdkVietnamClient,
   now = Date.now,
   requestTimeoutMs = 10000,
 } = {}) {
-  if (typeof clientFactory !== 'function' || typeof dopermindClientFactory !== 'function' || typeof now !== 'function'
+  if (typeof clientFactory !== 'function' || typeof dopermindClientFactory !== 'function' || typeof cdkVietnamClientFactory !== 'function' || typeof now !== 'function'
     || !Number.isInteger(requestTimeoutMs) || requestTimeoutMs < 1 || requestTimeoutMs > 10000) {
     throw new Error('Supplier runtime configuration is invalid.');
   }
@@ -92,8 +95,8 @@ export function createSupplierAutobuyRuntime({
 
   function start({ guildId, envFile, apiKey, provider = 'daiphuc' } = {}) {
     if (startPromise) return startPromise;
-    const supported = provider === 'daiphuc' || provider === 'dopermind';
-    const operations = provider === 'dopermind' ? DOPERMIND_OPERATIONS : OPERATIONS;
+    const supported = provider === 'daiphuc' || provider === 'dopermind' || provider === 'cdkvietnam';
+    const operations = provider === 'dopermind' ? DOPERMIND_OPERATIONS : provider === 'cdkvietnam' ? CDK_VIETNAM_OPERATIONS : OPERATIONS;
     const metadata = { provider: supported ? provider : 'unsupported' };
     const makeSnapshot = (status, startedAt, checkedAt, checks) => freezeSnapshot(status, startedAt, checkedAt, checks ?? emptyChecks(operations), metadata);
     // Root .env is inherited by both child processes. Both exact guards are
@@ -118,7 +121,7 @@ export function createSupplierAutobuyRuntime({
     startPromise = Promise.resolve().then(async () => {
       let client;
       try {
-        const factory = provider === 'dopermind' ? dopermindClientFactory : clientFactory;
+        const factory = provider === 'dopermind' ? dopermindClientFactory : provider === 'cdkvietnam' ? cdkVietnamClientFactory : clientFactory;
         client = factory({ apiKey, timeoutMs: requestTimeoutMs });
       } catch (error) {
         const checks = Object.fromEntries(operations.map(([name]) => [name, safeFailure(error)]));
@@ -130,7 +133,7 @@ export function createSupplierAutobuyRuntime({
       const results = await Promise.all(operations.map(([, method]) => probe(client, method)));
       const checks = Object.fromEntries(operations.map(([name], index) => [name, results[index].check]));
       const succeeded = results.every(result => result.check.requestSucceeded);
-      if (provider === 'dopermind' && succeeded) {
+      if ((provider === 'dopermind' || provider === 'cdkvietnam') && succeeded) {
         // The provider-specific client validates both documented envelopes and
         // whitelists product fields. Only aggregate metadata leaves this scope.
         metadata.schemaMapped = true;
@@ -138,7 +141,7 @@ export function createSupplierAutobuyRuntime({
       }
       const status = results.some(result => result.check.error === 'AUTHENTICATION_FAILED' || [401, 403].includes(result.check.httpStatus))
         ? 'AUTH_REJECTED'
-        : succeeded ? provider === 'dopermind' ? 'CONNECTED' : 'HTTP_OK_SCHEMA_UNVERIFIED' : 'CHECK_FAILED';
+        : succeeded ? (provider === 'dopermind' || provider === 'cdkvietnam') ? 'CONNECTED' : 'HTTP_OK_SCHEMA_UNVERIFIED' : 'CHECK_FAILED';
       snapshot = makeSnapshot(status, startedAt, checkedTime(), checks);
       return snapshot;
     });
@@ -148,7 +151,7 @@ export function createSupplierAutobuyRuntime({
   function setSalesEnabled(enabled) {
     // Called only by trusted startup after reviewed offers and the worker are
     // ready. An authentication failure or another store can never be promoted.
-    const ready = enabled === true && snapshot.provider === 'dopermind' && snapshot.status === 'CONNECTED';
+    const ready = enabled === true && ['dopermind', 'cdkvietnam'].includes(snapshot.provider) && snapshot.status === 'CONNECTED';
     snapshot = Object.freeze({ ...snapshot, purchasesEnabled: ready, readOnly: !ready });
     return snapshot;
   }
