@@ -92,7 +92,7 @@ export const PRICE_GROUPS = [
   },
   {
     key: 'claude', titleSlot: 'brand_claude', title: 'Claude Pro', accent: 0xD97757,
-    note: 'Gói chính chủ 1 tháng. Bảo hành gói trong 1 tháng, trừ trường hợp tài khoản bị khóa.',
+    note: 'CDK iOS 1 tháng · đọc điều kiện tài khoản, rủi ro Apple và chính sách hoàn tiền trước khi mua; không bảo đảm kích hoạt 100%.',
     match: (p) => p.service_type === 'AI' && /claude/i.test(p.name),
   },
   {
@@ -372,7 +372,7 @@ export function buildPriceGroupPayload(guildId, group, products) {
         ] : warrantyPolicy ? [
           `> ${E('warranty_shield')} **${international ? 'Warranty' : 'Bảo hành'}:** ${international ? translateProductWarranty(warrantyPolicy) : warrantyPolicy}`,
         ] : []),
-        ...([GEMINI_PRO_CDK_KEY, 'gemini-pro-antigravity-24-months'].includes(product.product_key) ? [
+        ...([GEMINI_PRO_CDK_KEY, 'gemini-pro-antigravity-24-months', 'claude-pro-1-month'].includes(product.product_key) ? [
           `> ${E('status_info')} **${international ? 'Terms' : 'Điều kiện'}:** ${international ? translateProductDescription(product.description) : product.description}`,
         ] : []),
       ].join('\n'))

@@ -29,6 +29,7 @@ import { buildOrderLogContent } from '../utils/formatters.js';
 import { emitStaffLog } from './staffLogService.js';
 import { emitAutomationLog } from './automationLogService.js';
 import { hasPurchaseNegation, isCommerceFollowup, isContextualPurchaseConfirmation } from './aiCommerceUnderstandingService.js';
+import { acceptClaudeProTerms, claudeProTermsText, isClaudeProProduct } from '../config/claudeProTerms202611.js';
 
 export const AI_SUPPORT_PREFIX = 'ai:support:';
 const ORDER_CODE_PATTERN = /\b(?:CN|CR)_\d{6}\b/i;
@@ -407,6 +408,7 @@ export function buildAiOrderConfirmationPayload({ guildId, ticket, product, quan
       .setStyle(ButtonStyle.Secondary),
     E.component('status_cross'),
   );
+  const claudeTerms = isClaudeProProduct(product) ? [claudeProTermsText({ emoji: E }), E('status_check') + ' Bấm nút xanh chỉ sau khi bạn đã đọc và chấp nhận toàn bộ điều khoản trên.'] : [];
   return messagePayload([
     `## ${E('icon_cart')} MÌNH ĐÃ CHUẨN BỊ ĐƠN CHO BẠN`,
     notice ? `> ${E('status_warn')} ${notice}` : `> ${E('status_info')} Bạn kiểm tra lại một lượt trước khi mình lên đơn và tạo mã QR nhé.`,
@@ -419,6 +421,7 @@ export function buildAiOrderConfirmationPayload({ guildId, ticket, product, quan
     `${E('payment_money')} **Tổng thanh toán** — **${money(total)}**`,
     '',
     `${E('status_warn')} Chỉ khi chính bạn bấm nút xanh thì hệ thống mới tạo đơn và gửi QR.`,
+    ...claudeTerms,
   ], accentFor(notice ? 'warning' : 'info'), [new ActionRowBuilder().addComponents(confirm, cancel)]);
 }
 
@@ -701,6 +704,9 @@ export async function handleAiSupportInteraction(interaction) {
           allowedMentions: { parse: [] },
         }).catch(() => null);
         return true;
+      }
+      if (isClaudeProProduct(product)) {
+        acceptClaudeProTerms({ guildId: interaction.guildId, customerId: interaction.user.id, productKey: product.product_key });
       }
       const lockKey = `${interaction.guildId}:${ticket.id}`;
       if (orderConfirmationLocks.has(lockKey)) throw new Error('Đơn đang được tạo, vui lòng không bấm lại.');
