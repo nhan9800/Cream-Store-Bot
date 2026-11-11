@@ -44,11 +44,11 @@ describe('supplier payment lower route protections', () => {
     await expect(regeneratePaymentQr({ guild: {}, orderCode: order.order_code })).rejects.toMatchObject({ code: 'PAYMENT_METHOD_LOCKED' });
     expect(fetch).not.toHaveBeenCalled(); expect(getOrderByCode(order.order_code)).toEqual(order);
   });
-  it('rechecks source funds before returning even an existing supplier PayOS invoice', async () => {
+  it('rechecks current quote before returning even an existing supplier PayOS invoice', async () => {
     const order = fixture();
-    preflight.mockRejectedValueOnce(Object.assign(new Error('safe source failure'), { code: 'SUPPLIER_UNFUNDED' }));
+    preflight.mockRejectedValueOnce(Object.assign(new Error('safe quote failure'), { code: 'QUOTE_CHANGED' }));
     const fetch = vi.spyOn(globalThis, 'fetch');
-    await expect(createOrLoadPayOSLink({ ...order, fulfillment_mode: 'LEGACY', total_amount: 1 })).rejects.toMatchObject({ code: 'SUPPLIER_UNFUNDED' });
+    await expect(createOrLoadPayOSLink({ ...order, fulfillment_mode: 'LEGACY', total_amount: 1 })).rejects.toMatchObject({ code: 'QUOTE_CHANGED' });
     expect(preflight).toHaveBeenCalledExactlyOnceWith({ guildId: order.guild_id, customerId: order.customer_id, orderCode: order.order_code });
     expect(fetch).not.toHaveBeenCalled(); expect(getOrderByCode(order.order_code)).toEqual(order);
   });

@@ -22,7 +22,9 @@ function fixture(customId = 'supplier-autobuy:catalog', patch = {}) {
   return {
     customId, guildId, channelId, user: { id: customerId },
     client: { user: { id: botId } },
-    message: { id: privateAction ? '1569999999999999999' : messageId, author: { id: botId }, flags: privateAction ? MessageFlags.Ephemeral : 0, ...(privateAction ? { interactionMetadata: { user: { id: customerId } } } : {}) },
+    message: { id: privateAction ? '1569999999999999999' : messageId, author: { id: botId }, flags: privateAction ? MessageFlags.Ephemeral : 0,
+      components: privateAction ? [{ type: 17, components: [{ type: 10, content: '**Thanh toán trước:** Chỉ tiếp tục nếu đồng ý chờ nguồn.' }] }] : [],
+      ...(privateAction ? { interactionMetadata: { user: { id: customerId } } } : {}) },
     isButton: () => true, isStringSelectMenu: () => false, isModalSubmit: () => false,
     deferReply: vi.fn().mockResolvedValue(undefined), reply: vi.fn().mockResolvedValue(undefined),
     editReply: vi.fn().mockResolvedValue({ id: '1569999999999999998' }), showModal: vi.fn().mockResolvedValue(undefined),
@@ -113,6 +115,21 @@ describe('supplier autobuy customer commerce interactions', () => {
     expect(deps.confirmCheckout).not.toHaveBeenCalled();
     expect(interaction.editReply).toHaveBeenCalledOnce();
   });
+  it.each(['wallet', 'payos'])('refreshes stale private %s payment buttons before creating an invoice or debit, then accepts the next click', async method => {
+    const deps = dependencies(), handler = createSupplierAutobuyInteractionHandler(deps);
+    const stale = fixture(privateId('pay', 'CN_123456:' + method));
+    stale.message.components = [{ type: 17, components: [{ type: 10, content: 'Thanh toán để nhận hàng ngay.' }] }];
+    await handler(stale);
+    expect(deps.createPayment).not.toHaveBeenCalled();
+    expect(deps.getOrder).toHaveBeenCalledExactlyOnceWith({ client: stale.client, ...context, orderCode: order.orderCode });
+    expect(JSON.stringify(stale.editReply.mock.calls[0][0].components)).toContain('Thanh toán trước');
+    expect(JSON.stringify(stale.editReply.mock.calls[0][0].components)).toContain('chỉ tiếp tục nếu bạn đồng ý chờ');
+    const next = fixture(privateId('pay', 'CN_123456:' + method));
+    next.message.components = stale.editReply.mock.calls[0][0].components;
+    await handler(next);
+    expect(deps.createPayment).toHaveBeenCalledExactlyOnceWith({ client: next.client, ...context, orderCode: order.orderCode, method });
+    expect(next.editReply).toHaveBeenCalledOnce();
+  });
   it('attaches a locally rendered PayOS QR to the same private receipt after successful payment creation', async () => {
     const deps = dependencies({ createPayment: vi.fn().mockResolvedValue({ orderCode: order.orderCode, method: 'PAYOS', paid: false,
       status: 'PENDING_PAYMENT', totalAmount: 55000, checkoutUrl: 'https://pay.payos.vn/web/test',
@@ -145,6 +162,22 @@ describe('supplier autobuy customer commerce interactions', () => {
     expect(JSON.stringify(payload.components)).not.toContain('private-provider-error');
     expect(deps.createPayment).toHaveBeenCalledTimes(1);
     expect(deps.confirmCheckout).not.toHaveBeenCalled();
+  });
+  it('shows paid preorders waiting for source funding with automatic resumption and no second payment action', async () => {
+    const deps = dependencies({ createPayment: vi.fn().mockResolvedValue({ orderCode: order.orderCode, method: 'WALLET', paid: true, status: 'PROCESSING' }),
+      getOrder: vi.fn().mockResolvedValue({ ...order, paymentStatus: 'PAID', status: 'PROCESSING', deliveryStatus: 'WAITING_SUPPLIER_FUNDS' }) });
+    const interaction = fixture(privateId('pay', 'CN_123456:wallet'));
+    await createSupplierAutobuyInteractionHandler(deps)(interaction);
+    const payload = interaction.editReply.mock.calls[0][0];
+    const text = JSON.stringify(payload.components);
+    expect(text).toContain('Đã thanh toán · Chờ shop bổ sung nguồn');
+    expect(text).toContain('không cần thanh toán lại hoặc tạo đơn mới');
+    expect(text).toContain('Hệ thống tự mua và giao khi shop bổ sung nguồn');
+    expect(text).not.toContain('supplier-autobuy:pay:');
+    expect(text).not.toContain('chưa tạo mã QR');
+    expect(payload.files).toBeUndefined();
+    expect(deps.createPayment).toHaveBeenCalledTimes(1);
+    expect(deps.acknowledgeDelivery).not.toHaveBeenCalled();
   });
   it.each(['order', 'orderselect'])('restores a persisted owned PayOS invoice on %s without requesting a new invoice', async action => {
     const deps = dependencies({ getOrder: vi.fn().mockResolvedValue({ ...order, payment: {
@@ -179,7 +212,7 @@ describe('supplier autobuy customer commerce interactions', () => {
     expect(deps.createPayment).not.toHaveBeenCalled();
   });
   it.each([
-    ['SUPPLIER_UNFUNDED', 'chưa tạo mã QR hoặc trừ Ví Cenar'],
+    ['SUPPLIER_UNFUNDED', 'không thanh toán lại'],
     ['PAYMENT_METHOD_LOCKED', 'Đơn đã chọn một phương thức thanh toán'],
   ])('shows a safe payment preflight notice for %s without retrying another method', async (code, message) => {
     const deps = dependencies({ createPayment: vi.fn().mockRejectedValue(Object.assign(new Error('provider-secret-private'), { code })) });
@@ -187,6 +220,7 @@ describe('supplier autobuy customer commerce interactions', () => {
     await createSupplierAutobuyInteractionHandler(deps)(interaction);
     const output = JSON.stringify(interaction.editReply.mock.calls);
     expect(output).toContain(message);
+    if (code === 'SUPPLIER_UNFUNDED') expect(output).not.toMatch(/chưa tạo mã QR|chưa trừ|chưa mở bán/);
     expect(output).not.toContain('provider-secret-private');
     expect(deps.createPayment).toHaveBeenCalledOnce();
     expect(deps.getOrder).not.toHaveBeenCalled();

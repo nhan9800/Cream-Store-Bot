@@ -51,6 +51,7 @@ function fixture({ supplierFunds = 500000, blockDm = false } = {}) {
   const dmChannelId = String(1569999999999999700n + BigInt(n));
   const dmMessageId = String(1569999999999999800n + BigInt(n));
   let funds = supplierFunds;
+  let clock = NOW;
   const requests = [];
   const fetchProvider = vi.fn(async (url, options) => {
     expect(new URL(url).origin).toBe(DOPERMIND_ORIGIN);
@@ -61,7 +62,7 @@ function fixture({ supplierFunds = 500000, blockDm = false } = {}) {
       price: COST, base_price: COST, unlimited: false, stock: 20,
     }] });
     if (options.method === 'GET' && new URL(url).pathname === '/v1/balance') return json({
-      balance: funds, currency: 'VND', updated_at: new Date(NOW).toISOString(),
+      balance: funds, currency: 'VND', updated_at: new Date(clock).toISOString(),
     });
     if (options.method === 'POST' && new URL(url).pathname === '/v1/orders') {
       const body = JSON.parse(options.body);
@@ -70,12 +71,14 @@ function fixture({ supplierFunds = 500000, blockDm = false } = {}) {
       // The durable identity and atomic customer payment must precede POST.
       expect(persisted).toMatchObject({ product_key: PRODUCT, quantity: body.quantity, status: 'SUBMITTING' });
       expect(JSON.parse(persisted.request_json)).toEqual(body);
-      expect(getOrderByCode(persisted.order_code)).toMatchObject({ payment_status: 'PAID', payment_provider: 'WALLET', amount_paid: persisted.sale_amount });
-      expect(ledgerFor(persisted.order_code)).toHaveLength(1);
+      const paidOrder = getOrderByCode(persisted.order_code);
+      expect(paidOrder).toMatchObject({ payment_status: 'PAID', amount_paid: persisted.sale_amount });
+      expect(ledgerFor(persisted.order_code)).toHaveLength(paidOrder.payment_provider === 'WALLET' ? 1 : 0);
+      expect(funds).toBeGreaterThanOrEqual(COST * body.quantity);
       funds -= COST * body.quantity;
       return json({ request_id: body.request_id, product_key: body.product_key, quantity: body.quantity,
         order_code: `SUPPLIER_TEST_${n}`, unit_price: COST, total_amount: COST * body.quantity,
-        balance_after: funds, created_at: new Date(NOW).toISOString(), idempotent: false,
+        balance_after: funds, created_at: new Date(clock).toISOString(), idempotent: false,
         items: Array.from({ length: body.quantity }, () => DELIVERABLE) });
     }
     throw new Error('Unexpected synthetic provider operation');
@@ -90,7 +93,7 @@ function fixture({ supplierFunds = 500000, blockDm = false } = {}) {
       warrantyLabel: 'Bảo hành đủ thời hạn gói', accountForm: 'Tài khoản cấp sẵn',
       comparisonDisclosure: 'Gói tham chiếu khác hình thức tài khoản.' }],
   };
-  const catalog = createSupplierAutobuyCatalog({ policy, database: db, enabled: () => true, now: () => NOW, clientFactory: () => provider });
+  const catalog = createSupplierAutobuyCatalog({ policy, database: db, enabled: () => true, now: () => clock, clientFactory: () => provider });
   const dmSend = vi.fn(async payload => {
     const owned = db.prepare('SELECT * FROM supplier_autobuy_intents WHERE customer_id=?').get(customerId);
     expect(owned.encrypted_payload).toMatch(/^enc:v1:/);
@@ -124,7 +127,7 @@ function fixture({ supplierFunds = 500000, blockDm = false } = {}) {
   const notifyCompletion = vi.fn().mockResolvedValue(null);
   const engine = createSupplierAutobuyOrderService({ db, getQuote: catalog.getQuote, createOrder,
     markOrderCompleted, saveDelivery, encrypt, decrypt, providerFactory: () => provider,
-    enabled: () => true, customerBlocked: () => false, now: () => NOW, notifyCompletion });
+    enabled: () => true, customerBlocked: () => false, now: () => clock, notifyCompletion });
   engine.init();
   const payosLink = vi.fn(async () => { throw new Error('PayOS must not be used in the wallet integration'); });
   const publishOrder = vi.fn().mockResolvedValue(null);
@@ -139,7 +142,8 @@ function fixture({ supplierFunds = 500000, blockDm = false } = {}) {
     return { quote, order };
   }
   return { context, client, guild, checkout, engine, catalog, provider, fetchProvider, requests, dmSend, createDM,
-    notifyCompletion, payosLink, confirm, ticketChannelId, dmChannelId, dmMessageId };
+    notifyCompletion, payosLink, confirm, ticketChannelId, dmChannelId, dmMessageId,
+    setSupplierFunds: value => { funds = value; }, advance: milliseconds => { clock += milliseconds; }, now: () => clock };
 }
 
 beforeAll(() => {
@@ -156,8 +160,8 @@ afterAll(() => {
 });
 
 describe('supplier autobuy real commerce integration without external I/O', () => {
-  it('persists a private PayOS invoice and re-renders its QR without duplicate creation, then hides it after payment', async () => {
-    const t = fixture();
+  it('creates a recoverable QR with zero source funds, waits after payment and buys once after top-up', async () => {
+    const t = fixture({ supplierFunds: 0 });
     const { order } = await t.confirm();
     const qrCode = '000201010212' + '1234567890'.repeat(6);
     const expiresAt = new Date(Date.now() + 3600000).toISOString();
@@ -175,11 +179,25 @@ describe('supplier autobuy real commerce integration without external I/O', () =
     expect(JSON.stringify(card.components)).toContain('61.000đ');
     expect(t.payosLink).toHaveBeenCalledOnce(); expect(ledgerFor(order.orderCode)).toHaveLength(0);
     expect(t.requests.filter(request => request.method === 'POST')).toHaveLength(0);
+    expect(t.requests.filter(request => request.path === '/v1/balance')).toHaveLength(0);
     recordOrderPayment({ orderCode: order.orderCode, provider: 'PAYOS', transactionId: 'synthetic-invoice-receipt', amount: 61000, content: order.orderCode });
     const paid = await t.checkout.status({ ...t.context, orderCode: order.orderCode });
     expect(paid.payment).toBeUndefined();
     expect((await buildSupplierPaymentView({ order: paid, customerId: t.context.customerId, payment })).files).toBeUndefined();
     expect(t.payosLink).toHaveBeenCalledOnce(); expect(t.dmSend).not.toHaveBeenCalled();
+    expect(await t.engine.fulfillSupplierOrder(t.client, order.orderCode)).toMatchObject({ status: 'WAITING_SUPPLIER_FUNDS' });
+    const requestId = intentFor(order.orderCode).request_id;
+    expect(intentFor(order.orderCode)).toMatchObject({ status: 'WAITING_SUPPLIER_FUNDS', attempts: 0 });
+    expect(getOrderByCode(order.orderCode)).toMatchObject({ status: 'PROCESSING', payment_status: 'PAID', amount_paid: 61000 });
+    expect(t.requests.filter(request => request.method === 'POST')).toHaveLength(0);
+    t.setSupplierFunds(COST); t.advance(5 * 60000 + 1);
+    const restarted = createSupplierAutobuyOrderService({ db, getQuote: t.catalog.getQuote, createOrder, markOrderCompleted,
+      saveDelivery, encrypt, decrypt, providerFactory: () => t.provider, enabled: () => true, customerBlocked: () => false, now: t.now });
+    expect(await restarted.fulfillSupplierOrder(t.client, order.orderCode)).toMatchObject({ delivered: true });
+    await restarted.fulfillSupplierOrder(t.client, order.orderCode);
+    expect(intentFor(order.orderCode)).toMatchObject({ status: 'DELIVERED', attempts: 1, request_id: requestId });
+    expect(t.requests.filter(request => request.method === 'POST')).toHaveLength(1);
+    expect(t.dmSend).toHaveBeenCalledOnce(); expect(t.payosLink).toHaveBeenCalledOnce();
   });
 
   it('quotes, creates one private ticket, debits once, persists encrypted receipt before private DM and survives repeated actions', async () => {
@@ -227,19 +245,27 @@ describe('supplier autobuy real commerce integration without external I/O', () =
     expect(t.payosLink).not.toHaveBeenCalled();
   });
 
-  it('leaves the actual order and wallet untouched when supplier funds fail preflight for either payment method', async () => {
+  it('debits the customer wallet once with zero source funds and resumes the paid order after funding', async () => {
     const t = fixture({ supplierFunds: 0 });
     const { order } = await t.confirm();
     addWalletBalance(t.context.guildId, t.context.customerId, 100000, 'TOPUP', 'Synthetic test funds');
-    for (const method of ['wallet', 'payos']) await expect(t.checkout.payment({ client: t.client, ...t.context,
-      orderCode: order.orderCode, method })).rejects.toMatchObject({ code: 'SUPPLIER_UNFUNDED' });
-    expect(getWalletBalance(t.context.guildId, t.context.customerId)).toBe(100000);
-    expect(ledgerFor(order.orderCode)).toHaveLength(0);
-    expect(getOrderByCode(order.orderCode)).toMatchObject({ status: 'PENDING_PAYMENT', payment_status: 'UNPAID', amount_paid: 0 });
-    expect(db.prepare('SELECT * FROM supplier_autobuy_payment_methods WHERE order_code=?').get(order.orderCode)).toBeUndefined();
+    const args = { client: t.client, ...t.context, orderCode: order.orderCode, method: 'wallet' };
+    expect(await t.checkout.payment(args)).toMatchObject({ paid: true });
+    await t.checkout.payment(args);
+    expect(getWalletBalance(t.context.guildId, t.context.customerId)).toBe(39000);
+    expect(ledgerFor(order.orderCode)).toHaveLength(1);
+    expect(getOrderByCode(order.orderCode)).toMatchObject({ status: 'PROCESSING', payment_status: 'PAID', amount_paid: 61000 });
+    expect(intentFor(order.orderCode)).toMatchObject({ status: 'WAITING_SUPPLIER_FUNDS', attempts: 0 });
     expect(t.requests.filter(request => request.method === 'POST')).toHaveLength(0);
     expect(t.dmSend).not.toHaveBeenCalled();
     expect(t.payosLink).not.toHaveBeenCalled();
+    t.setSupplierFunds(COST); t.advance(5 * 60000 + 1);
+    expect(await t.engine.fulfillSupplierOrder(t.client, order.orderCode)).toMatchObject({ delivered: true });
+    await t.checkout.payment(args);
+    expect(ledgerFor(order.orderCode)).toHaveLength(1);
+    expect(getWalletBalance(t.context.guildId, t.context.customerId)).toBe(39000);
+    expect(t.requests.filter(request => request.method === 'POST')).toHaveLength(1);
+    expect(t.dmSend).toHaveBeenCalledOnce();
   });
 
   it('retains one charged receipt after blocked DM and completes through owned private retrieval without rebuying', async () => {

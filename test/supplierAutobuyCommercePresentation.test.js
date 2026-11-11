@@ -6,7 +6,7 @@ vi.mock('../src/utils/emojiHelper.js', () => ({
   createEmojiResolver: () => { const E = name => '<:' + name + ':1382729296724099132>'; E.component = name => ({ id: '1382729296724099132', name }); return E; },
   withButtonEmoji: (button, emoji) => button.setEmoji({ name: emoji.match(/^<:(\w+):/)?.[1] || 'test', id: '1382729296724099132' }),
 }));
-import { buildSupplierCatalogView, buildSupplierQuoteView, buildSupplierOrderView, buildSupplierPaymentView, buildSupplierOrderListView, buildSupplierAutobuyPanel, buildSupplierAutobuyReply } from '../src/services/supplierAutobuyPanelService.js';
+import { buildSupplierCatalogView, buildSupplierQuoteView, buildSupplierOrderView, buildSupplierPaymentView, buildSupplierOrderListView, buildSupplierAutobuyPanel, buildSupplierAutobuyReply, hasSupplierPrepayDisclosure } from '../src/services/supplierAutobuyPanelService.js';
 const user = '111111111111111111';
 const quoteId = 'b9d30c1d-cb9a-4321-95dc-2994ac587ac1';
 const productKey = 'desc_12345678-abcd-abcd-abcd-123456789012';
@@ -59,6 +59,42 @@ describe('supplier autobuy commerce presentation', () => {
     expect(JSON.stringify(payload)).not.toMatch(/665544|999888|private-api-secret/);
     expect(JSON.stringify(payload)).toContain('55.000đ');
     expect(JSON.stringify(payload)).toContain('Bảo hành 30 ngày');
+  });
+  it('discloses prepaid waiting before creating an order and before either payment choice', () => {
+    const pending = { orderCode: 'CN_123456', totalAmount: 55000, paymentStatus: 'UNPAID', status: 'PENDING_PAYMENT' };
+    const confirmation = buildSupplierQuoteView({ quote, customerId: user });
+    const payment = buildSupplierOrderView({ order: pending, customerId: user });
+    for (const payload of [confirmation, payment]) {
+      const text = JSON.stringify(payload.components[0]);
+      expect(text).toContain('Thanh toán trước');
+      expect(text).toContain('chờ shop bổ sung nguồn');
+      expect(text).toContain('chỉ tiếp tục nếu bạn đồng ý chờ');
+      expect(text).toContain('Hệ thống tự mua và giao khi nguồn sẵn sàng');
+      expect(text).not.toMatch(/giao ngay|đảm bảo giao|số dư nguồn|providerBalance/);
+      expect(nodes({ components: [payload.components[0]] }).some(node => node.custom_id)).toBe(false);
+    }
+    expect(ids(confirmation)).toContain('supplier-autobuy:confirm:' + user + ':' + quoteId);
+    expect(ids(payment)).toContain('supplier-autobuy:pay:' + user + ':CN_123456:payos');
+    expect(ids(payment)).toContain('supplier-autobuy:pay:' + user + ':CN_123456:wallet');
+    expect(hasSupplierPrepayDisclosure({ components: confirmation.components })).toBe(true);
+    expect(hasSupplierPrepayDisclosure({ components: asJson(payment).components })).toBe(true);
+    expect(hasSupplierPrepayDisclosure({ components: [] })).toBe(false);
+    expect(hasSupplierPrepayDisclosure({ components: [{ type: 10, content: '\\*\\*Thanh toán trước:\\*\\*' }] })).toBe(false);
+    expect(hasSupplierPrepayDisclosure({ components: [{ toJSON() { throw new Error('unreadable'); } }] })).toBe(false);
+  });
+  it('labels paid orders waiting for shop funds honestly and keeps repeated-payment controls and stale QR hidden', async () => {
+    const order = { orderCode: 'CN_123456', productName: 'CapCut', totalAmount: 55000, paymentStatus: 'PAID', status: 'PROCESSING',
+      deliveryStatus: 'WAITING_SUPPLIER_FUNDS', providerBalance: 123456789, payment: { method: 'PAYOS', paid: false, checkoutUrl: 'https://pay.payos.vn/web/stale' } };
+    const payload = await buildSupplierPaymentView({ order, customerId: user });
+    const text = JSON.stringify(payload.components);
+    expect(text).toContain('Đã thanh toán · Chờ shop bổ sung nguồn');
+    expect(text).toContain('Hệ thống tự mua và giao khi shop bổ sung nguồn');
+    expect(text).toContain('không cần thanh toán lại hoặc tạo đơn mới');
+    expect(text).not.toMatch(/123456789|providerBalance|payos.vn|giao ngay/);
+    expect(payload.files).toBeUndefined();
+    expect(ids(payload).some(id => id.includes(':pay:'))).toBe(false);
+    expect(ids(payload)).toContain('supplier-autobuy:order:' + user + ':CN_123456');
+    expect(JSON.stringify(buildSupplierOrderListView({ orders: [order], customerId: user }).components)).toContain('Đã thanh toán · Chờ shop bổ sung nguồn');
   });
   it('renders all payment controls within one Discord action-row budget and allows only PayOS links', () => {
     const order = { orderCode: 'CN_123456', productName: 'Capcut', totalPriceVnd: 55000, paymentStatus: 'UNPAID', status: 'PENDING_PAYMENT' };
@@ -168,8 +204,14 @@ describe('supplier autobuy commerce presentation', () => {
     const payload = buildSupplierAutobuyPanel({ snapshot: { status: 'CONNECTED', purchasesEnabled: true }, supportChannelId: '1514607020098191393' });
     expect(ids(payload)).toEqual(['supplier-autobuy:catalog', 'supplier-autobuy:status']);
     expect(JSON.stringify(payload)).toContain('Chọn gói');
+    expect(JSON.stringify(payload)).toContain('Nhận thanh toán trước');
+    expect(JSON.stringify(payload)).toContain('Đơn có thể chờ shop bổ sung nguồn');
     expect(JSON.stringify(payload)).not.toContain('chưa nhận thanh toán');
     expect(payload.flags & MessageFlags.SuppressNotifications).toBeTruthy();
+    const status = buildSupplierAutobuyReply({ snapshot: { status: 'CONNECTED', purchasesEnabled: true }, action: 'status', customerId: user });
+    expect(JSON.stringify(status)).toContain('Nhận thanh toán trước');
+    expect(JSON.stringify(status)).toContain('hệ thống tự mua và giao riêng khi nguồn sẵn sàng');
+    expect(JSON.stringify(status)).toContain('status_check');
   });
   it('rejects missing customer scope and malformed order identities', () => {
     expect(() => buildSupplierCatalogView({ customerId: 'anonymous' })).toThrow();
