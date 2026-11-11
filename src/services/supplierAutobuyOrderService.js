@@ -342,40 +342,64 @@ export function createSupplierAutobuyOrderService({
         // Check encryption before any financial side effect.
         assertEncryptionReady();
         const provider = providerFactory();
-        const products = await provider.getStock({ productKey: initial.product_key });
-        const product = products.find(item => item.productKey === initial.product_key);
-        // A crashed UNKNOWN request may never have reached the provider. A
-        // same-ID replay can therefore be the first actual purchase; retain the
-        // cost ceiling even when this delays an older receipt's reconciliation.
-        if (!product) return pending(reconcile ? 'REVIEW' : 'WAITING_STOCK', 'PRODUCT_UNAVAILABLE', 5);
-        if (product.priceVnd > initial.max_unit_cost || !integer(product.priceVnd, 1)) return pending('REVIEW', 'PRICE_CHANGED');
-        if (!reconcile) {
-          if (!product.unlimited && product.stock < initial.quantity) return pending('WAITING_STOCK', 'INSUFFICIENT_STOCK', 5);
-          const wallet = await provider.getBalance();
-          if (wallet.currency !== 'VND' || !integer(wallet.balanceVnd) || BigInt(wallet.balanceVnd) < BigInt(product.priceVnd) * BigInt(initial.quantity)) {
-            return pending('WAITING_SUPPLIER_FUNDS', 'INSUFFICIENT_SUPPLIER_BALANCE', 5);
+        if (initial.supplier_order_code) {
+          // CDK Việt Nam may acknowledge an order before its item is ready.
+          // Poll the exact provider order ID rather than creating a duplicate
+          // purchase with the same paid customer order.
+          if (typeof provider.getOrder !== 'function') return pending('REVIEW', 'DELIVERY_REVIEW');
+          const source = await provider.getOrder({ orderId: initial.supplier_order_code });
+          const expectedId = /^cdkvietnam:(\d+)$/.exec(initial.product_key)?.[1];
+          if (source.orderCode !== initial.supplier_order_code || source.status !== 'delivered'
+            || source.quantity !== initial.quantity || !Array.isArray(source.items)
+            || source.items.length !== initial.quantity) return pending('RECONCILING', 'DELIVERY_REVIEW', 3);
+          if (expectedId && String(source.productId) !== expectedId) return pending('REVIEW', 'RECEIPT_INVALID');
+          if (!integer(source.unitPriceVnd, 1) || !integer(source.totalAmountVnd, 1)
+            || BigInt(source.unitPriceVnd) * BigInt(initial.quantity) !== BigInt(source.totalAmountVnd)
+            || source.items.some(item => typeof item !== 'string' || !item.trim())) return pending('REVIEW', 'RECEIPT_INVALID');
+          const encrypted = encrypt(JSON.stringify({ items: source.items, providerOrderCode: source.orderCode, createdAt: source.createdAt }));
+          if (!encrypted?.startsWith('enc:v1:')) fail('ENCRYPTION_UNAVAILABLE');
+          const overCost = source.unitPriceVnd > initial.max_unit_cost;
+          const stored = db.prepare(`UPDATE supplier_autobuy_intents SET encrypted_payload=?,charged_unit_cost=?,charged_total_cost=?,
+            status=?,last_error=?,updated_at=? WHERE order_code=? AND lease_token=?`).run(encrypted,
+            source.unitPriceVnd, source.totalAmountVnd, overCost ? 'REVIEW' : 'DELIVERING', overCost ? 'PRICE_LIMIT_EXCEEDED' : null, timestamp(), code, lease);
+          if (stored.changes !== 1) fail('LEASE_LOST');
+          if (overCost) return pending('REVIEW', 'PRICE_LIMIT_EXCEEDED');
+        } else {
+          const products = await provider.getStock({ productKey: initial.product_key });
+          const product = products.find(item => item.productKey === initial.product_key);
+          // A crashed UNKNOWN request may never have reached the provider. A
+          // same-ID replay can therefore be the first actual purchase; retain the
+          // cost ceiling even when this delays an older receipt's reconciliation.
+          if (!product) return pending(reconcile ? 'REVIEW' : 'WAITING_STOCK', 'PRODUCT_UNAVAILABLE', 5);
+          if (product.priceVnd > initial.max_unit_cost || !integer(product.priceVnd, 1)) return pending('REVIEW', 'PRICE_CHANGED');
+          if (!reconcile) {
+            if (!product.unlimited && product.stock < initial.quantity) return pending('WAITING_STOCK', 'INSUFFICIENT_STOCK', 5);
+            const wallet = await provider.getBalance();
+            if (wallet.currency !== 'VND' || !integer(wallet.balanceVnd) || BigInt(wallet.balanceVnd) < BigInt(product.priceVnd) * BigInt(initial.quantity)) {
+              return pending('WAITING_SUPPLIER_FUNDS', 'INSUFFICIENT_SUPPLIER_BALANCE', 5);
+            }
           }
+          if (!paid(orderByCode(code), intentByCode(code))) return pending('BLOCKED', 'ORDER_NOT_DELIVERABLE');
+          if (createHash('sha256').update(initial.request_json).digest('hex') !== initial.request_hash) return pending('REVIEW', 'REQUEST_INTEGRITY_FAILED');
+          const request = JSON.parse(initial.request_json);
+          if (request.product_key !== initial.product_key || request.quantity !== initial.quantity || request.request_id !== initial.request_id) return pending('REVIEW', 'REQUEST_INTEGRITY_FAILED');
+          db.prepare('UPDATE supplier_autobuy_intents SET attempts=attempts+1,updated_at=? WHERE order_code=? AND lease_token=?').run(timestamp(), code, lease);
+          submissionStarted = true;
+          const receipt = await provider.createOrder({ productKey: initial.product_key, quantity: initial.quantity,
+            requestId: initial.request_id, maxUnitCostVnd: initial.max_unit_cost });
+          if (receipt.requestId !== initial.request_id || receipt.productKey !== initial.product_key || receipt.quantity !== initial.quantity
+            || !Array.isArray(receipt.items) || receipt.items.length !== initial.quantity || !integer(receipt.unitPriceVnd, 1)
+            || !integer(receipt.totalAmountVnd, 1) || BigInt(receipt.unitPriceVnd) * BigInt(initial.quantity) !== BigInt(receipt.totalAmountVnd)
+            || receipt.items.some(item => typeof item !== 'string' || !item.trim())) return pending('UNKNOWN', 'RECEIPT_INVALID');
+          const encrypted = encrypt(JSON.stringify({ items: receipt.items, providerOrderCode: receipt.orderCode, createdAt: receipt.createdAt }));
+          if (!encrypted?.startsWith('enc:v1:')) fail('ENCRYPTION_UNAVAILABLE');
+          const overCost = receipt.unitPriceVnd > initial.max_unit_cost;
+          const stored = db.prepare(`UPDATE supplier_autobuy_intents SET encrypted_payload=?,supplier_order_code=?,charged_unit_cost=?,charged_total_cost=?,
+            status=?,last_error=?,updated_at=? WHERE order_code=? AND lease_token=?`).run(encrypted, receipt.orderCode,
+            receipt.unitPriceVnd, receipt.totalAmountVnd, overCost ? 'REVIEW' : 'DELIVERING', overCost ? 'PRICE_LIMIT_EXCEEDED' : null, timestamp(), code, lease);
+          if (stored.changes !== 1) fail('LEASE_LOST');
+          if (overCost) return pending('REVIEW', 'PRICE_LIMIT_EXCEEDED');
         }
-        if (!paid(orderByCode(code), intentByCode(code))) return pending('BLOCKED', 'ORDER_NOT_DELIVERABLE');
-        if (createHash('sha256').update(initial.request_json).digest('hex') !== initial.request_hash) return pending('REVIEW', 'REQUEST_INTEGRITY_FAILED');
-        const request = JSON.parse(initial.request_json);
-        if (request.product_key !== initial.product_key || request.quantity !== initial.quantity || request.request_id !== initial.request_id) return pending('REVIEW', 'REQUEST_INTEGRITY_FAILED');
-        db.prepare('UPDATE supplier_autobuy_intents SET attempts=attempts+1,updated_at=? WHERE order_code=? AND lease_token=?').run(timestamp(), code, lease);
-        submissionStarted = true;
-        const receipt = await provider.createOrder({ productKey: initial.product_key, quantity: initial.quantity,
-          requestId: initial.request_id, maxUnitCostVnd: initial.max_unit_cost });
-        if (receipt.requestId !== initial.request_id || receipt.productKey !== initial.product_key || receipt.quantity !== initial.quantity
-          || !Array.isArray(receipt.items) || receipt.items.length !== initial.quantity || !integer(receipt.unitPriceVnd, 1)
-          || !integer(receipt.totalAmountVnd, 1) || BigInt(receipt.unitPriceVnd) * BigInt(initial.quantity) !== BigInt(receipt.totalAmountVnd)
-          || receipt.items.some(item => typeof item !== 'string' || !item.trim())) return pending('UNKNOWN', 'RECEIPT_INVALID');
-        const encrypted = encrypt(JSON.stringify({ items: receipt.items, providerOrderCode: receipt.orderCode, createdAt: receipt.createdAt }));
-        if (!encrypted?.startsWith('enc:v1:')) fail('ENCRYPTION_UNAVAILABLE');
-        const overCost = receipt.unitPriceVnd > initial.max_unit_cost;
-        const stored = db.prepare(`UPDATE supplier_autobuy_intents SET encrypted_payload=?,supplier_order_code=?,charged_unit_cost=?,charged_total_cost=?,
-          status=?,last_error=?,updated_at=? WHERE order_code=? AND lease_token=?`).run(encrypted, receipt.orderCode,
-          receipt.unitPriceVnd, receipt.totalAmountVnd, overCost ? 'REVIEW' : 'DELIVERING', overCost ? 'PRICE_LIMIT_EXCEEDED' : null, timestamp(), code, lease);
-        if (stored.changes !== 1) fail('LEASE_LOST');
-        if (overCost) return pending('REVIEW', 'PRICE_LIMIT_EXCEEDED');
       }
       const intent = intentByCode(code); const order = orderByCode(code);
       if (!paid(order, intent)) return pending('BLOCKED', 'ORDER_NOT_DELIVERABLE');
@@ -398,11 +422,17 @@ export function createSupplierAutobuyOrderService({
         if (providerCode === 'NOT_ENOUGH_STOCK' || providerCode === 'OUT_OF_STOCK') return pending('WAITING_STOCK', 'INSUFFICIENT_STOCK', 5);
         if (providerCode === 'INSUFFICIENT_BALANCE') return pending('WAITING_SUPPLIER_FUNDS', 'INSUFFICIENT_SUPPLIER_BALANCE', 5);
         if (['PRICE_CHANGED', 'API_REQUEST_CONFLICT', 'API_ORDER_MANUALLY_FULFILLED', 'PRODUCT_LOCKED', 'IDEMPOTENCY_CONFLICT'].includes(providerCode)) return pending('REVIEW', providerCode);
-        // CDK Việt Nam explicitly says DELIVERY_REVIEW must not be replaced by
-        // another order. The adapter cannot safely recover a 202/409 receipt
-        // without a persisted provider order code, so stop in review instead of
-        // replaying the purchase and risking a duplicate charge.
-        if (providerCode === 'DELIVERY_REVIEW') return pending('REVIEW', providerCode);
+        // CDK Việt Nam exposes a provider order ID for 202 awaiting-delivery
+        // responses. Persist it and poll GET /v1/orders/:id before any retry;
+        // a review response without an ID remains closed for safety.
+        if (providerCode === 'DELIVERY_REVIEW') {
+          if (error.providerOrderCode) {
+            const stored = db.prepare(`UPDATE supplier_autobuy_intents SET supplier_order_code=?,status='RECONCILING',last_error=?,retry_at=?,lease_token=NULL,lease_until=NULL,updated_at=?
+              WHERE order_code=? AND lease_token=?`).run(error.providerOrderCode, providerCode, nextRetry(3), timestamp(), code, lease);
+            return stored.changes === 1 ? { handled: true, delivered: false, status: 'RECONCILING' } : { handled: true, delivered: false, status: 'LEASE_LOST' };
+          }
+          return pending('REVIEW', providerCode);
+        }
         if (['ORDER_HISTORY_PENDING', 'ORDER_FULFILLMENT_PENDING'].includes(providerCode)) return pending('RECONCILING', providerCode, 3);
         if (error.outcome === 'NOT_SUBMITTED') return pending('PENDING', 'PROVIDER_UNAVAILABLE', 2);
         if (error.outcome === 'REJECTED') return pending('REVIEW', 'PROVIDER_REJECTED');

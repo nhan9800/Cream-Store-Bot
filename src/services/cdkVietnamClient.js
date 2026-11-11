@@ -137,7 +137,9 @@ function orderFrom(body, fail, request, now) {
     throw fail('INVALID_SCHEMA');
   }
   if (order.status === 'awaiting_delivery' || order.items.length !== request.quantity) {
-    throw fail('DELIVERY_PENDING', null, { providerCode: 'DELIVERY_REVIEW', outcome: 'UNKNOWN' });
+    // Keep the provider order ID so the durable commerce worker can poll the
+    // documented GET endpoint instead of creating a second paid order.
+    throw fail('DELIVERY_PENDING', null, { providerCode: 'DELIVERY_REVIEW', outcome: 'UNKNOWN', providerOrderCode: order.id });
   }
   return Object.freeze({
     requestId: order.idempotency_key,
@@ -170,7 +172,7 @@ function orderReadFrom(body, fail) {
 }
 
 export class CdkVietnamError extends Error {
-  constructor(code, { operation = 'configure', status = null, outcome = 'NOT_SUBMITTED', providerCode = null } = {}) {
+  constructor(code, { operation = 'configure', status = null, outcome = 'NOT_SUBMITTED', providerCode = null, providerOrderCode = null } = {}) {
     const safeCode = Object.hasOwn(MESSAGES, code) ? code : 'NETWORK_ERROR';
     super(MESSAGES[safeCode]);
     this.name = 'CdkVietnamError';
@@ -179,6 +181,7 @@ export class CdkVietnamError extends Error {
     this.status = Number.isInteger(status) && status >= 100 && status <= 599 ? status : null;
     this.outcome = ['NOT_SUBMITTED', 'UNKNOWN', 'REJECTED'].includes(outcome) ? outcome : 'UNKNOWN';
     this.providerCode = safeProviderCode(providerCode);
+    this.providerOrderCode = typeof providerOrderCode === 'string' && ORDER_ID.test(providerOrderCode) ? providerOrderCode : null;
   }
 }
 
