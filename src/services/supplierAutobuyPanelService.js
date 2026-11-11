@@ -34,7 +34,7 @@ function checkedLine(snapshot) {
 }
 
 function stateLine(snapshot) {
-  if (snapshot?.purchasesEnabled === true) return 'Chọn gói phù hợp, kiểm tra điều kiện rồi thanh toán. Hàng được giao riêng cho đúng tài khoản đặt mua.';
+  if (snapshot?.purchasesEnabled === true) return 'Nhận thanh toán trước. Đơn có thể chờ shop bổ sung nguồn; hệ thống tự mua và giao riêng khi nguồn sẵn sàng.';
   if (snapshot?.status === 'CONNECTED' && snapshot?.provider === 'dopermind') return 'Nguồn hàng mới đã kết nối thành công. Shop đang hoàn thiện giá bán và điều kiện từng sản phẩm.';
   if (snapshot?.status === 'HTTP_OK_SCHEMA_UNVERIFIED') return 'Đã nhận phản hồi kết nối. Shop đang kiểm tra danh mục và điều kiện bán.';
   if (snapshot?.status === 'CHECKING') return 'Shop đang kiểm tra kết nối nguồn hàng.';
@@ -73,7 +73,7 @@ export function buildSupplierAutobuyPanel({ client, snapshot, supportChannelId }
 export function buildSupplierAutobuyReply({ client, snapshot, action, customerId } = {}) {
   const E = createEmojiResolver(STORE_ONE_GUILD_ID);
   const catalog = action === 'catalog';
-  const title = catalog ? `## ${E('icon_doc')} Danh mục đang được chuẩn bị` : `## ${E('status_loading')} Tình trạng autobuy`;
+  const title = catalog ? `## ${E('icon_doc')} Danh mục đang được chuẩn bị` : `## ${E(snapshot?.purchasesEnabled === true ? 'status_check' : 'status_loading')} Tình trạng autobuy`;
   const count = snapshot?.status === 'CONNECTED' && Number.isSafeInteger(snapshot?.productCount) && snapshot.productCount >= 0
     ? `Shop đã kiểm tra kết nối danh mục **${snapshot.productCount} sản phẩm**. Giá bán và điều kiện từng gói đang được hoàn thiện.\n\n` : '';
   const text = catalog
@@ -90,6 +90,22 @@ const identifier = value => typeof value === 'string' && /^[A-Za-z0-9_.:-]{1,100
 const clean = (value, limit = 200) => String(value ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, limit);
 const markdown = (value, limit = 200) => clean(value, limit).replace(/@/g, '＠').replace(/([\\`*_{}\[\]()#+\-.!>|~])/g, '\\$1');
 const money = amount => Number.isSafeInteger(amount) && amount >= 0 ? `${new Intl.NumberFormat('vi-VN').format(amount)}đ` : 'Đang cập nhật';
+const PREPAY_DISCLOSURE_LABEL = '**Thanh toán trước:**';
+const prepaymentDisclosure = E => `${E('status_info')} ${PREPAY_DISCLOSURE_LABEL} Đơn có thể chờ shop bổ sung nguồn sau khi trả tiền. Hệ thống tự mua và giao khi nguồn sẵn sàng; chỉ tiếp tục nếu bạn đồng ý chờ.`;
+
+/** Old private payment buttons must first display the changed delivery terms. */
+export function hasSupplierPrepayDisclosure(message) {
+  try {
+    const pending = Array.isArray(message?.components) ? [...message.components] : [];
+    for (let inspected = 0; pending.length && inspected < 100; inspected++) {
+      const item = pending.pop();
+      const value = typeof item?.toJSON === 'function' ? item.toJSON() : item;
+      if (value?.type === 10 && typeof value.content === 'string' && value.content.includes(PREPAY_DISCLOSURE_LABEL)) return true;
+      if (Array.isArray(value?.components)) pending.push(...value.components);
+    }
+  } catch { /* Unreadable cards are refreshed before any financial action. */ }
+  return false;
+}
 const priceOf = offer => offer?.unitPriceVnd ?? offer?.priceVnd;
 function productIcon(name) {
   const value = clean(name, 500).toLowerCase();
@@ -169,6 +185,7 @@ export function buildSupplierQuoteView({ quote, customerId, manager = false } = 
     `${E('ticket_user')} Hình thức: ${markdown(quote.accountForm || 'Xem mô tả gói', 130)}`,
     quote.comparisonDisclosure ? `-# ${markdown(quote.comparisonDisclosure, 240)}` : '',
     Number.isFinite(expiry) ? `-# Báo giá hết hạn <t:${Math.floor(expiry / 1000)}:R>. Nếu giá hoặc tồn kho thay đổi, shop sẽ yêu cầu bạn xem lại.` : '',
+    prepaymentDisclosure(E),
     '**Kiểm tra đúng gói và điều kiện trước khi xác nhận tạo đơn.**',
   ].filter(Boolean).join('\n\n');
   const controls = [button(`supplier-autobuy:confirm:${customerId}:${quote.quoteId}`, 'Xác nhận tạo đơn', 'icon_cart', ButtonStyle.Success)];
@@ -179,7 +196,7 @@ export function buildSupplierQuoteView({ quote, customerId, manager = false } = 
   return privatePayload([containerWithTitle(`## ${E('status_info')} Kiểm tra gói đã chọn`, text), row(...controls), nav(customerId)]);
 }
 
-const STATUSES = Object.freeze({ PENDING_PAYMENT: 'Chờ thanh toán', UNPAID: 'Chờ thanh toán', PROCESSING: 'Đang xử lý', PAID: 'Đã thanh toán', COMPLETED: 'Đã hoàn thành', DELIVERED: 'Đã giao hàng', READY: 'Có hàng để nhận', UNKNOWN: 'Đang đối soát với nguồn', RECONCILING: 'Đang đối soát với nguồn', REVIEW_REQUIRED: 'Shop đang kiểm tra', REVIEW: 'Shop đang kiểm tra đơn', BLOCKED: 'Shop đang kiểm tra đơn', WAITING_STOCK: 'Đang chờ nguồn bổ sung hàng', WAITING_SUPPLIER_FUNDS: 'Shop đang xử lý nguồn hàng', SUBMITTING: 'Đang lấy hàng', PURCHASED: 'Đã có hàng · Đang giao riêng', DELIVERY_PENDING: 'Đang chờ gửi hàng riêng', DELIVERING: 'Đang gửi hàng riêng', PENDING: 'Đang chờ lấy hàng', FAILED: 'Cần shop hỗ trợ', CANCELLED: 'Đã hủy', REFUNDED: 'Đã hoàn tiền' });
+const STATUSES = Object.freeze({ PENDING_PAYMENT: 'Chờ thanh toán', UNPAID: 'Chờ thanh toán', PROCESSING: 'Đang xử lý', PAID: 'Đã thanh toán', COMPLETED: 'Đã hoàn thành', DELIVERED: 'Đã giao hàng', READY: 'Có hàng để nhận', UNKNOWN: 'Đang đối soát với nguồn', RECONCILING: 'Đang đối soát với nguồn', REVIEW_REQUIRED: 'Shop đang kiểm tra', REVIEW: 'Shop đang kiểm tra đơn', BLOCKED: 'Shop đang kiểm tra đơn', WAITING_STOCK: 'Đang chờ nguồn bổ sung hàng', WAITING_SUPPLIER_FUNDS: 'Đã thanh toán · Chờ shop bổ sung nguồn', SUBMITTING: 'Đang lấy hàng', PURCHASED: 'Đã có hàng · Đang giao riêng', DELIVERY_PENDING: 'Đang chờ gửi hàng riêng', DELIVERING: 'Đang gửi hàng riêng', PENDING: 'Đang chờ lấy hàng', FAILED: 'Cần shop hỗ trợ', CANCELLED: 'Đã hủy', REFUNDED: 'Đã hoàn tiền' });
 function orderCodeOf(order) { return order?.orderCode ?? order?.order_code; }
 function publicOrderText(order, nameLimit = 150) {
   const terminal = ['COMPLETED', 'CANCELLED', 'REFUNDED'].includes(order?.status);
@@ -217,13 +234,17 @@ export function buildSupplierOrderView({ order, customerId, payment = order?.pay
   if (!/^CN_\d{6,12}$/.test(code || '')) throw new Error('INVALID_ORDER');
   const E = createEmojiResolver(STORE_ONE_GUILD_ID);
   const { unpaid, expiresAt, expired } = paymentState(order, payment);
+  const waitingForSource = !unpaid && (order?.paymentStatus ?? order?.payment_status) === 'PAID'
+    && order?.status === 'PROCESSING' && order?.deliveryStatus === 'WAITING_SUPPLIER_FUNDS';
   const text = [publicOrderText({ ...order, orderCode: code }), '',
-    !unpaid ? 'Thanh toán và trạng thái đơn được ghi nhận ở trên. Bấm Nhận hàng riêng khi đơn đã có kết quả.'
+    waitingForSource ? 'Khoản thanh toán đã được ghi nhận. Hệ thống tự mua và giao khi shop bổ sung nguồn. Bạn không cần thanh toán lại hoặc tạo đơn mới; bấm Kiểm tra đơn để theo dõi.'
+      : !unpaid ? 'Thanh toán và trạng thái đơn được ghi nhận ở trên. Bấm Nhận hàng riêng khi đơn đã có kết quả.'
       : expired ? 'Hóa đơn đã hết hạn. Vui lòng kiểm tra đơn hoặc tạo ticket hỗ trợ; không chuyển tiền vào mã QR cũ.'
       : qrAttachmentName ? 'Quét mã QR bên dưới hoặc bấm Mở trang thanh toán. Bot tự xác nhận khi nhận được tiền.'
       : qrUnavailable ? 'Chưa hiển thị được ảnh QR. Bạn có thể dùng trang thanh toán PayOS hoặc bấm Kiểm tra đơn để xem lại hóa đơn hiện có.'
       : 'Thanh toán cho đúng mã đơn. Mọi lần kiểm tra và nhận lại hàng đều sử dụng đơn này.',
     unpaid && expiresAt !== null ? `${E('icon_expire')} **${expired ? 'Đã hết hạn' : 'Hạn thanh toán'}:** <t:${Math.floor(expiresAt / 1000)}:f> · <t:${Math.floor(expiresAt / 1000)}:R>` : null,
+    unpaid && !expired ? `\n${prepaymentDisclosure(E)}` : null,
   ].filter(line => line !== null).join('\n');
   const controls = [];
   if (unpaid && !expired) controls.push(button(`supplier-autobuy:pay:${customerId}:${code}:payos`, 'Thanh toán QR / PayOS', 'payment_payos', ButtonStyle.Primary),

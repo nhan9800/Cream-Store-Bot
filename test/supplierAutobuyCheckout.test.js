@@ -47,7 +47,7 @@ afterAll(() => { if (db.open) db.close(); for (const s of ['', '-wal', '-shm']) 
 const payment = { guildId, customerId, orderCode: 'CN_123456', method: 'wallet' };
 
 describe('supplier checkout payment boundaries', () => {
-  it('normalizes UI lowercase methods, checks owned quote/funds before debit and coalesces duplicate clicks', async () => {
+  it('normalizes UI lowercase methods, checks owned quote before debit and coalesces duplicate clicks', async () => {
     const { facade, engine, client, debitWallet, database } = fixture();
     const results = await Promise.all([facade.payment({ ...payment, client }), facade.payment({ ...payment, client })]);
     expect(results[0]).toEqual(results[1]);
@@ -59,7 +59,7 @@ describe('supplier checkout payment boundaries', () => {
     expect(debitWallet).toHaveBeenCalledTimes(1);
     expect(engine.fulfillSupplierOrder).toHaveBeenCalledTimes(1);
   });
-  it.each(['INSUFFICIENT_SUPPLIER_BALANCE', 'QUOTE_CHANGED', 'OUT_OF_STOCK'])('never creates invoice or debits when preflight says %s', async code => {
+  it.each(['ENCRYPTION_UNAVAILABLE', 'QUOTE_CHANGED', 'OUT_OF_STOCK'])('never creates invoice or debits when preflight says %s', async code => {
     const { facade, engine, debitWallet, payosLink, database } = fixture();
     engine.validateSupplierOrderForPayment.mockRejectedValue(Object.assign(new Error('safe failure'), { code }));
     await expect(facade.payment({ ...payment, method: 'payos' })).rejects.toMatchObject({ code });

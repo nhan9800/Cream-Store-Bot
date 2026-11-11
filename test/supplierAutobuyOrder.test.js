@@ -61,8 +61,8 @@ function setup(options = {}) {
     sendDelivery, notifyCompletion, reconcileInvoices, now: () => time, ...options.settings };
   const service = createSupplierAutobuyOrderService(settings); service.init();
   const context = { guildId: STORE_ONE_GUILD_ID, customerId: CUSTOMER };
-  async function create() {
-    const pending = await service.prepareSupplierCheckout({ ...context, productKey: PRODUCT });
+  async function create(quantity = 1) {
+    const pending = await service.prepareSupplierCheckout({ ...context, productKey: PRODUCT, quantity });
     return service.confirmSupplierCheckout({ ...context, quoteId: pending.quoteId, ticketId: 1, ticketChannelId: CHANNEL, orderLogChannelId: LOG });
   }
   function pay(code) { database.prepare("UPDATE orders SET payment_status='PAID',amount_paid=total_amount,status='PROCESSING' WHERE order_code=?").run(code); }
@@ -155,14 +155,13 @@ describe('durable supplier checkout and ownership', () => {
     const t = setup(); t.getQuote.mockImplementation(async (key, quantity) => ({ ...t.quote(key, quantity), comparisonDisclosure: 'Tham khảo gói cá nhân; loại tài khoản được shop cấp khác gói chính hãng.' }));
     expect(await t.service.prepareSupplierCheckout({ ...t.context, productKey: PRODUCT })).toHaveProperty('comparisonDisclosure', 'Tham khảo gói cá nhân; loại tài khoản được shop cấp khác gói chính hãng.');
   });
-  it('blocks all customer-payment preparation when the provider wallet cannot cover exact confirmed costs', async () => {
+  it('allows customer invoice preparation without reading an unfunded source wallet', async () => {
     const t = setup(); const o = await t.create(); t.provider.getBalance.mockResolvedValue({ currency: 'VND', balanceVnd: 0 });
-    await expect(t.service.validateSupplierOrderForPayment({ ...t.context, orderCode: o.order_code })).rejects.toMatchObject({ code: 'SUPPLIER_UNFUNDED' });
+    await expect(t.service.validateSupplierOrderForPayment({ ...t.context, orderCode: o.order_code })).resolves.toMatchObject({ paymentStatus: 'UNPAID' });
+    expect(t.provider.getBalance).not.toHaveBeenCalled();
     expect(t.provider.createOrder).not.toHaveBeenCalled();
     expect(t.database.prepare('SELECT payment_status,amount_paid FROM orders WHERE order_code=?').get(o.order_code)).toEqual({ payment_status: 'UNPAID', amount_paid: 0 });
     expect(t.database.prepare('SELECT COUNT(*) AS n FROM wallet_transactions').get().n).toBe(0);
-    t.provider.getBalance.mockResolvedValue({ currency: 'VND', balanceVnd: 42000 });
-    await expect(t.service.validateSupplierOrderForPayment({ ...t.context, orderCode: o.order_code })).resolves.toMatchObject({ paymentStatus: 'UNPAID' });
   });
   it.each([
     { encrypt: () => { throw new Error('missing key'); } },
@@ -176,22 +175,20 @@ describe('durable supplier checkout and ownership', () => {
     expect(t.database.prepare('SELECT payment_status,amount_paid FROM orders WHERE order_code=?').get(o.order_code)).toEqual({ payment_status: 'UNPAID', amount_paid: 0 });
     expect(t.database.prepare('SELECT COUNT(*) AS n FROM wallet_transactions').get().n).toBe(0);
   });
-  it('reserves supplier funds for other active invoices and paid unknown purchases before accepting payment', async () => {
+  it('does not reserve source wallet funds for other unpaid invoices or paid waiting purchases', async () => {
     const t = setup(); const a = await t.create(); const b = await t.create();
     t.database.exec('CREATE TABLE supplier_autobuy_payment_methods(order_code TEXT PRIMARY KEY,method TEXT,created_at TEXT)');
     t.database.prepare("INSERT INTO supplier_autobuy_payment_methods VALUES(?,'PAYOS','2026-11-10T16:00:00Z')").run(a.order_code);
-    t.provider.getBalance.mockResolvedValue({ currency: 'VND', balanceVnd: 80000 });
-    await expect(t.service.validateSupplierOrderForPayment({ ...t.context, orderCode: b.order_code })).rejects.toMatchObject({ code: 'SUPPLIER_UNFUNDED' });
-    t.provider.getBalance.mockResolvedValue({ currency: 'VND', balanceVnd: 84000 });
+    t.provider.getBalance.mockResolvedValue({ currency: 'VND', balanceVnd: 0 });
     await expect(t.service.validateSupplierOrderForPayment({ ...t.context, orderCode: b.order_code })).resolves.toBeTruthy();
-    t.pay(a.order_code); t.database.prepare("UPDATE supplier_autobuy_intents SET status='UNKNOWN' WHERE order_code=?").run(a.order_code);
-    t.provider.getBalance.mockResolvedValue({ currency: 'VND', balanceVnd: 42000 });
-    await expect(t.service.validateSupplierOrderForPayment({ ...t.context, orderCode: b.order_code })).rejects.toMatchObject({ code: 'SUPPLIER_UNFUNDED' });
+    t.pay(a.order_code); t.database.prepare("UPDATE supplier_autobuy_intents SET status='WAITING_SUPPLIER_FUNDS' WHERE order_code=?").run(a.order_code);
+    await expect(t.service.validateSupplierOrderForPayment({ ...t.context, orderCode: b.order_code })).resolves.toBeTruthy();
     t.database.prepare("UPDATE supplier_autobuy_intents SET status='PURCHASED',encrypted_payload='enc:v1:existing' WHERE order_code=?").run(a.order_code);
     await expect(t.service.validateSupplierOrderForPayment({ ...t.context, orderCode: b.order_code })).resolves.toBeTruthy();
     t.database.prepare("UPDATE supplier_autobuy_intents SET encrypted_payload=NULL WHERE order_code=?").run(a.order_code);
     t.database.prepare("UPDATE orders SET status='CANCELLED',payment_status='CANCELLED' WHERE order_code=?").run(a.order_code);
     await expect(t.service.validateSupplierOrderForPayment({ ...t.context, orderCode: b.order_code })).resolves.toBeTruthy();
+    expect(t.provider.getBalance).not.toHaveBeenCalled();
   });
   it('holds the last finite item for the first selected invoice before any second customer payment', async () => {
     const t = setup(); const a = await t.create(); const b = await t.create();
@@ -227,6 +224,63 @@ describe('durable supplier checkout and ownership', () => {
 });
 
 describe('paid-only supplier fulfillment and recovery', () => {
+  it('keeps a paid unfunded order waiting beyond24h without buying, attempts, or cancellation', async () => {
+    const t = setup(); const o = await t.create(); t.pay(o.order_code);
+    t.provider.getBalance.mockResolvedValue({currency:'VND',balanceVnd:0});
+    const requestId=t.intent(o.order_code).request_id;
+    expect((await t.service.fulfillSupplierOrder({},o.order_code)).status).toBe('WAITING_SUPPLIER_FUNDS');
+    expect(t.intent(o.order_code)).toMatchObject({status:'WAITING_SUPPLIER_FUNDS',attempts:0,request_id:requestId});
+    t.advance(25*3600000);await t.service.processPendingSupplierOrders({},3);
+    expect(t.database.prepare('SELECT status,payment_status,amount_paid FROM orders WHERE order_code=?').get(o.order_code))
+      .toEqual({status:'PROCESSING',payment_status:'PAID',amount_paid:72000});
+    expect(t.intent(o.order_code)).toMatchObject({status:'WAITING_SUPPLIER_FUNDS',attempts:0,request_id:requestId});
+    expect(t.provider.createOrder).not.toHaveBeenCalled();expect(t.sendDelivery).not.toHaveBeenCalled();
+  });
+  it('survives a waiting-state restart then automatically buys and delivers exactly once after sufficient topup', async () => {
+    const t=setup();const o=await t.create();t.pay(o.order_code);
+    t.provider.getBalance.mockResolvedValue({currency:'VND',balanceVnd:0});
+    await t.service.fulfillSupplierOrder({},o.order_code);const requestId=t.intent(o.order_code).request_id;
+    const restarted=createSupplierAutobuyOrderService(t.settings);
+    t.advance(5*60000+1);await restarted.processPendingSupplierOrders({},3);
+    expect(t.intent(o.order_code)).toMatchObject({status:'WAITING_SUPPLIER_FUNDS',attempts:0,request_id:requestId});
+    expect(t.provider.createOrder).not.toHaveBeenCalled();
+    t.provider.getBalance.mockResolvedValue({currency:'VND',balanceVnd:42000});
+    t.advance(5*60000+1);await restarted.processPendingSupplierOrders({},3);
+    expect(t.provider.createOrder).toHaveBeenCalledTimes(1);
+    expect(t.provider.createOrder.mock.calls[0][0]).toMatchObject({requestId,productKey:PRODUCT,quantity:1});
+    expect(t.intent(o.order_code)).toMatchObject({status:'DELIVERED',attempts:1,request_id:requestId});
+    expect(t.sendDelivery).toHaveBeenCalledTimes(1);expect(t.markOrderCompleted).toHaveBeenCalledTimes(1);
+    t.advance(5*60000+1);await restarted.processPendingSupplierOrders({},3);
+    await restarted.fulfillSupplierOrder({},o.order_code);
+    expect(t.provider.createOrder).toHaveBeenCalledTimes(1);expect(t.sendDelivery).toHaveBeenCalledTimes(1);
+  });
+  it('uses partial source funding only for affordable paid orders and resumes the remaining order later', async () => {
+    const t=setup();const large=await t.create(2);const small=await t.create();t.pay(large.order_code);t.pay(small.order_code);
+    let wallet=42000;
+    t.provider.getBalance.mockImplementation(async()=>({currency:'VND',balanceVnd:wallet}));
+    const purchase=t.provider.createOrder.getMockImplementation();
+    t.provider.createOrder.mockImplementation(async request=>{
+      const total=42000*request.quantity;expect(wallet).toBeGreaterThanOrEqual(total);wallet-=total;
+      return purchase(request);
+    });
+    await t.service.processPendingSupplierOrders({},3);
+    expect(t.intent(large.order_code)).toMatchObject({status:'WAITING_SUPPLIER_FUNDS',attempts:0});
+    expect(t.intent(small.order_code)).toMatchObject({status:'DELIVERED',attempts:1});
+    expect(t.provider.createOrder).toHaveBeenCalledTimes(1);expect(wallet).toBe(0);
+    wallet=84000;t.advance(5*60000+1);await t.service.processPendingSupplierOrders({},3);
+    expect(t.intent(large.order_code)).toMatchObject({status:'DELIVERED',attempts:1});
+    expect(t.provider.createOrder).toHaveBeenCalledTimes(2);expect(wallet).toBe(0);
+    expect(new Set(t.provider.createOrder.mock.calls.map(([request])=>request.requestId)).size).toBe(2);
+  });
+  it.each(['CANCELLED','REFUNDED'])('never buys a formerly waiting paid order after it becomes %s', async status=>{
+    const t=setup();const o=await t.create();t.pay(o.order_code);
+    t.provider.getBalance.mockResolvedValue({currency:'VND',balanceVnd:0});await t.service.fulfillSupplierOrder({},o.order_code);
+    t.database.prepare('UPDATE orders SET status=?,payment_status=? WHERE order_code=?').run(status,status,o.order_code);
+    t.provider.getBalance.mockResolvedValue({currency:'VND',balanceVnd:100000});t.provider.getBalance.mockClear();
+    t.advance(5*60000+1);await t.service.processPendingSupplierOrders({},3);await t.service.fulfillSupplierOrder({},o.order_code);
+    expect(t.provider.getBalance).not.toHaveBeenCalled();expect(t.provider.createOrder).not.toHaveBeenCalled();
+    expect(t.intent(o.order_code).attempts).toBe(0);
+  });
   it('makes no purchase for unpaid/underpaid/cancelled/refunded orders or another guild', async () => {
     const t = setup(); const o = await t.create();
     await t.service.fulfillSupplierOrder({}, o.order_code); expect(t.provider.createOrder).not.toHaveBeenCalled();

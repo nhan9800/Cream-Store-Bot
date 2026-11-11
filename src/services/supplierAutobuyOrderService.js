@@ -278,23 +278,22 @@ export function createSupplierAutobuyOrderService({
     if (!product || product.name !== quote.productName || !integer(product.priceVnd, 1)
       || product.priceVnd !== quote.unitCostVnd || product.priceVnd > intent.max_unit_cost) fail('QUOTE_CHANGED');
     const hasMethods = Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='supplier_autobuy_payment_methods'").get());
-    const reservations = db.prepare(`SELECT i.product_key,i.max_unit_cost,i.quantity FROM supplier_autobuy_intents i JOIN orders o ON o.order_code=i.order_code
+    const reservations = db.prepare(`SELECT i.product_key,i.quantity FROM supplier_autobuy_intents i JOIN orders o ON o.order_code=i.order_code
       ${hasMethods ? 'LEFT JOIN supplier_autobuy_payment_methods m ON m.order_code=i.order_code' : ''}
       WHERE i.guild_id=? AND i.order_code!=? AND i.encrypted_payload IS NULL
       AND o.fulfillment_mode='SUPPLIER' AND o.status NOT IN ('COMPLETED','CANCELLED','REFUNDED')
       AND (o.payment_status='PAID' ${hasMethods ? "OR (o.payment_status='UNPAID' AND m.order_code IS NOT NULL)" : ''})`)
       .all(guildId, orderCode);
-    let reservedCost = 0n, reservedQuantity = 0n;
+    let reservedQuantity = 0n;
     for (const reservation of reservations) {
-      if (!integer(reservation.max_unit_cost, 1) || !integer(reservation.quantity, 1)) fail('RESERVATION_INVALID');
-      reservedCost += BigInt(reservation.max_unit_cost) * BigInt(reservation.quantity);
+      if (!integer(reservation.quantity, 1)) fail('RESERVATION_INVALID');
       if (reservation.product_key === intent.product_key) reservedQuantity += BigInt(reservation.quantity);
     }
     if (product.unlimited !== true && (!integer(product.stock)
       || BigInt(product.stock) < BigInt(intent.quantity) + reservedQuantity)) fail('OUT_OF_STOCK');
-    const balance = await provider.getBalance();
-    const required = BigInt(intent.max_unit_cost) * BigInt(intent.quantity) + reservedCost;
-    if (balance?.currency !== 'VND' || !integer(balance.balanceVnd) || BigInt(balance.balanceVnd) < required) fail('SUPPLIER_UNFUNDED');
+    // Customer payment is allowed before the shop funds its source wallet.
+    // Only the paid purchase worker checks source balance immediately before
+    // POST, retaining the paid order until the owner supplies enough funds.
     return safeOrder(order, intent);
   }
   async function runFulfillment(client, code, { allowReconcile = false } = {}) {
