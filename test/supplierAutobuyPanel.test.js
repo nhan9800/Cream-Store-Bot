@@ -43,8 +43,8 @@ function fixture({ existing = false, messages = [] } = {}) {
 beforeEach(() => { state.settings.clear(); state.emojis = true; vi.clearAllMocks(); });
 
 describe('supplier autobuy preparing panels', () => {
-  it('shows verified new-provider connection without publishing costs or accepting payments', () => {
-    const snapshot = { status: 'CONNECTED', provider: 'dopermind', productCount: 101, schemaMapped: true,
+  it.each(['dopermind', 'cdkvietnam'])('shows verified %s connection without publishing costs or accepting payments', provider => {
+    const snapshot = { status: 'CONNECTED', provider, productCount: 101, schemaMapped: true,
       checkedAt: '2026-11-10T16:00:00Z', balance: 1234567, products: ['private-cost'] };
     const payload = buildSupplierAutobuyPanel({ snapshot, supportChannelId: state.support });
     const json = JSON.stringify(payload);
