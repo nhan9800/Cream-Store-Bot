@@ -68,6 +68,7 @@ export function translateProductWarranty(value) {
   if (value === GEMINI_PRO_CDK_WARRANTY) return GEMINI_PRO_CDK_WARRANTY_EN;
   return String(value || '')
     .replace(/Full (\d+) tháng · không bảo hành nếu tài khoản bị khóa/gi, 'Full $1-month subscription warranty; locked accounts are excluded')
+    .replace(/Bảo hành theo điều khoản CDK iOS · không bảo đảm kích hoạt 100%/gi, 'Coverage follows the iOS CDK terms; activation is not guaranteed 100%')
     .replace(/^Bảo hành (\d+) giờ$/gi, '$1 hours of warranty')
     .replace(/^Bảo hành (\d+) ngày$/gi, '$1 days of warranty')
     .replace(/Bảo hành gói 1 tháng · không bảo hành tài khoản/gi, 'Subscription coverage for 1 month; the account is excluded')

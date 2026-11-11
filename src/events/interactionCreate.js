@@ -161,6 +161,7 @@ import {
 import {
   handleProductSelect,
   handleProductPurchaseFlow,
+  handleClaudeTermsButton,
   handleProductEditButton,
   handleProductEditModal,
   handleProductAddModal,
@@ -605,6 +606,11 @@ export function registerInteractionHandler(client, commands) {
       }
 
 
+
+      if (interaction.isButton() && interaction.customId.startsWith('product:claude:terms:')) {
+        await handleClaudeTermsButton(interaction, interaction.customId.split(':')[3]);
+        return;
+      }
 
       // Product purchase modal
       if (interaction.isModalSubmit() && (interaction.customId === 'product:claude:modal_buy' || interaction.customId === 'product:locket:modal_buy')) {
@@ -2457,7 +2463,4 @@ export function getClientOptions() {
     partials: [Partials.Channel],
   };
 }
-
-
-
 

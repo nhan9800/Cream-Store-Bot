@@ -19,7 +19,8 @@ import { isApiCreditProduct } from '../config/apiCreditCatalog.js';
 import { isCapcutProduct } from '../config/capcutCatalog.js';
 import { assertCapcutPurchaseQuote } from '../services/capcutPricingService.js';
 import { db } from '../database/db.js';
-import { createEmojiResolver } from '../utils/emojiHelper.js';
+import { createEmojiResolver, withButtonEmoji } from '../utils/emojiHelper.js';
+import { CLAUDE_PRO_PRODUCT_KEY, acceptClaudeProTerms, clearClaudeProTermsAcceptance, claudeProTermsText, hasAcceptedClaudeProTerms, isClaudeProProduct } from '../config/claudeProTerms202611.js';
 import { getGuildConfig } from '../services/guildConfigService.js';
 import { getCustomerFlag, getTicketMuteStatus } from '../services/blacklistService.js';
 import { canOpenMultipleOrderTickets, isStaffMember, TICKET_MEMBER_PERMISSIONS } from '../utils/permissions.js';
@@ -99,6 +100,23 @@ export async function handleProductSelect(interaction) {
     return;
   }
 
+  if (isClaudeProProduct(product)) {
+    const continueButton = withButtonEmoji(
+      new ButtonBuilder()
+        .setCustomId(`product:claude:terms:` + product.id)
+        .setLabel('Đã đọc điều khoản · Tiếp tục')
+        .setStyle(ButtonStyle.Success),
+      E.component('status_check'),
+    );
+    await safeReply(interaction, {
+      content: claudeProTermsText({ emoji: E }),
+      components: [new ActionRowBuilder().addComponents(continueButton)],
+      ephemeral: true,
+      allowedMentions: { parse: [] },
+    });
+    return;
+  }
+
   const capcut = isCapcutProduct(product);
   const quotedPrice = capcut ? Number(isCustomerCtv(interaction.guildId, interaction.user.id, interaction.member) && product.ctv_price !== null
     ? product.ctv_price : product.price) : null;
@@ -130,11 +148,34 @@ export async function handleProductSelect(interaction) {
 
 // Helper to parse price input (e.g. 180k -> 180000, 180000 -> 180000)
 
+export async function handleClaudeTermsButton(interaction, productId) {
+  const product = getProductById(Number(productId));
+  if (!product || !isClaudeProProduct(product) || product.is_active !== 1) {
+    await safeReply(interaction, { content: 'Gói Claude này không còn mở bán; vui lòng chọn lại bảng giá.', ephemeral: true });
+    return;
+  }
+  acceptClaudeProTerms({ guildId: interaction.guildId, customerId: interaction.user.id, productKey: CLAUDE_PRO_PRODUCT_KEY });
+  const modal = new ModalBuilder()
+    .setCustomId(`product:purchase:modal:` + product.id + `:claude-terms`)
+    .setTitle((`Mua: ` + product.name).slice(0, 45));
+  modal.addComponents(
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('quantity').setLabel('Số lượng').setValue('1').setStyle(TextInputStyle.Short).setRequired(true)),
+    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('discount_code').setLabel('Mã giảm giá (nếu có)').setPlaceholder('VD: SALE10').setStyle(TextInputStyle.Short).setRequired(false)),
+  );
+  await interaction.showModal(modal).catch(() => null);
+}
+
 export async function handleProductPurchaseFlow(interaction, productId, expectedPrice) {
   const E = createEmojiResolver(interaction.guildId);
   const product = getProductById(Number(productId));
   if (!product || product.is_active !== 1) {
     await safeReply(interaction, { content: `${E('status_cross')} Sản phẩm không còn tồn tại.`, ephemeral: true });
+    return;
+  }
+
+  const claudeTermsRequired = isClaudeProProduct(product);
+  if (claudeTermsRequired && !hasAcceptedClaudeProTerms({ guildId: interaction.guildId, customerId: interaction.user.id, productKey: product.product_key })) {
+    await safeReply(interaction, { content: `${E('status_warn')} Vui lòng mở lại gói Claude, đọc và xác nhận điều khoản trước khi thanh toán.`, ephemeral: true });
     return;
   }
 
@@ -166,6 +207,7 @@ export async function handleProductPurchaseFlow(interaction, productId, expected
     catch (error) { return interaction.editReply(error.message); }
   }
   const totalPrice = unitPrice * quantity;
+  if (claudeTermsRequired) clearClaudeProTermsAcceptance({ guildId: interaction.guildId, customerId: interaction.user.id, productKey: product.product_key });
 
   const currentBalance = getWalletBalance(interaction.guildId, interaction.user.id);
   if (currentBalance < totalPrice) {
@@ -638,4 +680,3 @@ export async function handleSaleRunModal(interaction) {
 }
 
 // ═══════════════ Subscription Handlers ═══════════════
-

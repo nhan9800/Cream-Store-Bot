@@ -140,7 +140,7 @@ describe('November 6 catalog refresh', () => {
       expect(product).toMatchObject({ duration_months: 1, activation_method: 'OWN_ACCOUNT', quota_value: null });
     }
     const claude = ai.find((p) => p.product_key === 'claude-pro-1-month');
-    expect(claude.warranty_policy).toBe('Full 1 tháng · không bảo hành nếu tài khoản bị khóa');
+    expect(claude.warranty_policy).toBe('Bảo hành theo điều khoản CDK iOS · không bảo đảm kích hoạt 100%');
     for (const p of ai.filter((p) => /Pro (200|500)/.test(p.name))) {
       expect(p.warranty_policy).toContain('Xác nhận');
     }

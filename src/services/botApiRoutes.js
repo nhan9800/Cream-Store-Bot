@@ -16,6 +16,7 @@ import { AUTOMATIC_PRICE_BOARD_PAUSED } from '../config/marketingAutomationPolic
 
 import { db, nowIso } from '../database/db.js';
 import { isCapcutProduct } from '../config/capcutCatalog.js';
+import { CLAUDE_PRO_TERMS_VERSION, acceptClaudeProTerms, isClaudeProProduct } from '../config/claudeProTerms202611.js';
 import { getCapcutWebCheckoutPrice } from './capcutPricingService.js';
 import { config } from '../config.js';
 import { getAiKnowledge } from './aiKnowledgeService.js';
@@ -1510,6 +1511,23 @@ export function registerBotApiRoutes(app) {
             let unitPrice = Number(catalogProduct?.price);
             if (!catalogProduct || !Number.isFinite(unitPrice) || unitPrice <= 0) {
                 return res.status(400).json({ ok: false, error: 'Sản phẩm không thể checkout trực tuyến.' });
+            }
+
+            if (isClaudeProProduct(catalogProduct)) {
+                const termsAccepted = req.body.claudeTermsAccepted === true;
+                const termsVersion = String(req.body.claudeTermsVersion || '').trim();
+                if (!termsAccepted || termsVersion !== CLAUDE_PRO_TERMS_VERSION) {
+                    return res.status(409).json({
+                        ok: false,
+                        code: 'CLAUDE_TERMS_REQUIRED',
+                        error: 'Vui lòng đọc và xác nhận điều khoản Claude Pro trước khi thanh toán.',
+                    });
+                }
+                acceptClaudeProTerms({
+                    guildId: config.guildId,
+                    customerId,
+                    productKey: catalogProduct.product_key,
+                });
             }
 
             let totalAmount = unitPrice * quantity;
