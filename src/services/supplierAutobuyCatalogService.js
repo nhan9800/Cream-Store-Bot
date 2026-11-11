@@ -4,6 +4,7 @@ import { db } from '../database/db.js';
 import { config } from '../config.js';
 import { STORE_ONE_GUILD_ID } from '../utils/locale.js';
 import { createDopermindClient } from './dopermindClient.js';
+import { createCdkVietnamClient } from './cdkVietnamClient.js';
 import { getGuildConfig } from './guildConfigService.js';
 import { isManager } from '../utils/permissions.js';
 
@@ -18,9 +19,20 @@ const dateMs = value => typeof value === 'string' ? Date.parse(value) : NaN;
 const validText = (s, max = 1000) => typeof s === 'string' && s.trim() && s.length <= max && !/[\u0000-\u001f\u007f]/.test(s);
 
 export function supplierSalesConfigured(env = process.env, guildId = config.guildId) {
-  return guildId === STORE_ONE_GUILD_ID && env.ENV_FILE === '.env'
-    && env.SUPPLIER_AUTOBUY_PROVIDER === 'dopermind'
-    && env.SUPPLIER_AUTOBUY_ENABLED === 'true' && typeof env.DOPERMIND_API_KEY === 'string' && Boolean(env.DOPERMIND_API_KEY.trim());
+  if (guildId !== STORE_ONE_GUILD_ID || env.ENV_FILE !== '.env' || env.SUPPLIER_AUTOBUY_ENABLED !== 'true') return false;
+  if (env.SUPPLIER_AUTOBUY_PROVIDER === 'dopermind') return typeof env.DOPERMIND_API_KEY === 'string' && Boolean(env.DOPERMIND_API_KEY.trim());
+  if (env.SUPPLIER_AUTOBUY_PROVIDER === 'cdkvietnam') return typeof env.CDKVIETNAM_API_KEY === 'string' && Boolean(env.CDKVIETNAM_API_KEY.trim());
+  return false;
+}
+
+function activeProvider(env = process.env) {
+  return env.SUPPLIER_AUTOBUY_PROVIDER === 'cdkvietnam' ? 'cdkvietnam' : 'dopermind';
+}
+
+function configuredClientFactory(env = process.env) {
+  return activeProvider(env) === 'cdkvietnam'
+    ? () => createCdkVietnamClient({ apiKey: env.CDKVIETNAM_API_KEY })
+    : () => createDopermindClient({ apiKey: env.DOPERMIND_API_KEY });
 }
 
 function durationFromPolicy(policy) {
@@ -40,7 +52,8 @@ export function priceSupplierProduct(product, policy, manifest, { nowMs = Date.n
   const reject = reason => ({ ok: false, reason });
   if (policy?.enabled !== true) return reject(policy?.reason || 'NOT_REVIEWED');
   if (!validText(product?.productKey, 200) || product.productKey !== policy.productKey
-    || product.name !== policy.expectedName || !integer(product.priceVnd, 1)) return reject('SOURCE_CHANGED');
+    || product.name !== policy.expectedName || !integer(product.priceVnd, 1)
+    || (policy.deliveryMode && product.delivery !== policy.deliveryMode)) return reject('SOURCE_CHANGED');
   const reference = manifest?.references?.[policy.referenceId];
   if (!reference || !['EXACT', 'BENCHMARK'].includes(reference.kind)) return reject('REFERENCE_UNVERIFIED');
   try { const url = new URL(reference.url); if (url.protocol !== 'https:' || url.username || url.password) return reject('REFERENCE_UNVERIFIED'); }
@@ -184,8 +197,10 @@ export function createSupplierAutobuyCatalog({
 let singleton;
 function catalog() {
   if (!singleton) {
-    const policy = JSON.parse(readFileSync(new URL('../data/supplierAutobuyPricingPolicy.json', import.meta.url), 'utf8'));
-    singleton = createSupplierAutobuyCatalog({ policy });
+    const provider = activeProvider();
+    const policyFile = provider === 'cdkvietnam' ? 'cdkVietnamAutobuyPricingPolicy.json' : 'supplierAutobuyPricingPolicy.json';
+    const policy = JSON.parse(readFileSync(new URL(`../data/${policyFile}`, import.meta.url), 'utf8'));
+    singleton = createSupplierAutobuyCatalog({ policy, clientFactory: configuredClientFactory() });
   }
   return singleton;
 }

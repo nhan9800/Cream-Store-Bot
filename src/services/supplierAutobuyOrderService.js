@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { STORE_ONE_GUILD_ID } from '../utils/locale.js';
 import { createDopermindClient, DopermindError } from './dopermindClient.js';
+import { createCdkVietnamClient, CdkVietnamError } from './cdkVietnamClient.js';
 
 const LEASE_MS = 120000;
 const MAX_QUANTITY = 10;
@@ -392,11 +393,16 @@ export function createSupplierAutobuyOrderService({
       const current = intentByCode(code);
       if (current?.encrypted_payload) return pending(current.status === 'REVIEW' ? 'REVIEW' : 'DELIVERY_PENDING', current.status === 'REVIEW' ? 'PRICE_LIMIT_EXCEEDED' : 'DELIVERY_RETRY');
       if (error instanceof SupplierAutobuyOrderError) return pending('REVIEW', ['ENCRYPTION_UNAVAILABLE', 'REQUEST_INTEGRITY_FAILED'].includes(error.code) ? error.code : 'LOCAL_REVIEW_REQUIRED');
-      if (error instanceof DopermindError) {
+      if (error instanceof DopermindError || error instanceof CdkVietnamError) {
         const providerCode = error.providerCode;
-        if (providerCode === 'NOT_ENOUGH_STOCK') return pending('WAITING_STOCK', 'INSUFFICIENT_STOCK', 5);
+        if (providerCode === 'NOT_ENOUGH_STOCK' || providerCode === 'OUT_OF_STOCK') return pending('WAITING_STOCK', 'INSUFFICIENT_STOCK', 5);
         if (providerCode === 'INSUFFICIENT_BALANCE') return pending('WAITING_SUPPLIER_FUNDS', 'INSUFFICIENT_SUPPLIER_BALANCE', 5);
-        if (['PRICE_CHANGED', 'API_REQUEST_CONFLICT', 'API_ORDER_MANUALLY_FULFILLED'].includes(providerCode)) return pending('REVIEW', providerCode);
+        if (['PRICE_CHANGED', 'API_REQUEST_CONFLICT', 'API_ORDER_MANUALLY_FULFILLED', 'PRODUCT_LOCKED', 'IDEMPOTENCY_CONFLICT'].includes(providerCode)) return pending('REVIEW', providerCode);
+        // CDK Việt Nam explicitly says DELIVERY_REVIEW must not be replaced by
+        // another order. The adapter cannot safely recover a 202/409 receipt
+        // without a persisted provider order code, so stop in review instead of
+        // replaying the purchase and risking a duplicate charge.
+        if (providerCode === 'DELIVERY_REVIEW') return pending('REVIEW', providerCode);
         if (['ORDER_HISTORY_PENDING', 'ORDER_FULFILLMENT_PENDING'].includes(providerCode)) return pending('RECONCILING', providerCode, 3);
         if (error.outcome === 'NOT_SUBMITTED') return pending('PENDING', 'PROVIDER_UNAVAILABLE', 2);
         if (error.outcome === 'REJECTED') return pending('REVIEW', 'PROVIDER_REJECTED');
@@ -468,9 +474,10 @@ async function defaultService() {
     defaultServiceInstance = createSupplierAutobuyOrderService({ db, getQuote: catalog.getSupplierQuote,
       createOrder: orders.createOrder, markOrderCompleted: orders.markOrderCompleted, saveDelivery: orders.saveDelivery,
       encrypt: crypto.encrypt, decrypt: crypto.decrypt,
-      providerFactory: () => createDopermindClient({ apiKey: process.env.DOPERMIND_API_KEY }),
-      enabled: () => process.env.SUPPLIER_AUTOBUY_ENABLED === 'true' && process.env.SUPPLIER_AUTOBUY_PROVIDER === 'dopermind'
-        && process.env.ENV_FILE === '.env' && config.guildId === STORE_ONE_GUILD_ID && Boolean(process.env.DOPERMIND_API_KEY?.trim()),
+      providerFactory: () => process.env.SUPPLIER_AUTOBUY_PROVIDER === 'cdkvietnam'
+        ? createCdkVietnamClient({ apiKey: process.env.CDKVIETNAM_API_KEY })
+        : createDopermindClient({ apiKey: process.env.DOPERMIND_API_KEY }),
+      enabled: () => catalog.supplierSalesConfigured(process.env, config.guildId),
       customerBlocked: (guildId, customerId) => Boolean(blacklist.getCustomerFlag(guildId, customerId).is_blacklisted),
       notifyCompletion: async (client, order) => {
         const guild = await client.guilds.fetch(order.guild_id);

@@ -35,7 +35,7 @@ function checkedLine(snapshot) {
 
 function stateLine(snapshot) {
   if (snapshot?.purchasesEnabled === true) return 'Nhận thanh toán trước. Đơn có thể chờ shop bổ sung nguồn; hệ thống tự mua và giao riêng khi nguồn sẵn sàng.';
-  if (snapshot?.status === 'CONNECTED' && snapshot?.provider === 'dopermind') return 'Nguồn hàng mới đã kết nối thành công. Shop đang hoàn thiện giá bán và điều kiện từng sản phẩm.';
+  if (snapshot?.status === 'CONNECTED' && ['dopermind', 'cdkvietnam'].includes(snapshot?.provider)) return 'Nguồn hàng mới đã kết nối thành công. Shop đang hoàn thiện giá bán và điều kiện từng sản phẩm.';
   if (snapshot?.status === 'HTTP_OK_SCHEMA_UNVERIFIED') return 'Đã nhận phản hồi kết nối. Shop đang kiểm tra danh mục và điều kiện bán.';
   if (snapshot?.status === 'CHECKING') return 'Shop đang kiểm tra kết nối nguồn hàng.';
   return 'Shop đang hoàn thiện kết nối nguồn hàng và bảng giá.';

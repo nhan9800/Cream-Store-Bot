@@ -113,7 +113,9 @@ export async function buildClient() {
       envFile: process.env.ENV_FILE,
       provider: process.env.SUPPLIER_AUTOBUY_PROVIDER || 'daiphuc',
       apiKey: process.env.SUPPLIER_AUTOBUY_PROVIDER === 'dopermind'
-        ? process.env.DOPERMIND_API_KEY : process.env.DAIPHUC_PARTNER_API_KEY,
+        ? process.env.DOPERMIND_API_KEY
+        : process.env.SUPPLIER_AUTOBUY_PROVIDER === 'cdkvietnam'
+          ? process.env.CDKVIETNAM_API_KEY : process.env.DAIPHUC_PARTNER_API_KEY,
     })).catch(() => {
       console.warn('[SUPPLIER-AUTOBUY] STARTUP_PROBE_FAILED');
       return null;
