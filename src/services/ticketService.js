@@ -1,6 +1,8 @@
 import { db, nowIso } from '../database/db.js';
 import { randomDigits } from '../utils/id.js';
 import { addMinutes } from '../utils/time.js';
+import { config } from '../config.js';
+import { getUnpaidOrderTicketRetention } from '../config/unpaidTicketPolicy.js';
 
 function createTicketStmt(){return db.prepare(`INSERT INTO tickets (ticket_code,guild_id,channel_id,customer_id,opened_by_id,ticket_type,related_order_code,ticket_subject,support_source,client_request_id,last_activity_at,status,created_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,'OPEN',?)`);}
 function ticketCodeExistsStmt(){return db.prepare('SELECT 1 FROM tickets WHERE ticket_code=? LIMIT 1');}
@@ -34,7 +36,7 @@ function getOpenTicketForOrderStmt(){return db.prepare(`
   LIMIT 1
 `);}
 function getOrdersLinkedToTicketStmt(){return db.prepare(`
-  SELECT order_code, status, feedback_submitted_at
+  SELECT order_code, status, feedback_submitted_at, payment_status, payment_link_id, payment_cancel_reason, created_at
   FROM orders
   WHERE guild_id=@guildId
     AND (
@@ -47,6 +49,7 @@ function getOrdersLinkedToTicketStmt(){return db.prepare(`
 function getFeedbackedTicketsMissingAutoCloseStmt(){return db.prepare(`
   SELECT t.* FROM tickets t
   WHERE t.guild_id=?
+    AND t.id>?
     AND t.status='OPEN'
     AND t.auto_close_at IS NULL
     AND COALESCE(t.keep_open_requested, 0)=0
@@ -201,8 +204,10 @@ export function getFeedbackAutoCloseState(ticketOrId) {
     channelId: String(ticket.channel_id || ''),
     relatedOrderCode: String(ticket.related_order_code || ''),
   });
+  const retention = getUnpaidOrderTicketRetention(ticket, linkedOrders, config.unpaidOrderTicketHours);
+  const heldCodes = new Set(retention && !retention.due ? retention.pending.map(order => order.order_code) : []);
   const relevantOrders = linkedOrders.filter((order) => (
-    !['CANCELLED', 'REFUNDED'].includes(String(order.status || '').toUpperCase())
+    !['CANCELLED', 'REFUNDED'].includes(String(order.status || '').toUpperCase()) || heldCodes.has(order.order_code)
   ));
   const blockingOrders = relevantOrders.filter((order) => (
     String(order.status || '').toUpperCase() !== 'COMPLETED' || !order.feedback_submitted_at
@@ -222,17 +227,28 @@ export function getFeedbackAutoCloseState(ticketOrId) {
   };
 }
 export function scheduleMissingFeedbackTicketAutoCloses(guildId, limit=100, minutes=2) {
-  const tickets = getFeedbackedTicketsMissingAutoCloseStmt().all(String(guildId), Number(limit));
+  const maximum = Number(limit);
+  if (!Number.isSafeInteger(maximum) || maximum < 1) return [];
   const delayMs = Math.max(0, Number(minutes) || 0) * 60_000;
-  return tickets.map((ticket) => {
-    const dates = getFeedbackAutoCloseState(ticket).feedbackedOrders
-      .map((order) => Date.parse(order.feedback_submitted_at)).filter(Number.isFinite);
-    // Recover the original deadline after restart without closing a recent
-    // feedback immediately or restarting a full countdown for an overdue one.
-    const latestFeedback = dates.length ? Math.max(...dates) : Date.now();
-    scheduleAutoCloseStmt().run(new Date(Math.max(Date.now(), latestFeedback + delayMs)).toISOString(), ticket.id);
-    return getTicketById(ticket.id);
-  });
+  const scheduled = [];
+  let afterId = 0;
+  while (scheduled.length < maximum) {
+    const tickets = getFeedbackedTicketsMissingAutoCloseStmt().all(String(guildId), afterId, maximum - scheduled.length);
+    if (!tickets.length) break;
+    for (const ticket of tickets) {
+      afterId = ticket.id;
+      const state = getFeedbackAutoCloseState(ticket);
+      if (!state.eligible) continue;
+      const dates = state.feedbackedOrders
+        .map((order) => Date.parse(order.feedback_submitted_at)).filter(Number.isFinite);
+      // Recover the original deadline after restart without closing a recent
+      // feedback immediately or restarting a full countdown for an overdue one.
+      const latestFeedback = dates.length ? Math.max(...dates) : Date.now();
+      scheduleAutoCloseStmt().run(new Date(Math.max(Date.now(), latestFeedback + delayMs)).toISOString(), ticket.id);
+      scheduled.push(getTicketById(ticket.id));
+    }
+  }
+  return scheduled;
 }
 export function updateTicketAiStatus(ticketId, status, pausedUntil = null){
   updateTicketAiStatusStmt().run(status, pausedUntil, ticketId);
