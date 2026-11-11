@@ -14,6 +14,7 @@ import {
 } from 'discord.js';
 import { getGuildConfig } from './guildConfigService.js';
 import { config } from '../config.js';
+import { getUnpaidOrderTicketRetention } from '../config/unpaidTicketPolicy.js';
 import { isInternationalGuild } from '../utils/locale.js';
 
 /**
@@ -108,16 +109,8 @@ function paymentTicketState(ticket, now = Date.now()) {
     ticket.channel_id, ticket.related_order_code || '');
   if (!linked.length || linked.some(order => ['PAID', 'FREE'].includes(order.payment_status)
     || !['PENDING_PAYMENT', 'CANCELLED', 'REFUNDED'].includes(order.status))) return null;
-  const pending = linked.filter(order => ['UNPAID', 'CANCELLED'].includes(order.payment_status) && order.status === 'PENDING_PAYMENT'
-    || ['UNPAID', 'CANCELLED'].includes(order.payment_status) && order.status === 'CANCELLED'
-      && (order.payment_link_id && !order.payment_cancel_reason
-        || /^(Thanh toán (?:PayOS )?bị hủy|Thanh toán.*hết hạn|Tự động hủy.*(thanh toán|phản hồi)|Tự động đóng ticket chưa thanh toán)/i.test(order.payment_cancel_reason || '')));
-  if (!pending.length) return null;
-  const anchors = [ticket.created_at, ticket.last_activity_at, ...pending.map(order => order.created_at)]
-    .filter(Boolean).map(value => Date.parse(value));
-  if (!anchors.length || anchors.some(value => !Number.isFinite(value))) return null;
-  const deadline = Math.max(...anchors) + config.unpaidOrderTicketHours * 3600000;
-  return { ticket, pending, deadline, due: now >= deadline };
+  const retention = getUnpaidOrderTicketRetention(ticket, linked, config.unpaidOrderTicketHours, now);
+  return retention?.deadline === null || !retention ? null : { ticket, ...retention };
 }
 
 export function getPendingPaymentTicketPolicy() {

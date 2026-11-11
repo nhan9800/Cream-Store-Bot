@@ -20,7 +20,8 @@ vi.mock('../src/services/customerRoleSyncService.js', async original => ({ ...aw
 
 import { db, initDatabase } from '../src/database/db.js';
 import { config } from '../src/config.js';
-import { createTicket, getTicketById, scheduleTicketAutoClose, keepTicketOpen, closeTicket } from '../src/services/ticketService.js';
+import { createTicket, getTicketById, scheduleTicketAutoClose, keepTicketOpen, closeTicket,
+  getFeedbackAutoCloseState, scheduleMissingFeedbackTicketAutoCloses, touchTicket } from '../src/services/ticketService.js';
 import { publishFeedback } from '../src/services/feedbackService.js';
 import { startScheduler, stopScheduler } from '../src/services/schedulerService.js';
 import { processFeedbackTicketAutoCloses, startFeedbackTicketAutoClose, stopFeedbackTicketAutoClose,
@@ -78,6 +79,56 @@ afterAll(() => {
 });
 
 describe('feedback closure deadlines and safety', () => {
+  it.each([true, false])('keeps an unpaid provider-expired sibling for24h despite older completed feedback (existingDeadline=%s)', async due => {
+    const { ticket, channel } = ticketFixture({ due, feedbackAt:new Date(Date.now()-3600_000).toISOString() });
+    const expired = orderFor(ticket, { status:'CANCELLED', reviewed:false });
+    db.prepare("UPDATE orders SET payment_status='UNPAID',amount_paid=0,payment_link_id='expired-invoice',payment_cancel_reason='Thanh toán PayOS đã hết hạn' WHERE order_code=?")
+      .run(expired.order_code);
+    expect(getFeedbackAutoCloseState(ticket)).toMatchObject({ eligible:false,reason:'linked_orders_pending' });
+    expect(scheduleMissingFeedbackTicketAutoCloses(config.guildId)).toEqual([]);
+    await processFeedbackTicketAutoCloses(client);
+    expect(channel.delete).not.toHaveBeenCalled();expect(fixture.archive).not.toHaveBeenCalled();
+    expect(getTicketById(ticket.id).auto_close_at).toBeNull();
+    await vi.advanceTimersByTimeAsync(24*3600_000-1);await processFeedbackTicketAutoCloses(client);
+    expect(channel.delete).not.toHaveBeenCalled();expect(getTicketById(ticket.id).auto_close_at).toBeNull();
+    await vi.advanceTimersByTimeAsync(1);await processFeedbackTicketAutoCloses(client);
+    expect(channel.delete).toHaveBeenCalledOnce();expect(getTicketById(ticket.id).status).toBe('CLOSED');
+  });
+
+  it('shares the latest human-activity retention deadline with feedback closure', async () => {
+    const { ticket, channel } = ticketFixture({due:false,feedbackAt:new Date(Date.now()-3600_000).toISOString()});
+    const expired=orderFor(ticket,{status:'CANCELLED',reviewed:false});
+    db.prepare("UPDATE orders SET payment_status='UNPAID',amount_paid=0,payment_link_id='invoice',payment_cancel_reason='Thanh toán bị hủy (PayOS)' WHERE order_code=?").run(expired.order_code);
+    await vi.advanceTimersByTimeAsync(23*3600_000);touchTicket(ticket.id);
+    await vi.advanceTimersByTimeAsync(3600_000);await processFeedbackTicketAutoCloses(client);
+    expect(channel.delete).not.toHaveBeenCalled();expect(getTicketById(ticket.id).auto_close_at).toBeNull();
+    await vi.advanceTimersByTimeAsync(23*3600_000);await processFeedbackTicketAutoCloses(client);
+    expect(channel.delete).toHaveBeenCalledOnce();
+  });
+
+  it('keeps invalid-date provider-expired rows blocking automatic feedback closure', async () => {
+    const {ticket,channel}=ticketFixture();const expired=orderFor(ticket,{status:'CANCELLED',reviewed:false});
+    db.prepare("UPDATE orders SET payment_status='UNPAID',amount_paid=0,payment_link_id='invoice',created_at='invalid-date' WHERE order_code=?").run(expired.order_code);
+    await processFeedbackTicketAutoCloses(client);
+    expect(channel.delete).not.toHaveBeenCalled();expect(getTicketById(ticket.id).auto_close_at).toBeNull();
+  });
+
+  it('keeps ordinary manual cancellation outside the24h unpaid provider retention policy', async () => {
+    const {ticket,channel}=ticketFixture();const cancelled=orderFor(ticket,{status:'CANCELLED',reviewed:false});
+    db.prepare("UPDATE orders SET payment_status='CANCELLED',amount_paid=0,payment_cancel_reason='Customer requested cancellation' WHERE order_code=?").run(cancelled.order_code);
+    await processFeedbackTicketAutoCloses(client);
+    expect(channel.delete).toHaveBeenCalledOnce();
+  });
+
+  it('does not let retained expired tickets consume the repair batch and starve later eligible feedback', () => {
+    const held=ticketFixture({due:false});const expired=orderFor(held.ticket,{status:'CANCELLED',reviewed:false});
+    db.prepare("UPDATE orders SET payment_status='UNPAID',amount_paid=0,payment_link_id='expired-invoice' WHERE order_code=?").run(expired.order_code);
+    const ready=ticketFixture({due:false});
+    expect(scheduleMissingFeedbackTicketAutoCloses(config.guildId,1).map(ticket=>ticket.id)).toEqual([ready.ticket.id]);
+    expect(getTicketById(held.ticket.id).auto_close_at).toBeNull();
+    expect(getTicketById(ready.ticket.id).auto_close_at).not.toBeNull();
+  });
+
   it('closes an admin-reviewed ticket at two minutes even while main maintenance is stuck', async () => {
     const { ticket, order, channel } = ticketFixture({ reviewed: false, due: false });
     const feedbackChannel = { id: 'FEEDBACK', isTextBased: () => true, send: vi.fn(async () => ({ id: 'REVIEW' })) };
