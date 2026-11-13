@@ -140,6 +140,37 @@ The worker also checks claimed unpaid PayOS invoices in batches of up to three, 
 
 Initial processing-log publication has its own durable send-attempt claim in `supplier_autobuy_order_notices`. Repeated confirmation does not repost it; an uncertain or failed send requires the normal staff repair flow rather than repeated public messages. The log uses sale/order data, never supplier costs or goods.
 
+Customer ticket receipts are separate from that staff log. Confirmation now
+sends the existing supplier order's summary and controls into its verified
+private ORDER ticket. `supplier_autobuy_ticket_notices` persists the exact
+order, channel, message and send state. Repeated confirmation reuses the same
+receipt; a lost send response is reconciled against bot-authored exact-order
+controls before any retry. Definitive rejections remain retryable. Incomplete
+history or uncertain absence never authorizes a blind duplicate send.
+
+After custom artwork is ready, Store1 startup repairs open active supplier
+orders missing their receipt. A coalesced background pass retries bounded
+batches each minute and pauses while Discord disconnects. It only reads owned
+order data and sends customer receipts: it creates no order, invoice, wallet
+debit or source purchase. Closed, wrong-owner and unrelated support tickets
+are excluded. A reused legacy ORDER ticket is accepted only through its exact
+persisted supplier order/ticket/channel/customer links and private permissions.
+
+Ticket controls support only the bound order's status, payment and private
+delivery. The source comes from its saved supplier intent, including when both
+sources share one customer ticket. Public controls require the exact saved bot
+message; later ephemeral controls require the matching customer, channel and
+order. Payment QR and delivered goods remain ephemeral. Browsing links return
+to the correct saved storefront. Order cards render the product name once and
+assign distinct verified custom artwork after final normalization; known
+legacy escaped product snapshots are decoded once before safe presentation.
+
+General PayOS reconciliation skips a supplier order with no saved invoice link
+and no PayOS method reservation only when the authoritative method schema is
+available. A persisted PayOS reservation still permits lookup by its original
+numeric payment identity after a lost create-link receipt; legacy orders and
+paid notification repair keep their previous behavior.
+
 ## Private QR display and ticket retention
 
 PayOS invoices display a locally generated PNG in the customer's ephemeral order card, together with the persisted order amount and invoice deadline. Rendering uses the stored EMV/VietQR text or an allowlisted HTTPS PayOS checkout link; it never fetches a remote QR image. The source data and attachment stay in the owned private interaction. A failed follow-up status read does not hide an invoice that was just created, and local rendering failure retains the existing safe checkout link rather than creating another invoice.

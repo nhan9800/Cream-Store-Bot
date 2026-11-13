@@ -3,7 +3,9 @@ import { MessageFlags } from 'discord.js';
 import QRCode from 'qrcode';
 // Layout/payment fixtures use symbolic artwork; real inventory and the final
 // REST boundary are covered by supplierAutobuyUniqueEmoji.test.js.
-vi.mock('../src/utils/uniqueCustomEmoji.js', () => ({ withUniqueCustomEmoji: payload => JSON.parse(JSON.stringify(payload)) }));
+vi.mock('../src/utils/uniqueCustomEmoji.js', async importOriginal => ({
+  ...await importOriginal(), withUniqueCustomEmoji: payload => JSON.parse(JSON.stringify(payload)),
+}));
 vi.mock('../src/database/db.js', () => ({ db: { prepare: () => { throw new Error('No database in presentation test'); } } }));
 vi.mock('../src/utils/emojiHelper.js', () => ({
   createEmojiResolver: () => { const E = name => '<:' + name + ':1382729296724099132>'; E.component = name => ({ id: '1382729296724099132', name }); return E; },

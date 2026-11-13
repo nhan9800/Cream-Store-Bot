@@ -39,6 +39,7 @@ import { supplierAutobuyRuntime } from './services/supplierAutobuyRuntime.js';
 import { getSupplierOffers, supplierSalesConfigured } from './services/supplierAutobuyCatalogService.js';
 import { startSupplierAutobuyWorker } from './services/supplierAutobuyOrderService.js';
 import { ensureSupplierAutobuyChannel } from './services/supplierAutobuyPanelService.js';
+import { repairSupplierTicketOrderNotices, startSupplierTicketNoticeMaintenance } from './services/supplierAutobuyTicketNoticeService.js';
 import { runShopRelaunchRelease } from './services/shopRelaunchReleaseService.js';
 import { runCompactSaleRelease } from './services/compactSaleReleaseService.js';
 
@@ -156,6 +157,18 @@ export async function buildClient() {
       .catch(() => console.warn('[SHOP-RELAUNCH] RELEASE_FAILED'));
     void iconSetup.then(() => runCompactSaleRelease(readyClient))
       .catch(() => console.warn('[COMPACT-SALE] RELEASE_FAILED'));
+    // Recover the already-created customer tickets without creating orders,
+    // payment links or supplier purchases. Optional repair never blocks startup.
+    if (separateSupplierSources) void iconSetup.then(async () => {
+      if (getCoreEmojiPackStatus(readyClient).status !== 'ready') return;
+      startSupplierTicketNoticeMaintenance(readyClient, {
+        guildId: config.guildId, envFile: process.env.ENV_FILE, limit: 25,
+      });
+      const repaired = await repairSupplierTicketOrderNotices(readyClient, {
+        guildId: config.guildId, envFile: process.env.ENV_FILE, limit: 25,
+      });
+      console.log('[SUPPLIER-TICKET-REPAIR]', JSON.stringify(repaired));
+    }).catch(() => console.warn('[SUPPLIER-TICKET-REPAIR] REPAIR_FAILED'));
     // The owner requested this dedicated channel. Persist and reuse its one
     // panel; other marketing and price-board publication stays paused.
     void Promise.all([supplierSalesSetup, iconSetup]).then(async ([snapshot]) => {

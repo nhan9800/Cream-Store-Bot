@@ -1,4 +1,4 @@
-import { AttachmentBuilder, ActionRowBuilder, MessageFlags, ModalBuilder, TextInputBuilder, TextInputStyle } from 'discord.js';
+import { AttachmentBuilder, ActionRowBuilder, ChannelType, MessageFlags, ModalBuilder, PermissionFlagsBits, TextInputBuilder, TextInputStyle } from 'discord.js';
 import { config } from '../config.js';
 import { STORE_ONE_GUILD_ID } from '../utils/locale.js';
 import { isManager } from '../utils/permissions.js';
@@ -15,6 +15,7 @@ const QUOTE_ID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$
 const ORDER_CODE = /^CN_\d{6,12}$/;
 const INTEGER = /^(?:0|[1-9]\d{0,3})$/;
 const PRIVATE_ACTIONS = new Set(['page', 'category', 'select', 'qty', 'qtymodal', 'confirm', 'pay', 'orders', 'order', 'orderselect', 'delivery', 'editprice', 'pricemodal']);
+const TICKET_ACTIONS = new Set(['pay', 'order', 'delivery']);
 
 async function replyInvalid(interaction) {
   if (interaction.deferred || interaction.replied) return;
@@ -38,11 +39,37 @@ function scopedOrigin(interaction) {
     && (!panel?.provider || panel.provider === provider) && panel?.status === 'READY'
     && CUSTOMER_ID.test(panel.channelId || '') && CUSTOMER_ID.test(panel.messageId || '')
     && interaction.channelId === panel.channelId);
-  return matches.length === 1 ? { ...matches[0], botId } : null;
+  return matches.length === 1 ? { ...matches[0], botId, kind: 'storefront' } : null;
+}
+
+async function scopedTicketOrigin(interaction, { action, owner, args, getTicketContext }) {
+  if (!TICKET_ACTIONS.has(action) || !validArguments(action, args) || interaction.isButton?.() !== true
+    || interaction.guildId !== STORE_ONE_GUILD_ID || config.guildId !== STORE_ONE_GUILD_ID || process.env.ENV_FILE !== '.env'
+    || !CUSTOMER_ID.test(owner || '') || interaction.user?.id !== owner) return null;
+  const botId = interaction.client?.user?.id;
+  const message = interaction.message, channel = interaction.channel;
+  if (!CUSTOMER_ID.test(botId || '') || !CUSTOMER_ID.test(message?.id || '')
+    || message?.author?.id !== botId || message.webhookId
+    || channel?.id !== interaction.channelId || channel.guildId !== STORE_ONE_GUILD_ID || channel.type !== ChannelType.GuildText) return null;
+  const ephemeral = isEphemeral(message);
+  const sourceUser = message.interactionMetadata?.user?.id ?? message.interaction?.user?.id;
+  if (ephemeral && sourceUser !== owner) return null;
+  const everyone = channel.permissionOverwrites?.cache?.get(STORE_ONE_GUILD_ID);
+  const customer = channel.permissionOverwrites?.cache?.get(owner);
+  if (!everyone?.deny?.has(PermissionFlagsBits.ViewChannel) || !customer?.allow?.has(PermissionFlagsBits.ViewChannel)
+    || !channel.permissionsFor?.(botId)?.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory])) return null;
+  const context = await getTicketContext({ guildId: interaction.guildId, channelId: interaction.channelId,
+    messageId: message.id, customerId: owner, orderCode: args[0], ephemeral });
+  if (!context || !['cdkvietnam', 'dopermind'].includes(context.provider) || context.orderCode !== args[0]
+    || context.customerId !== owner || context.channelId !== interaction.channelId
+    || (context.expectedTopic && context.expectedTopic !== channel.topic)
+    || (context.categoryId && context.categoryId !== channel.parentId)) return null;
+  return { ...context, botId, kind: 'ticket' };
 }
 
 function validPrivateOrigin(interaction, scope, owner, modal) {
   if (!CUSTOMER_ID.test(owner || '') || interaction.user?.id !== owner) return false;
+  if (scope.kind === 'ticket') return !modal && interaction.message?.author?.id === scope.botId && !interaction.message?.webhookId;
   if (modal) return interaction.isModalSubmit?.() === true && (!interaction.message || interaction.message.author?.id === scope.botId);
   if (interaction.message?.author?.id !== scope.botId || !isEphemeral(interaction.message)) return false;
   const sourceUser = interaction.message.interactionMetadata?.user?.id ?? interaction.message.interaction?.user?.id;
@@ -95,6 +122,7 @@ const defaults = {
   acknowledgeDelivery: async options => (await import('../services/supplierAutobuyOrderService.js')).acknowledgeSupplierDeliveryRetrieval(options),
   setPrice: async options => (await import('../services/supplierAutobuyCatalogService.js')).setSupplierPriceOverride(options),
   canManage: freshManager,
+  getTicketContext: async options => (await import('../services/supplierAutobuyTicketNoticeService.js')).getSupplierTicketOrderNoticeContext(options),
 };
 
 /** Every commerce action resolves its durable quote/order by the current user. */
@@ -111,7 +139,7 @@ export function createSupplierAutobuyInteractionHandler(dependencies = {}) {
       // A namespaced provider key contains ':', the custom-ID separator. Only
       // the product argument is URI-encoded; validate its decoded identity.
       if (['qty', 'qtymodal', 'editprice', 'pricemodal'].includes(action) && args.length === 1) args[0] = decodeURIComponent(args[0]);
-      scope = scopedOrigin(interaction);
+      scope = scopedOrigin(interaction) || await scopedTicketOrigin(interaction, { action, owner, args, getTicketContext: deps.getTicketContext });
       const publicValid = publicAction && interaction.isButton?.() === true
         && interaction.message?.id === scope?.panel.messageId && interaction.message?.author?.id === scope?.botId;
       const privateValid = PRIVATE_ACTIONS.has(action) && validArguments(action, args)
@@ -171,14 +199,14 @@ export function createSupplierAutobuyInteractionHandler(dependencies = {}) {
           payload = presentation.buildSupplierQuoteView({ quote, customerId: context.customerId, manager: await deps.canManage(interaction) });
         } else if (action === 'confirm') {
           const order = await deps.confirmCheckout({ client: interaction.client, ...context, quoteId: args[0] });
-          payload = presentation.buildSupplierOrderView({ order, customerId: context.customerId });
+          payload = presentation.buildSupplierOrderView({ order, customerId: context.customerId, ticketContext: scope.kind === 'ticket' });
         } else if (action === 'pay') {
           const orderCode = args[0];
           if (!presentation.hasSupplierPrepayDisclosure(interaction.message)) {
             // Buttons from before the policy change refresh the owned invoice
             // and disclose prepayment first; only a subsequent click can pay.
             const order = await deps.getOrder({ client: interaction.client, ...context, orderCode });
-            payload = await presentation.buildSupplierPaymentView({ order, customerId: context.customerId });
+            payload = await presentation.buildSupplierPaymentView({ order, customerId: context.customerId, ticketContext: scope.kind === 'ticket' });
           } else {
             const payment = await deps.createPayment({ client: interaction.client, ...context, orderCode, method: args[1] });
             // A successful invoice must remain visible even if its subsequent
@@ -187,7 +215,7 @@ export function createSupplierAutobuyInteractionHandler(dependencies = {}) {
               orderCode, totalAmount: payment.totalAmount, status: payment.status,
               paymentStatus: payment.paid ? 'PAID' : 'UNPAID',
             }));
-            payload = await presentation.buildSupplierPaymentView({ order, customerId: context.customerId, payment });
+            payload = await presentation.buildSupplierPaymentView({ order, customerId: context.customerId, payment, ticketContext: scope.kind === 'ticket' });
           }
         } else if (action === 'orders') {
           payload = presentation.buildSupplierOrderListView({ orders: await deps.listOrders({ ...context, limit: 10 }),
@@ -195,14 +223,16 @@ export function createSupplierAutobuyInteractionHandler(dependencies = {}) {
         } else if (action === 'order' || action === 'orderselect') {
           const orderCode = action === 'orderselect' ? interaction.values?.[0] : args[0];
           if ((action === 'orderselect' && interaction.values?.length !== 1) || !ORDER_CODE.test(orderCode || '')) throw new Error('INVALID_ORDER');
-          payload = await presentation.buildSupplierPaymentView({ order: await deps.getOrder({ client: interaction.client, ...context, orderCode }), customerId: context.customerId });
+          payload = await presentation.buildSupplierPaymentView({ order: await deps.getOrder({ client: interaction.client, ...context, orderCode }), customerId: context.customerId, ticketContext: scope.kind === 'ticket' });
         } else if (action === 'delivery') {
           const delivery = await deps.getDelivery({ ...context, orderCode: args[0] });
           if (!Array.isArray(delivery?.items) || !delivery.items.length || !delivery.items.every(item => typeof item === 'string' && item.length > 0)) throw new Error('DELIVERY_PENDING');
           const content = delivery.items.join('\n\n');
           if (Buffer.byteLength(content, 'utf8') > 1024 * 1024) throw new Error('DELIVERY_TOO_LARGE');
           files = [new AttachmentBuilder(Buffer.from(content, 'utf8'), { name: args[0] + '-hang-da-mua.txt' })];
-          payload = presentation.buildSupplierNoticeView({ title: 'Hàng đã mua của bạn', text: 'Mã đơn ' + args[0] + '. Nội dung giao hàng nằm trong file đính kèm riêng tư. Bạn có thể nhận lại từ Đơn của tôi.', customerId: context.customerId });
+          payload = presentation.buildSupplierNoticeView({ title: 'Hàng đã mua của bạn',
+            text: 'Mã đơn ' + args[0] + '. Nội dung giao hàng nằm trong file đính kèm riêng tư. Bạn có thể nhận lại bằng nút Nhận hàng trên thẻ đơn.',
+            customerId: context.customerId, ticketContext: scope.kind === 'ticket' });
         } else if (action === 'pricemodal') {
           if (!await deps.canManage(interaction)) throw new Error('FORBIDDEN');
           const value = interaction.fields?.getTextInputValue('price')?.trim();
@@ -220,7 +250,8 @@ export function createSupplierAutobuyInteractionHandler(dependencies = {}) {
           await interaction.editReply({ content: UNAVAILABLE, allowedMentions: NO_MENTIONS });
           return true;
         }
-        payload = presentation.buildSupplierNoticeView({ title: 'Cần kiểm tra lại', text: errorText(error), customerId: interaction.user.id, warning: true });
+        payload = presentation.buildSupplierNoticeView({ title: 'Cần kiểm tra lại', text: errorText(error), customerId: interaction.user.id,
+          warning: true, ticketContext: scope.kind === 'ticket' });
       } catch { return true; }
       files = undefined;
     }

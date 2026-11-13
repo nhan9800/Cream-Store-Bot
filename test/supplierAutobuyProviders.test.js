@@ -11,13 +11,16 @@ vi.mock('../src/utils/emojiHelper.js', () => ({
   createEmojiResolver: () => { const E = slot => `<:${slot}:1382729296724099132>`; E.component = slot => ({ id: '1382729296724099132', name: slot }); return E; },
   withButtonEmoji: (button, token) => token ? button.setEmoji({ id: '1382729296724099132', name: token.match(/^<:(\w+):/)?.[1] || 'test' }) : button,
 }));
-vi.mock('../src/utils/uniqueCustomEmoji.js', () => ({ withUniqueCustomEmoji: payload => JSON.parse(JSON.stringify(payload)) }));
+vi.mock('../src/utils/uniqueCustomEmoji.js', async importOriginal => ({
+  ...await importOriginal(), withUniqueCustomEmoji: payload => JSON.parse(JSON.stringify(payload)),
+}));
 vi.mock('../src/services/supplierAutobuyRuntime.js', () => ({ supplierAutobuyRuntime: {
   forProvider: provider => ({ getHealth: () => state.snapshots[provider] }),
   getHealth: () => state.snapshots.cdkvietnam,
 } }));
 import { ensureSupplierAutobuyChannel, getSupplierAutobuyPanelHealth,
-  getSupplierAutobuyPanelsHealth } from '../src/services/supplierAutobuyPanelService.js';
+  getSupplierAutobuyPanelsHealth, buildSupplierOrderView, buildSupplierPaymentView,
+  buildSupplierNoticeView } from '../src/services/supplierAutobuyPanelService.js';
 import { createSupplierAutobuyInteractionHandler } from '../src/events/supplierAutobuyHandlers.js';
 
 const guildId = '1282637033340403754', categoryId = '1514606994256957600', botId = '1382729296724099132';
@@ -98,6 +101,27 @@ function dependencies() {
 }
 
 describe('separate CDK and Dopermind AutoBuy channels', () => {
+  it('links a ticket card only to its saved source storefront and keeps generic navigation out of ticket replies', async () => {
+    await readyFixture();
+    const nodes = payload => payload.components.flatMap(function visit(node) {
+      return [node, ...(node.components || []).flatMap(visit)];
+    });
+    for (const provider of ['cdkvietnam', 'dopermind']) {
+      const owned = { ...order, provider };
+      const reference = getSupplierAutobuyPanelHealth(provider);
+      const expected = `https://discord.com/channels/${guildId}/${reference.channelId}/${reference.messageId}`;
+      for (const payload of [buildSupplierOrderView({ order: owned, customerId: userId, ticketContext: true }),
+        await buildSupplierPaymentView({ order: owned, customerId: userId, ticketContext: true }),
+        buildSupplierNoticeView({ title: 'Đơn hàng', text: 'Đã kiểm tra.', customerId: userId, ticketContext: true, order: owned })]) {
+        expect(nodes(payload).filter(node => node.url).map(node => node.url)).toEqual([expected]);
+        expect(nodes(payload).map(node => node.custom_id).filter(Boolean).some(id => /:(?:page|orders):/.test(id))).toBe(false);
+      }
+    }
+    const unknown = buildSupplierOrderView({ order: { ...order, provider: 'spoofed' }, customerId: userId, ticketContext: true });
+    expect(nodes(unknown).some(node => node.url)).toBe(false);
+    const notice = buildSupplierNoticeView({ text: 'Kiểm tra lại đơn.', customerId: userId, ticketContext: true });
+    expect(nodes(notice).some(node => node.url || node.custom_id)).toBe(false);
+  });
   it('preserves existing CDK IDs and creates one independent Dopermind channel/panel on the same client', async () => {
     const value = fixture();
     const cdk = value.setup('cdkvietnam'), doper = value.setup('dopermind');

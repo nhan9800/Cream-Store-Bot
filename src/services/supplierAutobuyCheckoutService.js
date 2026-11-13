@@ -9,6 +9,7 @@ import { getOrderByCode, payOrderWithWallet, saveOrderLogMessage } from './order
 import { createOrLoadPayOSLink, syncPaymentStatusFromPayOS } from './paymentService.js';
 import { supplierSalesConfigured } from './supplierAutobuyCatalogService.js';
 import { buildOrderLogV2Update } from '../utils/embeds.js';
+import { sendSupplierTicketOrderNotice } from './supplierAutobuyTicketNoticeService.js';
 
 export class SupplierCheckoutError extends Error {
   constructor(code) { super('Chưa thể tiếp tục thanh toán. Vui lòng kiểm tra trạng thái đơn hoặc tạo ticket hỗ trợ.'); this.name = 'SupplierCheckoutError'; this.code = code; }
@@ -55,6 +56,7 @@ export function createSupplierAutobuyCheckout({
   findOpenTicket = getOpenTicketByCustomer, insertTicket = createTicket,
   readOrder = getOrderByCode, debitWallet = payOrderWithWallet, payosLink = createOrLoadPayOSLink,
   syncPayos = syncPaymentStatusFromPayOS, publishOrder = publishSupplierOrderLog,
+  publishTicketOrder = sendSupplierTicketOrderNotice,
 } = {}) {
   const ticketFlights = new Map(), paymentFlights = new Map();
   let paymentTurn = Promise.resolve();
@@ -72,7 +74,11 @@ export function createSupplierAutobuyCheckout({
   }
   async function notifyCreated(client, code) {
     const order = readOrder(code);
-    if (!order || order.fulfillment_mode !== 'SUPPLIER' || order.order_log_message_id) return;
+    if (!order || order.fulfillment_mode !== 'SUPPLIER') return;
+    // Customer receipt has its own durable/recoverable state, independent of
+    // staff logging. Retrying a confirmation repairs the same existing order.
+    await publishTicketOrder({ client, orderCode: code, guildId: order.guild_id, envFile: process.env.ENV_FILE }).catch(() => {});
+    if (order.order_log_message_id) return;
     // Claim before sending. Unknown Discord outcomes never cause a second post;
     // the normal staff repair flow can recreate a missing processing card.
     const claim = database.prepare('INSERT INTO supplier_autobuy_order_notices VALUES (?,?) ON CONFLICT(order_code) DO NOTHING')

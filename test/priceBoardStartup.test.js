@@ -18,6 +18,8 @@ const state = vi.hoisted(() => ({
   supplierConfigured: vi.fn(),
   supplierOffers: vi.fn(),
   supplierWorker: vi.fn(),
+  supplierTicketRepair: vi.fn(),
+  supplierTicketMaintenance: vi.fn(),
   supplierRuntimes: new Map(),
 }));
 
@@ -49,6 +51,10 @@ vi.mock('../src/services/supplierAutobuyOrderService.js', () => ({ startSupplier
 vi.mock('../src/services/shopRelaunchReleaseService.js', () => ({ runShopRelaunchRelease: vi.fn() }));
 vi.mock('../src/services/compactSaleReleaseService.js', () => ({ runCompactSaleRelease: vi.fn() }));
 vi.mock('../src/services/supplierAutobuyPanelService.js', () => ({ ensureSupplierAutobuyChannel: state.supplierPanel }));
+vi.mock('../src/services/supplierAutobuyTicketNoticeService.js', () => ({
+  repairSupplierTicketOrderNotices: state.supplierTicketRepair,
+  startSupplierTicketNoticeMaintenance: state.supplierTicketMaintenance,
+}));
 vi.mock('../src/events/interactionCreate.js', () => ({ getClientOptions: () => ({}), loadCommands: async () => new Map(), registerInteractionHandler: vi.fn() }));
 vi.mock('../src/services/schedulerService.js', () => ({ startScheduler: state.scheduler }));
 vi.mock('../src/services/webhookServer.js', () => ({ startWebhookServer: state.webhook }));
@@ -99,6 +105,7 @@ beforeEach(() => {
   state.supplierConfigured.mockReturnValue(false);
   state.supplierOffers.mockResolvedValue({ offers: [{ available: true }] });
   state.supplierWorker.mockResolvedValue({ workerRunning: true });
+  state.supplierTicketRepair.mockResolvedValue({ status: 'READY', scanned: 0, sent: 0, failed: 0 });
   state.supplierRuntimes.clear();
   state.webhook.mockResolvedValue(undefined);
   state.cleanup.mockImplementation(() => new Promise(() => {}));
@@ -135,6 +142,12 @@ describe('independent price-board publication at startup', () => {
     expect(state.supplierWorker).toHaveBeenCalledTimes(1);
     expect(state.supplierPanel.mock.calls.map(([, options]) => options.provider).sort()).toEqual(['cdkvietnam', 'dopermind']);
     expect(state.supplierPanel.mock.calls.every(([, options]) => options.snapshot.purchasesEnabled)).toBe(true);
+    await vi.waitFor(() => expect(state.supplierTicketRepair).toHaveBeenCalledExactlyOnceWith(client, {
+      guildId: '1282637033340403754', envFile: '.env', limit: 25,
+    }));
+    expect(state.supplierTicketMaintenance).toHaveBeenCalledExactlyOnceWith(client, {
+      guildId: '1282637033340403754', envFile: '.env', limit: 25,
+    });
     expect(state.scheduler).toHaveBeenCalledWith(client);
   });
   it('keeps the connected source and commerce available when the other provider probe fails', async () => {
@@ -164,6 +177,8 @@ describe('independent price-board publication at startup', () => {
     expect(state.webhook).toHaveBeenCalledWith(client);
     expect(state.scheduler).toHaveBeenCalledWith(client);
     expect(state.otp).toHaveBeenCalledWith(client);
+    expect(state.supplierTicketRepair).not.toHaveBeenCalled();
+    expect(state.supplierTicketMaintenance).not.toHaveBeenCalled();
     expect(state.cleanup).toHaveBeenCalledTimes(1);
     expect(state.icons).toHaveBeenCalledWith(client, {
       guildId: '1070676180103086132', afterSync: state.refreshInterfaces,

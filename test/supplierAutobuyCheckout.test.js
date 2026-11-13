@@ -37,10 +37,11 @@ function fixture(options = {}) {
     database.prepare("INSERT INTO tickets(ticket_code,guild_id,customer_id,channel_id,status) VALUES('TKT_123456',?,?,?,'OPEN')").run(input.guildId, input.customerId, input.channelId);
     return findOpenTicket();
   });
+  const publishTicketOrder = vi.fn().mockResolvedValue({ status: 'SENT' });
   const facade = createSupplierAutobuyCheckout({ database, enabled: () => true, engine,
     customerFlag: () => ({}), ticketMute: () => ({}), guildConfig: () => ({ ticket_category_id: categoryId, order_log_channel_id: logId }),
-    readOrder, debitWallet, payosLink, findOpenTicket, insertTicket, ...options });
-  return { facade, database, engine, client, guild, channel, readOrder, debitWallet, payosLink };
+    readOrder, debitWallet, payosLink, findOpenTicket, insertTicket, publishTicketOrder, ...options });
+  return { facade, database, engine, client, guild, channel, readOrder, debitWallet, payosLink, publishTicketOrder };
 }
 afterEach(() => { for (const d of databases.splice(0)) if (d.open) d.close(); });
 afterAll(() => { if (db.open) db.close(); for (const s of ['', '-wal', '-shm']) fs.rmSync(process.env.DATABASE_PATH + s, { force: true }); });
@@ -142,6 +143,28 @@ describe('supplier owned invoice recovery', () => {
 });
 
 describe('supplier private ticket confirmation', () => {
+  it('publishes the existing order to its private ticket without invoice, debit or source purchase', async () => {
+    const t = fixture();
+    await t.facade.confirm({ client: t.client, guildId, customerId, quoteId: 'quote-a' });
+    expect(t.publishTicketOrder).toHaveBeenCalledWith({ client: t.client, orderCode: 'CN_123456', guildId, envFile: process.env.ENV_FILE });
+    expect(t.payosLink).not.toHaveBeenCalled(); expect(t.debitWallet).not.toHaveBeenCalled();
+    expect(t.engine.fulfillSupplierOrder).not.toHaveBeenCalled();
+  });
+  it('repairs the same ticket card when confirmation is reused even if a staff log already exists', async () => {
+    const t = fixture();
+    t.database.exec('ALTER TABLE orders ADD COLUMN order_log_message_id TEXT');
+    t.database.prepare("UPDATE orders SET order_log_message_id='1569729564115206999'").run();
+    t.engine.getSupplierQuoteForCustomer.mockResolvedValue({ orderCode: 'CN_123456' });
+    await t.facade.confirm({ client: t.client, guildId, customerId, quoteId: 'quote-a' });
+    expect(t.publishTicketOrder).toHaveBeenCalledOnce();
+    expect(t.guild.channels.create).not.toHaveBeenCalled(); expect(t.engine.confirmSupplierCheckout).not.toHaveBeenCalled();
+  });
+  it('keeps confirmation usable after a ticket card failure so durable repair can retry it', async () => {
+    const publishTicketOrder = vi.fn().mockRejectedValue(new Error('Synthetic message failure'));
+    const t = fixture({ publishTicketOrder });
+    await expect(t.facade.confirm({ client: t.client, guildId, customerId, quoteId: 'quote-a' })).resolves.toMatchObject({ orderCode: 'CN_123456' });
+    expect(publishTicketOrder).toHaveBeenCalledOnce(); expect(t.payosLink).not.toHaveBeenCalled(); expect(t.debitWallet).not.toHaveBeenCalled();
+  });
   it('creates and persists one private ticket for simultaneous quote confirmations', async () => {
     const { facade, client, guild, engine, database } = fixture();
     await Promise.all([facade.confirm({ client, guildId, customerId, quoteId: 'quote-a' }), facade.confirm({ client, guildId, customerId, quoteId: 'quote-a' })]);

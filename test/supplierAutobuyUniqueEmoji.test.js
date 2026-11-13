@@ -108,6 +108,90 @@ describe('unique sourced custom artwork for AutoBuy', () => {
     expect(ids).toHaveLength(2);
     expect(ids[0]).not.toBe(ids[1]);
   });
+  it('renders the marked persisted Claude name once without exposing the stored Markdown escape layer', async () => {
+    const stored = { order_code: 'CN_123456', provider: 'cdkvietnam',
+      product_name: String.raw`\[AutoBuy\] CDK Claude PRO 1M \(IOS\) - BH Gói`,
+      total_amount: 100000, status: 'PENDING_PAYMENT', payment_status: 'UNPAID' };
+    for (const payload of [buildSupplierOrderView({ order: stored, customerId: user }),
+      await buildSupplierPaymentView({ order: stored, customerId: user }),
+      buildSupplierOrderListView({ orders: [stored], customerId: user })]) {
+      const { strings } = verified(payload), text = strings.join('\n');
+      expect(text).toContain('**Sản phẩm:** CDK Claude PRO 1M (IOS) - BH Gói');
+      expect(text.match(/CDK Claude PRO 1M/g)).toHaveLength(1);
+      expect(text).not.toContain('[AutoBuy]');
+      expect(text).not.toContain(String.raw`\(`);
+      expect(text).not.toContain(String.raw`\[`);
+      expect(text).toContain('100.000đ');
+    }
+  });
+  it('preserves meaningful source backslashes and Unicode while escaping active Markdown only once', () => {
+    const name = String.raw`C:\Kho\bản_gốc [Gói 1] (IOS) - #1! हिन्दी क्‍ष 漢字 é`;
+    const payload = buildSupplierOrderView({ order: { ...order, productName: name }, customerId: user });
+    const text = verified(payload).strings.join('\n');
+    expect(text).toContain(String.raw`C:\\Kho\\bản\_gốc [Gói 1] (IOS) - #1! हिन्दी क्‍ष 漢字 é`);
+    const persisted = { ...order, productName: undefined,
+      product_name: String.raw`\[AutoBuy\] C:\\Kho\\bản\_gốc \[Gói 1\] \(IOS\) - #1! हिन्दी क्‍ष 漢字 é` };
+    // A literal unescaped # is not in the storage encoder's canonical format;
+    // unknown or malformed snapshots must not have backslashes guessed away.
+    const malformed = verified(buildSupplierOrderView({ order: persisted, customerId: user })).strings.join('\n');
+    expect(malformed).toContain('AutoBuy');
+    const canonical = { ...persisted, product_name: persisted.product_name.replace('#1', String.raw`\#1`) };
+    expect(verified(buildSupplierOrderView({ order: canonical, customerId: user })).strings.join('\n'))
+      .toContain(String.raw`C:\\Kho\\bản\_gốc [Gói 1] (IOS) - #1! हिन्दी क्‍ष 漢字 é`);
+    // Intent names are raw even when they intentionally resemble the marker.
+    expect(verified(buildSupplierOrderView({ order: { ...order, productName: String.raw`\[AutoBuy\] literal` }, customerId: user }))
+      .strings.join('\n')).toContain(String.raw`\\[AutoBuy\\] literal`);
+  });
+  it('keeps source mentions, links, native emoji and custom markup inert across product surfaces', async () => {
+    const source = '<:source_brand:1535690966911025262> 🇻🇳 👍🏽 1️⃣ 👨‍👩‍👧‍👦 Việt Nam **sale** `gói` ||ẩn|| <@111111111111111111> @everyone [mở](https://evil.invalid/x)';
+    const item = { ...order, productName: source };
+    const payloads = [buildSupplierCatalogView({ customerId: user, catalog: { offers: [{ ...offers[0], name: source }] } }),
+      buildSupplierQuoteView({ quote: { ...quote, productName: source }, customerId: user }),
+      buildSupplierOrderView({ order: item, customerId: user }),
+      await buildSupplierPaymentView({ order: item, customerId: user, payment: { method: 'PAYOS', checkoutUrl: 'https://pay.payos.vn/web/owned-invoice' } }),
+      buildSupplierOrderListView({ orders: [item], customerId: user })];
+    for (const payload of payloads) {
+      const text = verified(payload).strings.join('\n'), serialized = JSON.stringify(payload);
+      expect(text).toContain('Việt Nam');
+      expect(serialized).not.toMatch(/source_brand|1535690966911025262|🇻|🏽|\u20e3|\u200d|@everyone|<@|https:\/\/evil/);
+      expect(text).toContain('＠everyone');
+      expect(text).toContain('\\*\\*sale\\*\\*');
+      expect(text).toContain('\\`gói\\`');
+      expect(text).toContain('\\|\\|ẩn\\|\\|');
+      if (text.includes('evil')) expect(text).toContain('https:\u200b//evil');
+    }
+  });
+  it('keeps ticket order/payment/notice controls scoped to one order with distinct final icons', async () => {
+    const owned = { ...order, provider: 'dopermind' };
+    for (const payload of [buildSupplierOrderView({ order: owned, customerId: user, ticketContext: true }),
+      await buildSupplierPaymentView({ order: owned, customerId: user, ticketContext: true,
+        payment: { method: 'PAYOS', checkoutUrl: 'https://pay.payos.vn/web/owned-invoice' } }),
+      buildSupplierNoticeView({ title: 'Thông tin đơn', text: 'Vui lòng kiểm tra đơn.', customerId: user, ticketContext: true, order: owned })]) {
+      const result = verified(payload);
+      expect(result.controls.some(id => /:(?:page|orders):/.test(id))).toBe(false);
+      expect(result.controls.every(id => id.includes(`:${user}:CN_123456`))).toBe(true);
+    }
+    expect(collect(buildSupplierOrderView({ order: owned, customerId: user })).controls)
+      .toContain(`supplier-autobuy:orders:${user}`);
+  });
+  it('does not treat escaped source delimiters as credential spans that bypass artwork allocation', () => {
+    const token = createUniqueCustomEmojiResolver(guildId)('icon_doc');
+    const payload = withUniqueCustomEmoji({ components: [{ type: 10,
+      content: `## ${token} Tiêu đề\n\\\` ${token} 🛒 \\\` \\|\\| ${token} 👍🏽 \\|\\|` }], allowedMentions: { parse: [] } }, { guildId });
+    expect(verified(payload).ids).toHaveLength(3);
+    expect(() => withUniqueCustomEmoji({ components: [{ type: 10, content: 'https://' }] }, { guildId })).not.toThrow();
+  });
+  it('keeps selectors valid when supplier names or categories contain only decorative emoji', () => {
+    const payload = buildSupplierCatalogView({ customerId: user, catalog: { offers: [
+      { ...offers[0], name: '👨‍👩‍👧‍👦', category: '🛒' },
+      { ...offers[1], name: '<:source_brand:1535690966911025262>', category: 'AI' },
+    ] } });
+    verified(payload);
+    const menus = payload.components.filter(node => node.type === 1).flatMap(node => node.components).filter(node => node.type === 3);
+    expect(menus.every(menu => menu.options.every(option => option.label.trim().length > 0))).toBe(true);
+    expect(menus.flatMap(menu => menu.options).filter(option => option.value.startsWith('cdkvietnam:'))
+      .every(option => option.label === 'Sản phẩm AutoBuy')).toBe(true);
+  });
   it('preserves protocol fields, links, files and authored literal spans exactly', () => {
     const attachment = { attachment: Buffer.from('private bytes'), name: 'owned.png' };
     const literal = '`password:<:old:1999999999999999999>` https://example.com/:secret:';

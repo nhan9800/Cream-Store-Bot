@@ -784,12 +784,26 @@ export async function reconcileRecentPayOSPayments(client, { limit = 20, lookbac
   const safeLimit = Math.min(100, Math.max(1, Number(limit) || 20));
   const cutoff = new Date(Date.now() - Math.max(1, Number(lookbackHours) || 24) * 60 * 60 * 1000).toISOString();
   const actionPlaceholders = PAYMENT_CONFIRMATION_ACTIONS.map(() => '?').join(',');
+  let supplierInvoiceFilter = '';
+  try {
+    const methods = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='supplier_autobuy_payment_methods'").get();
+    const columns = methods ? db.prepare('PRAGMA table_info(supplier_autobuy_payment_methods)').all() : [];
+    if (['order_code', 'method'].every(name => columns.some(column => column.name === name))) {
+      // Supplier orders receive a numeric payment identity before the customer
+      // chooses a method. Only a stored link or method claim warrants a lookup.
+      // Keep PAYOS/unknown claims: a create-link receipt may have been lost.
+      supplierInvoiceFilter = `AND (COALESCE(o.fulfillment_mode,'LEGACY')!='SUPPLIER'
+        OR COALESCE(o.payment_link_id,'')!=''
+        OR EXISTS (SELECT 1 FROM supplier_autobuy_payment_methods m
+          WHERE m.order_code=o.order_code AND COALESCE(m.method,'')!='WALLET'))`;
+    }
+  } catch { /* Missing/unusable claim schema retains the previous reconciliation path. */ }
   const candidates = db.prepare(`SELECT o.* FROM orders o
     WHERE o.payment_provider = 'PAYOS'
       AND o.payos_order_code IS NOT NULL
       AND o.created_at >= ?
       AND (
-        (o.payment_status != 'PAID' AND o.status = 'PENDING_PAYMENT')
+        (o.payment_status != 'PAID' AND o.status = 'PENDING_PAYMENT' ${supplierInvoiceFilter})
         OR (
           o.payment_status = 'PAID'
           AND NOT EXISTS (

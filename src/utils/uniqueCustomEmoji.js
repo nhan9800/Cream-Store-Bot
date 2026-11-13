@@ -3,9 +3,11 @@ import { createEmojiResolver } from './emojiHelper.js';
 import { getCanonicalEmojiSlot, parseDiscordEmoji, resolveLiveCustomEmoji } from '../services/emojiService.js';
 
 const CUSTOM = /<a?:[A-Za-z0-9_]+:\d+>/g;
-const protectedText = /(```[\s\S]*?(?:```|$)|`[^`\n]*`|\|\|[\s\S]*?(?:\|\||$)|https?:\/\/[^\s<>]+)/g;
-const nativeEmoji = /\p{Extended_Pictographic}|[\uFE0E\uFE0F\u200D\u20E3]/gu;
+// Consume complete emoji sequences, including modifiers, flags and keycaps.
+// A joiner or variation selector in ordinary merchant Unicode is not artwork.
+const nativeEmoji = /(?:\p{Regional_Indicator}{1,2}|[#*0-9]\uFE0F?\u20E3|\p{Emoji_Modifier}|\p{Extended_Pictographic}[\uFE0E\uFE0F]?(?:\p{Emoji_Modifier})?(?:\u200D\p{Extended_Pictographic}[\uFE0E\uFE0F]?(?:\p{Emoji_Modifier})?)*)(?:[\u{E0020}-\u{E007E}]+\u{E007F})?/gu;
 const json = value => value?.toJSON?.() || value;
+export const stripPresentationEmoji = value => String(value ?? '').replace(nativeEmoji, '').replace(CUSTOM, '');
 const relatedArt = [
   [/price|tag|money|wallet|payment/i, ['payment_money', 'icon_wallet', 'payment_payos', 'payment_vietqr', 'icon_gem', 'order_id', 'icon_chart', 'icon_gift']],
   [/brand_|product|package/i, ['order_product', 'icon_brain', 'icon_key', 'icon_book', 'icon_art', 'icon_gem', 'icon_sparkle', 'icon_doc']],
@@ -73,13 +75,44 @@ function buttonSlot(label) {
   return 'icon_doc';
 }
 
+function escapedAt(value, index) {
+  let backslashes = 0;
+  while (index > 0 && value[--index] === '\\') backslashes++;
+  return backslashes % 2 === 1;
+}
+
+// Authored credential/code spans stay byte-for-byte intact. Escaped supplier
+// backticks and spoiler delimiters are plain text, not protected literal spans.
+function mapPresentationText(value, transform) {
+  const source = String(value);
+  let result = '', plainStart = 0, index = 0;
+  while (index < source.length) {
+    let end = null;
+    if (source[index] === '`' || source.startsWith('||', index)) {
+      const run = source[index] === '`' ? /^`+/.exec(source.slice(index))[0] : '||';
+      if (escapedAt(source, index)) { index += run.length; continue; }
+      let closing = source.indexOf(run, index + run.length);
+      while (closing !== -1 && escapedAt(source, closing)) closing = source.indexOf(run, closing + run.length);
+      if (closing !== -1 && (run.length >= 3 || run === '||' || !source.slice(index, closing).includes('\n'))) end = closing + run.length;
+      else if (run.length >= 3 || run === '||') end = source.length;
+      if (end === null) { index += run.length; continue; }
+    } else if (/^https?:\/\//.test(source.slice(index))) {
+      const url = /^https?:\/\/[^\s<>]+/.exec(source.slice(index));
+      if (url) end = index + url[0].length;
+    }
+    if (end !== null) {
+      result += transform(source.slice(plainStart, index)) + source.slice(index, end);
+      plainStart = end; index = end;
+    } else index++;
+  }
+  return result + transform(source.slice(plainStart));
+}
+
 /** Presentation only: no IDs, values, links, file data or literal code changes. */
 export function withUniqueCustomEmoji(payload, { guildId, seed = '', resolver } = {}) {
   const E = createUniqueCustomEmojiResolver(guildId, { seed, ...(resolver ? { resolver } : {}) });
-  const text = (value, purpose) => String(value).split(protectedText).map(part => {
-    if (/^(?:`|\|\||https?:\/\/)/.test(part)) return part;
-    return part.replace(nativeEmoji, '').replace(CUSTOM, token => E(token, purpose));
-  }).join('');
+  const text = (value, purpose) => mapPresentationText(value,
+    part => part.replace(nativeEmoji, '').replace(CUSTOM, token => E(token, purpose)));
   const visit = (value, path = 'view') => {
     const item = json(value);
     if (!item || typeof item !== 'object') return item;
