@@ -145,6 +145,32 @@ describe('supplier owned invoice recovery', () => {
 });
 
 describe('supplier private ticket confirmation', () => {
+  it('captures history before new order creation and registers it before publishing the receipt', async () => {
+    const registerTicketOrder = vi.fn(() => ({ status: 'REGISTERED' })), t = fixture({ registerTicketOrder });
+    const boundary = '1569729564115206200';
+    t.database.prepare("INSERT INTO tickets VALUES(1,'TKT_1',?,?,?,'OPEN')").run(guildId, customerId, ticketChannelId);
+    t.channel.lastMessageId = boundary;
+    t.engine.confirmSupplierCheckout.mockImplementationOnce(async () => {
+      expect(t.guild.channels.fetch).toHaveBeenCalledWith(ticketChannelId, { force: true });
+      // A Gateway update during quote confirmation must not advance the origin.
+      t.channel.lastMessageId = '1569729564115299999';
+      return { ...t.readOrder('CN_123456'), orderCode: 'CN_123456', provider: 'dopermind', reused: false };
+    });
+    await t.facade.confirm({ client: t.client, guildId, customerId, quoteId: 'quote-a', provider: 'dopermind' });
+    expect(registerTicketOrder).toHaveBeenCalledExactlyOnceWith({ guildId, customerId, orderCode: 'CN_123456',
+      ticketId: 1, channelId: ticketChannelId, provider: 'dopermind', historyAfterMessageId: boundary, envFile: process.env.ENV_FILE });
+    expect(registerTicketOrder.mock.invocationCallOrder[0]).toBeLessThan(t.publishTicketOrder.mock.invocationCallOrder[0]);
+    expect(t.payosLink).not.toHaveBeenCalled(); expect(t.debitWallet).not.toHaveBeenCalled();
+  });
+  it('does not register a new history window for an already existing order or reused confirmation', async () => {
+    const registerTicketOrder = vi.fn(), t = fixture({ registerTicketOrder });
+    t.channel.lastMessageId = '1569729564115206200';
+    t.engine.confirmSupplierCheckout.mockResolvedValueOnce({ ...t.readOrder('CN_123456'), orderCode: 'CN_123456', reused: true });
+    await t.facade.confirm({ client: t.client, guildId, customerId, quoteId: 'quote-a' });
+    t.engine.getSupplierQuoteForCustomer.mockResolvedValueOnce({ orderCode: 'CN_123456' });
+    await t.facade.confirm({ client: t.client, guildId, customerId, quoteId: 'quote-a' });
+    expect(registerTicketOrder).not.toHaveBeenCalled(); expect(t.publishTicketOrder).toHaveBeenCalledTimes(2);
+  });
   it('publishes the existing order to its private ticket without invoice, debit or source purchase', async () => {
     const t = fixture();
     await t.facade.confirm({ client: t.client, guildId, customerId, quoteId: 'quote-a' });

@@ -29,8 +29,11 @@ export function createSupplierAutobuyTicketNoticeService({ database = db, guildC
     database.exec(`CREATE TABLE IF NOT EXISTS supplier_autobuy_ticket_notices (
       order_code TEXT PRIMARY KEY,channel_id TEXT NOT NULL,message_id TEXT,
       status TEXT NOT NULL DEFAULT 'PENDING',attempts INTEGER NOT NULL DEFAULT 0,
-      attempted_at TEXT,updated_at TEXT NOT NULL,last_error TEXT);
+      attempted_at TEXT,updated_at TEXT NOT NULL,last_error TEXT,history_after_message_id TEXT);
       CREATE UNIQUE INDEX IF NOT EXISTS idx_supplier_ticket_notice_message ON supplier_autobuy_ticket_notices(message_id) WHERE message_id IS NOT NULL;`);
+    if (!database.prepare('PRAGMA table_info(supplier_autobuy_ticket_notices)').all().some(column => column.name === 'history_after_message_id')) {
+      database.exec('ALTER TABLE supplier_autobuy_ticket_notices ADD COLUMN history_after_message_id TEXT');
+    }
     initialized = true;
   }
   function linkedOrder(code) {
@@ -69,6 +72,23 @@ export function createSupplierAutobuyTicketNoticeService({ database = db, guildC
     const row = linkedOrder(notice.order_code);
     return row && row.customer_id === customerId && row.guild_id === guildId && row.linked_channel_id === channelId ? context(row) : null;
   }
+  function registerOrigin({ guildId, channelId, customerId, orderCode, ticketId, provider, historyAfterMessageId,
+    envFile = process.env.ENV_FILE } = {}) {
+    if (!scopeEnabled({ guildId, envFile })) return { status: 'DISABLED_OTHER_STORE' };
+    if (!snowflake(historyAfterMessageId) || !snowflake(channelId) || !snowflake(customerId)
+      || !Number.isSafeInteger(ticketId) || ticketId < 1) return { status: 'NOT_ELIGIBLE' };
+    init();
+    const row = linkedOrder(orderCode);
+    if (!row || row.guild_id !== guildId || row.customer_id !== customerId || row.linked_channel_id !== channelId
+      || row.linked_ticket_id !== ticketId || row.provider !== provider) return { status: 'NOT_ELIGIBLE' };
+    // Only the confirmation facade may supply a snapshot captured before a new
+    // order existed. Never attach/advance a floor on an existing journal row:
+    // a restored or uncertain receipt must retain its original search window.
+    const inserted = database.prepare(`INSERT INTO supplier_autobuy_ticket_notices
+      (order_code,channel_id,updated_at,history_after_message_id) VALUES(?,?,?,?) ON CONFLICT(order_code) DO NOTHING`)
+      .run(orderCode, channelId, new Date(now()).toISOString(), historyAfterMessageId);
+    return { status: inserted.changes ? 'REGISTERED' : 'EXISTS' };
+  }
   function privateChannel(channel, bound, botId) {
     return channel?.type === ChannelType.GuildText && channel.guildId === bound.guildId && channel.id === bound.channelId
       && snowflake(bound.categoryId) && channel.parentId === bound.categoryId
@@ -87,13 +107,16 @@ export function createSupplierAutobuyTicketNoticeService({ database = db, guildC
     const matches = items => Array.isArray(items) && items.some(item => item?.custom_id === expected || matches(item?.components));
     return matches(components);
   }
-  async function findExisting(channel, bound, botId, fullScan) {
+  async function findExisting(channel, bound, botId, fullScan, historyAfterMessageId) {
     let before;
     for (let page = 0; page < (fullScan ? 10 : 1); page++) {
       const batch = await channel.messages.fetch({ limit: 100, ...(before ? { before } : {}) });
       const messages = values(batch), matches = messages.filter(message => ownedMessage(message, bound, botId));
       if (matches.length > 1) return { ambiguous: true };
       if (matches.length === 1) return { message: matches[0] };
+      // Check every marker on this page before stopping. Use an exact message
+      // boundary, not clock-derived age or assumed cross-worker Snowflake order.
+      if (snowflake(historyAfterMessageId) && messages.some(message => message.id === historyAfterMessageId)) return {};
       if (messages.length < 100) return {};
       const next = messages.at(-1)?.id;
       if (!snowflake(next) || next === before) return { incomplete: true };
@@ -138,7 +161,7 @@ export function createSupplierAutobuyTicketNoticeService({ database = db, guildC
       }
     }
     try {
-      const found = await findExisting(channel, bound, botId, true);
+      const found = await findExisting(channel, bound, botId, true, notice.history_after_message_id);
       if (found.ambiguous) return { status: 'REVIEW' };
       if (found.message) return receipt(found.message, true);
       if (found.incomplete) return { status: 'UNKNOWN' };
@@ -271,11 +294,12 @@ export function createSupplierAutobuyTicketNoticeService({ database = db, guildC
     schedule();
     return { status: 'RUNNING', workerRunning: true };
   }
-  return Object.freeze({ send, repair, getContext, getHealth: () => health, startMaintenance, stopMaintenance });
+  return Object.freeze({ send, repair, getContext, registerOrigin, getHealth: () => health, startMaintenance, stopMaintenance });
 }
 
 const singleton = createSupplierAutobuyTicketNoticeService();
 export const sendSupplierTicketOrderNotice = input => singleton.send(input);
+export const registerSupplierTicketOrderOrigin = input => singleton.registerOrigin(input);
 export const repairSupplierTicketOrderNotices = (client, options) => singleton.repair(client, options);
 export const getSupplierTicketOrderNoticeContext = input => singleton.getContext(input);
 export const getSupplierTicketOrderNoticeHealth = () => singleton.getHealth();

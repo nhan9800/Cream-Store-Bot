@@ -117,6 +117,70 @@ describe('durable customer AutoBuy ticket order cards', () => {
     expect(await t.send()).toEqual({ status: 'UNKNOWN' });
     expect(t.channel.messages.fetch).toHaveBeenCalledTimes(10); expect(t.channel.send).not.toHaveBeenCalled();
   });
+  it('sends a fresh order card in a long reused ticket after reaching its exact pre-order history boundary', async () => {
+    const t = fixture();
+    for (let index = 0; index < 1200; index++) {
+      const id = String(1569729564115204000n + BigInt(index));
+      t.messages.set(id, { id, author: { id: customerId }, channelId, components: [] });
+    }
+    const boundary = [...t.messages.keys()].at(-1);
+    expect(t.service.registerOrigin({ guildId, customerId, orderCode: code, channelId, ticketId: 1483,
+      provider: 'cdkvietnam', historyAfterMessageId: boundary, envFile: '.env' })).toEqual({ status: 'REGISTERED' });
+    expect(await t.send()).toMatchObject({ status: 'SENT', recovered: false });
+    expect(t.channel.messages.fetch).toHaveBeenCalledOnce();
+    expect(t.channel.send).toHaveBeenCalledOnce();
+  });
+  it('checks receipt markers before stopping on the boundary and preserves that boundary across restart', async () => {
+    const t = fixture(), boundary = '1569729564115206000';
+    t.messages.set(boundary, { id: boundary, author: { id: customerId }, channelId, components: [] });
+    const input = { guildId, customerId, orderCode: code, channelId, ticketId: 1483, provider: 'cdkvietnam', historyAfterMessageId: boundary, envFile: '.env' };
+    t.service.registerOrigin(input);
+    t.newMessage(t.buildCard({ order: { orderCode: code, productName: 'Stored order' }, customerId }));
+    const restarted = createSupplierAutobuyTicketNoticeService(t.settings);
+    expect(restarted.registerOrigin({ ...input, historyAfterMessageId: '1569729564115299999' })).toEqual({ status: 'EXISTS' });
+    expect(t.notice().history_after_message_id).toBe(boundary);
+    expect(await restarted.send({ client: t.client, guildId, orderCode: code, envFile: '.env' })).toMatchObject({ status: 'SENT', recovered: true });
+    expect(t.channel.send).not.toHaveBeenCalled();
+  });
+  it('keeps discovery conservative if the boundary was deleted or more than 1000 later messages hide it', async () => {
+    const t = fixture();
+    t.service.registerOrigin({ guildId, customerId, orderCode: code, channelId, ticketId: 1483,
+      provider: 'cdkvietnam', historyAfterMessageId: '1569729564115205000', envFile: '.env' });
+    t.channel.messages.fetch.mockImplementation(async input => {
+      const start = input.before ? BigInt(input.before) - 1n : 1569729564115299999n;
+      return new Collection(Array.from({ length: 100 }, (_, index) => {
+        const id = String(start - BigInt(index)); return [id, { id, author: { id: customerId }, channelId, components: [] }];
+      }));
+    });
+    expect(await t.send()).toEqual({ status: 'UNKNOWN' });
+    expect(t.channel.messages.fetch).toHaveBeenCalledTimes(10); expect(t.channel.send).not.toHaveBeenCalled();
+  });
+  it('refuses cross-owner or cross-ticket history registration and never advances an attempted notice', async () => {
+    const t = fixture(), input = { guildId, customerId, orderCode: code, channelId, ticketId: 1483,
+      provider: 'cdkvietnam', historyAfterMessageId: '1569729564115206000', envFile: '.env' };
+    expect(t.service.registerOrigin({ ...input, customerId: botId })).toEqual({ status: 'NOT_ELIGIBLE' });
+    expect(t.service.registerOrigin({ ...input, ticketId: 1484 })).toEqual({ status: 'NOT_ELIGIBLE' });
+    expect(t.service.registerOrigin({ ...input, provider: 'dopermind' })).toEqual({ status: 'NOT_ELIGIBLE' });
+    t.channel.send.mockRejectedValueOnce(new Error('Synthetic uncertain send'));
+    await t.send();
+    expect(t.service.registerOrigin(input)).toEqual({ status: 'EXISTS' });
+    expect(t.notice()).toMatchObject({ status: 'UNKNOWN', history_after_message_id: null, attempts: 1 });
+    await t.send(); expect(t.channel.send).toHaveBeenCalledOnce();
+  });
+  it('adds origin metadata without resetting an existing legacy unknown-send journal', async () => {
+    const t = fixture();
+    t.database.exec(`CREATE TABLE supplier_autobuy_ticket_notices(order_code TEXT PRIMARY KEY,channel_id TEXT NOT NULL,
+      message_id TEXT,status TEXT,attempts INTEGER,attempted_at TEXT,updated_at TEXT NOT NULL,last_error TEXT);
+      INSERT INTO supplier_autobuy_ticket_notices VALUES('${code}','${channelId}',NULL,'UNKNOWN',2,
+        '2026-11-14T01:00:00Z','2026-11-14T01:00:01Z','SEND_UNCERTAIN');`);
+    const receipt = t.newMessage(t.buildCard({ order: { orderCode: code, productName: 'Legacy order' }, customerId }));
+    expect(t.service.registerOrigin({ guildId, customerId, orderCode: code, channelId, ticketId: 1483,
+      provider: 'cdkvietnam', historyAfterMessageId: receipt.id, envFile: '.env' })).toEqual({ status: 'EXISTS' });
+    expect(t.notice()).toMatchObject({ status: 'UNKNOWN', attempts: 2, history_after_message_id: null,
+      attempted_at: '2026-11-14T01:00:00Z', updated_at: '2026-11-14T01:00:01Z', last_error: 'SEND_UNCERTAIN' });
+    expect(await t.send()).toMatchObject({ status: 'SENT', recovered: true, messageId: receipt.id });
+    expect(t.notice().attempts).toBe(2); expect(t.channel.send).not.toHaveBeenCalled();
+  });
   it('retries a known send failure automatically, coalesces maintenance and stops on invalidation', async () => {
     vi.useFakeTimers(); const t = fixture();
     const events = new EventEmitter(); t.client.once = events.once.bind(events); t.client.off = events.off.bind(events);

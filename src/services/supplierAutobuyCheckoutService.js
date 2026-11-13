@@ -9,7 +9,7 @@ import { getOrderByCode, payOrderWithWallet, saveOrderLogMessage } from './order
 import { createOrLoadPayOSLink, syncPaymentStatusFromPayOS } from './paymentService.js';
 import { supplierSalesConfigured } from './supplierAutobuyCatalogService.js';
 import { buildOrderLogV2Update } from '../utils/embeds.js';
-import { sendSupplierTicketOrderNotice } from './supplierAutobuyTicketNoticeService.js';
+import { registerSupplierTicketOrderOrigin, sendSupplierTicketOrderNotice } from './supplierAutobuyTicketNoticeService.js';
 import { supplierProviderForProductKey } from '../utils/supplierProvider.js';
 
 export class SupplierCheckoutError extends Error {
@@ -68,6 +68,7 @@ export function createSupplierAutobuyCheckout({
   readOrder = getOrderByCode, debitWallet = payOrderWithWallet, payosLink = createOrLoadPayOSLink,
   syncPayos = syncPaymentStatusFromPayOS, publishOrder = publishSupplierOrderLog,
   publishTicketOrder = sendSupplierTicketOrderNotice,
+  registerTicketOrder = registerSupplierTicketOrderOrigin,
 } = {}) {
   const ticketFlights = new Map(), paymentFlights = new Map(), orderTurns = new Map(), admissionTurns = new Map();
   let initialized = false;
@@ -150,9 +151,9 @@ export function createSupplierAutobuyCheckout({
         ticketType: 'ORDER', supportSource: 'DISCORD_AUTOBUY', clientRequestId: `autobuy-ticket:${quoteId}`,
       })).immediate();
       if (/^\d{17,20}$/.test(String(ticket.channel_id))) {
-        const channel = await guild.channels.fetch(ticket.channel_id).catch(() => null);
+        const channel = await guild.channels.fetch(ticket.channel_id, { force: true }).catch(() => null);
         if (!privateChannel(channel, customerId)) deny('TICKET_ACCESS_UNVERIFIED');
-        return { ticket, guild, settings };
+        return { ticket, guild, settings, historyAfterMessageId: snowflake(channel.lastMessageId) ? channel.lastMessageId : null };
       }
       if (ticket.channel_id !== `autobuy-pending-${customerId}`) deny('TICKET_SETUP_PENDING');
       const inventory = await guild.channels.fetch();
@@ -182,7 +183,8 @@ export function createSupplierAutobuyCheckout({
       }
       const saved = database.prepare('UPDATE tickets SET channel_id=? WHERE id=? AND channel_id=?').run(channel.id, ticket.id, ticket.channel_id);
       if (saved.changes !== 1) deny('TICKET_SETUP_PENDING');
-      return { ticket: { ...ticket, channel_id: channel.id }, guild, settings };
+      return { ticket: { ...ticket, channel_id: channel.id }, guild, settings,
+        historyAfterMessageId: snowflake(channel.lastMessageId) ? channel.lastMessageId : null };
     }).finally(() => ticketFlights.delete(key));
     ticketFlights.set(key, task);
     return task;
@@ -199,11 +201,17 @@ export function createSupplierAutobuyCheckout({
       await notifyCreated(client, quote.orderCode);
       return owned;
     }
-    const { ticket, settings } = await ensureTicket(client, guildId, customerId, quoteId);
+    const { ticket, settings, historyAfterMessageId } = await ensureTicket(client, guildId, customerId, quoteId);
     guard(guildId, customerId, true, provider);
     const confirmed = await orders.confirmSupplierCheckout({ guildId, customerId, quoteId, ticketId: ticket.id,
       ticketChannelId: ticket.channel_id, orderLogChannelId: settings.order_log_channel_id, createdById: client.user.id, ...providerScope(provider) });
     checkedProvider(provider, confirmed);
+    if (confirmed.reused === false && historyAfterMessageId) {
+      try {
+        registerTicketOrder({ guildId, customerId, orderCode: confirmed.orderCode, ticketId: ticket.id,
+          channelId: ticket.channel_id, provider: confirmed.provider ?? provider, historyAfterMessageId, envFile: process.env.ENV_FILE });
+      } catch { /* Missing origin metadata keeps the conservative full-history repair. */ }
+    }
     await notifyCreated(client, confirmed.orderCode);
     return confirmed;
   }
