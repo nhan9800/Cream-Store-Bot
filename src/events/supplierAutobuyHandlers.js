@@ -285,7 +285,9 @@ export function createSupplierAutobuyInteractionHandler(dependencies = {}) {
             const payment = await deps.createPayment({ client: interaction.client, ...context, orderCode, method: args[1] });
             // A successful invoice must remain visible even if its subsequent
             // status lookup fails. The server payment result contains no client price.
-            const order = await deps.getOrder({ client: interaction.client, ...context, orderCode }).catch(() => ({
+            // Read the owned persisted snapshot without polling the just-created
+            // invoice again; the explicit order/status controls still reconcile.
+            const order = await deps.getOrder({ ...context, orderCode }).catch(() => ({
               orderCode, totalAmount: payment.totalAmount, status: payment.status,
               paymentStatus: payment.paid ? 'PAID' : 'UNPAID',
             }));

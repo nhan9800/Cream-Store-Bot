@@ -187,9 +187,25 @@ describe('supplier autobuy customer commerce interactions', () => {
     const deps = dependencies(), interaction = fixture(privateId('pay', 'CN_123456:' + method));
     await createSupplierAutobuyInteractionHandler(deps)(interaction);
     expect(deps.createPayment).toHaveBeenCalledExactlyOnceWith({ client: interaction.client, ...context, orderCode: 'CN_123456', method });
-    expect(deps.getOrder).toHaveBeenCalledExactlyOnceWith({ client: interaction.client, ...context, orderCode: 'CN_123456' });
+    expect(deps.getOrder).toHaveBeenCalledExactlyOnceWith({ ...context, orderCode: 'CN_123456' });
     expect(deps.confirmCheckout).not.toHaveBeenCalled();
     expect(interaction.editReply).toHaveBeenCalledOnce();
+  });
+  it('shows a newly created invoice without waiting for an immediate PayOS status poll', async () => {
+    let releasePoll;
+    const poll = new Promise(resolve => { releasePoll = resolve; });
+    const deps = dependencies({ getOrder: vi.fn(async input => { if (input.client) await poll; return order; }) });
+    const click = fixture(privateId('pay', 'CN_123456:payos'));
+    const pending = createSupplierAutobuyInteractionHandler(deps)(click);
+    let renderedBeforePoll = false;
+    try {
+      await vi.waitFor(() => expect(click.editReply).toHaveBeenCalledOnce(), { timeout: 300 });
+      renderedBeforePoll = true;
+    } catch { /* Release the synthetic poll before reporting a failed latency regression. */ }
+    finally { releasePoll(); await pending; }
+    expect(renderedBeforePoll).toBe(true);
+    expect(JSON.stringify(click.editReply.mock.calls)).toContain('https://pay.payos.vn/web/test');
+    expect(deps.createPayment).toHaveBeenCalledOnce();
   });
   it.each(['wallet', 'payos'])('refreshes stale private %s payment buttons before creating an invoice or debit, then accepts the next click', async method => {
     const deps = dependencies(), handler = createSupplierAutobuyInteractionHandler(deps);

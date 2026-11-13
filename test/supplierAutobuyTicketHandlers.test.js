@@ -116,7 +116,7 @@ describe('durable supplier ticket interaction origin', () => {
     await createSupplierAutobuyInteractionHandler(deps)(click);
     const context = { client: click.client, guildId, customerId, orderCode: doperCode, provider: 'dopermind' };
     expect(deps.createPayment).toHaveBeenCalledExactlyOnceWith({ ...context, method });
-    expect(deps.getOrder).toHaveBeenCalledExactlyOnceWith(context);
+    expect(deps.getOrder).toHaveBeenCalledExactlyOnceWith({ guildId, customerId, orderCode: doperCode, provider: 'dopermind' });
     expect(state.render.payment).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ customerId, ticketContext: true,
       payment: expect.objectContaining({ orderCode: doperCode, provider: 'dopermind' }) }));
     expect(click.deferReply).toHaveBeenCalledExactlyOnceWith({ flags: MessageFlags.Ephemeral });
