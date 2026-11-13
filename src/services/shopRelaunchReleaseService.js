@@ -67,7 +67,8 @@ export async function runShopRelaunchRelease(client, {
     const journal = getShopRelaunchPublicationHealth({ dbInstance });
     status = { ...status, status: 'RELEASE_FAILED', lastError: /^[A-Z0-9_]{3,80}$/.test(String(error?.code || ''))
       ? error.code : 'SHOP_RELAUNCH_FAILED', links: journal.links || [], parts: journal.parts,
-      ...(error?.publicVerification ? { verification: error.publicVerification } : {}) };
+      ...(error?.code === 'RELAUNCH_PUBLICATION_CONTENT_MISMATCH' && error?.publicVerification
+        ? { verification: error.publicVerification } : {}) };
     console.warn('[SHOP-RELAUNCH]', JSON.stringify({ status: status.status, code: status.lastError }));
     return getShopRelaunchReleaseHealth();
   }

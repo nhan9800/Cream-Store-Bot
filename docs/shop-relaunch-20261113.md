@@ -14,6 +14,12 @@ catalog examples, not newly created discounts.
 
 Every accepted or recovered message is fetched/verified against its exact text, channel, author, V2 flag, custom emoji and mentions. Health reports part links, text hashes, custom/native emoji counts and allowed roles. A missing or modified prior message stops verification; it is not automatically recreated.
 
+Verification accounts for the shared REST boundary replacing a legacy brand
+emoji with its current custom icon. It accepts only the exact normalized text
+when the icon count and every non-emoji character remain unchanged. Prices,
+terms, links and mentions still require exact verification. The same saved
+message is recovered after such a mismatch, without another Member mention.
+
 Preview from the server without logging in or modifying SQLite:
 
 ```sh

@@ -1,5 +1,6 @@
 import { SHOP_RELAUNCH, buildShopRelaunchNotice, prepareShopRelaunch, shopRelaunchHash } from '../campaigns/shopRelaunch20261113.js';
 import { PermissionFlagsBits } from 'discord.js';
+import { normalizeMessagePresentation } from '../utils/discordEmojiBoundary.js';
 
 const fail = code => Object.assign(new Error(code), { code });
 const active = new WeakMap();
@@ -66,7 +67,19 @@ async function history(channel) {
 
 function verify(message, payload, expectedChannel, botId, part) {
   const actualText = textOf(message);
-  const expectedText = textOf(payload);
+  let expectedText = textOf(payload);
+  if (actualText !== expectedText) {
+    try {
+      // The final REST boundary can replace a legacy brand icon with its
+      // current custom artwork. Accept that exact wire representation only
+      // when every non-emoji character and the icon count stay unchanged.
+      const wireText = textOf(normalizeMessagePresentation(payload, SHOP_RELAUNCH.guildId));
+      const tokens = /<a?:[A-Za-z0-9_]+:\d+>/g;
+      const expectedIcons = (expectedText.match(tokens) || []).length;
+      if (expectedIcons > 0 && expectedIcons === (wireText.match(tokens) || []).length
+        && expectedText.replace(tokens, '') === wireText.replace(tokens, '')) expectedText = wireText;
+    } catch { /* Missing live inventory must not turn a mismatch into success. */ }
+  }
   if (!message?.id || String(message.author?.id) !== String(botId)
     || String(message.channelId || message.channel?.id) !== String(expectedChannel)
     || actualText !== expectedText || !hasMarker(message, part)) {
