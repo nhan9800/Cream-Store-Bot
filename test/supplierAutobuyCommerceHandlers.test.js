@@ -255,6 +255,21 @@ describe('supplier autobuy customer commerce interactions', () => {
     expect(deps.createPayment).toHaveBeenCalledTimes(1);
     expect(deps.confirmCheckout).not.toHaveBeenCalled();
   });
+  it.each(['PAYOS', 'WALLET'])('preserves the authoritative Dopermind source and paid amount in a %s fallback receipt', async method => {
+    state.panel = { ...state.panel, provider: 'dopermind' };
+    state.snapshot = { ...state.snapshot, provider: 'dopermind' };
+    const deps = dependencies({ createPayment: vi.fn().mockResolvedValue({ provider: 'dopermind', orderCode: order.orderCode,
+      method, paid: method === 'WALLET', status: method === 'WALLET' ? 'PROCESSING' : 'PENDING_PAYMENT', totalAmount: 55000,
+      ...(method === 'PAYOS' ? { checkoutUrl: 'https://pay.payos.vn/web/owned-dopermind' } : {}) }),
+      getOrder: vi.fn().mockRejectedValue(new Error('private-status-read-failure')) });
+    const click = fixture(privateId('pay', 'CN_123456:' + method.toLowerCase()));
+    await createSupplierAutobuyInteractionHandler(deps)(click);
+    const output = JSON.stringify(click.editReply.mock.calls[0][0]);
+    expect(output).toContain('Dopermind'); expect(output).not.toContain('CDK Việt Nam'); expect(output).toContain('55.000đ');
+    expect(output).not.toContain('private-status-read-failure');
+    expect(deps.getOrder).toHaveBeenCalledExactlyOnceWith({ guildId, customerId, provider: 'dopermind', orderCode: order.orderCode });
+    expect(deps.createPayment).toHaveBeenCalledOnce();
+  });
   it('shows paid preorders waiting for source funding with automatic resumption and no second payment action', async () => {
     const deps = dependencies({ createPayment: vi.fn().mockResolvedValue({ orderCode: order.orderCode, method: 'WALLET', paid: true, status: 'PROCESSING' }),
       getOrder: vi.fn().mockResolvedValue({ ...order, paymentStatus: 'PAID', status: 'PROCESSING', deliveryStatus: 'WAITING_SUPPLIER_FUNDS' }) });

@@ -18,6 +18,7 @@ const INTEGER = /^(?:0|[1-9]\d{0,3})$/;
 const PRIVATE_ACTIONS = new Set(['page', 'category', 'select', 'qty', 'qtymodal', 'confirm', 'pay', 'orders', 'order', 'orderselect', 'delivery', 'editprice', 'pricemodal']);
 const TICKET_ACTIONS = new Set(['pay', 'order', 'delivery']);
 const PRIVATE_VIEW_ACTIONS = new Set(['page', 'category', 'select', 'orders', 'order', 'orderselect']);
+const BROWSE_ACTIONS = new Set(['catalog', 'page', 'category', 'select', 'qtymodal']);
 
 async function replyInvalid(interaction) {
   if (interaction.deferred || interaction.replied) return;
@@ -142,6 +143,12 @@ function canUpdatePrivateView(interaction, action, owner) {
     && isEphemeral(interaction.message) && sourceUser === owner && botAuthoredMessage(interaction, owner, { ephemeralWebhook: true });
 }
 
+function providerSnapshot(provider) {
+  const current = supplierAutobuyRuntime.forProvider?.(provider)?.getHealth() || supplierAutobuyRuntime.getHealth();
+  return !current?.provider || current.provider === provider ? current
+    : { status: 'NOT_STARTED', provider, purchasesEnabled: false };
+}
+
 const defaults = {
   getCatalog: async options => (await import('../services/supplierAutobuyCatalogService.js')).getSupplierOffers(options),
   prepareCheckout: async options => (await import('../services/supplierAutobuyOrderService.js')).prepareSupplierCheckout(options),
@@ -215,10 +222,7 @@ export function createSupplierAutobuyInteractionHandler(dependencies = {}) {
       if (interaction.deferred || interaction.replied) return true;
     } catch { await replyInvalid(interaction); return true; }
 
-    const currentSnapshot = supplierAutobuyRuntime.forProvider?.(scope.provider)?.getHealth()
-      || supplierAutobuyRuntime.getHealth();
-    const snapshot = !currentSnapshot?.provider || currentSnapshot.provider === scope.provider ? currentSnapshot
-      : { status: 'NOT_STARTED', provider: scope.provider, purchasesEnabled: false };
+    const snapshot = providerSnapshot(scope.provider);
     // Existing paid orders remain privately retrievable while new sales pause.
     const historical = ['orders', 'order', 'orderselect', 'delivery'].includes(action);
     if (!publicAction && !historical && snapshot?.purchasesEnabled !== true) { await replyInvalid(interaction); return true; }
@@ -288,7 +292,7 @@ export function createSupplierAutobuyInteractionHandler(dependencies = {}) {
             // Read the owned persisted snapshot without polling the just-created
             // invoice again; the explicit order/status controls still reconcile.
             const order = await deps.getOrder({ ...context, orderCode }).catch(() => ({
-              orderCode, totalAmount: payment.totalAmount, status: payment.status,
+              provider: scope.provider, orderCode, totalAmount: payment.totalAmount, status: payment.status,
               paymentStatus: payment.paid ? 'PAID' : 'UNPAID',
             }));
             payload = await presentation.buildSupplierPaymentView({ order, customerId: context.customerId, payment, ticketContext: scope.kind === 'ticket' });
@@ -335,9 +339,19 @@ export function createSupplierAutobuyInteractionHandler(dependencies = {}) {
     try {
       // A slower prior navigation must not overwrite the latest selected view.
       if (navigation && !navigation.current()) return true;
-      const attachments = [...(payload.files || []), ...(files || [])];
-      const send = () => interaction.editReply({ components: payload.components, flags: MessageFlags.IsComponentsV2, allowedMentions: NO_MENTIONS,
-        ...(inPlace ? { attachments: [] } : {}), ...(attachments.length ? { files: attachments } : {}) });
+      const send = () => {
+        let currentPayload = payload;
+        if (BROWSE_ACTIONS.has(action) && snapshot?.purchasesEnabled === true) {
+          const latest = providerSnapshot(scope.provider);
+          if (latest?.purchasesEnabled !== true) currentPayload = presentation.buildSupplierAutobuyReply({
+            client: interaction.client, snapshot: latest, action: 'catalog', provider: scope.provider,
+            ...(CUSTOMER_ID.test(interaction.user?.id || '') ? { customerId: interaction.user.id } : {}),
+          });
+        }
+        const attachments = [...(currentPayload.files || []), ...(files || [])];
+        return interaction.editReply({ components: currentPayload.components, flags: MessageFlags.IsComponentsV2, allowedMentions: NO_MENTIONS,
+          ...(inPlace ? { attachments: [] } : {}), ...(attachments.length ? { files: attachments } : {}) });
+      };
       const receipt = navigation ? await navigation.publish(send) : await send();
       if (action === 'delivery' && files?.length) {
         await deps.acknowledgeDelivery({ ...dataContext(interaction, scope.provider), orderCode: args[0], messageId: receipt?.id, channelId: interaction.channelId });

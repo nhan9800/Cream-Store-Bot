@@ -1,10 +1,10 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MessageFlags, PermissionsBitField } from 'discord.js';
 
-const state = vi.hoisted(() => ({ quoteView: vi.fn(), catalogView: vi.fn(), noticeView: vi.fn() }));
+const state = vi.hoisted(() => ({ quoteView: vi.fn(), catalogView: vi.fn(), noticeView: vi.fn(), replyView: vi.fn(), enabled: {} }));
 vi.mock('../src/config.js', () => ({ config: { guildId: '1282637033340403754' } }));
 vi.mock('../src/services/supplierAutobuyRuntime.js', () => ({ supplierAutobuyRuntime: {
-  forProvider: provider => ({ getHealth: () => ({ provider, purchasesEnabled: true }) }),
+  forProvider: provider => ({ getHealth: () => ({ provider, purchasesEnabled: state.enabled[provider] ?? true }) }),
 } }));
 vi.mock('../src/services/supplierAutobuyPanelService.js', () => ({
   getSupplierAutobuyPanelHealth: provider => ({ status: 'READY', provider,
@@ -13,6 +13,7 @@ vi.mock('../src/services/supplierAutobuyPanelService.js', () => ({
   buildSupplierQuoteView: options => state.quoteView(options),
   buildSupplierCatalogView: options => state.catalogView(options),
   buildSupplierNoticeView: options => state.noticeView(options),
+  buildSupplierAutobuyReply: options => state.replyView(options),
   buildSupplierOrderListView: () => view('orders'),
   buildSupplierPaymentView: async options => view(`order:${options.order.orderCode}`),
   buildSupplierOrderView: () => view('order'),
@@ -43,9 +44,11 @@ function fixture(action = 'select', patch = {}) {
 }
 beforeEach(() => {
   vi.stubEnv('ENV_FILE', '.env'); vi.clearAllMocks();
+  state.enabled = {};
   state.quoteView.mockImplementation(options => view(`quote:${options.quote.quoteId}`));
   state.catalogView.mockImplementation(options => view(`catalog:${options.page}`));
   state.noticeView.mockImplementation(options => view(options.title));
+  state.replyView.mockImplementation(options => view(`paused:${options.provider}`));
 });
 afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); });
 
@@ -230,5 +233,52 @@ describe('AutoBuy interaction responsiveness', () => {
     const selected = fixture('select', { client: first.client, deferUpdate: vi.fn(async () => {}) }); const latest = handler(selected);
     await vi.waitFor(() => expect(state.quoteView).toHaveBeenCalledOnce()); publishing.reject(new Error('Unknown edit result'));
     await Promise.all([old, latest]); expect(selected.editReply).toHaveBeenCalledOnce();
+  });
+  it.each(['catalog', 'page', 'category', 'select', 'qtymodal'])
+    ('rechecks provider readiness after a pending %s view without publishing stale sale controls', async action => {
+      const read = pending(), getCatalog = vi.fn(() => read.promise), prepareCheckout = vi.fn(() => read.promise);
+      const args = action === 'page' ? '0:0' : action === 'qtymodal' ? encodeURIComponent(productKey) : '';
+      const click = fixture(action, { customId: action === 'catalog' ? 'supplier-autobuy:catalog' : control(action, args),
+        deferUpdate: vi.fn(async () => {}), isModalSubmit: () => action === 'qtymodal',
+        isButton: () => ['catalog', 'page'].includes(action), isStringSelectMenu: () => ['category', 'select'].includes(action),
+        values: [action === 'category' ? '0' : productKey], fields: { getTextInputValue: () => '1' } });
+      if (action === 'catalog') click.message = { id: '1569729568695255211', author: { id: botId }, flags: 0 };
+      const work = createSupplierAutobuyInteractionHandler({ getCatalog, prepareCheckout })(click);
+      await vi.waitFor(() => expect(['select', 'qtymodal'].includes(action) ? prepareCheckout : getCatalog).toHaveBeenCalledOnce());
+      state.enabled.cdkvietnam = false; read.resolve(['select', 'qtymodal'].includes(action) ? { quoteId, productKey } : { offers: [] });
+      await work;
+      expect(JSON.stringify(click.editReply.mock.calls[0][0].components)).toContain('paused:cdkvietnam');
+      expect(state.replyView).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ provider: 'cdkvietnam', action: 'catalog',
+        customerId: userId, snapshot: expect.objectContaining({ purchasesEnabled: false }) }));
+    });
+  it('checks readiness after an earlier private edit finishes, immediately before publishing the queued next view', async () => {
+    const firstEdit = pending(), first = fixture('page', { customId: control('page', '0:0'), deferUpdate: vi.fn(async () => {}),
+      editReply: vi.fn(() => firstEdit.promise) });
+    const handler = createSupplierAutobuyInteractionHandler({ getCatalog: async () => ({ offers: [] }), prepareCheckout: async () => ({ quoteId, productKey }) });
+    const prior = handler(first); await vi.waitFor(() => expect(first.editReply).toHaveBeenCalledOnce());
+    const selected = fixture('select', { client: first.client, deferUpdate: vi.fn(async () => {}) });
+    const next = handler(selected); await vi.waitFor(() => expect(state.quoteView).toHaveBeenCalledOnce());
+    state.enabled.cdkvietnam = false; firstEdit.resolve({ id: first.message.id }); await Promise.all([prior, next]);
+    expect(JSON.stringify(selected.editReply.mock.calls[0][0].components)).toContain('paused:cdkvietnam');
+  });
+  it.each(['orders', 'order'])('keeps owned %s readable when its source pauses during the read', async action => {
+    const read = pending(), click = fixture(action, { customId: control(action, action === 'order' ? 'CN_123456' : ''),
+      deferUpdate: vi.fn(async () => {}) });
+    const listOrders = vi.fn(() => read.promise), getOrder = vi.fn(() => read.promise);
+    const work = createSupplierAutobuyInteractionHandler({ listOrders, getOrder })(click);
+    await vi.waitFor(() => expect(action === 'orders' ? listOrders : getOrder).toHaveBeenCalledOnce());
+    state.enabled.cdkvietnam = false; read.resolve(action === 'orders' ? [] : { orderCode: 'CN_123456' }); await work;
+    expect(click.editReply).toHaveBeenCalledOnce(); expect(state.replyView).not.toHaveBeenCalled();
+    expect(JSON.stringify(click.editReply.mock.calls[0][0].components)).toContain(action === 'orders' ? 'orders' : 'CN_123456');
+  });
+  it('keeps a known successful payment receipt visible if the source pauses before the payment response resolves', async () => {
+    const completed = pending(), createPayment = vi.fn(() => completed.promise), getOrder = vi.fn(async () => ({ provider: 'cdkvietnam', orderCode: 'CN_123456' }));
+    const click = fixture('pay', { customId: control('pay', 'CN_123456:wallet'), deferUpdate: vi.fn(async () => {}) });
+    const work = createSupplierAutobuyInteractionHandler({ createPayment, getOrder })(click);
+    await vi.waitFor(() => expect(createPayment).toHaveBeenCalledOnce());
+    state.enabled.cdkvietnam = false; completed.resolve({ provider: 'cdkvietnam', orderCode: 'CN_123456', paid: true, totalAmount: 55000 }); await work;
+    expect(click.editReply).toHaveBeenCalledOnce(); expect(state.replyView).not.toHaveBeenCalled();
+    expect(JSON.stringify(click.editReply.mock.calls[0][0].components)).toContain('CN_123456');
+    expect(getOrder).toHaveBeenCalledExactlyOnceWith({ ...context, orderCode: 'CN_123456' });
   });
 });
