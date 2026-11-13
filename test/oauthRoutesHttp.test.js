@@ -25,7 +25,8 @@ async function fixture(options = {}) {
     token_expires_at TEXT,username TEXT,email TEXT,avatar TEXT,scopes TEXT,recovery_consent_at TEXT,verified_at TEXT,UNIQUE(discord_id,guild_id));`);
   let time = Date.parse('2026-11-14T02:00:00Z');
   const role = { id: '1282638730812854345', name: 'Cenar Explorer', position: 1, permissions: 0n, editable: true };
-  const member = { id: userId, roles: { cache: new Collection(), add: vi.fn(async () => { member.roles.cache.set(role.id, role); }) }, send: vi.fn(async () => ({})) };
+  const member = { id: userId, guild: { id: guildId }, roles: { cache: new Collection(), add: vi.fn(async () => { member.roles.cache.set(role.id, role); }) },
+    send: vi.fn(async () => ({ id: '1555555555555555555' })) };
   const guild = { id: guildId, name: 'Cenar Store', roles: { cache: new Collection([[role.id, role]]) }, members: { fetch: vi.fn(async () => member) } };
   const client = { isReady: () => true, guilds: { fetch: vi.fn(async () => guild) } };
   const fetchImpl = options.fetchImpl || vi.fn(async url => url.endsWith('/token')
@@ -63,6 +64,144 @@ function jar() {
 }
 
 describe('real HTTP OAuth callback rate/replay handling', () => {
+  it('serializes same-member completions through fresh membership and leaves the later queued grant canonical', async () => {
+    let issued = 0;
+    const fetchImpl = vi.fn(async url => url.endsWith('/token')
+      ? Response.json({ access_token: `access-${++issued}`, refresh_token: `refresh-${issued}`, scope: 'identify guilds.join', expires_in: 3600 })
+      : Response.json({ id: userId, username: 'synthetic-user' }));
+    const t = await fixture({ fetchImpl });
+    let release; const gate = new Promise(resolve => { release = resolve; });
+    t.guild.members.fetch.mockImplementationOnce(async () => { await gate; return t.member; }).mockResolvedValue(t.member);
+    const first = t.callback(t.state());
+    await vi.waitFor(() => expect(t.guild.members.fetch).toHaveBeenCalledOnce());
+    t.advance(1); const second = t.callback(t.state());
+    await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledTimes(4));
+    expect(t.guild.members.fetch).toHaveBeenCalledOnce();
+    release(); const results = await Promise.all([first, second]);
+    expect(results.map(result => result.status)).toEqual([200, 200]);
+    expect(t.database.prepare('SELECT access_token,refresh_token FROM oauth_backups').get()).toEqual({
+      access_token: `enc:v1:${Buffer.from('access-2').toString('base64')}`, refresh_token: `enc:v1:${Buffer.from('refresh-2').toString('base64')}` });
+    expect(t.guild.members.fetch.mock.calls).toEqual([[{ user: userId, force: true }], [{ user: userId, force: true }]]);
+    expect(t.member.send).toHaveBeenCalledOnce();
+  });
+  it('keeps another member completion independent of a stalled membership read', async () => {
+    const otherId = '1138315103821889567'; let profiles = 0;
+    const fetchImpl = vi.fn(async url => url.endsWith('/token')
+      ? Response.json({ access_token: 'access', refresh_token: 'refresh', scope: 'identify guilds.join', expires_in: 3600 })
+      : Response.json({ id: ++profiles === 1 ? userId : otherId, username: 'synthetic-user' }));
+    const t = await fixture({ fetchImpl });
+    const other = { ...t.member, id: otherId, roles: { cache: new Collection(), add: vi.fn(async () => {}) }, send: vi.fn(async () => ({ id: '1555555555555555556' })) };
+    let release; const gate = new Promise(resolve => { release = resolve; });
+    t.guild.members.fetch.mockImplementation(async ({ user }) => { if (user === userId) { await gate; return t.member; } return other; });
+    const first = t.callback(t.state()); await vi.waitFor(() => expect(t.guild.members.fetch).toHaveBeenCalledOnce());
+    expect((await t.callback(t.state())).status).toBe(200); expect(other.send).toHaveBeenCalledOnce();
+    expect(t.member.send).not.toHaveBeenCalled(); release(); expect((await first).status).toBe(200);
+  });
+  it('releases a failed member turn so a queued valid callback can finish', async () => {
+    const t = await fixture(); let release; const gate = new Promise(resolve => { release = resolve; });
+    t.guild.members.fetch.mockImplementationOnce(async () => { await gate; return null; }).mockResolvedValue(t.member);
+    const first = t.callback(t.state()); await vi.waitFor(() => expect(t.guild.members.fetch).toHaveBeenCalledOnce());
+    const next = t.callback(t.state()); await vi.waitFor(() => expect(t.fetchImpl).toHaveBeenCalledTimes(4));
+    release(); expect((await first).status).toBe(400); expect((await next).status).toBe(200);
+    expect(t.member.send).toHaveBeenCalledOnce();
+  });
+  it('returns successful callbacks and releases the member turn while an optional welcome is still pending', async () => {
+    const t = await fixture(); let release; const gate = new Promise(resolve => { release = resolve; });
+    t.member.roles.add.mockResolvedValue(t.member); // Gateway role cache stays stale.
+    t.member.send.mockImplementation(() => gate);
+    let firstResponse, secondResponse;
+    const first = t.callback(t.state()).then(value => { firstResponse = value; return value; });
+    await vi.waitFor(() => expect(t.member.send).toHaveBeenCalledOnce());
+    const second = t.callback(t.state()).then(value => { secondResponse = value; return value; });
+    try {
+      await vi.waitFor(() => {
+        expect(firstResponse?.status).toBe(200); expect(secondResponse?.status).toBe(200);
+      }, { timeout: 200 });
+      expect(t.member.send).toHaveBeenCalledOnce();
+      expect(t.database.prepare('SELECT status,message_id FROM oauth_verification_welcomes').get()).toEqual({ status: 'SENDING', message_id: null });
+    } finally { release({ id: '1555555555555555555' }); await Promise.all([first, second]); }
+    await vi.waitFor(() => expect(t.database.prepare('SELECT status,message_id FROM oauth_verification_welcomes').get())
+      .toEqual({ status: 'SENT', message_id: '1555555555555555555' }));
+  });
+  it('durably coalesces optional welcomes despite a stale Gateway cache, including a route restart', async () => {
+    const t = await fixture(), role = t.guild.roles.cache.first();
+    t.member.roles.add.mockImplementation(async () => ({ ...t.member, roles: { cache: new Collection([[role.id, role]]) } }));
+    expect((await t.callback(t.state())).status).toBe(200); expect((await t.callback(t.state())).status).toBe(200);
+    expect(t.member.send).toHaveBeenCalledOnce();
+    const restarted = await fixture({ database: t.database });
+    expect((await restarted.callback(restarted.state())).status).toBe(200); expect(restarted.member.send).not.toHaveBeenCalled();
+    const journal = t.database.prepare('SELECT * FROM oauth_verification_welcomes').get();
+    expect(journal).toMatchObject({ client_id: clientId, store: 'store1', guild_id: guildId, discord_id: userId,
+      status: 'SENT', message_id: '1555555555555555555' });
+    expect(JSON.stringify(journal)).not.toMatch(/access-|refresh-|synthetic-access|synthetic-refresh|synthetic-code/);
+    expect(t.member.send.mock.calls[0][0]).toMatchObject({ nonce: expect.any(String), enforceNonce: true, allowedMentions: { parse: [] } });
+  });
+  it('snapshots the confirmed role from discord.js returned member while Gateway cache is stale', async () => {
+    const t = await fixture(), role = t.guild.roles.cache.first();
+    const updated = { ...t.member, roles: { cache: new Collection([[role.id, role]]) } };
+    t.member.roles.add.mockResolvedValue(updated);
+    expect((await t.callback(t.state())).status).toBe(200);
+    expect(t.updateMemberSnapshot).toHaveBeenCalledWith(guildId, updated);
+  });
+  it.each(['failure', 'unknown', 'interrupted'])('holds an optional welcome after an uncertain %s without blind retry', async kind => {
+    const t = await fixture();
+    t.member.roles.add.mockResolvedValue(t.member); // Keep Gateway cache stale.
+    if (kind === 'failure') t.member.send.mockRejectedValue(new Error('secret-provider-error'));
+    if (kind === 'unknown') t.member.send.mockResolvedValue({});
+    if (kind === 'interrupted') {
+      await t.callback(t.state());
+      t.database.prepare("UPDATE oauth_verification_welcomes SET status='SENDING',message_id=NULL").run();
+      t.member.send.mockClear();
+    }
+    expect((await t.callback(t.state())).status).toBe(200); expect((await t.callback(t.state())).status).toBe(200);
+    expect(t.member.send).toHaveBeenCalledTimes(kind === 'interrupted' ? 0 : 1);
+    const entry = t.database.prepare('SELECT status,message_id FROM oauth_verification_welcomes').get();
+    expect(entry).toEqual({ status: kind === 'interrupted' ? 'SENDING' : 'UNKNOWN', message_id: null });
+    expect(JSON.stringify(console.warn.mock.calls)).not.toContain('secret-provider-error');
+  });
+  it.each(['revoked', 'deleted', 'new-grant'])('does not override a canonical %s during the membership wait', async kind => {
+    const t = await fixture();
+    t.database.prepare(`INSERT INTO oauth_backups(discord_id,guild_id,access_token,refresh_token,scopes,recovery_consent_at,verified_at)
+      VALUES(?,?,'enc:previous-access','enc:previous-refresh','identify guilds.join','previous-consent','previous-verify')`).run(userId,guildId);
+    let changed;
+    t.guild.members.fetch.mockImplementation(async () => {
+      if (kind === 'revoked') t.database.prepare('UPDATE oauth_backups SET recovery_consent_at=NULL').run();
+      if (kind === 'deleted') t.database.prepare('DELETE FROM oauth_backups').run();
+      if (kind === 'new-grant') t.database.prepare("UPDATE oauth_backups SET access_token='enc:new-grant',refresh_token='enc:new-refresh'").run();
+      changed = t.database.prepare('SELECT * FROM oauth_backups').get();
+      return t.member;
+    });
+    expect((await t.callback(t.state())).status).toBe(409);
+    expect(t.database.prepare('SELECT * FROM oauth_backups').get()).toEqual(changed);
+    expect(t.member.roles.add).not.toHaveBeenCalled(); expect(t.member.send).not.toHaveBeenCalled();
+    expect(t.updateMemberSnapshot).not.toHaveBeenCalled(); expect(t.snapshotGuild).not.toHaveBeenCalled();
+  });
+  it('does not welcome or snapshot when consent changes while the role PUT is pending', async () => {
+    const t = await fixture();
+    t.member.roles.add.mockImplementation(async () => { t.database.prepare('UPDATE oauth_backups SET recovery_consent_at=NULL').run(); });
+    expect((await t.callback(t.state())).status).toBe(409);
+    expect(t.database.prepare('SELECT recovery_consent_at FROM oauth_backups').get().recovery_consent_at).toBeNull();
+    expect(t.member.send).not.toHaveBeenCalled(); expect(t.updateMemberSnapshot).not.toHaveBeenCalled();
+  });
+  it.each([
+    { access_token: '   ' }, { refresh_token: '\t ' }, { scope: ['identify', 'guilds.join'] },
+    { scope: 'identify' }, { expires_in: true }, { expires_in: null }, { expires_in: -1 }, { expires_in: 31536001 },
+  ])('rejects malformed token metadata before profile or member effects: %j', async patch => {
+    const fetchImpl = vi.fn(async () => Response.json({ access_token: 'synthetic-access', refresh_token: 'synthetic-refresh',
+      scope: 'identify guilds.join', expires_in: 3600, ...patch }));
+    const t = await fixture({ fetchImpl }); expect((await t.callback(t.state())).status).toBe(502);
+    expect(fetchImpl).toHaveBeenCalledOnce(); expect(t.guild.members.fetch).not.toHaveBeenCalled(); expect(t.member.send).not.toHaveBeenCalled();
+    expect(t.database.prepare('SELECT COUNT(*) AS n FROM oauth_backups').get().n).toBe(0);
+  });
+  it.each(['guild', 'member', 'member-guild'])('rejects an incorrectly bound %s before consent or roles', async kind => {
+    const t = await fixture();
+    if (kind === 'guild') t.guild.id = '1282637033340403755';
+    if (kind === 'member') t.member.id = '1138315103821889567';
+    if (kind === 'member-guild') t.member.guild.id = '1282637033340403755';
+    expect((await t.callback(t.state())).status).toBe(400);
+    expect(t.database.prepare('SELECT COUNT(*) AS n FROM oauth_backups').get().n).toBe(0);
+    expect(t.member.roles.add).not.toHaveBeenCalled(); expect(t.member.send).not.toHaveBeenCalled();
+  });
   it('reuses a browser flow across login tabs using an OAuth-wide cookie without dropping requested scopes', async () => {
     const t = await fixture(), browser = jar();
     const first = await t.request('/oauth/login'); browser.absorb(first);

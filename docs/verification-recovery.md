@@ -25,6 +25,20 @@ resolve its fallback, without shortening a newer concurrent provider wait.
 There is no automatic token POST retry and no raw provider-body logging. Success
 body reads retain the request deadline and a bounded response size.
 
+After Discord returns a validated member identity, completion is serialized
+per application/store/guild/member. Each turn force-fetches the current member
+and compares the canonical grant/consent version before storing tokens or
+continuing after role I/O. A newer grant, deletion or revoked consent aborts
+the older completion. Queued callbacks take their own baseline when their
+turn begins, so a later valid completion can store its token pair normally.
+Role snapshots never create or renew OAuth consent.
+
+Optional welcome DMs have a durable per-member/verification-role claim and a
+deterministic nonce. Browser success and the next completion do not wait for
+that DM. Positive receipts are recorded; uncertain or failed welcomes are
+held without automatic resends. This journal is delivery metadata, not proof
+that a member received or read a welcome.
+
 The browser success response no longer waits for a guild recovery snapshot.
 The existing per-guild snapshot lock and 30-minute freshness guard still apply.
 These changes control our requests; they do not prove whether Discord has

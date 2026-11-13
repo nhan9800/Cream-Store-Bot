@@ -1,6 +1,6 @@
 import { config } from '../config.js';
 import { db } from '../database/db.js';
-import { timingSafeEqual } from 'node:crypto';
+import { createHash, timingSafeEqual } from 'node:crypto';
 import { encrypt } from '../utils/crypto.js';
 import {
   createOAuthState,
@@ -16,6 +16,19 @@ import { createOAuthRequestGuard, DiscordOAuthRequestError, fetchDiscordOAuthJso
 
 const defaultRequestGuard = createOAuthRequestGuard({ database: db });
 export const getOAuthRequestGuardHealth = () => defaultRequestGuard.getHealth({ clientId: config.clientId, store: currentOAuthStore() });
+const completionTurns = new Map();
+const grantVersionFields = ['access_token', 'refresh_token', 'token_expires_at', 'scopes', 'recovery_consent_at', 'verified_at'];
+const snowflake = value => typeof value === 'string' && /^\d{17,20}$/.test(value);
+class OAuthCompletionError extends Error {
+  constructor(code, status) { super('OAuth completion unavailable'); this.code = code; this.status = status; }
+}
+function serializeCompletion(key, operation) {
+  const task = (completionTurns.get(key) || Promise.resolve()).then(operation);
+  const settled = task.then(() => {}, () => {});
+  completionTurns.set(key, settled);
+  void settled.then(() => { if (completionTurns.get(key) === settled) completionTurns.delete(key); });
+  return task;
+}
 
 // So sánh key an toàn theo thời gian (chống timing attack), fail-closed nếu thiếu key.
 function safeKeyMatch(provided) {
@@ -46,6 +59,40 @@ export function registerOauthRoutes(app, { database = db, configuration = config
   updateMemberSnapshot = updateOauthMemberSnapshot, buildSuccessDm = buildVerificationSuccessDmV2,
 } = {}) {
   const scope = () => ({ clientId: configuration.clientId, store: currentOAuthStore() });
+  let completionInitialized = false;
+  const currentGrant = (guildId, discordId) => database.prepare(`SELECT access_token,refresh_token,token_expires_at,
+    scopes,recovery_consent_at,verified_at FROM oauth_backups WHERE guild_id=? AND discord_id=?`).get(guildId, discordId);
+  const sameGrant = (left, right) => !left || !right ? left === right : grantVersionFields.every(field => left[field] === right[field]);
+  function initializeCompletion() {
+    if (completionInitialized) return;
+    database.exec(`CREATE TABLE IF NOT EXISTS oauth_verification_welcomes (
+      client_id TEXT NOT NULL,store TEXT NOT NULL,guild_id TEXT NOT NULL,discord_id TEXT NOT NULL,role_id TEXT NOT NULL,
+      status TEXT NOT NULL,attempted_at TEXT NOT NULL,message_id TEXT,
+      PRIMARY KEY(client_id,store,guild_id,discord_id,role_id));`);
+    completionInitialized = true;
+  }
+  function claimWelcome(member, role, guild, identity, assertCurrentGrant) {
+    initializeCompletion();
+    const keys = [identity.clientId, identity.store, guild.id, member.id, role.id];
+    const claim = database.prepare(`INSERT INTO oauth_verification_welcomes
+      (client_id,store,guild_id,discord_id,role_id,status,attempted_at) VALUES(?,?,?,?,?,'SENDING',?)
+      ON CONFLICT(client_id,store,guild_id,discord_id,role_id) DO NOTHING`).run(...keys, new Date(now()).toISOString());
+    if (!claim.changes) return;
+    // A restart/unknown outcome never resends this optional welcome. The nonce
+    // also bounds duplicates if the transport retries this exact send.
+    const nonce = BigInt(`0x${createHash('sha256').update(JSON.stringify(keys)).digest('hex').slice(0, 16)}`).toString();
+    return async () => {
+      let receipt;
+      try {
+        assertCurrentGrant();
+        receipt = await member.send({ ...buildSuccessDm({ guildId: guild.id, guildName: guild.name, roleName: role.name }),
+          nonce, enforceNonce: true, allowedMentions: { parse: [], users: [], roles: [], repliedUser: false } });
+      } catch { console.warn('[OAuth Verify] Optional welcome delivery incomplete'); }
+      database.prepare(`UPDATE oauth_verification_welcomes SET status=?,message_id=?
+        WHERE client_id=? AND store=? AND guild_id=? AND discord_id=? AND role_id=? AND status='SENDING'`)
+        .run(snowflake(receipt?.id) ? 'SENT' : 'UNKNOWN', snowflake(receipt?.id) ? receipt.id : null, ...keys);
+    };
+  }
   const limited = (res, waitMs, local = false) => {
     const seconds = Math.max(1, Math.ceil(waitMs / 1000));
     res.setHeader('Retry-After', String(seconds));
@@ -205,14 +252,15 @@ export function registerOauthRoutes(app, { database = db, configuration = config
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' }
       });
 
-      const accessToken = tokenData.access_token;
-      const refreshToken = tokenData.refresh_token;
-      const scopes = String(tokenData.scope || '').trim();
-      if (typeof accessToken !== 'string' || !accessToken || typeof refreshToken !== 'string' || !refreshToken
+      const accessToken = tokenData?.access_token;
+      const refreshToken = tokenData?.refresh_token;
+      const scopes = typeof tokenData?.scope === 'string' ? tokenData.scope.trim() : '';
+      if (typeof accessToken !== 'string' || !accessToken.trim() || typeof refreshToken !== 'string' || !refreshToken.trim()
         || !scopes.split(/\s+/).includes('identify') || !scopes.split(/\s+/).includes('guilds.join')) {
         throw new Error('Discord không cấp đủ quyền recovery bắt buộc.');
       }
-      const expiresIn = Number(tokenData.expires_in);
+      const expiresIn = typeof tokenData.expires_in === 'number'
+        || typeof tokenData.expires_in === 'string' && /^\d+(?:\.\d+)?$/.test(tokenData.expires_in) ? Number(tokenData.expires_in) : NaN;
       if (!Number.isFinite(expiresIn) || expiresIn <= 0 || expiresIn > 31_536_000) {
         throw new Error('Discord không trả thời hạn token hợp lệ.');
       }
@@ -223,139 +271,86 @@ export function registerOauthRoutes(app, { database = db, configuration = config
         headers: { Authorization: `Bearer ${accessToken}` }
       });
 
-      if (!/^\d{17,20}$/.test(String(userProfile?.id || '')) || typeof userProfile.username !== 'string' || userProfile.bot) {
+      if (!snowflake(userProfile?.id) || typeof userProfile.username !== 'string' || !userProfile.username.trim() || userProfile.bot) {
         throw new Error('Discord không trả danh tính thành viên hợp lệ.');
       }
       const discordId = userProfile.id;
       const username = `${userProfile.username}${userProfile.discriminator && userProfile.discriminator !== '0' ? '#' + userProfile.discriminator : ''}`;
       const email = userProfile.email || null;
       const avatar = userProfile.avatar || null;
-      const resolvedGuildId = guildId;
       const discordClient = req.app.locals.discordClient;
-      const verifiedGuild = discordClient?.isReady?.()
-        ? await discordClient.guilds.fetch(guildId).catch(() => null)
-        : null;
-      const verifiedMember = verifiedGuild
-        ? await verifiedGuild.members.fetch(discordId).catch(() => null)
-        : null;
-      if (!verifiedGuild || !verifiedMember) {
-        return res.status(400).send(buildErrorPage(
-          'Không thể xác nhận thành viên',
-          'Bạn cần ở trong server Cenar Store trước khi bật recovery backup.',
-        ));
-      }
+      const identity = { ...scope(), guildId, discordId };
+      const completed = await serializeCompletion(JSON.stringify(identity), async () => {
+        // A queued callback takes its baseline only when its own turn begins.
+        // The next member's verification is independent of this user's REST.
+        const baseline = currentGrant(guildId, discordId);
+        const verifiedGuild = discordClient?.isReady?.()
+          ? await discordClient.guilds.fetch(guildId).catch(() => null) : null;
+        if (verifiedGuild?.id !== guildId) throw new OAuthCompletionError('MEMBER_UNVERIFIED', 400);
+        const verifiedMember = await verifiedGuild.members.fetch({ user: discordId, force: true }).catch(() => null);
+        if (verifiedMember?.id !== discordId || verifiedMember.guild?.id !== guildId || verifiedMember.partial === true
+          || typeof verifiedMember.roles?.cache?.has !== 'function') throw new OAuthCompletionError('MEMBER_UNVERIFIED', 400);
 
-      // Save user to database oauth_backups
-      database.prepare(`
-        INSERT INTO oauth_backups (
-          discord_id, guild_id, access_token, refresh_token, token_expires_at,
-          username, email, avatar, scopes, recovery_consent_at, verified_at
-        )
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-        ON CONFLICT(discord_id, guild_id) DO UPDATE SET
-          access_token     = excluded.access_token,
-          refresh_token    = excluded.refresh_token,
-          token_expires_at = excluded.token_expires_at,
-          username         = excluded.username,
-          email            = excluded.email,
-          avatar           = excluded.avatar,
-          scopes           = excluded.scopes,
-          recovery_consent_at = CURRENT_TIMESTAMP,
-          verified_at      = CURRENT_TIMESTAMP
-      `).run(
-        discordId,
-        resolvedGuildId,
-        encryptTokens(accessToken),
-        encryptTokens(refreshToken),
-        tokenExpiresAt,
-        username,
-        email,
-        avatar,
-        scopes,
-      );
-
-      console.log(`[OAuth Verify] OAuth callback validated and recovery consent stored: ${username} (${discordId})`);
-
-      // Assign verified role in the target guild
-      let roleGranted = false;
-      let assignedRoleName = '';
-      let errorMsg = '';
-      let guildName = '';
-
-      if (discordClient && guildId) {
-        try {
-          const guild = verifiedGuild;
-          if (guild) {
-            guildName = guild.name;
-            const member = verifiedMember;
-            if (member) {
-              // Customer/VIP roles must never count as account verification.
-              // This role is resolved only after the OAuth callback was validated.
-              const role = resolveVerificationRole(guild);
-              
-              if (role) {
-                const alreadyHadRole = member.roles.cache.has(role.id);
-                // Check if already has the role
-                if (!alreadyHadRole) {
-                  await member.roles.add(role);
-                  roleGranted = true;
-                  assignedRoleName = role.name;
-                  console.log(`[OAuth Verify] Assigned role "${role.name}" to ${username} in ${guild.name}`);
-                } else {
-                  // Already has the role — still count as success
-                  roleGranted = true;
-                  assignedRoleName = role.name;
-                  console.log(`[OAuth Verify] ${username} already has role "${role.name}" in ${guild.name}`);
-                }
-
-                // ─── Gửi DM chào mừng sau khi verify thành công ───
-                try {
-                  if (!alreadyHadRole) {
-                  await member.send(buildSuccessDm({
-                    guildId,
-                    guildName: guild.name,
-                    roleName: role.name,
-                  })).catch(() => {
-                    // DM có thể bị tắt — không phải lỗi nghiêm trọng
-                    console.log(`[OAuth Verify] DM disabled for ${username}, skipping.`);
-                  });
-                  }
-                } catch (dmErr) {
-                  console.warn('[OAuth Verify] DM send failed:', dmErr.message);
-                }
-
-              } else {
-                console.warn(`[OAuth Verify] Verification role not found in guild ${guild.name}`);
-                errorMsg = 'Không tìm thấy vai trò xác minh trong server.';
-              }
-              updateMemberSnapshot(guildId, member);
-            } else {
-              console.warn(`[OAuth Verify] Member ${discordId} not in guild ${guild.name}`);
-              errorMsg = 'Bạn chưa vào server Discord. Hãy join server trước rồi thử lại.';
+        const grant = database.transaction(() => {
+          if (!sameGrant(baseline, currentGrant(guildId, discordId))) throw new OAuthCompletionError('COMPLETION_CHANGED', 409);
+          database.prepare(`INSERT INTO oauth_backups (
+            discord_id,guild_id,access_token,refresh_token,token_expires_at,username,email,avatar,scopes,recovery_consent_at,verified_at)
+            VALUES(?,?,?,?,?,?,?,?,?,CURRENT_TIMESTAMP,CURRENT_TIMESTAMP)
+            ON CONFLICT(discord_id,guild_id) DO UPDATE SET access_token=excluded.access_token,refresh_token=excluded.refresh_token,
+            token_expires_at=excluded.token_expires_at,username=excluded.username,email=excluded.email,avatar=excluded.avatar,
+            scopes=excluded.scopes,recovery_consent_at=CURRENT_TIMESTAMP,verified_at=CURRENT_TIMESTAMP`)
+            .run(discordId,guildId,encryptTokens(accessToken),encryptTokens(refreshToken),tokenExpiresAt,username,email,avatar,scopes);
+          return currentGrant(guildId, discordId);
+        }).immediate();
+        const assertCurrentGrant = () => {
+          if (!sameGrant(grant, currentGrant(guildId, discordId))) throw new OAuthCompletionError('COMPLETION_CHANGED', 409);
+        };
+        let roleGranted = false, assignedRoleName = '', errorMsg = '', snapshotMember = verifiedMember, welcome;
+        const role = resolveVerificationRole(verifiedGuild);
+        if (role) {
+          const alreadyHadRole = verifiedMember.roles.cache.has(role.id);
+          try {
+            assertCurrentGrant();
+            if (!alreadyHadRole) {
+              const updated = await verifiedMember.roles.add(role);
+              // Singular discord.js PUT returns a clone before Gateway updates
+              // the original member; retain that confirmed role in the backup.
+              if (updated?.id === discordId && updated.guild?.id === guildId && updated.roles?.cache?.has(role.id)) snapshotMember = updated;
             }
-          } else {
-            console.warn(`[OAuth Verify] Guild ${guildId} not found`);
-            errorMsg = 'Không tìm thấy server Discord.';
+            // A consent change while Discord awaited its role response must not
+            // trigger a welcome or a later recovery snapshot from this callback.
+            assertCurrentGrant();
+            roleGranted = true; assignedRoleName = role.name;
+            if (!alreadyHadRole) welcome = claimWelcome(verifiedMember, role, verifiedGuild, identity, assertCurrentGrant);
+            assertCurrentGrant();
+          } catch (error) {
+            if (error instanceof OAuthCompletionError) throw error;
+            console.warn('[OAuth Verify] Verification role update incomplete');
+            errorMsg = 'Chưa cấp được vai trò xác minh. Vui lòng liên hệ hỗ trợ.';
           }
-        } catch (err) {
-          console.error('[OAuth Verify] Error assigning role:', err.message);
-          errorMsg = `Lỗi cấp quyền: ${err.message}`;
-        }
-      } else {
-        errorMsg = 'Bot đang khởi động hoặc server không hợp lệ. Vui lòng thử lại sau vài giây.';
-      }
-
-      // Render success/partial success page
+        } else errorMsg = 'Không tìm thấy vai trò xác minh trong server.';
+        assertCurrentGrant();
+        updateMemberSnapshot(guildId, snapshotMember);
+        return { verifiedGuild, roleGranted, assignedRoleName, errorMsg, welcome };
+      });
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
-      res.send(buildSuccessPage(username, roleGranted, assignedRoleName, errorMsg, guildName));
-      if (roleGranted) {
-        // The existing recovery service coalesces per guild and retains its
-        // 30-minute freshness window; backups never delay browser success.
-        void Promise.resolve().then(() => snapshotGuild(verifiedGuild))
+      res.send(buildSuccessPage(username, completed.roleGranted, completed.assignedRoleName, completed.errorMsg, completed.verifiedGuild.name));
+      if (completed.welcome) {
+        // The optional DM cannot keep the successful browser response or the
+        // next same-member callback waiting on Discord's REST cooldowns.
+        void Promise.resolve().then(completed.welcome).catch(() => console.warn('[OAuth Verify] Optional welcome receipt incomplete'));
+      }
+      if (completed.roleGranted) {
+        void Promise.resolve().then(() => snapshotGuild(completed.verifiedGuild))
           .catch(() => console.warn('[RECOVERY] OAuth snapshot refresh incomplete'));
       }
 
     } catch (err) {
+      if (err instanceof OAuthCompletionError) {
+        return res.status(err.status).send(buildErrorPage(err.code === 'MEMBER_UNVERIFIED' ? 'Không thể xác nhận thành viên' : 'Phiên xác minh đã thay đổi',
+          err.code === 'MEMBER_UNVERIFIED' ? 'Bạn cần ở trong đúng server Cenar Store trước khi bật recovery backup.'
+            : 'Quyền recovery đã thay đổi trong lúc xác minh. Chưa gửi thêm thông báo; hãy mở một phiên mới nếu bạn muốn cấp quyền lại.'));
+      }
       if (err instanceof DiscordOAuthRequestError && err.code === 'RATE_LIMITED') {
         console.warn('[OAuth Verify] Discord rate limited; cooldown recorded');
         return limited(res, requestGuard.retryAfter(scope()) || err.retryAfterMs);

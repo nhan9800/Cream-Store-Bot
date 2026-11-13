@@ -5,10 +5,10 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 
 const fixtures = vi.hoisted(() => ({
   config: { clientId: '1382729296724099132', guildId: '1282637033340403754', publicBaseUrl: 'https://api.example.test/' },
-  run: vi.fn(), snapshot: vi.fn().mockResolvedValue(undefined), memberSnapshot: vi.fn(),
+  snapshot: vi.fn().mockResolvedValue(undefined), memberSnapshot: vi.fn(),
 }));
 vi.mock('../src/config.js', () => ({ config: fixtures.config }));
-vi.mock('../src/database/db.js', () => ({ db: { prepare: vi.fn(() => ({ run: fixtures.run })) } }));
+vi.mock('../src/database/db.js', () => ({ db: {} }));
 vi.mock('../src/utils/crypto.js', () => ({ encrypt: (value) => `encrypted:${value}` }));
 vi.mock('../src/services/guildRecoveryService.js', () => ({ snapshotGuildForRecovery: fixtures.snapshot, updateOauthMemberSnapshot: fixtures.memberSnapshot }));
 vi.mock('../src/services/verificationPanelService.js', () => ({ buildVerificationSuccessDmV2: () => ({ content: 'Verified test' }) }));
@@ -23,12 +23,16 @@ const guildId = fixtures.config.guildId;
 const memberId = '200000000000000001';
 let server, base, guild, member, upstream;
 let guardDatabase;
+const backupCount = () => guardDatabase.prepare('SELECT COUNT(*) AS n FROM oauth_backups').get().n;
 
 beforeAll(async () => {
   const app = express();
   app.locals.discordClient = { isReady: () => true, guilds: { fetch: async (id) => id === guildId ? guild : null } };
   guardDatabase = new Database(':memory:');
-  registerOauthRoutes(app, { requestGuard: createOAuthRequestGuard({ database: guardDatabase }) });
+  guardDatabase.exec(`CREATE TABLE oauth_backups(discord_id TEXT,guild_id TEXT,access_token TEXT,refresh_token TEXT,
+    token_expires_at TEXT,username TEXT,email TEXT,avatar TEXT,scopes TEXT,recovery_consent_at TEXT,verified_at TEXT,
+    UNIQUE(discord_id,guild_id));`);
+  registerOauthRoutes(app, { database: guardDatabase, requestGuard: createOAuthRequestGuard({ database: guardDatabase }) });
   server = app.listen(0, '127.0.0.1');
   await new Promise((resolve) => server.once('listening', resolve));
   base = `http://127.0.0.1:${server.address().port}`;
@@ -42,8 +46,11 @@ beforeEach(() => {
   vi.spyOn(console, 'log').mockImplementation(() => {});
   vi.spyOn(console, 'warn').mockImplementation(() => {});
   vi.spyOn(console, 'error').mockImplementation(() => {});
-  fixtures.run.mockClear(); fixtures.snapshot.mockClear(); fixtures.memberSnapshot.mockClear();
-  member = { roles: { cache: new Collection(), add: vi.fn().mockResolvedValue(undefined) }, send: vi.fn().mockResolvedValue(undefined) };
+  fixtures.snapshot.mockClear(); fixtures.memberSnapshot.mockClear();
+  guardDatabase.prepare('DELETE FROM oauth_backups').run();
+  if (guardDatabase.prepare("SELECT 1 FROM sqlite_master WHERE name='oauth_verification_welcomes'").get()) guardDatabase.exec('DELETE FROM oauth_verification_welcomes');
+  member = { id: memberId, guild: { id: guildId }, roles: { cache: new Collection(), add: vi.fn().mockResolvedValue(undefined) },
+    send: vi.fn().mockResolvedValue({ id: '1555555555555555555' }) };
   const role = { id: '1282638730812854345', name: '⌘ Cenar Explorer', managed: false, position: 5, permissions: new PermissionsBitField(67108864n) };
   guild = { id: guildId, name: 'Cenar test', roles: { cache: new Collection([[role.id, role]]) }, members: {
     me: { permissions: new PermissionsBitField(PermissionFlagsBits.ManageRoles), roles: { highest: { position: 37 } } },
@@ -85,7 +92,8 @@ describe('verification callback integrity and delivery', () => {
     const r = await callback({ extraCookie: '; unrelated=%E0%A4%A' });
     expect(r.status).toBe(200);
     expect(member.roles.add).toHaveBeenCalledWith(guild.roles.cache.first());
-    expect(fixtures.run).toHaveBeenCalledWith(memberId, guildId, 'encrypted:access-test', 'encrypted:refresh-test', expect.any(String), 'Test Member', null, null, 'identify guilds.join');
+    expect(guardDatabase.prepare('SELECT * FROM oauth_backups').get()).toMatchObject({ discord_id: memberId, guild_id: guildId,
+      access_token: 'encrypted:access-test', refresh_token: 'encrypted:refresh-test', username: 'Test Member', scopes: 'identify guilds.join' });
     expect(member.send).toHaveBeenCalledTimes(1);
     expect(r.headers.get('cache-control')).toContain('no-store');
     expect(await r.text()).toContain('Xác Minh Thành Công');
@@ -101,13 +109,13 @@ describe('verification callback integrity and delivery', () => {
     });
     if (kind === 'tampered') state += 'a';
     expect((await callback({ state, cookie: kind !== 'no-cookie' })).status).toBe(400);
-    expect(upstream).not.toHaveBeenCalled(); expect(fixtures.run).not.toHaveBeenCalled(); expect(member.roles.add).not.toHaveBeenCalled();
+    expect(upstream).not.toHaveBeenCalled(); expect(backupCount()).toBe(0); expect(member.roles.add).not.toHaveBeenCalled();
   });
   it('shows cancellation safely without reflecting provider text or claiming a role was granted', async () => {
     const r = await callback({ error: 'access_denied', code: null });
     expect(r.status).toBe(400); const html = await r.text();
     expect(html).toContain('Bạn đã hủy hoặc từ chối'); expect(html).not.toContain('private-provider-text');
-    expect(upstream).not.toHaveBeenCalled(); expect(fixtures.run).not.toHaveBeenCalled();
+    expect(upstream).not.toHaveBeenCalled(); expect(backupCount()).toBe(0);
   });
   it('reports other Discord authorization restrictions without reflecting provider content', async () => {
     const r = await callback({ error: 'arbitrary-private-error', code: null });
@@ -120,23 +128,23 @@ describe('verification callback integrity and delivery', () => {
     const r = await callback();
     expect(r.status).toBe(504); expect(await r.text()).toContain('quá thời gian chờ');
     expect(upstream.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
-    expect(fixtures.run).not.toHaveBeenCalled(); expect(member.roles.add).not.toHaveBeenCalled();
+    expect(backupCount()).toBe(0); expect(member.roles.add).not.toHaveBeenCalled();
   });
   it('does not log raw Discord failure bodies', async () => {
     upstream.mockResolvedValueOnce(new Response('private-token-body', { status: 403 }));
     const r = await callback();
     expect(r.status).toBe(502); expect(await r.text()).not.toContain('private-token-body');
     expect(JSON.stringify(console.error.mock.calls)).not.toContain('private-token-body');
-    expect(fixtures.run).not.toHaveBeenCalled();
+    expect(backupCount()).toBe(0);
   });
   it('rejects insufficient consent or invalid identity without storing tokens or granting roles', async () => {
     upstream.mockResolvedValueOnce(new Response(JSON.stringify({ access_token: 'a', refresh_token: 'r', scope: 'identify', expires_in: 500 })));
     expect((await callback()).status).toBe(502);
-    expect(fixtures.run).not.toHaveBeenCalled(); expect(member.roles.add).not.toHaveBeenCalled();
+    expect(backupCount()).toBe(0); expect(member.roles.add).not.toHaveBeenCalled();
   });
   it('does not grant roles when the authorized account is not a guild member', async () => {
     guild.members.fetch.mockResolvedValueOnce(null);
     expect((await callback()).status).toBe(400);
-    expect(fixtures.run).not.toHaveBeenCalled(); expect(member.roles.add).not.toHaveBeenCalled();
+    expect(backupCount()).toBe(0); expect(member.roles.add).not.toHaveBeenCalled();
   });
 });
