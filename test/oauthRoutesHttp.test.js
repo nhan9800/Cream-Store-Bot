@@ -112,6 +112,31 @@ describe('real HTTP OAuth callback rate/replay handling', () => {
     expect(result.status).toBe(429); expect(result.headers['retry-after']).toBe('2');
     expect(t.guard.retryAfter({ clientId, store: 'store1' })).toBe(2000);
   });
+  it('stops an in-flight successful token flow before profile lookup when another flow establishes cooldown', async () => {
+    let releaseToken;
+    const pendingToken = new Promise(resolve => { releaseToken = resolve; });
+    let tokenCalls = 0;
+    const fetchImpl = vi.fn(async url => {
+      if (url.endsWith('/token')) {
+        if (++tokenCalls === 1) return pendingToken;
+        return new Response('{"retry_after":7}', { status: 429, headers: { 'retry-after': '7' } });
+      }
+      return new Response(JSON.stringify({ id: userId, username: 'test-user' }));
+    });
+    const t = await fixture({ fetchImpl }), alreadyInFlight = t.callback(t.state());
+    await vi.waitFor(() => expect(fetchImpl).toHaveBeenCalledOnce());
+    const limited = await t.callback(t.state());
+    expect(limited.status).toBe(429);
+    releaseToken(new Response('{"access_token":"access","refresh_token":"refresh","scope":"identify guilds.join","expires_in":3600}'));
+    const resumed = await alreadyInFlight;
+    expect(resumed.status).toBe(429); expect(resumed.headers['retry-after']).toBe('7');
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(fetchImpl.mock.calls.every(([url]) => url.endsWith('/token'))).toBe(true);
+    expect(t.member.roles.add).not.toHaveBeenCalled();
+    expect(t.member.send).not.toHaveBeenCalled();
+    expect(t.database.prepare('SELECT COUNT(*) AS n FROM oauth_backups').get().n).toBe(0);
+    expect(t.guard.getHealth({ clientId, store: 'store1' }).providerRateLimits).toBe(1);
+  });
   it('claims valid state before exchange and blocks concurrent replay plus replay after restart', async () => {
     let release; const pause = new Promise(resolve => { release = resolve; });
     const fetchImpl = vi.fn(async url => {

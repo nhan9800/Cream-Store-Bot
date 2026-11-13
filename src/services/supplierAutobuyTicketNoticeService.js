@@ -108,9 +108,9 @@ export function createSupplierAutobuyTicketNoticeService({ database = db, guildC
     if (!row || row.guild_id !== guildId) return { status: 'NOT_ELIGIBLE' };
     const bound = context(row), botId = client?.user?.id;
     if (!snowflake(botId) || (typeof client.isReady === 'function' && !client.isReady())) return { status: 'CHANNEL_UNVERIFIED' };
-    let channel;
+    let channel, guild;
     try {
-      const guild = await client.guilds.fetch(guildId);
+      guild = await client.guilds.fetch(guildId);
       if (guild?.id !== guildId) return { status: 'CHANNEL_UNVERIFIED' };
       channel = await guild.channels.fetch(bound.channelId);
     } catch { return { status: 'CHANNEL_UNVERIFIED' }; }
@@ -159,7 +159,24 @@ export function createSupplierAutobuyTicketNoticeService({ database = db, guildC
         .run(timestamp(), orderCode);
       return { status: 'RETRY' };
     }
-    if (typeof client.isReady === 'function' && !client.isReady()) return { status: 'CHANNEL_UNVERIFIED' };
+    // History discovery and card rendering await other services. A ticket can
+    // close or change owners during those waits; never publish the old owner's
+    // card using a channel/permission snapshot from the start of the request.
+    const validateCurrentBinding = () => {
+      if (!scopeEnabled({ guildId, envFile })) return 'DISABLED_OTHER_STORE';
+      const current = linkedOrder(orderCode);
+      if (!current || current.guild_id !== guildId) return 'NOT_ELIGIBLE';
+      const currentBound = context(current);
+      if (current.product_key !== row.product_key || Object.keys(bound).some(key => bound[key] !== currentBound[key])) return 'REVIEW';
+      return null;
+    };
+    let changed = validateCurrentBinding();
+    if (changed) return { status: changed };
+    try { channel = await guild.channels.fetch(bound.channelId, { force: true }); }
+    catch { return { status: 'CHANNEL_UNVERIFIED' }; }
+    changed = validateCurrentBinding();
+    if (changed) return { status: changed };
+    if (!privateChannel(channel, bound, botId) || (typeof client.isReady === 'function' && !client.isReady())) return { status: 'CHANNEL_UNVERIFIED' };
     const claimed = database.prepare(`UPDATE supplier_autobuy_ticket_notices SET status='SENDING',attempts=attempts+1,
       attempted_at=?,updated_at=?,last_error=NULL WHERE order_code=? AND status IN ('PENDING','RETRY')`)
       .run(timestamp(), timestamp(), orderCode);

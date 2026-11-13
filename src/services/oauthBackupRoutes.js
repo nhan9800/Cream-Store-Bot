@@ -52,10 +52,16 @@ export function registerOauthRoutes(app, { database = db, configuration = config
     return res.status(429).send(buildErrorPage(local ? 'Vui lòng chờ trước khi xác minh tiếp' : 'Discord đang giới hạn xác minh',
       `Vui lòng chờ ít nhất ${seconds} giây rồi quay lại Discord. Không tải lại hoặc bấm xác minh liên tục; chưa có thêm yêu cầu cấp quyền nào được gửi.`));
   };
-  const discordOAuthJson = (url, options) => fetchDiscordOAuthJson(url, options, { fetchImpl, now,
-    onRateLimit: (waitMs, count, metadata) => metadata?.finalize
-      ? requestGuard.finalizeCooldown(scope(), metadata.finalize, waitMs)
-      : requestGuard.setCooldown(scope(), waitMs, count) });
+  const discordOAuthJson = (url, options) => {
+    // Another callback can establish a cooldown while this flow awaits its
+    // token response. Check before every new request, including profile lookup.
+    const waitMs = requestGuard.retryAfter(scope());
+    if (waitMs) throw new DiscordOAuthRequestError('RATE_LIMITED', { status: 429, retryAfterMs: waitMs });
+    return fetchDiscordOAuthJson(url, options, { fetchImpl, now,
+      onRateLimit: (retryMs, count, metadata) => metadata?.finalize
+        ? requestGuard.finalizeCooldown(scope(), metadata.finalize, retryMs)
+        : requestGuard.setCooldown(scope(), retryMs, count) });
+  };
   
   // 1. Route redirect to Discord OAuth2 page
   app.get('/oauth/login', async (req, res) => {

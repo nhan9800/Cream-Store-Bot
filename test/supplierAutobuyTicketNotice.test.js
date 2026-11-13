@@ -176,6 +176,47 @@ describe('durable customer AutoBuy ticket order cards', () => {
     expect(await t.send()).toEqual({ status: 'CHANNEL_UNVERIFIED' });
     expect(t.channel.send).not.toHaveBeenCalled(); expect(t.readCustomerOrder).not.toHaveBeenCalled();
   });
+  it('does not send if the ticket closes while its order card is being built', async () => {
+    const t = fixture(); const read = t.readCustomerOrder.getMockImplementation();
+    t.readCustomerOrder.mockImplementationOnce(async input => {
+      const order = await read(input);
+      t.database.prepare("UPDATE tickets SET status='CLOSED'").run();
+      return order;
+    });
+    expect(await t.send()).toEqual({ status: 'NOT_ELIGIBLE' });
+    expect(t.channel.send).not.toHaveBeenCalled(); expect(t.notice().attempts).toBe(0);
+    expect(t.database.prepare('SELECT payment_status,total_amount FROM orders').get()).toEqual({ payment_status: 'UNPAID', total_amount: 344000 });
+  });
+  it('does not send an old card after the persisted customer binding changes during rendering', async () => {
+    const t = fixture(); const read = t.readCustomerOrder.getMockImplementation();
+    t.readCustomerOrder.mockImplementationOnce(async input => {
+      const order = await read(input);
+      t.database.prepare('UPDATE orders SET customer_id=?').run(botId);
+      t.database.prepare('UPDATE tickets SET customer_id=?').run(botId);
+      t.database.prepare('UPDATE supplier_autobuy_intents SET customer_id=?').run(botId);
+      t.channel.topic = `Cenar AutoBuy · customer:${botId} · ticket:1483`;
+      t.channel.permissionOverwrites.cache.set(botId, { allow: new PermissionsBitField(['ViewChannel']) });
+      return order;
+    });
+    expect(await t.send()).toEqual({ status: 'REVIEW' });
+    expect(t.channel.send).not.toHaveBeenCalled(); expect(t.notice().attempts).toBe(0);
+  });
+  it('refreshes channel privacy before sending instead of trusting the earlier cached channel', async () => {
+    const t = fixture();
+    const publicChannel = { ...t.channel, permissionOverwrites: { cache: new Collection() } };
+    t.guild.channels.fetch.mockResolvedValueOnce(t.channel).mockResolvedValueOnce(publicChannel);
+    expect(await t.send()).toEqual({ status: 'CHANNEL_UNVERIFIED' });
+    expect(t.guild.channels.fetch).toHaveBeenLastCalledWith(channelId, { force: true });
+    expect(t.channel.send).not.toHaveBeenCalled(); expect(t.notice().attempts).toBe(0);
+  });
+  it('rechecks ticket eligibility after the final channel refresh is awaited', async () => {
+    const t = fixture();
+    t.guild.channels.fetch.mockResolvedValueOnce(t.channel).mockImplementationOnce(async () => {
+      t.database.prepare("UPDATE tickets SET status='CLOSED'").run(); return t.channel;
+    });
+    expect(await t.send()).toEqual({ status: 'NOT_ELIGIBLE' });
+    expect(t.channel.send).not.toHaveBeenCalled(); expect(t.notice().attempts).toBe(0);
+  });
   it.each([['ticket_type', 'WARRANTY'], ['support_source', 'WEBSITE_AI'], ['support_source', 'DISCORD_SUPPORT']])('excludes unrelated ticket %s=%s', async (field, value) => {
     const t = fixture(); t.database.prepare(`UPDATE tickets SET ${field}=?`).run(value);
     expect(await t.send()).toEqual({ status: 'NOT_ELIGIBLE' }); expect(t.channel.send).not.toHaveBeenCalled();
