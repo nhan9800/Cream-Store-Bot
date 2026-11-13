@@ -8,7 +8,7 @@ vi.mock('../src/utils/permissions.js', () => ({ hasConfiguredOwnerRole: () => fa
 vi.mock('../src/utils/emojiHelper.js', () => ({ createEmojiResolver: () => () => '' }));
 vi.mock('../src/services/guildRecoveryService.js', () => ({ getRecoveryRoleMapping: () => ({ ids: [], skipped: [] }) }));
 
-import { addMemberToGuild, createRecoveryCommand, createRecoveryMemberCooldownGuard, refreshAccessToken } from '../src/commands/chuyen-server.js';
+import { addMemberToGuild, createRecoveryCommand, createRecoveryMemberCooldownGuard, refreshAccessToken, syncMemberRoles } from '../src/commands/chuyen-server.js';
 import { createOAuthRequestGuard } from '../src/services/oauthRequestGuard.js';
 
 const source = '1234567890123456789', target = '9876543210987654321', app = '1382729296724099132';
@@ -149,6 +149,17 @@ describe('durable recovery cooldowns', () => {
   });
 });
 
+describe('recovery role authorization', () => {
+  it('does not grant roles if consent changes while the member fetch is pending', async () => {
+    let valid = true; const add = vi.fn();
+    const guild = { members: { fetch: vi.fn(async () => { valid = false; return { roles: { cache: new Map(), add } }; }) } };
+    const result = await syncMemberRoles(guild, '1111111111111111111', ['safe-role'], {
+      checkAuthorization: () => { if (!valid) throw new Error('authorization changed'); },
+    });
+    expect(result).toMatchObject({ synced: 0, missing: 1 }); expect(result.error).toBeTruthy(); expect(add).not.toHaveBeenCalled();
+  });
+});
+
 describe('explicit admin recovery run', () => {
   it('stops on the first token429, paces the deferred record and leaves all later users untouched', async () => {
     const f = fixture([{ token_expires_at: 'invalid-expiry' }, { token_expires_at: '2026-01-01' }]);
@@ -192,7 +203,8 @@ describe('explicit admin recovery run', () => {
       return new Response(null, { status: 204 });
     });
     expect(await f.run(f.interaction())).toMatchObject({ status: 'COMPLETE', already: 1 });
-    expect(f.fetchImpl).toHaveBeenCalledTimes(2); expect(f.syncRoles).toHaveBeenCalledWith(expect.anything(), '1111111111111111111', ['safe-role']);
+    expect(f.fetchImpl).toHaveBeenCalledTimes(2); expect(f.syncRoles).toHaveBeenCalledWith(expect.anything(), '1111111111111111111', ['safe-role'],
+      { checkAuthorization: expect.any(Function) });
   });
   it('refreshes a revoked access token once and preserves the same user and mapped roles', async () => {
     const f = fixture([{}]);
@@ -218,7 +230,7 @@ describe('explicit admin recovery run', () => {
     expect(JSON.parse(f.fetchImpl.mock.calls[0][1].body).roles).toEqual(['safe-role']);
     expect(JSON.parse(f.fetchImpl.mock.calls[1][1].body).roles).toEqual([]);
     expect(JSON.stringify(interaction.editReply.mock.calls)).not.toMatch(/secret-provider|secret\.example|synthetic-access/);
-    expect(f.syncRoles).toHaveBeenCalledWith(expect.anything(), '1111111111111111111', ['safe-role']);
+    expect(f.syncRoles).toHaveBeenCalledWith(expect.anything(), '1111111111111111111', ['safe-role'], { checkAuthorization: expect.any(Function) });
   });
   it.each([401, 403, 503])('stops subsequent refreshes after a systemic token HTTP%s response', async status => {
     const f = fixture([{ token_expires_at: 'invalid-expiry' }, { token_expires_at: 'invalid-expiry' }]);
@@ -234,6 +246,90 @@ describe('explicit admin recovery run', () => {
     });
     expect(await f.run(f.interaction())).toMatchObject({ status: 'DEFERRED', processed: 1 });
     expect(f.fetchImpl).toHaveBeenCalledOnce(); expect(f.syncRoles).not.toHaveBeenCalled();
+  });
+  it.each(['expiry', '401'])('retains a newer callback grant during the %s refresh and joins with the canonical pair', async path => {
+    const f = fixture([{ token_expires_at: path === 'expiry' ? 'invalid-expiry' : '2026-12-01' }]);
+    f.fetchImpl.mockImplementation(async (url, options) => {
+      if (url.endsWith('/oauth2/token')) {
+        f.database.prepare(`UPDATE oauth_backups SET access_token='enc:callback-access',refresh_token='enc:callback-refresh',
+          recovery_consent_at='newer-consent',verified_at='newer-callback',token_expires_at=? WHERE guild_id=?`)
+          .run(new Date(f.now() + 86400000).toISOString(), source);
+        return Response.json({ access_token: 'old-grant-rotated-access', refresh_token: 'old-grant-rotated-refresh', expires_in: 86400 });
+      }
+      const access = JSON.parse(options.body).access_token;
+      if (path === '401' && access === 'synthetic-access') return Response.json({}, { status: 401 });
+      expect(access).toBe('callback-access');
+      return new Response(null, { status: 201 });
+    });
+    expect(await f.run(f.interaction())).toMatchObject({ status: 'COMPLETE', added: 1, failed: 0 });
+    expect(f.database.prepare('SELECT access_token,refresh_token,verified_at FROM oauth_backups').get()).toEqual({
+      access_token: 'enc:callback-access', refresh_token: 'enc:callback-refresh', verified_at: 'newer-callback',
+    });
+    expect(f.syncRoles).toHaveBeenCalledOnce();
+  });
+  it.each(['expiry', '401'])('does not restore a revoked consent while the %s refresh is pending', async path => {
+    const f = fixture([{ token_expires_at: path === 'expiry' ? 'invalid-expiry' : '2026-12-01' }]);
+    f.fetchImpl.mockImplementation(async url => {
+      if (!url.endsWith('/oauth2/token')) return Response.json({}, { status: 401 });
+      f.database.prepare('UPDATE oauth_backups SET recovery_consent_at=NULL WHERE guild_id=?').run(source);
+      return Response.json({ access_token: 'stale-rotated-access', refresh_token: 'stale-rotated-refresh', expires_in: 86400 });
+    });
+    expect(await f.run(f.interaction())).toMatchObject({ status: 'COMPLETE', added: 0, failed: 1 });
+    expect(f.fetchImpl).toHaveBeenCalledTimes(path === 'expiry' ? 1 : 2); expect(f.syncRoles).not.toHaveBeenCalled();
+    expect(f.database.prepare('SELECT access_token,refresh_token,recovery_consent_at FROM oauth_backups').get()).toEqual({
+      access_token: 'enc:synthetic-access', refresh_token: 'enc:synthetic-refresh', recovery_consent_at: null,
+    });
+  });
+  it.each(['DELETE FROM oauth_backups', "UPDATE oauth_backups SET scopes='identify'",
+    "UPDATE oauth_backups SET recovery_consent_at='changed-consent'",
+    "UPDATE oauth_backups SET guild_id='9876543210987654321'",
+    "UPDATE oauth_backups SET discord_id='1111111111111111112'"])(
+    'discards an in-flight rotation if canonical authorization changes: %s', async mutation => {
+      const f = fixture([{ token_expires_at: 'invalid-expiry' }]);
+      f.fetchImpl.mockImplementation(async () => {
+        f.database.exec(mutation);
+        return Response.json({ access_token: 'stale-rotated-access', refresh_token: 'stale-rotated-refresh', expires_in: 86400 });
+      });
+      expect(await f.run(f.interaction())).toMatchObject({ status: 'COMPLETE', added: 0, failed: 1 });
+      expect(f.fetchImpl).toHaveBeenCalledOnce(); expect(f.syncRoles).not.toHaveBeenCalled();
+      expect(f.database.prepare("SELECT COUNT(*) AS n FROM oauth_backups WHERE access_token='enc:stale-rotated-access'").get().n).toBe(0);
+    });
+  it('reads canonical consent and tokens again before reaching the next listed user', async () => {
+    const f = fixture([{}, {}, {}]);
+    let calls = 0;
+    f.fetchImpl.mockImplementation(async (_url, options) => {
+      if (++calls === 1) {
+        f.database.prepare('UPDATE oauth_backups SET recovery_consent_at=NULL WHERE discord_id=?').run('1111111111111111112');
+        f.database.prepare("UPDATE oauth_backups SET access_token='enc:callback-access',refresh_token='enc:callback-refresh' WHERE discord_id=?")
+          .run('1111111111111111113');
+      } else expect(JSON.parse(options.body).access_token).toBe('callback-access');
+      return new Response(null, { status: 201 });
+    });
+    expect(await f.run(f.interaction())).toMatchObject({ status: 'COMPLETE', added: 2, failed: 1 });
+    expect(f.fetchImpl).toHaveBeenCalledTimes(2); expect(f.sleep.mock.calls).toEqual([[120], [120], [120]]);
+  });
+  it('does not refresh or retry revoked credentials after a401 when a callback already supplied a fresh pair', async () => {
+    const f = fixture([{}]);
+    f.fetchImpl.mockImplementationOnce(async () => {
+      f.database.prepare("UPDATE oauth_backups SET access_token='enc:callback-access',refresh_token='enc:callback-refresh' WHERE guild_id=?").run(source);
+      return Response.json({}, { status: 401 });
+    }).mockImplementation(async (url, options) => {
+      expect(url).toContain('/members/'); expect(JSON.parse(options.body).access_token).toBe('callback-access');
+      return new Response(null, { status: 201 });
+    });
+    expect(await f.run(f.interaction())).toMatchObject({ status: 'COMPLETE', added: 1 });
+    expect(f.fetchImpl).toHaveBeenCalledTimes(2);
+  });
+  it('rechecks authorization before member retries and role-only follow-up work', async () => {
+    for (const status of [503, 403, 201]) {
+      const f = fixture([{}]);
+      f.fetchImpl.mockImplementationOnce(async () => {
+        f.database.prepare('UPDATE oauth_backups SET recovery_consent_at=NULL').run();
+        return status === 201 ? new Response(null, { status }) : Response.json({}, { status });
+      });
+      await f.run(f.interaction());
+      expect(f.fetchImpl).toHaveBeenCalledOnce(); expect(f.syncRoles).not.toHaveBeenCalled();
+    }
   });
   it('allows only one run per application across factories and releases the lock after completion', async () => {
     const f = fixture([{}]); const first = f.interaction(), second = f.interaction();

@@ -23,6 +23,11 @@ const oauthScope = (configuration, env) => ({ clientId: String(configuration.cli
 const noMentions = { parse: [], users: [], roles: [], repliedUser: false };
 const safeName = value => String(value ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ')
   .replace(/@/g, '＠').replace(/`/g, '′').replace(/</g, '‹').replace(/>/g, '›').slice(0, 80);
+const credentialVersionFields = ['access_token', 'refresh_token', 'token_expires_at', 'scopes', 'recovery_consent_at', 'verified_at'];
+const sameCredentialVersion = (left, right) => credentialVersionFields.every(field => left[field] === right[field]);
+class RecoveryRecordChangedError extends Error {
+  constructor() { super('Bản ghi recovery đã thay đổi hoặc không còn đủ quyền.'); this.name = 'RecoveryRecordChangedError'; }
+}
 
 export class RecoveryRequestError extends Error {
   constructor(code, { status = null, retryAfterMs = null } = {}) {
@@ -180,7 +185,7 @@ export async function addMemberToGuild(
   botToken,
   roles = [],
   { fetchImpl = fetch, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)), now = Date.now,
-    timeoutMs = 12_000, checkCooldown = () => 0, onRateLimit = () => {} } = {},
+    timeoutMs = 12_000, checkCooldown = () => 0, onRateLimit = () => {}, checkAuthorization = () => {} } = {},
 ) {
   let lastStatus = 0;
   let lastError = '';
@@ -189,6 +194,9 @@ export async function addMemberToGuild(
     const cooling = checkCooldown();
     if (cooling) return { status: 429, ok: false, deferred: true, retryAfterMs: cooling, global: false,
       error: 'Discord đang giới hạn khôi phục; chưa gửi thêm yêu cầu.', retries };
+    // Recheck after retry backoff as a browser callback can replace/revoke the
+    // canonical grant while this request is waiting. Fail before sending it.
+    checkAuthorization();
     let res;
     const signal = AbortSignal.timeout(timeoutMs);
     try {
@@ -237,7 +245,7 @@ export async function addMemberToGuild(
   return { status: lastStatus, ok: false, error: lastError || `HTTP ${lastStatus}`, retries };
 }
 
-export async function syncMemberRoles(targetGuild, discordId, targetRoleIds) {
+export async function syncMemberRoles(targetGuild, discordId, targetRoleIds, { checkAuthorization = () => {} } = {}) {
   if (!targetRoleIds.length) return { synced: 0, missing: 0, error: '' };
   const member = await targetGuild.members.fetch(discordId).catch(() => null);
   if (!member) return { synced: 0, missing: targetRoleIds.length, error: 'Không tìm thấy thành viên sau khi thêm vào server' };
@@ -249,6 +257,7 @@ export async function syncMemberRoles(targetGuild, discordId, targetRoleIds) {
   }
 
   try {
+    checkAuthorization();
     await member.roles.add(missingRoleIds, 'Cenar recovery: đồng bộ role đã được khách đồng ý');
     return { synced: missingRoleIds.length, missing: 0, error: '' };
   } catch {
@@ -297,8 +306,9 @@ export function createRecoveryCommand({ database = db, configuration = config, e
   const initialWait = Math.max(tokenGuard.retryAfter(scope), memberGuard.retryAfter(applicationId, newGuildId));
   if (initialWait) return interaction.editReply(`Discord đang giới hạn recovery. Chờ ít nhất ${Math.ceil(initialWait / 1000)} giây trước khi mở tác vụ mới; chưa gửi yêu cầu thêm thành viên.`);
   const refresh = token => refreshAccessToken(token, { fetchImpl, configuration, env, requestGuard: tokenGuard, now });
-  const add = (discordId, accessToken, roles) => addMemberToGuild(newGuildId, discordId, accessToken, botToken, roles,
+  const add = (credential, roles) => addMemberToGuild(newGuildId, credential.row.discord_id, credential.accessToken, botToken, roles,
     { fetchImpl, sleep, now, checkCooldown: () => Math.max(tokenGuard.retryAfter(scope), memberGuard.retryAfter(applicationId, newGuildId)),
+      checkAuthorization: () => assertCurrentCredential(credential),
       onRateLimit: (waitMs, global) => memberGuard.setCooldown(applicationId, newGuildId, waitMs, global) });
 
   // Kiểm tra bot có trong server mới không
@@ -318,8 +328,7 @@ export function createRecoveryCommand({ database = db, configuration = config, e
 
   // Lấy danh sách user cần chuyển
   const rows = database.prepare(
-    `SELECT discord_id, username, access_token, refresh_token, token_expires_at,
-            member_roles_json, scopes, recovery_consent_at
+    `SELECT discord_id, username
      FROM oauth_backups
      WHERE guild_id = ? AND recovery_consent_at IS NOT NULL AND TRIM(recovery_consent_at)!=''
      ORDER BY verified_at`
@@ -329,9 +338,44 @@ export function createRecoveryCommand({ database = db, configuration = config, e
     return interaction.editReply(`Không có thành viên đã verify nào trong guild \`${sourceGuildId}\` được lưu trong hệ thống.`);
   }
 
-  const updateStmt = database.prepare(
-    'UPDATE oauth_backups SET access_token = ?, refresh_token = ?, token_expires_at = ?, last_refreshed_at = CURRENT_TIMESTAMP WHERE discord_id = ? AND guild_id = ?'
-  );
+  const readStmt = database.prepare(`SELECT discord_id,guild_id,username,access_token,refresh_token,token_expires_at,
+    member_roles_json,scopes,recovery_consent_at,verified_at FROM oauth_backups WHERE discord_id=? AND guild_id=?`);
+  const updateStmt = database.prepare(`UPDATE oauth_backups SET access_token=?,refresh_token=?,token_expires_at=?,
+    last_refreshed_at=CURRENT_TIMESTAMP WHERE discord_id=? AND guild_id=? AND access_token IS ? AND refresh_token IS ?
+    AND token_expires_at IS ? AND scopes IS ? AND recovery_consent_at IS ? AND verified_at IS ?`);
+  function readCredential(discordId) {
+    const row = readStmt.get(discordId, sourceGuildId);
+    const scopes = new Set(String(row?.scopes || '').split(/\s+/));
+    if (!snowflake(discordId) || row?.discord_id !== discordId || row.guild_id !== sourceGuildId
+      || !String(row.recovery_consent_at || '').trim() || !scopes.has('identify') || !scopes.has('guilds.join')) {
+      throw new RecoveryRecordChangedError();
+    }
+    const accessToken = decryptTokens(row.access_token), refreshToken = decryptTokens(row.refresh_token);
+    if (typeof accessToken !== 'string' || !accessToken.trim() || typeof refreshToken !== 'string' || !refreshToken.trim()) {
+      throw new RecoveryRecordChangedError();
+    }
+    return { row, accessToken, refreshToken };
+  }
+  function assertCurrentCredential(credential) {
+    const fresh = readCredential(credential.row.discord_id);
+    if (!sameCredentialVersion(credential.row, fresh.row)
+      || credential.row.member_roles_json !== fresh.row.member_roles_json) throw new RecoveryRecordChangedError();
+  }
+  function usableReplacement(credential) {
+    if (!(Date.parse(credential.row.token_expires_at || '') > now())) throw new RecoveryRecordChangedError();
+    return credential;
+  }
+  async function refreshCredential(credential) {
+    const fresh = readCredential(credential.row.discord_id);
+    // A completed callback supersedes the old401/expiry snapshot. Never refresh
+    // that stale grant or overwrite the callback's new pair.
+    if (!sameCredentialVersion(credential.row, fresh.row)) return usableReplacement(fresh);
+    const refreshed = await refresh(fresh.refreshToken);
+    const changed = updateStmt.run(encryptTokens(refreshed.access_token), encryptTokens(refreshed.refresh_token), refreshed.expires_at,
+      fresh.row.discord_id, sourceGuildId, ...credentialVersionFields.map(field => fresh.row[field])).changes;
+    const canonical = readCredential(fresh.row.discord_id);
+    return changed ? canonical : usableReplacement(canonical);
+  }
 
   let countSuccess = 0;
   let countAlready = 0;
@@ -348,38 +392,25 @@ export function createRecoveryCommand({ database = db, configuration = config, e
     waitMs: error?.retryAfterMs ?? null });
 
   // Xử lý từng user với delay nhỏ để tránh rate limit
-  for (const row of rows) {
+  for (const listed of rows) {
+    let row = listed;
     processed++;
     try {
       const tokenWait = tokenGuard.retryAfter(scope);
       if (tokenWait) { deferred = { kind: 'TOKEN_COOLDOWN', waitMs: tokenWait }; break; }
       const memberWait = memberGuard.retryAfter(applicationId, newGuildId);
       if (memberWait) { deferred = { kind: 'MEMBER_COOLDOWN', waitMs: memberWait }; break; }
-      const scopes = new Set(String(row.scopes || '').split(/\s+/));
-      if (!scopes.has('identify') || !scopes.has('guilds.join')) {
-        failures.push({ user: row.username || row.discord_id, reason: 'Thiếu quyền identify/guilds.join' });
-        countFailed++;
-        continue;
-      }
-      let accessToken = decryptTokens(row.access_token);
-      let refreshToken = decryptTokens(row.refresh_token);
-      if (!accessToken || !refreshToken) {
-        failures.push({ user: row.username || row.discord_id, reason: 'Token recovery không đầy đủ' });
-        countFailed++;
-        continue;
-      }
+      let credential = readCredential(listed.discord_id);
+      row = credential.row;
 
       // Refresh token nếu đã hết hạn hoặc sắp hết (trong vòng 1 giờ)
       const expiresAt = Date.parse(row.token_expires_at || '');
       const needsRefresh = !Number.isFinite(expiresAt) || expiresAt - now() < 3600 * 1000;
 
-      if (needsRefresh && refreshToken) {
+      if (needsRefresh) {
         try {
-          const refreshed = await refresh(refreshToken);
-          accessToken = refreshed.access_token;
-          refreshToken = refreshed.refresh_token || refreshToken;
-          // Lưu token mới vào DB ngay lập tức
-          updateStmt.run(encryptTokens(refreshed.access_token), encryptTokens(refreshToken), refreshed.expires_at, row.discord_id, sourceGuildId);
+          credential = await refreshCredential(credential);
+          row = credential.row;
         } catch (refreshErr) {
           if (tokenStopped(refreshErr)) { deferred = stopForToken(refreshErr); break; }
           failures.push({ user: row.username || row.discord_id, reason: `Refresh token thất bại` });
@@ -388,8 +419,8 @@ export function createRecoveryCommand({ database = db, configuration = config, e
         }
       }
 
-      const mapped = roleMapping(row.member_roles_json, newGuild);
-      const targetRoleIds = mapped.ids;
+      let mapped = roleMapping(row.member_roles_json, newGuild);
+      let targetRoleIds = mapped.ids;
       if (mapped.skipped.length) {
         countRoleFailed++;
         failures.push({
@@ -397,17 +428,17 @@ export function createRecoveryCommand({ database = db, configuration = config, e
           reason: 'Một số vai trò đã lưu không thể khôi phục với quyền hiện tại của bot.',
         });
       }
-      let result = await add(row.discord_id, accessToken, targetRoleIds);
+      let result = await add(credential, targetRoleIds);
 
       // Token có thể bị thu hồi giữa lần kiểm tra expiry và request. Refresh
       // một lần rồi thử lại để không làm mất khách chỉ vì access token cũ.
-      if (result.status === 401 && refreshToken) {
+      if (result.status === 401) {
         try {
-          const refreshed = await refresh(refreshToken);
-          accessToken = refreshed.access_token;
-          refreshToken = refreshed.refresh_token || refreshToken;
-          updateStmt.run(encryptTokens(refreshed.access_token), encryptTokens(refreshToken), refreshed.expires_at, row.discord_id, sourceGuildId);
-          result = await add(row.discord_id, accessToken, targetRoleIds);
+          credential = await refreshCredential(credential);
+          row = credential.row;
+          mapped = roleMapping(row.member_roles_json, newGuild);
+          targetRoleIds = mapped.ids;
+          result = await add(credential, targetRoleIds);
         } catch (refreshErr) {
           if (tokenStopped(refreshErr)) { deferred = stopForToken(refreshErr); break; }
           // Giữ lỗi 401 ban đầu để báo cáo ngắn gọn cho Owner.
@@ -418,7 +449,7 @@ export function createRecoveryCommand({ database = db, configuration = config, e
       // bot. Thử thêm thành viên trước với body roles rỗng, sau đó sync từng
       // role hợp lệ để phần di chuyển vẫn hoàn tất.
       if (!result.ok && [400, 403].includes(result.status) && targetRoleIds.length) {
-        const joinOnlyResult = await add(row.discord_id, accessToken, []);
+        const joinOnlyResult = await add(credential, []);
         if (joinOnlyResult.ok || joinOnlyResult.deferred) result = joinOnlyResult;
       }
 
@@ -434,9 +465,17 @@ export function createRecoveryCommand({ database = db, configuration = config, e
         continue;
       }
 
+      try { assertCurrentCredential(credential); }
+      catch {
+        countRoleFailed++;
+        failures.push({ user: row.username || row.discord_id, reason: 'Quyền recovery đã thay đổi trong lúc Discord xử lý; chưa gửi thêm yêu cầu vai trò.' });
+        continue;
+      }
+
       // 201 có thể vẫn không gán được role nếu bot thiếu hierarchy; 204 cũng
       // không đảm bảo body roles được áp dụng cho thành viên đã tồn tại.
-      const roleSync = await syncRoles(newGuild, row.discord_id, targetRoleIds);
+      const roleSync = await syncRoles(newGuild, row.discord_id, targetRoleIds,
+        { checkAuthorization: () => assertCurrentCredential(credential) });
       countRoleSynced += roleSync.synced;
       if (roleSync.error || roleSync.missing > 0) {
         countRoleFailed++;

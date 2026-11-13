@@ -269,9 +269,10 @@ export function updateOauthMemberSnapshot(guildId, member) {
     .filter((role) => role.id !== member.guild.id && !role.managed)
     .sort((left, right) => right.position - left.position)
     .map((role) => ({ id: role.id, name: role.name }));
+  // Observed roles never grant or renew the customer's OAuth consent.
   db.prepare(`
     UPDATE oauth_backups
-    SET member_roles_json = ?, recovery_consent_at = COALESCE(recovery_consent_at, CURRENT_TIMESTAMP)
+    SET member_roles_json = ?
     WHERE guild_id = ? AND discord_id = ?
   `).run(JSON.stringify(roles), guildId, member.id);
   return roles;

@@ -12,7 +12,7 @@ const testDatabasePath = vi.hoisted(() => {
 });
 
 import { db, initDatabase } from '../src/database/db.js';
-import { getRecoveryRoleMapping, mapRecoveryRoleIds, restoreGuildStructure } from '../src/services/guildRecoveryService.js';
+import { getRecoveryRoleMapping, mapRecoveryRoleIds, restoreGuildStructure, updateOauthMemberSnapshot } from '../src/services/guildRecoveryService.js';
 import { addMemberToGuild, syncMemberRoles } from '../src/commands/chuyen-server.js';
 
 function makeRole(id, name, overrides = {}) {
@@ -113,6 +113,21 @@ describe('guild recovery structure and role mapping', () => {
     db.close();
     const absolutePath = path.resolve(process.cwd(), testDatabasePath);
     for (const suffix of ['', '-shm', '-wal']) fs.rmSync(`${absolutePath}${suffix}`, { force: true });
+  });
+
+  it.each([null, '2026-11-01 10:00:00'])('does not create or renew recovery consent while saving member roles (%s)', consent => {
+    const guildId = '1234567890123456789', discordId = consent ? '1111111111111111112' : '1111111111111111111';
+    db.prepare(`INSERT INTO oauth_backups(discord_id,guild_id,access_token,refresh_token,scopes,recovery_consent_at,verified_at)
+      VALUES(?,?,?,?,?,?,?)`).run(discordId, guildId, 'enc:v1:synthetic-access', 'enc:v1:synthetic-refresh',
+      'identify guilds.join', consent, '2026-11-01 09:00:00');
+    const member = { id: discordId, guild: { id: guildId }, roles: { cache: new Map([
+      [guildId, makeRole(guildId, '@everyone')], ['safe-role', makeRole('safe-role', 'Member')],
+    ]) } };
+    const roles = updateOauthMemberSnapshot(guildId, member);
+    const saved = db.prepare('SELECT * FROM oauth_backups WHERE guild_id=? AND discord_id=?').get(guildId, discordId);
+    expect(JSON.parse(saved.member_roles_json)).toEqual(roles);
+    expect(saved).toMatchObject({ recovery_consent_at: consent, access_token: 'enc:v1:synthetic-access',
+      refresh_token: 'enc:v1:synthetic-refresh', scopes: 'identify guilds.join', verified_at: '2026-11-01 09:00:00' });
   });
 
   it('clones identity, hierarchy, channels, emoji and stickers from a snapshot', async () => {
