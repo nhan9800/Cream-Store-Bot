@@ -47,7 +47,10 @@ function ticketFixture(options = {}) {
   channels.set(channelId, channel);
   return { ticket, order, channel };
 }
-beforeAll(() => initDatabase());
+beforeAll(() => {
+  initDatabase();
+  db.exec('CREATE TABLE IF NOT EXISTS supplier_autobuy_payment_methods(order_code TEXT PRIMARY KEY,method TEXT,created_at TEXT)');
+});
 beforeEach(() => {
   vi.useFakeTimers(); vi.setSystemTime(new Date('2026-11-11T10:00:00Z')); vi.clearAllMocks(); channels.clear();
   fixture.archive.mockReset().mockResolvedValue({ archived: true }); fixture.log.mockResolvedValue({});
@@ -56,6 +59,7 @@ beforeEach(() => {
 });
 afterEach(() => {
   vi.useRealTimers();
+  db.prepare('DELETE FROM supplier_autobuy_payment_methods').run();
   db.prepare('DELETE FROM orders WHERE guild_id=?').run(config.guildId);
   db.prepare('DELETE FROM tickets WHERE guild_id=?').run(config.guildId);
 });
@@ -84,6 +88,42 @@ describe('24-hour unpaid Discord ORDER ticket policy', () => {
     expect(getTicketById(ticket.id).status).toBe('CLOSED');
     expect(db.prepare('SELECT status,payment_status FROM orders WHERE order_code=?').get(order.order_code)).toEqual({ status:'CANCELLED', payment_status:'CANCELLED' });
     expect(fixture.archive.mock.calls[0][0].minimumCreatedAt).toBe(new Date().toISOString());
+  });
+  it.each(['PAYOS', 'UNRECOGNIZED', 'LINK_WITHOUT_METHOD'])('keeps an unresolved supplier invoice past ticket retention (%s)', async method => {
+    const { ticket, channel, order } = ticketFixture();
+    db.prepare("UPDATE orders SET fulfillment_mode='SUPPLIER',payment_link_id=? WHERE order_code=?")
+      .run(method === 'LINK_WITHOUT_METHOD' ? 'uncertain-invoice' : null, order.order_code);
+    if (method !== 'LINK_WITHOUT_METHOD') db.prepare('INSERT INTO supplier_autobuy_payment_methods VALUES(?,?,?)')
+      .run(order.order_code, method, new Date().toISOString());
+    await processPendingPaymentTickets(client);
+    expect(fixture.archive).not.toHaveBeenCalled(); expect(channel.delete).not.toHaveBeenCalled();
+    expect(getTicketById(ticket.id).status).toBe('OPEN');
+    expect(db.prepare('SELECT status,payment_status FROM orders WHERE order_code=?').get(order.order_code))
+      .toEqual({ status: 'PENDING_PAYMENT', payment_status: 'UNPAID' });
+  });
+  it('rechecks a supplier invoice claim created while the transcript was exporting', async () => {
+    const { ticket, channel, order } = ticketFixture();
+    db.prepare("UPDATE orders SET fulfillment_mode='SUPPLIER' WHERE order_code=?").run(order.order_code);
+    fixture.archive.mockImplementationOnce(async () => {
+      db.prepare("INSERT INTO supplier_autobuy_payment_methods VALUES(?,'PAYOS',?)").run(order.order_code, new Date().toISOString());
+      return { archived: true };
+    });
+    await processPendingPaymentTickets(client);
+    expect(fixture.archive).toHaveBeenCalledOnce(); expect(channel.delete).not.toHaveBeenCalled();
+    expect(getTicketById(ticket.id).status).toBe('OPEN');
+    expect(db.prepare('SELECT status FROM orders WHERE order_code=?').get(order.order_code).status).toBe('PENDING_PAYMENT');
+  });
+  it('allows supplier cleanup after authoritative invoice expiry and keeps unused checkout retention unchanged', async () => {
+    const held = ticketFixture(), unused = ticketFixture();
+    for (const order of [held.order, unused.order]) db.prepare("UPDATE orders SET fulfillment_mode='SUPPLIER' WHERE order_code=?").run(order.order_code);
+    db.prepare("INSERT INTO supplier_autobuy_payment_methods VALUES(?,'PAYOS',?)").run(held.order.order_code, new Date().toISOString());
+    await processPendingPaymentTickets(client);
+    expect(held.channel.delete).not.toHaveBeenCalled(); expect(unused.channel.delete).toHaveBeenCalledOnce();
+    db.prepare("UPDATE orders SET status='CANCELLED',payment_status='CANCELLED',payment_cancel_reason='Thanh toán PayOS đã hết hạn' WHERE order_code=?")
+      .run(held.order.order_code);
+    db.prepare('DELETE FROM supplier_autobuy_payment_methods WHERE order_code=?').run(held.order.order_code);
+    await processPendingPaymentTickets(client);
+    expect(held.channel.delete).toHaveBeenCalledOnce(); expect(getTicketById(held.ticket.id).status).toBe('CLOSED');
   });
   it('claims a closed ticket before Discord deletion so a simultaneous purchase cannot reuse it', async () => {
     const { ticket, channel } = ticketFixture();

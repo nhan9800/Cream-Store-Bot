@@ -15,7 +15,7 @@ beforeAll(() => {
     return [id, { id, name: asset.name, animated: false, available: true }];
   }));
   global.discordClient = {
-    guilds: { cache: new Collection([[guildId, { id: guildId, emojis: { cache: new Collection() } }]]) },
+    guilds: { cache: new Collection([guildId, '1282637033340403754'].map(id => [id, { id, emojis: { cache: new Collection() } }])) },
     application: { emojis: { cache: applicationEmojis } },
   };
 });
@@ -75,5 +75,18 @@ describe('welcome and payment Components V2', () => {
     expect(content).toContain(deadline);
     expect(content).toContain('QR/payment links may expire earlier');
     expect(content).not.toMatch(/(<a?:[^>]+>){2,}/);
+  });
+  it.each(['first', 'final'])('uses distinct custom emoji for every AutoBuy %s reminder slot', stage => {
+    const payload = buildPaymentReminderV2({ guildId: '1282637033340403754', customerId: '123456789012345678',
+      orderCode: 'CN_213802', stage, deadlineAt: Date.now() + 10 * 60000, supplierOrder: true });
+    const wire = JSON.stringify(payload);
+    const emojiIds = [...wire.matchAll(/<a?:[a-zA-Z0-9_]+:(\d+)>/g)].map(match => match[1]);
+    expect(emojiIds.length).toBeGreaterThanOrEqual(7);
+    expect(new Set(emojiIds).size).toBe(emojiIds.length);
+    expect(wire.replace(/<a?:[a-zA-Z0-9_]+:\d+>/g, '')).not.toMatch(NATIVE_EMOJI);
+    expect(wire).toContain('<@123456789012345678>'); expect(wire).toContain('CN_213802');
+    expect(wire).toContain('QR/liên kết thanh toán');
+    expect(wire).toContain('Ticket có thể đóng sau');
+    if (stage === 'final') expect(wire).toContain('không còn hóa đơn chờ đối soát');
   });
 });

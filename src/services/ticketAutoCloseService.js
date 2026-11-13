@@ -2,6 +2,7 @@ import { db, nowIso } from '../database/db.js';
 import { cancelOrder } from './orderService.js';
 import { closeTicket, closeTicketIfOpen, getTicketById } from './ticketService.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
+import { withUniqueCustomEmoji } from '../utils/uniqueCustomEmoji.js';
 import { emitStaffLog } from './staffLogService.js';
 import { archiveTicketConversation } from './ticketClosureService.js';
 import { sendOrderCancelledFlow, updateOrderLogMessage } from './notificationService.js';
@@ -38,7 +39,7 @@ export function buildNoticeV2({ accent, headerEmoji, headerText, bodyLines }) {
   return { components: [container], flags: MessageFlags.IsComponentsV2 };
 }
 
-export function buildPaymentReminderV2({ guildId, customerId, orderCode, stage = 'first', deadlineAt = null }) {
+export function buildPaymentReminderV2({ guildId, customerId, orderCode, stage = 'first', deadlineAt = null, supplierOrder = false }) {
   const E = createEmojiResolver(guildId);
   const isFinal = stage === 'final';
   const deadlineMinutes = deadlineAt === null ? config.unpaidOrderTicketHours * 60
@@ -46,7 +47,7 @@ export function buildPaymentReminderV2({ guildId, customerId, orderCode, stage =
   const deadlineText = deadlineAt === null ? null : `<t:${Math.floor(Number(deadlineAt) / 1000)}:R>`;
   const international = isInternationalGuild(guildId);
 
-  return buildNoticeV2({
+  const notice = buildNoticeV2({
     accent: isFinal ? 0xE67E22 : 0xFEE75C,
     headerEmoji: isFinal ? E('status_warn') : E('icon_clock'),
     headerText: international
@@ -56,11 +57,11 @@ export function buildPaymentReminderV2({ guildId, customerId, orderCode, stage =
       `${E('ticket_user')} Hi <@${customerId}>, payment has not been confirmed for your order yet.`,
       '',
       `> ${E('order_id')} **Order:** \`${orderCode}\``,
-      `> ${E('icon_clock')} **Ticket closes:** ${deadlineText || `**${config.unpaidOrderTicketHours} hours**`} (${deadlineMinutes} minutes)`,
+      `> ${E('icon_clock')} **${supplierOrder ? 'Ticket may close after' : 'Ticket closes'}:** ${deadlineText || `**${config.unpaidOrderTicketHours} hours**`} (${deadlineMinutes} minutes)`,
       `> ${E('payment_money')} **Action required:** ${isFinal ? 'Complete payment or reply in this ticket now.' : 'Pay or send a short reply to keep the ticket open.'}`,
       '',
       isFinal
-        ? `${E('order_cancel')} **After this deadline, the order is cancelled and the ticket closes automatically.**`
+        ? `${E('order_cancel')} **${supplierOrder ? 'After this time, automatic closure requires an unpaid order with no invoice awaiting reconciliation.' : 'After this deadline, the order is cancelled and the ticket closes automatically.'}**`
         : `${E('status_info')} A short message such as \`I am paying now\` confirms that you still need assistance.`,
       `${E('status_info')} An unpaid ticket stays open for at least ${config.unpaidOrderTicketHours} hours after the latest order or ticket activity. QR/payment links may expire earlier; ask for a current invoice if needed.`,
       '',
@@ -69,17 +70,18 @@ export function buildPaymentReminderV2({ guildId, customerId, orderCode, stage =
       `${E('ticket_user')} Chào <@${customerId}>, hệ thống vẫn chưa ghi nhận thanh toán cho đơn hàng của bạn.`,
       '',
       `> ${E('order_id')} **Mã đơn:** \`${orderCode}\``,
-      `> ${E('icon_clock')} **Ticket đóng:** ${deadlineText || `**${config.unpaidOrderTicketHours} giờ**`} (${deadlineMinutes} phút)`,
+      `> ${E('icon_clock')} **${supplierOrder ? 'Ticket có thể đóng sau' : 'Ticket đóng'}:** ${deadlineText || `**${config.unpaidOrderTicketHours} giờ**`} (${deadlineMinutes} phút)`,
       `> ${E('payment_money')} **Cần thực hiện:** ${isFinal ? 'Hoàn tất thanh toán hoặc phản hồi ngay trong ticket.' : 'Thanh toán hoặc gửi một phản hồi để giữ ticket mở.'}`,
       '',
       isFinal
-        ? `${E('order_cancel')} **Sau thời hạn trên, đơn sẽ tự động hủy và ticket sẽ được đóng.**`
+        ? `${E('order_cancel')} **${supplierOrder ? 'Sau mốc này, ticket chỉ tự đóng khi đơn chưa thanh toán và không còn hóa đơn chờ đối soát.' : 'Sau thời hạn trên, đơn sẽ tự động hủy và ticket sẽ được đóng.'}**`
         : `${E('status_info')} Chỉ cần gửi một tin nhắn ngắn như \`mình đang thanh toán\` để hệ thống ghi nhận bạn vẫn cần hỗ trợ.`,
       `${E('status_info')} Ticket chưa thanh toán được giữ ít nhất ${config.unpaidOrderTicketHours} giờ từ đơn mới nhất hoặc hoạt động trong ticket. QR/liên kết thanh toán có thể hết hạn sớm hơn; liên hệ shop để nhận hóa đơn hiện hành khi cần.`,
       '',
       `-# ${E('ticket_open')} Ticket được theo dõi tự động · Không cần ping nhân viên hoặc Owner`,
     ],
   });
+  return supplierOrder ? withUniqueCustomEmoji(notice, { guildId, seed: 'autobuy:payment-reminder' }) : notice;
 }
 
 async function cancelPendingOrderEverywhere({ client, guild = null, order, reason }) {
@@ -113,6 +115,23 @@ function paymentTicketState(ticket, now = Date.now()) {
   return retention?.deadline === null || !retention ? null : { ticket, ...retention };
 }
 
+function hasUnresolvedSupplierInvoice(orders) {
+  const candidates = orders.filter(order => order.fulfillment_mode === 'SUPPLIER'
+    && order.status === 'PENDING_PAYMENT' && order.payment_status === 'UNPAID');
+  if (!candidates.length) return false;
+  const table = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='supplier_autobuy_payment_methods'").get();
+  const columns = table ? db.prepare('PRAGMA table_info(supplier_autobuy_payment_methods)').all() : [];
+  const readable = ['order_code', 'method'].every(name => columns.some(column => column.name === name));
+  return candidates.some(order => {
+    // Ticket inactivity is not evidence that an attempted PayOS invoice is
+    // terminal. Preserve uncertain reservations until provider reconciliation
+    // changes the canonical order; never release stock by cancelling locally.
+    if (order.payment_link_id || !readable) return true;
+    const choice = db.prepare('SELECT method FROM supplier_autobuy_payment_methods WHERE order_code=?').get(order.order_code);
+    return Boolean(choice && choice.method !== 'WALLET');
+  });
+}
+
 export function getPendingPaymentTicketPolicy() {
   return { idleHours: config.unpaidOrderTicketHours, activityBasis: 'LATEST_ORDER_OR_HUMAN_TICKET_ACTIVITY', invoiceExpirySeparate: true };
 }
@@ -129,6 +148,7 @@ export function processPendingPaymentTickets(client) {
         // Preserve the separate legacy no-ticket cleanup; a web pseudo-channel
         // is never a Discord channel and is not part of this policy.
         if (!order.ticket_channel_id) {
+          if (hasUnresolvedSupplierInvoice([order])) continue;
           if (order.status === 'PENDING_PAYMENT' && (Date.now() - Date.parse(order.created_at) >= 15 * 60000
             || order.payment_status === 'CANCELLED')) await cancelPendingOrderEverywhere({ client, order,
               reason: order.payment_cancel_reason || 'Tự động hủy đơn hàng không có kênh ticket' });
@@ -154,12 +174,14 @@ export function processPendingPaymentTickets(client) {
           if (!reminder) continue;
           const stage = remaining <= 10 * 60000 ? 'final' : 'first';
           const sent = await channel.send({ ...buildPaymentReminderV2({ guildId: order.guild_id,
-            customerId: reminder.customer_id, orderCode: reminder.order_code, stage, deadlineAt: state.deadline }),
+            customerId: reminder.customer_id, orderCode: reminder.order_code, stage, deadlineAt: state.deadline,
+            supplierOrder: reminder.fulfillment_mode === 'SUPPLIER' }),
             allowedMentions: { parse: [], users: [reminder.customer_id] } }).catch(() => null);
           if (sent) db.prepare(`UPDATE orders SET ${stage === 'final' ? 'processing_reminder_sent_at' : 'payment_reminder_sent_at'}=?,updated_at=?
             WHERE order_code=? AND status='PENDING_PAYMENT' AND payment_status='UNPAID'`).run(nowIso(), nowIso(), reminder.order_code);
           continue;
         }
+        if (hasUnresolvedSupplierInvoice(state.pending)) continue;
         const deadline = state.deadline;
         const archive = await archiveTicketConversation({ guild: channel.guild, ticket: state.ticket, channel,
           closedById: client.user.id, minimumCreatedAt: new Date().toISOString() });
@@ -171,7 +193,7 @@ export function processPendingPaymentTickets(client) {
         // Keep Open, warranty work or a new order must cancel this closure.
         const claim = db.transaction(() => {
           const fresh = paymentTicketState(getTicketById(ticket.id));
-          if (!fresh?.due || fresh.deadline !== deadline) return null;
+          if (!fresh?.due || fresh.deadline !== deadline || hasUnresolvedSupplierInvoice(fresh.pending)) return null;
           const cancelled = fresh.pending.filter(item => item.status === 'PENDING_PAYMENT').map(item => cancelOrder(item.order_code, reason));
           // A new purchase must see a closed ticket while Discord DELETE is in
           // flight, rather than bind to a channel already being removed.
