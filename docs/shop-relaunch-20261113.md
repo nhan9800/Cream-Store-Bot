@@ -4,6 +4,10 @@ The owner requested new custom-emoji announcements, a promotional price board me
 
 The live `product_catalog` is the price source, with active WEB rows taking precedence over guild rows, matching checkout. Only positive integer prices are shown. A crossed-out price is shown only if the same row's `original_price` is greater than its current price. Decor/Gift tiers are summarized by their real count and lowest current price and link to the full price forum. No new discounts, supplier stock claims or delivery guarantees are inferred. The announcement explains that prepaid AutoBuy orders can wait for shop supplier funding.
 
+The Discord card also highlights the lowest existing offer for each Decor/Gift
+form, including its own recorded original price where applicable. These are
+catalog examples, not newly created discounts.
+
 `prepareShopRelaunch({dbInstance,E})` is read-only and returns public `priceManifest`, `priceHash`, `payloadHash`, and `payloads`. Every decorative token and button icon must be a verified custom emoji from `E` before publication. The runtime release uses an exact reviewed `expectedPriceHash`; changed prices stop the release before a ledger or message is written.
 
 `publishShopRelaunch(client,{dbInstance,E,expectedPriceHash,sendMessage})` accepts an injected exact-send authorization wrapper for the paused REST boundary. Each payload carries a stable numeric nonce and `enforceNonce:true`. SQLite stores immutable payload snapshots and records the attempt before dispatch. Reruns locate exact revision/part markers in paginated bot-authored history. A lost response is recovered from the accepted message without repeating Member's ping. If a send is uncertain and no matching message exists, the release stops with `RELAUNCH_SEND_UNCERTAIN` for operator investigation. It never blindly repeats an uncertain send.

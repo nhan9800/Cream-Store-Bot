@@ -1,4 +1,5 @@
 import Database from 'better-sqlite3';
+import { PermissionFlagsBits } from 'discord.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import fs from 'node:fs';
 vi.mock('../src/config.js', () => ({ config: { guildId: '1282637033340403754' } }));
@@ -86,6 +87,8 @@ describe('current-catalog shop relaunch presentation', () => {
     expect(payloads).toHaveLength(3);
     const text = payloads.map(shopRelaunchPublicationInternals.textOf).join('\n');
     expect(text).toContain('850.000đ'); expect(text).toContain('530.000đ');
+    expect(text).toContain('~~66.000đ~~ **25.000đ**');
+    expect(text).toContain('~~79.000đ~~ **35.000đ**');
     expect(text).not.toMatch(/mail không bao giờ|tỷ lệ die|giao ngay|hạn mức.*không giới hạn/i);
     for (const payload of payloads) expect(shopRelaunchPublicationInternals.textOf(payload).length).toBeLessThanOrEqual(4000);
   });
@@ -128,6 +131,14 @@ describe('current-catalog shop relaunch presentation', () => {
 });
 
 describe('durable relaunch publication and one Member mention', () => {
+  it('does not post a purported Member ping when the bot cannot mention that role', async () => {
+    const state = fixture();
+    const guild = await state.client.guilds.fetch(SHOP_RELAUNCH.guildId);
+    guild.roles.fetch = async id => ({ id, managed: false, mentionable: false });
+    state.channels.get(SHOP_RELAUNCH.channelId).permissionsFor = () => ({ has: permission => permission !== PermissionFlagsBits.MentionEveryone });
+    await expect(state.run()).rejects.toMatchObject({ code: 'RELAUNCH_MEMBER_MENTION_PERMISSION_MISSING' });
+    expect(state.channels.get(SHOP_RELAUNCH.channelId).send).not.toHaveBeenCalled();
+  });
   it('publishes three boards plus a silent announcement, verifies fetched messages and never repeats the ping', async () => {
     const state = fixture();
     expect(getShopRelaunchPublicationHealth({ dbInstance: state.db }).status).toBe('not_started');

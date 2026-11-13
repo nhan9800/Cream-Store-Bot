@@ -107,7 +107,11 @@ export function buildShopRelaunchPayloads({ products, E }) {
       const heading = `## ${checkedEmoji(E, slot)} ${title}`;
       if (slot === 'promo_decor') {
         entries.forEach(p => assigned.add(p.id));
-        sections.push(`${heading}\n${priceEmoji} **${entries.length} lựa chọn Decor/Gift** · từ **${money(Math.min(...entries.map(p => p.price)))}**\n-# Có gói cho tài khoản có Nitro, chưa có Nitro và Gift. Xem từng mức tại Bảng giá đầy đủ; giá phụ thuộc lựa chọn.`);
+        const highlights = [/Acc Có Nitro/i, /Acc Không Nitro/i, /Dạng Gift/i, /Combo Gift/i]
+          .map(pattern => entries.filter(p => pattern.test(p.name)).sort((a, b) => a.price - b.price)[0]).filter(Boolean);
+        sections.push(`${heading}\n${priceEmoji} **${entries.length} lựa chọn Decor/Gift** · từ **${money(Math.min(...entries.map(p => p.price)))}**\n`
+          + highlights.map(product => productLine(product, priceEmoji)).join('\n')
+          + '\n-# Chọn đúng dạng tài khoản hoặc Gift. Xem toàn bộ mức giá tại Bảng giá đầy đủ.');
         continue;
       }
       let section = heading;

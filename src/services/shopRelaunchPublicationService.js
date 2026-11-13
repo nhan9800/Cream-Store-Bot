@@ -85,7 +85,7 @@ async function publishInternal(client, { dbInstance, E, sendMessage = (channel, 
   const guild = await client.guilds.fetch(SHOP_RELAUNCH.guildId);
   if (String(guild?.id) !== SHOP_RELAUNCH.guildId) throw fail('RELAUNCH_GUILD_MISMATCH');
   const role = await guild.roles.fetch(SHOP_RELAUNCH.memberRoleId);
-  if (!role || role.managed || role.id === guild.id) throw fail('RELAUNCH_MEMBER_ROLE_INVALID');
+  if (!role || String(role.id) !== SHOP_RELAUNCH.memberRoleId || role.managed || role.id === guild.id) throw fail('RELAUNCH_MEMBER_ROLE_INVALID');
   const channels = new Map();
   const botMember = guild.members.me || await guild.members.fetchMe();
   for (const id of [SHOP_RELAUNCH.channelId, SHOP_RELAUNCH.announcementChannelId]) {
