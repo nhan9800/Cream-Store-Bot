@@ -30,11 +30,15 @@ function isEphemeral(message) {
 
 function scopedOrigin(interaction) {
   if (interaction.guildId !== STORE_ONE_GUILD_ID || config.guildId !== STORE_ONE_GUILD_ID || process.env.ENV_FILE !== '.env') return null;
-  const panel = presentation.getSupplierAutobuyPanelHealth();
   const botId = interaction.client?.user?.id;
-  if (panel?.status !== 'READY' || !CUSTOMER_ID.test(panel.channelId || '') || !CUSTOMER_ID.test(panel.messageId || '')
-    || interaction.channelId !== panel.channelId || !CUSTOMER_ID.test(botId || '')) return null;
-  return { panel, botId };
+  if (!CUSTOMER_ID.test(botId || '')) return null;
+  const matches = ['cdkvietnam', 'dopermind'].map(provider => ({ provider,
+    panel: presentation.getSupplierAutobuyPanelHealth(provider),
+  })).filter(({ provider, panel }) => (provider === 'cdkvietnam' || panel?.provider === provider)
+    && (!panel?.provider || panel.provider === provider) && panel?.status === 'READY'
+    && CUSTOMER_ID.test(panel.channelId || '') && CUSTOMER_ID.test(panel.messageId || '')
+    && interaction.channelId === panel.channelId);
+  return matches.length === 1 ? { ...matches[0], botId } : null;
 }
 
 function validPrivateOrigin(interaction, scope, owner, modal) {
@@ -55,7 +59,7 @@ function validArguments(action, args) {
   return action === 'pay' && args.length === 2 && ORDER_CODE.test(args[0]) && ['payos', 'wallet'].includes(args[1]);
 }
 
-const dataContext = interaction => ({ guildId: interaction.guildId, customerId: interaction.user.id });
+const dataContext = (interaction, provider) => ({ guildId: interaction.guildId, customerId: interaction.user.id, provider });
 const safeText = value => typeof value === 'string' && value.length <= 200 ? value : '';
 const inputError = code => Object.assign(new Error('Autobuy input is invalid.'), { code });
 function errorText(error) {
@@ -117,7 +121,10 @@ export function createSupplierAutobuyInteractionHandler(dependencies = {}) {
       if (interaction.deferred || interaction.replied) return true;
     } catch { await replyInvalid(interaction); return true; }
 
-    const snapshot = supplierAutobuyRuntime.getHealth();
+    const currentSnapshot = supplierAutobuyRuntime.forProvider?.(scope.provider)?.getHealth()
+      || supplierAutobuyRuntime.getHealth();
+    const snapshot = !currentSnapshot?.provider || currentSnapshot.provider === scope.provider ? currentSnapshot
+      : { status: 'NOT_STARTED', provider: scope.provider, purchasesEnabled: false };
     // Existing paid orders remain privately retrievable while new sales pause.
     const historical = ['orders', 'order', 'orderselect', 'delivery'].includes(action);
     if (!publicAction && !historical && snapshot?.purchasesEnabled !== true) { await replyInvalid(interaction); return true; }
@@ -142,9 +149,10 @@ export function createSupplierAutobuyInteractionHandler(dependencies = {}) {
     try {
       if (publicAction && (snapshot?.purchasesEnabled !== true || action === 'status')) {
         payload = presentation.buildSupplierAutobuyReply({ client: interaction.client, snapshot, action,
+          provider: scope.provider,
           ...(CUSTOMER_ID.test(interaction.user?.id || '') ? { customerId: interaction.user.id } : {}) });
       } else {
-        const context = dataContext(interaction);
+        const context = dataContext(interaction, scope.provider);
         if (action === 'catalog' || action === 'page' || action === 'category') {
           let category = action === 'page' ? Number(args[0]) : 0;
           const page = action === 'page' ? Number(args[1]) : 0;
@@ -152,7 +160,8 @@ export function createSupplierAutobuyInteractionHandler(dependencies = {}) {
             if (interaction.values?.length !== 1 || !INTEGER.test(interaction.values[0])) throw new Error('INVALID_CATEGORY');
             category = Number(interaction.values[0]);
           }
-          payload = presentation.buildSupplierCatalogView({ catalog: await deps.getCatalog(), customerId: context.customerId, page, category });
+          payload = presentation.buildSupplierCatalogView({ catalog: await deps.getCatalog({ provider: scope.provider }),
+            customerId: context.customerId, page, category, provider: scope.provider });
         } else if (action === 'select' || action === 'qtymodal') {
           const productKey = action === 'select' ? interaction.values?.[0] : args[0];
           if ((action === 'select' && interaction.values?.length !== 1) || !isSupplierAutobuyProductKey(productKey)) throw new Error('INVALID_PRODUCT');
@@ -181,7 +190,8 @@ export function createSupplierAutobuyInteractionHandler(dependencies = {}) {
             payload = await presentation.buildSupplierPaymentView({ order, customerId: context.customerId, payment });
           }
         } else if (action === 'orders') {
-          payload = presentation.buildSupplierOrderListView({ orders: await deps.listOrders({ ...context, limit: 10 }), customerId: context.customerId });
+          payload = presentation.buildSupplierOrderListView({ orders: await deps.listOrders({ ...context, limit: 10 }),
+            customerId: context.customerId, provider: scope.provider });
         } else if (action === 'order' || action === 'orderselect') {
           const orderCode = action === 'orderselect' ? interaction.values?.[0] : args[0];
           if ((action === 'orderselect' && interaction.values?.length !== 1) || !ORDER_CODE.test(orderCode || '')) throw new Error('INVALID_ORDER');
@@ -197,7 +207,8 @@ export function createSupplierAutobuyInteractionHandler(dependencies = {}) {
           if (!await deps.canManage(interaction)) throw new Error('FORBIDDEN');
           const value = interaction.fields?.getTextInputValue('price')?.trim();
           if (!/^[1-9]\d{0,9}$/.test(value || '') || Number(value) > 1_000_000_000) throw inputError('INVALID_PRICE');
-          await deps.setPrice({ client: interaction.client, guildId: context.guildId, productKey: args[0], priceVnd: Number(value), actorId: context.customerId });
+          await deps.setPrice({ client: interaction.client, guildId: context.guildId, provider: scope.provider,
+            productKey: args[0], priceVnd: Number(value), actorId: context.customerId });
           payload = presentation.buildSupplierNoticeView({ title: 'Đã cập nhật giá', text: 'Giá mới đã được lưu. Báo giá mới sử dụng mức giá đã cập nhật; đơn đã thanh toán giữ nguyên giá đã xác nhận.', customerId: context.customerId });
         }
       }
@@ -217,7 +228,7 @@ export function createSupplierAutobuyInteractionHandler(dependencies = {}) {
       const attachments = [...(payload.files || []), ...(files || [])];
       const receipt = await interaction.editReply({ components: payload.components, flags: MessageFlags.IsComponentsV2, allowedMentions: NO_MENTIONS, ...(attachments.length ? { files: attachments } : {}) });
       if (action === 'delivery' && files?.length) {
-        await deps.acknowledgeDelivery({ ...dataContext(interaction), orderCode: args[0], messageId: receipt?.id, channelId: interaction.channelId });
+        await deps.acknowledgeDelivery({ ...dataContext(interaction, scope.provider), orderCode: args[0], messageId: receipt?.id, channelId: interaction.channelId });
       }
     } catch { /* Notification retries must never repeat payment or purchase. */ }
     return true;

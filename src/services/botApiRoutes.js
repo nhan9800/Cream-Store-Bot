@@ -82,6 +82,7 @@ import { getSupplierCatalogHealth } from './supplierAutobuyCatalogService.js';
 import { getSupplierAutobuyOrderHealth } from './supplierAutobuyOrderService.js';
 import { getCoreEmojiPackStatus } from './coreEmojiPackService.js';
 import { getShopRelaunchReleaseHealth } from './shopRelaunchReleaseService.js';
+import { getCompactSaleReleaseHealth } from './compactSaleReleaseService.js';
 
 let storeInviteCache = { url: '', expiresAt: 0 };
 const websiteSupportProvisioning = new Map();
@@ -514,6 +515,7 @@ export function registerBotApiRoutes(app) {
             supplierAutobuyOrders: getSupplierAutobuyOrderHealth(),
             botUi: { icons: getCoreEmojiPackStatus(req.app.locals.discordClient) },
             shopRelaunch: getShopRelaunchReleaseHealth(),
+            compactSale: getCompactSaleReleaseHealth(),
             unpaidTicketPolicy: getPendingPaymentTicketPolicy(),
             // Aggregate-only media readiness; never expose extractor paths,
             // subprocess output, cookies or proxy credentials on public health.

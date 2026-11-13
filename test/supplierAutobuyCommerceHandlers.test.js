@@ -43,10 +43,10 @@ function dependencies(patch = {}) {
   };
 }
 const privateId = (action, suffix = '') => 'supplier-autobuy:' + action + ':' + customerId + (suffix ? ':' + suffix : '');
-const context = { guildId, customerId };
+const context = { guildId, customerId, provider: 'cdkvietnam' };
 beforeEach(() => {
   vi.stubEnv('ENV_FILE', '.env');
-  state.snapshot = { status: 'CONNECTED', provider: 'dopermind', purchasesEnabled: true, productCount: 101, checkedAt: '2026-11-10T15:57:34.914Z' };
+  state.snapshot = { status: 'CONNECTED', provider: 'cdkvietnam', purchasesEnabled: true, productCount: 12, checkedAt: '2026-11-10T15:57:34.914Z' };
   state.panel = { status: 'READY', channelId, messageId };
 });
 afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
@@ -100,7 +100,7 @@ describe('supplier autobuy customer commerce interactions', () => {
       isButton: () => false, isModalSubmit: () => true, fields: { getTextInputValue: () => '75000' },
     });
     await handler(price);
-    expect(deps.setPrice).toHaveBeenCalledExactlyOnceWith({ client: price.client, guildId, productKey: key, priceVnd: 75000, actorId: customerId });
+    expect(deps.setPrice).toHaveBeenCalledExactlyOnceWith({ client: price.client, guildId, provider: 'cdkvietnam', productKey: key, priceVnd: 75000, actorId: customerId });
     expect(deps.confirmCheckout).not.toHaveBeenCalled();
     expect(deps.createPayment).not.toHaveBeenCalled();
   });
@@ -328,7 +328,7 @@ describe('supplier autobuy customer commerce interactions', () => {
     const deps = dependencies({ canManage: vi.fn().mockResolvedValue(true) });
     const interaction = fixture(privateId('pricemodal', productKey), { message: undefined, isButton: () => false, isModalSubmit: () => true, fields: { getTextInputValue: () => '65000' } });
     await createSupplierAutobuyInteractionHandler(deps)(interaction);
-    expect(deps.setPrice).toHaveBeenCalledExactlyOnceWith({ client: interaction.client, guildId, productKey, priceVnd: 65000, actorId: customerId });
+    expect(deps.setPrice).toHaveBeenCalledExactlyOnceWith({ client: interaction.client, guildId, provider: 'cdkvietnam', productKey, priceVnd: 65000, actorId: customerId });
     expect(JSON.stringify(interaction.editReply.mock.calls)).toContain('Đã cập nhật giá');
   });
   it('uses a forced fresh guild member lookup for the default Admin guard', async () => {

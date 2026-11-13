@@ -36,10 +36,11 @@ import { startCoreEmojiMaintenance, getCoreEmojiPackStatus } from './services/co
 import { refreshBotInterfaces } from './services/botInterfaceRefreshService.js';
 import { pauseAutomaticMarketing } from './services/marketingPauseService.js';
 import { supplierAutobuyRuntime } from './services/supplierAutobuyRuntime.js';
-import { getSupplierOffers, getSupplierCatalogReviewSnapshot, supplierSalesConfigured } from './services/supplierAutobuyCatalogService.js';
+import { getSupplierOffers, supplierSalesConfigured } from './services/supplierAutobuyCatalogService.js';
 import { startSupplierAutobuyWorker } from './services/supplierAutobuyOrderService.js';
 import { ensureSupplierAutobuyChannel } from './services/supplierAutobuyPanelService.js';
 import { runShopRelaunchRelease } from './services/shopRelaunchReleaseService.js';
+import { runCompactSaleRelease } from './services/compactSaleReleaseService.js';
 
 export async function buildClient() {
   initDatabase();
@@ -124,17 +125,6 @@ export async function buildClient() {
     const supplierSalesSetup = supplierProbe.then(async snapshot => {
       if (!supplierSalesConfigured()) return snapshot;
       const catalog = await getSupplierOffers();
-      if (config.guildId === STORE_ONE_GUILD_ID && process.env.ENV_FILE === '.env') {
-        console.log('[SUPPLIER-CATALOG-PROVIDERS]', JSON.stringify({
-          active: process.env.SUPPLIER_AUTOBUY_PROVIDER,
-          dopermindConfigured: Boolean(process.env.DOPERMIND_API_KEY),
-          cdkVietnamConfigured: Boolean(process.env.CDKVIETNAM_API_KEY),
-        }));
-        for (const product of getSupplierCatalogReviewSnapshot().products) {
-          console.log('[SUPPLIER-CATALOG-REVIEW]', JSON.stringify({ ...product,
-            description: String(product.description || '').slice(0, 4000) }));
-        }
-      }
       const worker = await startSupplierAutobuyWorker(readyClient);
       return supplierAutobuyRuntime.setSalesEnabled(worker.workerRunning === true && catalog.offers.some(offer => offer.available));
     }).catch(() => {
@@ -154,6 +144,8 @@ export async function buildClient() {
     const iconSetup=startCoreEmojiMaintenance(readyClient,{guildId:config.guildId,afterSync:refreshBotInterfaces});
     void iconSetup.then(() => runShopRelaunchRelease(readyClient))
       .catch(() => console.warn('[SHOP-RELAUNCH] RELEASE_FAILED'));
+    void iconSetup.then(() => runCompactSaleRelease(readyClient))
+      .catch(() => console.warn('[COMPACT-SALE] RELEASE_FAILED'));
     // The owner requested this dedicated channel. Persist and reuse its one
     // panel; other marketing and price-board publication stays paused.
     void Promise.all([supplierSalesSetup, iconSetup]).then(([snapshot]) => {

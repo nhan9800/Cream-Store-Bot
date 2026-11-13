@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChannelType, Collection, MessageFlags, PermissionsBitField } from 'discord.js';
+// Channel setup fixtures isolate Discord ownership/permissions from live art.
+vi.mock('../src/utils/uniqueCustomEmoji.js', () => ({ withUniqueCustomEmoji: payload => JSON.parse(JSON.stringify(payload)) }));
 
 const state = vi.hoisted(() => ({ settings: new Map(), support: '1514607020098191393', emojis: true }));
 vi.mock('../src/database/db.js', () => ({ db: { prepare: sql => ({

@@ -55,7 +55,7 @@ describe('supplier autobuy cached-card interactions', () => {
     expect(await handleSupplierAutobuyInteraction(click)).toBe(true);
     expect(click.deferReply).toHaveBeenCalledExactlyOnceWith({ flags: MessageFlags.Ephemeral });
     expect(click.deferReply.mock.invocationCallOrder[0]).toBeLessThan(state.builder.mock.invocationCallOrder[0]);
-    expect(state.builder).toHaveBeenCalledExactlyOnceWith({ client: click.client, snapshot, action });
+    expect(state.builder).toHaveBeenCalledExactlyOnceWith({ client: click.client, snapshot, action, provider: 'cdkvietnam' });
     expect(click.editReply).toHaveBeenCalledExactlyOnceWith({
       components, flags: MessageFlags.IsComponentsV2,
       allowedMentions: { parse: [], users: [], roles: [], repliedUser: false },

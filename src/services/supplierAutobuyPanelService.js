@@ -8,23 +8,38 @@ import { db } from '../database/db.js';
 import { createEmojiResolver, withButtonEmoji } from '../utils/emojiHelper.js';
 import { STORE_ONE_GUILD_ID } from '../utils/locale.js';
 import { isSupplierAutobuyProductKey } from '../utils/supplierAutobuyIdentifiers.js';
+import { withUniqueCustomEmoji } from '../utils/uniqueCustomEmoji.js';
 
 const CATEGORY_ID = '1514606994256957600';
 const CHANNEL_NAME = '🛒・autobuy';
-const channelTopic = botId => `Cenar AutoBuy · Cenar Store quản lý · Bot ${botId}`;
+const PROVIDERS = ['cdkvietnam', 'dopermind'];
+const sourceLabel = provider => provider === 'dopermind' ? 'Dopermind' : 'CDK Việt Nam';
+const channelName = provider => provider === 'dopermind' ? '🛒・autobuy-dopermind' : CHANNEL_NAME;
+const channelTopic = (botId, provider = 'cdkvietnam') => provider === 'dopermind'
+  ? `Cenar AutoBuy Dopermind · Cenar Store quản lý · Bot ${botId}`
+  : `Cenar AutoBuy · Cenar Store quản lý · Bot ${botId}`;
 const PREFIX = `supplier-autobuy:${STORE_ONE_GUILD_ID}:`;
 const CONTROL_IDS = ['supplier-autobuy:catalog', 'supplier-autobuy:status'];
 const NO_MENTIONS = { parse: [], users: [], roles: [], repliedUser: false };
 const starts = new WeakMap();
-let panelHealth = Object.freeze({ status: 'NOT_STARTED', channelId: null, messageId: null });
+const panelHealth = new Map(PROVIDERS.map(provider => [provider,
+  Object.freeze({ status: 'NOT_STARTED', channelId: null, messageId: null, ...(provider === 'dopermind' ? { provider } : {}) })]));
 const snowflake = value => typeof value === 'string' && /^\d{17,20}$/.test(value);
+const decorate = (payload, seed) => withUniqueCustomEmoji(payload, { guildId: STORE_ONE_GUILD_ID, seed });
 
-function setHealth(status, channelId = null, messageId = null) {
-  panelHealth = Object.freeze({ status, channelId: snowflake(channelId) ? channelId : null, messageId: snowflake(messageId) ? messageId : null });
-  return panelHealth;
+function recordPanelHealth(status, channelId = null, messageId = null, provider = 'cdkvietnam') {
+  const summary = Object.freeze({ status, channelId: snowflake(channelId) ? channelId : null,
+    messageId: snowflake(messageId) ? messageId : null, ...(provider === 'dopermind' ? { provider } : {}) });
+  panelHealth.set(provider, summary);
+  return summary;
 }
 
-export function getSupplierAutobuyPanelHealth() { return panelHealth; }
+export function getSupplierAutobuyPanelHealth(provider = 'cdkvietnam') {
+  return panelHealth.get(provider) || Object.freeze({ status: 'DISABLED_PROVIDER', channelId: null, messageId: null });
+}
+export function getSupplierAutobuyPanelsHealth() {
+  return Object.fromEntries(PROVIDERS.map(provider => [provider, getSupplierAutobuyPanelHealth(provider)]));
+}
 
 function checkedLine(snapshot) {
   const value = snapshot?.checkedAt;
@@ -50,10 +65,10 @@ function containerWithTitle(title, text, accent = 0x41B899) {
   return container;
 }
 
-export function buildSupplierAutobuyPanel({ client, snapshot, supportChannelId } = {}) {
+export function buildSupplierAutobuyPanel({ client, snapshot, supportChannelId, provider = snapshot?.provider || 'cdkvietnam' } = {}) {
   const E = createEmojiResolver(STORE_ONE_GUILD_ID);
   const opened = snapshot?.purchasesEnabled === true;
-  const container = containerWithTitle(`## ${E('panel_order')} CENAR AUTOBUY`.trim(), [
+  const container = containerWithTitle(`## ${E('panel_order')} CENAR AUTOBUY · ${sourceLabel(provider)}`.trim(), [
     `### ${E(snapshot?.status === 'CONNECTED' || opened ? 'status_check' : 'status_loading')} ${opened ? 'Chọn gói · Thanh toán · Nhận hàng riêng' : snapshot?.status === 'CONNECTED' ? 'Đã kết nối nguồn hàng mới' : 'Đang chuẩn bị mở bán'}`,
     stateLine(snapshot),
     '',
@@ -68,21 +83,21 @@ export function buildSupplierAutobuyPanel({ client, snapshot, supportChannelId }
   );
   if (snowflake(supportChannelId)) row.addComponents(withButtonEmoji(new ButtonBuilder().setLabel('Tạo ticket hỗ trợ')
     .setStyle(ButtonStyle.Link).setURL(`https://discord.com/channels/${STORE_ONE_GUILD_ID}/${supportChannelId}`), E('cenar_support')));
-  return { components: [container, row], flags: MessageFlags.IsComponentsV2 | MessageFlags.SuppressNotifications, allowedMentions: { ...NO_MENTIONS } };
+  return decorate({ components: [container, row], flags: MessageFlags.IsComponentsV2 | MessageFlags.SuppressNotifications, allowedMentions: { ...NO_MENTIONS } }, 'autobuy:public');
 }
 
-export function buildSupplierAutobuyReply({ client, snapshot, action, customerId } = {}) {
+export function buildSupplierAutobuyReply({ client, snapshot, action, customerId, provider = snapshot?.provider || 'cdkvietnam' } = {}) {
   const E = createEmojiResolver(STORE_ONE_GUILD_ID);
   const catalog = action === 'catalog';
   const title = catalog ? `## ${E('icon_doc')} Danh mục đang được chuẩn bị` : `## ${E(snapshot?.purchasesEnabled === true ? 'status_check' : 'status_loading')} Tình trạng autobuy`;
   const count = snapshot?.status === 'CONNECTED' && Number.isSafeInteger(snapshot?.productCount) && snapshot.productCount >= 0
     ? `Shop đã kiểm tra kết nối danh mục **${snapshot.productCount} sản phẩm**. Giá bán và điều kiện từng gói đang được hoàn thiện.\n\n` : '';
-  const text = catalog
+  const text = `${sourceLabel(provider)}\n\n` + (catalog
     ? `${count}Shop chưa công bố sản phẩm hoặc giá bán autobuy. Giá, thời hạn và bảo hành sẽ hiển thị rõ trước khi khách xác nhận mua.\n\n**Hiện chưa nhận tiền hoặc tạo đơn ở kênh này.**`
-    : `${stateLine(snapshot)}\n\n${checkedLine(snapshot)}\nĐây là kết quả kiểm tra đã lưu; thao tác này không tạo giao dịch.\n\n**${snapshot?.purchasesEnabled === true ? 'Autobuy đã sẵn sàng. Xem giá và điều kiện trước khi mua.' : 'Autobuy chưa mở bán.'}**`;
+    : `${stateLine(snapshot)}\n\n${checkedLine(snapshot)}\nĐây là kết quả kiểm tra đã lưu; thao tác này không tạo giao dịch.\n\n**${snapshot?.purchasesEnabled === true ? 'Autobuy đã sẵn sàng. Xem giá và điều kiện trước khi mua.' : 'Autobuy chưa mở bán.'}**`);
   const components = [containerWithTitle(title, text)];
   if (ownerId(customerId)) components.push(row(button(`supplier-autobuy:orders:${customerId}`, 'Đơn của tôi', 'icon_doc')));
-  return { components, flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral, allowedMentions: { ...NO_MENTIONS } };
+  return decorate({ components, flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral, allowedMentions: { ...NO_MENTIONS } }, `autobuy:reply:${action}`);
 }
 
 const PAGE_SIZE = 8;
@@ -130,7 +145,7 @@ function categoryIcon(name) {
 function selectEmoji(E, slot) { const emoji = E.component?.(slot); return emoji ? { emoji } : {}; }
 const validOffer = offer => isSupplierAutobuyProductKey(offer?.productKey) && clean(offer?.name).length > 0
   && Number.isSafeInteger(priceOf(offer)) && priceOf(offer) > 0 && offer.available === true;
-const privatePayload = components => ({ components, flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral, allowedMentions: { ...NO_MENTIONS } });
+const privatePayload = components => decorate({ components, flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral, allowedMentions: { ...NO_MENTIONS } }, 'autobuy:private');
 const button = (id, label, slot = 'icon_doc', style = ButtonStyle.Secondary) => {
   const E = createEmojiResolver(STORE_ONE_GUILD_ID);
   return withButtonEmoji(new ButtonBuilder().setCustomId(id).setLabel(label).setStyle(style), E(slot));
@@ -139,7 +154,7 @@ const row = (...buttons) => new ActionRowBuilder().addComponents(buttons);
 const nav = customerId => row(button(`supplier-autobuy:page:${customerId}:0:0`, 'Danh mục', 'icon_store'), button(`supplier-autobuy:orders:${customerId}`, 'Đơn của tôi', 'icon_doc'));
 function requireOwner(customerId) { if (!ownerId(customerId)) throw new Error('INVALID_CUSTOMER'); }
 
-export function buildSupplierCatalogView({ catalog, customerId, page = 0, category = 0 } = {}) {
+export function buildSupplierCatalogView({ catalog, customerId, page = 0, category = 0, provider = catalog?.provider || 'cdkvietnam' } = {}) {
   requireOwner(customerId);
   const E = createEmojiResolver(STORE_ONE_GUILD_ID);
   const offers = Array.isArray(catalog?.offers) ? catalog.offers.filter(validOffer) : [];
@@ -149,9 +164,11 @@ export function buildSupplierCatalogView({ catalog, customerId, page = 0, catego
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const currentPage = Number.isInteger(page) ? Math.max(0, Math.min(page, pages - 1)) : 0;
   const visible = filtered.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
-  const text = visible.length ? visible.map(offer => `${E(productIcon(offer.name))} **${markdown(offer.name, 90)}**\n${E('icon_price')} **${money(priceOf(offer))}** · ${markdown(offer.termLabel || 'Xem điều kiện gói', 65)}`).join('\n\n')
+  const text = visible.length ? visible.map(offer => `${E(productIcon(offer.name)) || E('order_product')} **${markdown(offer.name, 90)}**\n${E('icon_price')} **${money(priceOf(offer))}** · ${markdown(offer.termLabel || 'Xem điều kiện gói', 65)}`).join('\n\n')
     : 'Chưa có gói phù hợp còn hàng. Bạn có thể quay lại sau hoặc tạo ticket để shop kiểm tra.';
-  const container = containerWithTitle(`## ${E('icon_store')} Chọn gói bạn cần`, `${text}\n\n-# Trang ${currentPage + 1}/${pages} · ${filtered.length} gói đang có hàng. Giá và tồn kho được kiểm tra lại trước khi tạo đơn.`);
+  const sourceNote = Number.isSafeInteger(catalog?.sourceCount) && catalog.sourceCount > offers.length
+    ? `\n-# Nguồn đang kết nối: ${catalog.sourceCount} gói. Những gói chưa đủ giá hoặc điều kiện được giữ lại để shop kiểm tra.` : '';
+  const container = containerWithTitle(`## ${E('icon_store')} Chọn gói bạn cần · ${sourceLabel(provider)}`, `${text}\n\n-# Trang ${currentPage + 1}/${pages} · ${filtered.length} gói đã duyệt còn hàng. Giá và tồn kho được kiểm tra lại trước khi tạo đơn.${sourceNote}`);
   const components = [container];
   if (categories.length > 1) {
     components.push(new ActionRowBuilder().addComponents(new StringSelectMenuBuilder()
@@ -194,7 +211,7 @@ export function buildSupplierQuoteView({ quote, customerId, manager = false } = 
   if (quantityId.length <= 100) controls.push(button(quantityId, 'Đổi số lượng', 'icon_edit'));
   const priceId = `supplier-autobuy:editprice:${customerId}:${encodeURIComponent(quote.productKey)}`;
   if (manager && priceId.length <= 100) controls.push(button(priceId, 'Admin · Sửa giá', 'panel_edit'));
-  return privatePayload([containerWithTitle(`## ${E('status_info')} Kiểm tra gói đã chọn`, text), row(...controls), nav(customerId)]);
+  return privatePayload([containerWithTitle(`## ${E('status_info')} Kiểm tra gói đã chọn · ${sourceLabel(quote.provider)}`, text), row(...controls), nav(customerId)]);
 }
 
 const STATUSES = Object.freeze({ PENDING_PAYMENT: 'Chờ thanh toán', UNPAID: 'Chờ thanh toán', PROCESSING: 'Đang xử lý', PAID: 'Đã thanh toán', COMPLETED: 'Đã hoàn thành', DELIVERED: 'Đã giao hàng', READY: 'Có hàng để nhận', UNKNOWN: 'Đang đối soát với nguồn', RECONCILING: 'Đang đối soát với nguồn', REVIEW_REQUIRED: 'Shop đang kiểm tra', REVIEW: 'Shop đang kiểm tra đơn', BLOCKED: 'Shop đang kiểm tra đơn', WAITING_STOCK: 'Đang chờ nguồn bổ sung hàng', WAITING_SUPPLIER_FUNDS: 'Đã thanh toán · Chờ shop bổ sung nguồn', SUBMITTING: 'Đang lấy hàng', PURCHASED: 'Đã có hàng · Đang giao riêng', DELIVERY_PENDING: 'Đang chờ gửi hàng riêng', DELIVERING: 'Đang gửi hàng riêng', PENDING: 'Đang chờ lấy hàng', FAILED: 'Cần shop hỗ trợ', CANCELLED: 'Đã hủy', REFUNDED: 'Đã hoàn tiền' });
@@ -254,7 +271,7 @@ export function buildSupplierOrderView({ order, customerId, payment = order?.pay
   if (link) controls.push(withButtonEmoji(new ButtonBuilder().setLabel('Mở trang thanh toán').setStyle(ButtonStyle.Link).setURL(link), E('payment_payos')));
   controls.push(button(`supplier-autobuy:order:${customerId}:${code}`, 'Kiểm tra đơn', 'icon_refresh'),
     button(`supplier-autobuy:delivery:${customerId}:${code}`, 'Nhận hàng riêng', 'icon_gift'));
-  const container = containerWithTitle(`## ${E('panel_order')} Đơn autobuy của bạn`, text);
+  const container = containerWithTitle(`## ${E('panel_order')} Đơn autobuy của bạn · ${sourceLabel(order?.provider)}`, text);
   if (unpaid && !expired && qrAttachmentName === `payos-${code}.png`) {
     container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
     container.addMediaGalleryComponents(new MediaGalleryBuilder().addItems(new MediaGalleryItemBuilder()
@@ -293,12 +310,12 @@ export async function buildSupplierPaymentView({ order, customerId, payment = or
   return { ...buildSupplierOrderView({ order, customerId, payment, qrAttachmentName, qrUnavailable: payos && !qrAttachmentName }), ...(files ? { files } : {}) };
 }
 
-export function buildSupplierOrderListView({ orders, customerId } = {}) {
+export function buildSupplierOrderListView({ orders, customerId, provider = 'cdkvietnam' } = {}) {
   requireOwner(customerId);
   const E = createEmojiResolver(STORE_ONE_GUILD_ID);
   const safe = Array.isArray(orders) ? orders.filter(order => /^CN_\d{6,12}$/.test(orderCodeOf(order) || '')).slice(0, 10) : [];
   const text = safe.length ? safe.map(order => publicOrderText(order, 70)).join('\n\n') : 'Bạn chưa có đơn autobuy. Vào Danh mục để chọn gói và xem điều kiện.';
-  const components = [containerWithTitle(`## ${E('icon_doc')} Đơn autobuy của tôi`, text)];
+  const components = [containerWithTitle(`## ${E('icon_doc')} Đơn autobuy của tôi · ${sourceLabel(provider)}`, text)];
   if (safe.length) components.push(new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId(`supplier-autobuy:orderselect:${customerId}`)
     .setPlaceholder('Chọn đơn để kiểm tra hoặc nhận hàng').addOptions(safe.map(order => ({ label: orderCodeOf(order), value: orderCodeOf(order), description: clean(order.productName ?? order.product_name ?? 'Đơn autobuy', 100) })))));
   components.push(nav(customerId));
@@ -311,10 +328,11 @@ export function buildSupplierNoticeView({ title = 'Thông tin autobuy', text, cu
   return privatePayload([containerWithTitle(`## ${E(warning ? 'status_warn' : 'status_check')} ${markdown(title, 100)}`, markdown(text, 1200), warning ? 0xDDAA55 : 0x41B899), nav(customerId)]);
 }
 
-function readSetting(name) { return db.prepare('SELECT value FROM system_settings WHERE key = ?').get(`${PREFIX}${name}`)?.value ?? null; }
-function saveSetting(name, value) {
+const settingPrefix = provider => provider === 'dopermind' ? `${PREFIX}dopermind:` : PREFIX;
+function readProviderSetting(name, provider) { return db.prepare('SELECT value FROM system_settings WHERE key = ?').get(`${settingPrefix(provider)}${name}`)?.value ?? null; }
+function saveProviderSetting(name, value, provider) {
   db.prepare(`INSERT INTO system_settings (key,value,updated_at) VALUES (?,?,?)
-    ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at`).run(`${PREFIX}${name}`, value, new Date().toISOString());
+    ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at`).run(`${settingPrefix(provider)}${name}`, value, new Date().toISOString());
 }
 function componentIds(message) {
   const ids = [];
@@ -330,10 +348,10 @@ function ownedPanel(message, botId) {
   return message?.author?.id === botId && !message.webhookId
     && JSON.stringify(componentIds(message)) === JSON.stringify([...CONTROL_IDS].sort());
 }
-function ownedChannel(channel, botId) {
+function ownedChannel(channel, botId, provider = 'cdkvietnam') {
   return channel?.type === ChannelType.GuildText && channel.guildId === STORE_ONE_GUILD_ID
-    && channel.parentId === CATEGORY_ID && channel.name === CHANNEL_NAME
-    && channel.topic === channelTopic(botId);
+    && channel.parentId === CATEGORY_ID && channel.name === channelName(provider)
+    && channel.topic === channelTopic(botId, provider);
 }
 function readOnlyPermissions(channel, botId) {
   const everyone = channel.permissionOverwrites?.cache?.get(STORE_ONE_GUILD_ID);
@@ -347,9 +365,17 @@ function readOnlyPermissions(channel, botId) {
     && bot?.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory]);
 }
 
-export function ensureSupplierAutobuyChannel(client, { guildId, envFile, snapshot } = {}) {
+export function ensureSupplierAutobuyChannel(client, { guildId, envFile, snapshot, provider = 'cdkvietnam' } = {}) {
+  if (!PROVIDERS.includes(provider)) return Promise.resolve({ status: 'DISABLED_PROVIDER', channelId: null, messageId: null });
+  const setHealth = (status, channelId = null, messageId = null) => recordPanelHealth(status, channelId, messageId, provider);
+  const readSetting = name => readProviderSetting(name, provider);
+  const saveSetting = (name, value) => saveProviderSetting(name, value, provider);
+  const targetName = channelName(provider);
   if (guildId !== STORE_ONE_GUILD_ID || envFile !== '.env') return Promise.resolve(setHealth('DISABLED_OTHER_STORE'));
-  if (starts.has(client)) return starts.get(client);
+  if (snapshot?.provider && PROVIDERS.includes(snapshot.provider) && snapshot.provider !== provider) return Promise.resolve(setHealth('DEGRADED_SOURCE_MISMATCH'));
+  if (!starts.has(client)) starts.set(client, new Map());
+  const tasks = starts.get(client);
+  if (tasks.has(provider)) return tasks.get(provider);
   const task = Promise.resolve().then(async () => {
     let channelId = null;
     let messageId = null;
@@ -369,27 +395,27 @@ export function ensureSupplierAutobuyChannel(client, { guildId, envFile, snapsho
       let channel;
       if (channelId) {
         channel = channels.get(channelId);
-        if (!ownedChannel(channel, botId)) return setHealth('DEGRADED_SAVED_CHANNEL', channelId, messageId);
+        if (!ownedChannel(channel, botId, provider)) return setHealth('DEGRADED_SAVED_CHANNEL', channelId, messageId);
       } else {
-        const matches = [...channels.values()].filter(item => ownedChannel(item, botId));
+        const matches = [...channels.values()].filter(item => ownedChannel(item, botId, provider));
         if (matches.length > 1) return setHealth('DEGRADED_AMBIGUOUS_CHANNEL');
         channel = matches[0];
         if (!channel) {
           // A conflicting name is not ours to adopt, rename or overwrite.
-          if ([...channels.values()].some(item => item.parentId === CATEGORY_ID && item.name === CHANNEL_NAME)) return setHealth('DEGRADED_CHANNEL_CONFLICT');
+          if ([...channels.values()].some(item => item.parentId === CATEGORY_ID && item.name === targetName)) return setHealth('DEGRADED_CHANNEL_CONFLICT');
           if (readSetting('channel_pending') === '1') return setHealth('DEGRADED_CHANNEL_UNCERTAIN');
           if (!parent.permissionsFor?.(botId)?.has(PermissionFlagsBits.ManageChannels)) return setHealth('DEGRADED_NO_ACCESS');
           saveSetting('channel_pending', '1');
           channel = await guild.channels.create({
-            name: CHANNEL_NAME, type: ChannelType.GuildText, parent: CATEGORY_ID,
-            topic: channelTopic(botId),
+            name: targetName, type: ChannelType.GuildText, parent: CATEGORY_ID,
+            topic: channelTopic(botId, provider),
             permissionOverwrites: [
               { id: STORE_ONE_GUILD_ID, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory], deny: [PermissionFlagsBits.SendMessages, PermissionFlagsBits.CreatePublicThreads, PermissionFlagsBits.CreatePrivateThreads, PermissionFlagsBits.SendMessagesInThreads] },
               { id: botId, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.ReadMessageHistory, PermissionFlagsBits.SendMessages, PermissionFlagsBits.EmbedLinks, PermissionFlagsBits.ManageMessages] },
             ],
-            reason: 'Owner-requested separate autobuy channel; sales remain disabled',
+            reason: `Owner-requested separate ${sourceLabel(provider)} autobuy channel`,
           });
-          if (!ownedChannel(channel, botId)) return setHealth('DEGRADED_CREATED_CHANNEL');
+          if (!ownedChannel(channel, botId, provider)) return setHealth('DEGRADED_CREATED_CHANNEL');
         }
         channelId = channel.id;
         saveSetting('channel_id', channelId);
@@ -399,7 +425,7 @@ export function ensureSupplierAutobuyChannel(client, { guildId, envFile, snapsho
       const supportId = db.prepare('SELECT ticket_panel_channel_id FROM guild_settings WHERE guild_id = ?').get(STORE_ONE_GUILD_ID)?.ticket_panel_channel_id;
       const support = snowflake(supportId) ? channels.get(supportId) : null;
       const supportChannelId = support?.guildId === STORE_ONE_GUILD_ID && [ChannelType.GuildText, ChannelType.GuildAnnouncement].includes(support.type) ? supportId : null;
-      const payload = buildSupplierAutobuyPanel({ client, snapshot, supportChannelId });
+      const payload = buildSupplierAutobuyPanel({ client, snapshot, supportChannelId, provider });
       let message;
       if (messageId) {
         message = await channel.messages.fetch(messageId);
@@ -429,6 +455,6 @@ export function ensureSupplierAutobuyChannel(client, { guildId, envFile, snapsho
       return setHealth('DEGRADED_SETUP_FAILED', channelId, messageId);
     }
   });
-  starts.set(client, task);
+  tasks.set(provider, task);
   return task;
 }
