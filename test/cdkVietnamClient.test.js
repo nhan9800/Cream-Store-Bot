@@ -63,6 +63,33 @@ describe('CDK Việt Nam fixed-origin transport', () => {
     expect(rows[0]).toMatchObject({ productKey: 'cdkvietnam:6', providerProductId: 6 });
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
+  it('includes every page in the full source catalog without requiring a short last page', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ products: [product({ id: 1 })], next_after: 1 }))
+      .mockResolvedValueOnce(jsonResponse({ products: [product({ id: 2 })], next_after: 2 }))
+      .mockResolvedValueOnce(jsonResponse({ products: [product({ id: 3 })], next_after: null }));
+    const client = createCdkVietnamClient({ apiKey: SECRET, fetchImpl });
+    expect((await client.getStock()).map(row => row.productKey)).toEqual(['cdkvietnam:1', 'cdkvietnam:2', 'cdkvietnam:3']);
+    expect(fetchImpl.mock.calls.map(([url]) => url)).toEqual([0, 1, 2].map(after => `${CDK_VIETNAM_ORIGIN}/v1/products?after=${after}&limit=100`));
+  });
+  it.each(['2', -1, 0, 1.5])('rejects malformed or non-advancing cursor %j rather than returning a truncated catalog', async next_after => {
+    const { client } = setup({ products: [product({ id: 1 })], next_after });
+    await expect(client.getStock()).rejects.toMatchObject({ code: 'INVALID_SCHEMA' });
+  });
+  it('rejects repeated products across pages and never caches the partial catalog', async () => {
+    const fetchImpl = vi.fn()
+      .mockResolvedValueOnce(jsonResponse({ products: [product({ id: 1 })], next_after: 1 }))
+      .mockResolvedValueOnce(jsonResponse({ products: [product({ id: 1 })], next_after: null }))
+      .mockResolvedValueOnce(jsonResponse({ products: [product({ id: 3 })], next_after: null }));
+    const client = createCdkVietnamClient({ apiKey: SECRET, fetchImpl });
+    await expect(client.getStock()).rejects.toMatchObject({ code: 'INVALID_SCHEMA' });
+    expect((await client.getStock())[0].productKey).toBe('cdkvietnam:3');
+    expect(fetchImpl).toHaveBeenCalledTimes(3);
+  });
+  it('rejects a next cursor without any source rows', async () => {
+    const { client } = setup({ products: [], next_after: 4 });
+    await expect(client.getStock()).rejects.toMatchObject({ code: 'INVALID_SCHEMA' });
+  });
 
   it('sends the documented purchase body, idempotency header and maps a delivered receipt', async () => {
     const { client, fetchImpl } = setup({ replayed: false, order: order() }, { status: 201 });

@@ -87,7 +87,7 @@ function priceForQuantity(prices, quantity = 1, fail = code => new CdkVietnamErr
 
 function productsFrom(body, fail) {
   const payload = envelopeBody(body, fail);
-  if (!Array.isArray(payload.products) || payload.products.length > MAX_PRODUCTS) throw fail('INVALID_SCHEMA');
+  if (!Array.isArray(payload.products) || payload.products.length > 100) throw fail('INVALID_SCHEMA');
   const seen = new Set();
   const products = payload.products.map(item => {
     if (!record(item) || !integer(item.id, 1) || seen.has(item.id) ||
@@ -265,15 +265,24 @@ export function createCdkVietnamClient({
     const cacheKey = `${identityKey}:${filterId ?? 'all'}`;
     const cached = cache.get(cacheKey);
     if (cached && cached.expiresAt > Date.now()) return cached.value;
-    let after = 0; const all = [];
+    let after = 0; const all = []; const seen = new Set();
     for (let page = 0; page < 100; page += 1) {
       const query = new URLSearchParams({ after: String(after), limit: '100' });
       const response = await request('getStock', `/v1/products?${query}`);
       const rows = productsFrom(response.body, code => new CdkVietnamError(code, { operation: 'getStock' }));
+      for (const row of rows) {
+        if (seen.has(row.providerProductId)) throw new CdkVietnamError('INVALID_SCHEMA', { operation: 'getStock' });
+        seen.add(row.providerProductId);
+      }
       all.push(...rows);
-      if ((filterId !== null && all.some(row => row.providerProductId === filterId))
-        || !Number.isSafeInteger(response.body?.next_after) || response.body.next_after <= after) break;
-      after = response.body.next_after;
+      if (all.length > MAX_PRODUCTS) throw new CdkVietnamError('INVALID_SCHEMA', { operation: 'getStock' });
+      if (filterId !== null && all.some(row => row.providerProductId === filterId)) break;
+      const next = response.body?.next_after;
+      if (next === null || next === undefined) break;
+      if (!Number.isSafeInteger(next) || next <= after || rows.length === 0 || page === 99) {
+        throw new CdkVietnamError('INVALID_SCHEMA', { operation: 'getStock' });
+      }
+      after = next;
     }
     const value = Object.freeze(filterId === null ? all : all.filter(row => row.providerProductId === filterId));
     cache.set(cacheKey, { value, expiresAt: Date.now() + 2500 });

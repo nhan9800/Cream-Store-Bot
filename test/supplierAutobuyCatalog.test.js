@@ -33,6 +33,7 @@ describe('reviewed supplier pricing', () => {
   });
   it.each([
     ['source name changed', { ...product, name: 'Capcut Trial 7 Ngày' }, entry, policy, 'SOURCE_CHANGED'],
+    ['locked source product', { ...product, locked: true }, entry, policy, 'SOURCE_LOCKED'],
     ['free product', { ...product, priceVnd: 0 }, entry, policy, 'SOURCE_CHANGED'],
     ['unreviewed', product, { ...entry, enabled: false, reason: 'NOT_REVIEWED' }, policy, 'NOT_REVIEWED'],
     ['unknown term', product, { ...entry, termLabel: 'Theo tài khoản' }, policy, 'TERMS_UNVERIFIED'],
@@ -82,6 +83,38 @@ describe('supplier catalog cache and private quotes', () => {
     const { service } = fixture({ clientFactory: () => ({ getStock: async () => [{ ...product, stock: 0 }] }) });
     expect((await service.getOffers()).offers[0].available).toBe(false);
     await expect(service.getQuote(key)).rejects.toMatchObject({ code: 'OUT_OF_STOCK' });
+  });
+  it('reports complete source coverage with fixed exclusion codes and no private import prices', async () => {
+    const rows = [product, { ...product, productKey: 'new-source-product', name: 'Unreviewed source offer', delivery: 'manual' },
+      { ...product, productKey: 'locked-product', name: 'Locked source offer', locked: true }];
+    const { service, getStock } = fixture({ clientFactory: () => ({ getStock: async () => rows }) });
+    expect(service.getHealth().sourceCount).toBe(0);
+    const catalog = await service.getOffers();
+    expect(catalog.offers).toHaveLength(1);
+    expect(service.getHealth()).toMatchObject({ sourceCount: 3, policyCount: 1, reviewedCount: 1,
+      availableCount: 1, blockedCount: 2, unreviewedCount: 2, lockedCount: 1, manualDeliveryCount: 1,
+      blockedReasons: { NOT_REVIEWED: 1, SOURCE_LOCKED: 1 } });
+    const snapshot = service.getReviewSnapshot();
+    expect(snapshot.products).toHaveLength(3);
+    expect(snapshot.products.find(row => row.productKey === 'new-source-product')).toMatchObject({ reviewReason: 'NOT_REVIEWED', delivery: 'manual' });
+    expect(JSON.stringify([catalog, service.getHealth(), snapshot])).not.toMatch(/priceVnd":36000|unitCost|netProfit|apiKey|balance/);
+    expect(Object.isFrozen(service.getHealth().blockedReasons)).toBe(true);
+    expect(getStock).not.toHaveBeenCalled();
+  });
+  it('blocks a previously reviewed product when the supplier locks it, including overrides and checkout', async () => {
+    const { service, advance, getStock } = fixture();
+    await service.getOffers(); advance(30001);
+    getStock.mockResolvedValue([{ ...product, locked: true }]);
+    expect((await service.getOffers()).offers).toHaveLength(0);
+    await expect(service.getQuote(key)).rejects.toMatchObject({ code: 'SOURCE_LOCKED' });
+    expect(service.getHealth()).toMatchObject({ blockedReasons: { SOURCE_LOCKED: 1 }, lockedCount: 1 });
+  });
+  it('does not expose an arbitrary policy exclusion explanation in aggregate public health', async () => {
+    const { service } = fixture({ policy: { ...policy, products: [{ ...entry, enabled: false, reason: 'private-policy-note' }] } });
+    const offers = await service.getOffers();
+    expect(offers.blockedReasons).toEqual({ POLICY_EXCLUDED: 1 });
+    expect(JSON.stringify([offers, service.getHealth()])).not.toContain('private-policy-note');
+    expect(service.getReviewSnapshot().products[0].reviewReason).toBe('POLICY_EXCLUDED');
   });
   it('fails closed on unavailable fresh source rather than using a stale sale quote', async () => {
     const { service, getStock, advance } = fixture();

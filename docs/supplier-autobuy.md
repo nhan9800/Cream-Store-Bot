@@ -14,6 +14,29 @@ Integration coverage exercises all six reviewed CDK products through private
 quotes, one owned SQLite order and payment-method selection. These checks do
 not charge a customer, purchase supplier goods or claim a real paid delivery.
 
+### Source catalog coverage
+
+The active provider is selected explicitly. A CDK connection does not merge the
+separate Dopermind catalog into the same fulfillment engine. The CDK source can
+return more products than the reviewed sale manifest: unreviewed identity,
+missing activation/warranty evidence, changed terms, supplier locks, stale
+references or margin limits keep a source product out of sale. A stock count is
+not authorization to sell that SKU.
+
+Catalog health exposes aggregate `sourceCount`, `policyCount`, `reviewedCount`,
+`availableCount`, `blockedCount`, `unreviewedCount`, `outOfStockCount`,
+`lockedCount`, `manualDeliveryCount` and a fixed-code `blockedReasons` histogram.
+No source costs, balances, goods, credentials or free-form provider explanations
+are exposed. Operator review can read a separate cached metadata snapshot for
+unreviewed names, delivery mode and descriptions; it is not a public-health
+field and performs no extra provider request.
+
+The CDK adapter follows every `next_after` page within a 5,000-product bound,
+using the provider's documented 100-item page maximum. Invalid or repeating
+cursors, duplicate IDs across pages and incomplete bounded scans reject the
+read instead of silently returning a truncated catalog. Locked products are
+excluded from pricing, new quotes and overrides before customer payment.
+
 The owner explicitly allows customer payment before funding the supplier wallet. This supersedes the earlier rule that required supplier funds before issuing an invoice or debiting a customer wallet. A paid order waits durably for shop funding when necessary, then resumes automatically; customer payment is not a promise of immediate delivery while this wait is displayed.
 
 AutoBuy is a separate Store1 Discord catalog. The existing 59 products, manual orders, account-stock delivery and website catalog retain their existing source. Supplier products are not silently inserted into `product_catalog` or substituted into an old order.

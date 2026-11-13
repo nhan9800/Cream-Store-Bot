@@ -50,6 +50,7 @@ function durationFromPolicy(policy) {
 /** Trusted reviewed policy + live integer VND cost. No invented official discount. */
 export function priceSupplierProduct(product, policy, manifest, { nowMs = Date.now(), override = null } = {}) {
   const reject = reason => ({ ok: false, reason });
+  if (product?.locked === true) return reject('SOURCE_LOCKED');
   if (policy?.enabled !== true) return reject(policy?.reason || 'NOT_REVIEWED');
   if (!validText(product?.productKey, 200) || product.productKey !== policy.productKey
     || product.name !== policy.expectedName || !integer(product.priceVnd, 1)
@@ -101,8 +102,12 @@ export function createSupplierAutobuyCatalog({
     if (!validText(item?.productKey, 200) || policies.has(item.productKey)) throw new SupplierCatalogError('INVALID_CONFIGURATION');
     policies.set(item.productKey, item);
   }
-  let initialized = false, products = [], checkedAtMs = 0, flight = null;
+  let initialized = false, products = [], checkedAtMs = 0, flight = null, reviewedRows = [];
   let status = 'NOT_STARTED', availableCount = 0, reviewedCount = 0;
+  let coverage = { sourceCount: 0, blockedCount: 0, unreviewedCount: 0, outOfStockCount: 0,
+    lockedCount: 0, manualDeliveryCount: 0, policyCount: policies.size, blockedReasons: {} };
+  const safeReasons = new Set(['NOT_REVIEWED', 'SOURCE_LOCKED', 'SOURCE_CHANGED', 'REFERENCE_UNVERIFIED',
+    'REFERENCE_STALE', 'INVALID_PRICING_POLICY', 'TERMS_UNVERIFIED', 'INVALID_OVERRIDE', 'NO_PROFITABLE_PRICE']);
   function initialize() {
     if (initialized) return;
     database.exec(`CREATE TABLE IF NOT EXISTS supplier_autobuy_price_overrides (
@@ -138,6 +143,7 @@ export function createSupplierAutobuyCatalog({
   async function getOffers({ force = false } = {}) {
     await refresh(force);
     const rows = allEvaluated();
+    reviewedRows = rows;
     const offers = rows.filter(row => row.price.ok).map(({ product, price }) => ({
       productKey: product.productKey, name: product.name, priceVnd: price.priceVnd, unitPriceVnd: price.priceVnd,
       available: product.unlimited || product.stock > 0, stock: product.stock, unlimited: product.unlimited,
@@ -146,7 +152,19 @@ export function createSupplierAutobuyCatalog({
     }));
     reviewedCount = offers.length;
     availableCount = offers.filter(offer => offer.available).length;
-    return { status: 'READY', checkedAt: new Date(checkedAtMs).toISOString(), offers, blockedCount: rows.length - offers.length };
+    const blockedReasons = {};
+    for (const row of rows.filter(row => !row.price.ok)) {
+      const reason = safeReasons.has(row.price.reason) ? row.price.reason : 'POLICY_EXCLUDED';
+      blockedReasons[reason] = (blockedReasons[reason] || 0) + 1;
+    }
+    coverage = { sourceCount: rows.length, blockedCount: rows.length - offers.length,
+      unreviewedCount: rows.filter(row => !policies.has(row.product.productKey)).length,
+      outOfStockCount: offers.filter(offer => !offer.available).length,
+      lockedCount: products.filter(product => product.locked === true).length,
+      manualDeliveryCount: products.filter(product => product.delivery === 'manual').length,
+      policyCount: policies.size, blockedReasons };
+    return { status: 'READY', checkedAt: new Date(checkedAtMs).toISOString(), offers,
+      ...coverage, blockedReasons: { ...blockedReasons } };
   }
   async function getQuote(productKey, quantity = 1, { force = false } = {}) {
     if (!validText(productKey, 200) || !integer(quantity, 1) || quantity > 10) fail('INVALID_QUANTITY');
@@ -190,8 +208,20 @@ export function createSupplierAutobuyCatalog({
     return { productKey, priceVnd, revision };
   }
   function getHealth() { return Object.freeze({ enabled: Boolean(enabled()), status, reviewedCount, availableCount,
-    checkedAt: checkedAtMs ? new Date(checkedAtMs).toISOString() : null, pricingVersion: policy.version }); }
-  return Object.freeze({ getOffers, getQuote, setPriceOverride, getHealth });
+    checkedAt: checkedAtMs ? new Date(checkedAtMs).toISOString() : null, pricingVersion: policy.version,
+    ...coverage, blockedReasons: Object.freeze({ ...coverage.blockedReasons }) }); }
+  // Operator-only cached source metadata. Never include this in public health.
+  // It does not refresh the supplier, read credentials, expose costs or mutate DB.
+  function getReviewSnapshot() {
+    return { status, pricingVersion: policy.version, products: reviewedRows.map(({ product, price }) => ({
+      productKey: product.productKey, name: product.name, delivery: product.delivery || null,
+      locked: product.locked === true, description: product.description || null,
+      stock: product.stock, unlimited: product.unlimited === true,
+      reviewReason: price.ok ? (product.unlimited || product.stock > 0 ? 'SELLABLE' : 'OUT_OF_STOCK')
+        : safeReasons.has(price.reason) ? price.reason : 'POLICY_EXCLUDED',
+    })) };
+  }
+  return Object.freeze({ getOffers, getQuote, setPriceOverride, getHealth, getReviewSnapshot });
 }
 
 let singleton;
@@ -209,6 +239,9 @@ export const getSupplierQuote = (key, quantity, options) => catalog().getQuote(k
 export function getSupplierCatalogHealth() {
   if (!singleton) return { enabled: supplierSalesConfigured(), status: 'NOT_STARTED', reviewedCount: 0, availableCount: 0, checkedAt: null };
   return singleton.getHealth();
+}
+export function getSupplierCatalogReviewSnapshot() {
+  return { provider: activeProvider(), ...(singleton ? singleton.getReviewSnapshot() : { status: 'NOT_STARTED', products: [] }) };
 }
 export async function setSupplierPriceOverride({ guildId, productKey, priceVnd, actorId, client } = {}) {
   if (guildId !== STORE_ONE_GUILD_ID || !client?.guilds) fail('ACCESS_DENIED');
