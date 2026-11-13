@@ -28,6 +28,18 @@ describe('supplier autobuy commerce presentation', () => {
     expect(payload.flags & MessageFlags.Ephemeral).toBeTruthy();
     expect(payload.allowedMentions.parse).toEqual([]);
   });
+  it('keeps CDK provider identities in offers and encodes only product arguments in controls', () => {
+    const key = 'cdkvietnam:6';
+    const catalog = buildSupplierCatalogView({ customerId: user, catalog: { offers: [offer(6, { productKey: key })] } });
+    expect(nodes(catalog).find(node => node.custom_id === 'supplier-autobuy:select:' + user).options[0].value).toBe(key);
+    const card = buildSupplierQuoteView({ quote: { ...quote, productKey: key }, customerId: user, manager: true });
+    expect(ids(card)).toContain(`supplier-autobuy:qty:${user}:cdkvietnam%3A6`);
+    expect(ids(card)).toContain(`supplier-autobuy:editprice:${user}:cdkvietnam%3A6`);
+    expect(ids(card).every(id => id.length <= 100)).toBe(true);
+    for (const invalid of ['other:6', 'cdkvietnam:0', 'cdkvietnam:01', 'cdkvietnam:9007199254740992']) {
+      expect(() => buildSupplierQuoteView({ quote: { ...quote, productKey: invalid }, customerId: user })).toThrow('INVALID_QUOTE');
+    }
+  });
   it('uses bounded category choices and clamps stale page/category indexes', () => {
     const payload = buildSupplierCatalogView({ customerId: user, catalog: { offers: Array.from({ length: 100 }, (_, index) => offer(index, { category: 'Category ' + index })) }, page: 9999, category: 9999 });
     expect(nodes(payload).find(node => node.custom_id === 'supplier-autobuy:category:' + user).options).toHaveLength(25);

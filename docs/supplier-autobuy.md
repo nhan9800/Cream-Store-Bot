@@ -2,6 +2,18 @@
 
 This describes the implementation and owner's updated prepayment policy as of 2026-11-11. It does not establish that a revision is deployed, the production flag is enabled, or a real paid purchase has been tested. Verify the release record, exact live commit, health and Discord panel separately. Read-only connection success is distinct from purchase/delivery evidence.
 
+### CDK storefront repair · 2026-11-13
+
+CDK product identifiers retain their `cdkvietnam:<id>` namespace throughout the
+catalog, quote and Admin price controls. Product arguments in Discord custom IDs
+are URI-encoded and decoded exactly once before validation. This repairs the
+case where provider/catalog health was ready but the storefront filtered out
+every CDK offer or split its quantity control at the namespace colon.
+
+Integration coverage exercises all six reviewed CDK products through private
+quotes, one owned SQLite order and payment-method selection. These checks do
+not charge a customer, purchase supplier goods or claim a real paid delivery.
+
 The owner explicitly allows customer payment before funding the supplier wallet. This supersedes the earlier rule that required supplier funds before issuing an invoice or debiting a customer wallet. A paid order waits durably for shop funding when necessary, then resumes automatically; customer payment is not a promise of immediate delivery while this wait is displayed.
 
 AutoBuy is a separate Store1 Discord catalog. The existing 59 products, manual orders, account-stock delivery and website catalog retain their existing source. Supplier products are not silently inserted into `product_catalog` or substituted into an old order.

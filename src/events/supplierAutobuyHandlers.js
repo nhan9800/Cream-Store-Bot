@@ -4,13 +4,13 @@ import { STORE_ONE_GUILD_ID } from '../utils/locale.js';
 import { isManager } from '../utils/permissions.js';
 import { supplierAutobuyRuntime } from '../services/supplierAutobuyRuntime.js';
 import * as presentation from '../services/supplierAutobuyPanelService.js';
+import { isSupplierAutobuyProductKey } from '../utils/supplierAutobuyIdentifiers.js';
 
 const PREFIX = 'supplier-autobuy:';
 const INVALID_PANEL = 'Bảng autobuy này không còn khả dụng. Vui lòng mở bảng mới nhất trong kênh autobuy của Cenar Store.';
 const UNAVAILABLE = 'Chưa thể hiển thị thông tin autobuy. Vui lòng thử lại sau; chưa có đơn hàng hoặc thanh toán nào được tạo.';
 const NO_MENTIONS = Object.freeze({ parse: [], users: [], roles: [], repliedUser: false });
 const CUSTOMER_ID = /^\d{17,20}$/;
-const PRODUCT_KEY = /^[A-Za-z0-9_.-]{1,100}$/;
 const QUOTE_ID = /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i;
 const ORDER_CODE = /^CN_\d{6,12}$/;
 const INTEGER = /^(?:0|[1-9]\d{0,3})$/;
@@ -49,7 +49,7 @@ function validArguments(action, args) {
   if (action === 'orders') return args.length === 0;
   if (action === 'page') return args.length === 2 && args.every(value => INTEGER.test(value));
   if (['select', 'category', 'orderselect'].includes(action)) return args.length === 0;
-  if (['qty', 'qtymodal', 'editprice', 'pricemodal'].includes(action)) return args.length === 1 && PRODUCT_KEY.test(args[0]);
+  if (['qty', 'qtymodal', 'editprice', 'pricemodal'].includes(action)) return args.length === 1 && isSupplierAutobuyProductKey(args[0]);
   if (action === 'confirm') return args.length === 1 && QUOTE_ID.test(args[0]);
   if (['order', 'delivery'].includes(action)) return args.length === 1 && ORDER_CODE.test(args[0]);
   return action === 'pay' && args.length === 2 && ORDER_CODE.test(args[0]) && ['payos', 'wallet'].includes(args[1]);
@@ -104,6 +104,9 @@ export function createSupplierAutobuyInteractionHandler(dependencies = {}) {
     const publicAction = ['catalog', 'status'].includes(action) && owner === undefined;
     const modal = ['qtymodal', 'pricemodal'].includes(action);
     try {
+      // A namespaced provider key contains ':', the custom-ID separator. Only
+      // the product argument is URI-encoded; validate its decoded identity.
+      if (['qty', 'qtymodal', 'editprice', 'pricemodal'].includes(action) && args.length === 1) args[0] = decodeURIComponent(args[0]);
       scope = scopedOrigin(interaction);
       const publicValid = publicAction && interaction.isButton?.() === true
         && interaction.message?.id === scope?.panel.messageId && interaction.message?.author?.id === scope?.botId;
@@ -127,7 +130,7 @@ export function createSupplierAutobuyInteractionHandler(dependencies = {}) {
           .setLabel(price ? 'Giá mới (VNĐ, chỉ nhập số)' : 'Số lượng (từ 1 đến 10)')
           .setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(price ? 10 : 2)
           .setPlaceholder(price ? '55000' : '1');
-        await interaction.showModal(new ModalBuilder().setCustomId(PREFIX + (price ? 'pricemodal' : 'qtymodal') + ':' + owner + ':' + args[0])
+        await interaction.showModal(new ModalBuilder().setCustomId(PREFIX + (price ? 'pricemodal' : 'qtymodal') + ':' + owner + ':' + encodeURIComponent(args[0]))
           .setTitle(price ? 'Cập nhật giá autobuy' : 'Chọn số lượng').addComponents(new ActionRowBuilder().addComponents(field)));
       } catch { /* Failed modals cannot produce a transaction. */ }
       return true;
@@ -152,7 +155,7 @@ export function createSupplierAutobuyInteractionHandler(dependencies = {}) {
           payload = presentation.buildSupplierCatalogView({ catalog: await deps.getCatalog(), customerId: context.customerId, page, category });
         } else if (action === 'select' || action === 'qtymodal') {
           const productKey = action === 'select' ? interaction.values?.[0] : args[0];
-          if ((action === 'select' && interaction.values?.length !== 1) || !PRODUCT_KEY.test(productKey || '')) throw new Error('INVALID_PRODUCT');
+          if ((action === 'select' && interaction.values?.length !== 1) || !isSupplierAutobuyProductKey(productKey)) throw new Error('INVALID_PRODUCT');
           const rawQuantity = action === 'qtymodal' ? interaction.fields?.getTextInputValue('quantity')?.trim() : '1';
           if (!/^(?:[1-9]|10)$/.test(rawQuantity || '')) throw inputError('INVALID_QUANTITY');
           const quote = await deps.prepareCheckout({ ...context, productKey, quantity: Number(rawQuantity) });

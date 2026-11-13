@@ -39,6 +39,7 @@ import { supplierAutobuyRuntime } from './services/supplierAutobuyRuntime.js';
 import { getSupplierOffers, supplierSalesConfigured } from './services/supplierAutobuyCatalogService.js';
 import { startSupplierAutobuyWorker } from './services/supplierAutobuyOrderService.js';
 import { ensureSupplierAutobuyChannel } from './services/supplierAutobuyPanelService.js';
+import { runShopRelaunchRelease } from './services/shopRelaunchReleaseService.js';
 
 export async function buildClient() {
   initDatabase();
@@ -140,6 +141,8 @@ export async function buildClient() {
     // Restore the owned application icon set independently of slow optional
     // setup. Partial uploads/Discord failures retry; commerce stays available.
     const iconSetup=startCoreEmojiMaintenance(readyClient,{guildId:config.guildId,afterSync:refreshBotInterfaces});
+    void iconSetup.then(() => runShopRelaunchRelease(readyClient))
+      .catch(() => console.warn('[SHOP-RELAUNCH] RELEASE_FAILED'));
     // The owner requested this dedicated channel. Persist and reuse its one
     // panel; other marketing and price-board publication stays paused.
     void Promise.all([supplierSalesSetup, iconSetup]).then(([snapshot]) => {

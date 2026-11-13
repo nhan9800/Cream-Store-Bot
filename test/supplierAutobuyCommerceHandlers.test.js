@@ -78,6 +78,40 @@ describe('supplier autobuy customer commerce interactions', () => {
     expect(deps.confirmCheckout).not.toHaveBeenCalled();
     expect(deps.createPayment).not.toHaveBeenCalled();
   });
+  it('carries the namespaced CDK identity through select, quantity and manager price modals', async () => {
+    const key = 'cdkvietnam:6';
+    const deps = dependencies({ prepareCheckout: vi.fn().mockResolvedValue({ ...quote, productKey: key }), canManage: vi.fn().mockResolvedValue(true) });
+    const handler = createSupplierAutobuyInteractionHandler(deps);
+    const selected = fixture(privateId('select'), { isButton: () => false, isStringSelectMenu: () => true, values: [key] });
+    await handler(selected);
+    expect(deps.prepareCheckout).toHaveBeenLastCalledWith({ ...context, productKey: key, quantity: 1 });
+    const qty = fixture(privateId('qty', encodeURIComponent(key)));
+    await handler(qty);
+    expect(qty.showModal.mock.calls[0][0].data.custom_id).toBe(privateId('qtymodal', encodeURIComponent(key)));
+    const submitted = fixture(privateId('qtymodal', encodeURIComponent(key)), {
+      isButton: () => false, isModalSubmit: () => true, fields: { getTextInputValue: () => '2' },
+    });
+    await handler(submitted);
+    expect(deps.prepareCheckout).toHaveBeenLastCalledWith({ ...context, productKey: key, quantity: 2 });
+    const edit = fixture(privateId('editprice', encodeURIComponent(key)));
+    await handler(edit);
+    expect(edit.showModal.mock.calls[0][0].data.custom_id).toBe(privateId('pricemodal', encodeURIComponent(key)));
+    const price = fixture(privateId('pricemodal', encodeURIComponent(key)), {
+      isButton: () => false, isModalSubmit: () => true, fields: { getTextInputValue: () => '75000' },
+    });
+    await handler(price);
+    expect(deps.setPrice).toHaveBeenCalledExactlyOnceWith({ client: price.client, guildId, productKey: key, priceVnd: 75000, actorId: customerId });
+    expect(deps.confirmCheckout).not.toHaveBeenCalled();
+    expect(deps.createPayment).not.toHaveBeenCalled();
+  });
+  it.each(['other%3A6', 'cdkvietnam%3A0', 'cdkvietnam%3A01', 'cdkvietnam%3A9007199254740992', '%E0%A4%A'])('rejects malformed encoded product arguments %s', async key => {
+    const deps = dependencies(), interaction = fixture(privateId('qty', key));
+    await createSupplierAutobuyInteractionHandler(deps)(interaction);
+    expect(interaction.reply).toHaveBeenCalledOnce();
+    expect(interaction.showModal).not.toHaveBeenCalled();
+    expect(deps.prepareCheckout).not.toHaveBeenCalled();
+    expect(deps.createPayment).not.toHaveBeenCalled();
+  });
   it.each([
     { user: { id: otherId } },
     { message: { id: '1569999999999999999', author: { id: botId }, flags: 0 } },

@@ -69,3 +69,23 @@ when this dedicated pack has not been uploaded.
 
 Discadia remains a reference only for this change: its directory returned an
 anti-bot page and could not be safely validated or attributed automatically.
+
+## Announcements and shop refresh (2026-11-13)
+
+The current `ui27` pack contains 118 distinct sourced assets. It is maintained
+as application emoji, so a full guild emoji inventory does not prevent the bot
+from rendering its interface. Provenance and file hashes are in
+`assets/emojis/ui27/manifest.json`; attribution is in
+`assets/emojis/ui27/credits.md`.
+
+Public `/thongbao` publication requires live custom artwork for its heading,
+signature, rules button and warranty button. Missing artwork returns a clear
+retry message before dispatch and leaves the draft editable. Preview controls
+use separate group, location, announcement, edit and cancel illustrations.
+No native emoji are used as a decorative fallback. Text authored by the admin,
+including literal passwords and URLs, retains its existing preservation rules.
+
+The [announcement](https://emoji.gg/emoji/541187-announce),
+[information](https://emoji.gg/emoji/70178-information) and
+[shield](https://emoji.gg/emoji/912203-shield) source listings were rechecked on
+2026-11-13 and grant the Emoji.gg Basic License for free platform emoji access.

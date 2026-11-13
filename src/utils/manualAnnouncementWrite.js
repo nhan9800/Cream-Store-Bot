@@ -2,7 +2,8 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 
 const manualWrite = new AsyncLocalStorage();
 
-// Only the permission-checked /thongbao confirmation grants this one send.
+// A permission-checked /thongbao confirmation or a dated owner-authorized
+// campaign release grants this one send. Historical automatic jobs do not.
 // Keep the grant local to its async task, REST client, channel and draft nonce.
 export async function withManualAnnouncementWrite({ rest, channelId, nonce }, operation) {
   const grant = { rest, channelId: String(channelId), nonce: String(nonce), active: true, used: false };

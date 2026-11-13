@@ -7,6 +7,7 @@ import QRCode from 'qrcode';
 import { db } from '../database/db.js';
 import { createEmojiResolver, withButtonEmoji } from '../utils/emojiHelper.js';
 import { STORE_ONE_GUILD_ID } from '../utils/locale.js';
+import { isSupplierAutobuyProductKey } from '../utils/supplierAutobuyIdentifiers.js';
 
 const CATEGORY_ID = '1514606994256957600';
 const CHANNEL_NAME = '🛒・autobuy';
@@ -127,7 +128,7 @@ function categoryIcon(name) {
   return 'icon_settings';
 }
 function selectEmoji(E, slot) { const emoji = E.component?.(slot); return emoji ? { emoji } : {}; }
-const validOffer = offer => typeof offer?.productKey === 'string' && /^[A-Za-z0-9_.-]{1,100}$/.test(offer.productKey) && clean(offer?.name).length > 0
+const validOffer = offer => isSupplierAutobuyProductKey(offer?.productKey) && clean(offer?.name).length > 0
   && Number.isSafeInteger(priceOf(offer)) && priceOf(offer) > 0 && offer.available === true;
 const privatePayload = components => ({ components, flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral, allowedMentions: { ...NO_MENTIONS } });
 const button = (id, label, slot = 'icon_doc', style = ButtonStyle.Secondary) => {
@@ -174,7 +175,7 @@ export function buildSupplierCatalogView({ catalog, customerId, page = 0, catego
 
 export function buildSupplierQuoteView({ quote, customerId, manager = false } = {}) {
   requireOwner(customerId);
-  if (!identifier(quote?.quoteId) || !identifier(quote?.productKey)) throw new Error('INVALID_QUOTE');
+  if (!identifier(quote?.quoteId) || !isSupplierAutobuyProductKey(quote?.productKey)) throw new Error('INVALID_QUOTE');
   const E = createEmojiResolver(STORE_ONE_GUILD_ID);
   const expiry = Date.parse(quote.expiresAt);
   const text = [
@@ -189,9 +190,9 @@ export function buildSupplierQuoteView({ quote, customerId, manager = false } = 
     '**Kiểm tra đúng gói và điều kiện trước khi xác nhận tạo đơn.**',
   ].filter(Boolean).join('\n\n');
   const controls = [button(`supplier-autobuy:confirm:${customerId}:${quote.quoteId}`, 'Xác nhận tạo đơn', 'icon_cart', ButtonStyle.Success)];
-  const quantityId = `supplier-autobuy:qty:${customerId}:${quote.productKey}`;
+  const quantityId = `supplier-autobuy:qty:${customerId}:${encodeURIComponent(quote.productKey)}`;
   if (quantityId.length <= 100) controls.push(button(quantityId, 'Đổi số lượng', 'icon_edit'));
-  const priceId = `supplier-autobuy:editprice:${customerId}:${quote.productKey}`;
+  const priceId = `supplier-autobuy:editprice:${customerId}:${encodeURIComponent(quote.productKey)}`;
   if (manager && priceId.length <= 100) controls.push(button(priceId, 'Admin · Sửa giá', 'panel_edit'));
   return privatePayload([containerWithTitle(`## ${E('status_info')} Kiểm tra gói đã chọn`, text), row(...controls), nav(customerId)]);
 }

@@ -14,12 +14,29 @@ import {
 import { createEmojiResolver, withButtonEmoji } from '../utils/emojiHelper.js';
 import { publishPriceBoard } from './autoSetupPriceBoardService.js';
 import { AUTOMATIC_PRICE_BOARD_PAUSED } from '../config/marketingAutomationPolicy.js';
+import { CORE_UI_EMOJI_SLOTS } from '../config/coreEmojiPack2026.js';
 
 const SNOWFLAKE_RE = /^\d{17,20}$/;
 const ANNOUNCEMENT_IMAGE_TTL_MS = 10 * 60 * 1000;
 const IMAGE_EXT_RE = /\.(?:png|jpe?g|webp|gif)$/i;
 const ALLOWED_IMAGE_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif']);
 const announcementDraftImages = new Map();
+
+const ANNOUNCEMENT_EMOJI_SLOTS = Object.freeze({
+  announce: ['cenar_announce', 'icon_announce'],
+  signature: [CORE_UI_EMOJI_SLOTS.cenar_admin, 'cenar_admin', 'cenar_staff'],
+  rules: ['partner_rules', 'icon_store'],
+  warranty: ['warranty_shield', 'panel_warranty'],
+});
+
+/** A strict publication can wait for live artwork instead of silently losing it. */
+export function getAnnouncementEmojiReadiness(guildId) {
+  const E = createEmojiResolver(guildId);
+  const emojis = Object.fromEntries(Object.entries(ANNOUNCEMENT_EMOJI_SLOTS)
+    .map(([purpose, slots]) => [purpose, slots.map(slot => E(slot)).find(Boolean) || '']));
+  const missing = Object.keys(emojis).filter(purpose => !emojis[purpose]);
+  return { ready: missing.length === 0, missing, emojis };
+}
 
 function announcementDraftKey(interaction) {
   return [interaction?.guildId, interaction?.channelId, interaction?.user?.id].map(String).join(':');
@@ -126,15 +143,22 @@ export function buildAnnouncementMessageV2({
   tagEveryone = false,
   tagHere = false,
   image = null,
+  requireCustomEmoji = false,
 }) {
   const E = createEmojiResolver(guildId);
+  const emojiStatus = getAnnouncementEmojiReadiness(guildId);
+  if (requireCustomEmoji && !emojiStatus.ready) {
+    throw Object.assign(new Error('Bộ emoji thông báo đang đồng bộ. Vui lòng thử lại sau ít phút.'), {
+      code: 'ANNOUNCEMENT_EMOJI_NOT_READY', requestNotSent: true, missing: emojiStatus.missing,
+    });
+  }
   const safeRoleIds = normalizeRoleIds(roleIds);
   const mentionParts = safeRoleIds.map((id) => `<@&${id}>`);
   if (tagEveryone) mentionParts.push('@everyone');
   if (tagHere) mentionParts.push('@here');
 
-  const announceEmoji = E('cenar_announce') || E('icon_announce');
-  const adminEmoji = E('cenar_admin') || E('cenar_staff');
+  const announceEmoji = emojiStatus.emojis.announce;
+  const adminEmoji = emojiStatus.emojis.signature;
   const header = `${announceEmoji ? `${announceEmoji} ` : ''}THÔNG BÁO TỪ BAN QUẢN TRỊ`;
   const footer = `${adminEmoji ? `${adminEmoji} ` : ''}Trân trọng,\n**Ban Quản Trị Hệ Thống**`;
   const normalizedImage = normalizeAnnouncementImage(image);
@@ -208,7 +232,7 @@ export function buildAnnouncementMessageV2({
   };
 }
 
-export async function publishAnnouncement({ guild, channelId, nonce, onSend, ...messageOptions }) {
+export async function publishAnnouncement({ guild, channelId, nonce, onSend, requireCustomEmoji = true, ...messageOptions }) {
   const normalizedImage = normalizeAnnouncementImage(messageOptions.image);
   const channel = await guild.channels.fetch(channelId).catch((error) => {
     throw new Error(`Không thể tải kênh ${channelId}: ${error.message}`, { cause: error });
@@ -238,6 +262,7 @@ export async function publishAnnouncement({ guild, channelId, nonce, onSend, ...
     guildId: guild.id,
     ...messageOptions,
     image: normalizedImage,
+    requireCustomEmoji,
   });
   if (nonce) {
     payload.nonce = String(nonce);

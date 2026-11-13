@@ -9,3 +9,18 @@ The existing Discord REST message boundary rejects POST/PATCH message writes in 
 Owner authorized deleting every message in event1514606987839672563, including human posts. Promotion cleanup removes the bot's sale/story/notice messages; other authors' posts are retained. Use full paginated history, preserve an owner-only local recovery snapshot before deletion, and verify both channels after deployment. Do not recreate a replacement campaign or send an announcement until explicitly requested by the owner.
 
 Historical campaign mechanics remain tested with a fixture-only policy override. `marketingPause.test.js` uses the real closed default and proves force/mention options cannot enable publication. Boundary tests prove blocked writes and permitted deletion/commerce. New manual giveaways in unrelated channels are unaffected.
+
+## Deliberate shop relaunch · 2026-11-13
+
+The owner's new request authorizes one current-catalog promotion and a shop
+announcement. `shopRelaunchRelease20261113.js` releases that exact dated campaign
+after its live price manifest is reviewed. Only the first promotion mentions
+Member; the linked announcement is silent. Immutable payloads and durable
+per-message attempts prevent a restart from repeating the mention. The release
+does not resume old giveaways, daily pings or automatic price-board resends.
+
+Permission-checked `/thongbao` confirmations and this dated owner release can
+grant one exact POST through the REST pause boundary. Each grant is scoped to
+its async operation, REST client, channel and deduplicating nonce. Other writes
+remain paused. A local rejection is reported as not sent and does not lock an
+announcement draft as an uncertain Discord delivery.

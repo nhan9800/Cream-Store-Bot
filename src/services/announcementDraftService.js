@@ -4,6 +4,7 @@ import {
 } from 'discord.js';
 import { normalizeAnnouncementImage, publishAnnouncement } from './announcementService.js';
 import { withManualAnnouncementWrite } from '../utils/manualAnnouncementWrite.js';
+import { createEmojiResolver, withButtonEmoji } from '../utils/emojiHelper.js';
 
 const drafts = new Map();
 const TTL = 15 * 60_000;
@@ -44,6 +45,7 @@ export function buildAnnouncementModal(draft) {
 }
 
 export function buildAnnouncementPreview(draft, notice = '') {
+  const E = createEmojiResolver(draft.guildId);
   const disabled = draft.publishing || draft.cancelled || Boolean(draft.result);
   const tags = [...draft.roles.map(id => `<@&${id}>`),
     ...(draft.tagEveryone ? ['@everyone'] : []), ...(draft.tagHere ? ['@here'] : [])];
@@ -55,8 +57,11 @@ export function buildAnnouncementPreview(draft, notice = '') {
   const select = new RoleSelectMenuBuilder().setCustomId(`announcement:roleselect:${draft.id}`)
     .setPlaceholder('Chọn hoặc tìm role muốn tag').setMinValues(0).setMaxValues(10).setDisabled(disabled);
   if (draft.roles.length) select.setDefaultRoles(...draft.roles);
-  const button = (action, label, style) => new ButtonBuilder().setCustomId(`announcement:${action}:${draft.id}`)
-    .setLabel(label).setStyle(style).setDisabled(disabled);
+  const buttonSlots = { toggle_everyone: 'icon_group', toggle_here: 'icon_location',
+    confirm: 'icon_announce', edit: 'icon_edit', cancel: 'status_cross' };
+  const button = (action, label, style) => withButtonEmoji(
+    new ButtonBuilder().setCustomId(`announcement:${action}:${draft.id}`)
+      .setLabel(label).setStyle(style).setDisabled(disabled), E.component(buttonSlots[action]));
   return {
     content: notice, embeds: [embed], allowedMentions: NO_MENTIONS,
     components: [
@@ -82,6 +87,7 @@ function successPayload(draft) {
 }
 
 function publicationError(error) {
+  if (error?.code === 'ANNOUNCEMENT_EMOJI_NOT_READY') return 'Bộ emoji thông báo đang đồng bộ. Thông báo chưa được gửi; vui lòng thử lại sau ít phút.';
   if (error?.code === 'MARKETING_PAUSED') return 'Kênh đang tạm dừng marketing tự động. Thông báo chưa được gửi; bạn có thể sửa bản nháp hoặc thử đăng lại.';
   if (error?.code === 50013 || error?.code === 50001) return 'Bot thiếu quyền truy cập hoặc gửi tin nhắn tại kênh này.';
   if (error?.code === 10003) return 'Kênh đăng thông báo không còn tồn tại.';

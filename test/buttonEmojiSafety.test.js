@@ -245,6 +245,7 @@ describe('safe custom emoji components', () => {
 
     await publishAnnouncement({
       guild,
+      requireCustomEmoji: false,
       channelId: '123456789012345679',
       content: 'Lịch hoạt động cuối tuần',
       nonce: '123456789012345688',
@@ -283,6 +284,7 @@ describe('safe custom emoji components', () => {
 
     await expect(publishAnnouncement({
       guild,
+      requireCustomEmoji: false,
       channelId: '123456789012345679',
       content: 'Nội dung kiểm thử',
     })).rejects.toThrow('Unknown Emoji');
