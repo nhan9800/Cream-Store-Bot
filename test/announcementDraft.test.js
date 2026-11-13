@@ -119,6 +119,36 @@ describe('/thongbao interaction lifecycle', () => {
     expect(publish).toHaveBeenCalledTimes(2);
   });
 
+  it('keeps a draft editable and retryable after the local marketing guard rejects before dispatch', async () => {
+    vi.useFakeTimers();
+    const draft = await draftWithContent(image);
+    publish.mockImplementationOnce(async options => {
+      options.onSend();
+      throw Object.assign(new Error('Automatic marketing is paused by the owner.'), { code: 'MARKETING_PAUSED' });
+    });
+    const failed = confirm(draft);
+    await handleAnnouncementDraftInteraction(failed);
+    expect(draft.uncertainAt).toBeUndefined();
+    expect(draft.publishing).toBe(false);
+    expect(failed.editReply.mock.calls.at(-1)[0].content).not.toContain('chưa xác nhận');
+
+    const edit = interaction(`announcement:edit:${draft.id}`);
+    await handleAnnouncementDraftInteraction(edit);
+    expect(edit.showModal).toHaveBeenCalledTimes(1);
+
+    const role = '1282638730812854345';
+    await handleAnnouncementDraftInteraction(interaction(`announcement:roleselect:${draft.id}`, {
+      isRoleSelectMenu: () => true, isButton: () => false, values: [role],
+    }));
+    expect(draft.roles).toEqual([role]);
+
+    vi.advanceTimersByTime(91_000);
+    publish.mockResolvedValueOnce(published());
+    await handleAnnouncementDraftInteraction(confirm(draft));
+    expect(publish).toHaveBeenCalledTimes(2);
+    expect(draft.result.message.id).toBe('123456789012345681');
+  });
+
   it('reuses the nonce for immediate uncertain retries and refuses a late blind resend', async () => {
     vi.useFakeTimers();
     const draft = await draftWithContent();

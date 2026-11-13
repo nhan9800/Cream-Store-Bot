@@ -3,6 +3,7 @@ import {
   ModalBuilder, PermissionFlagsBits, RoleSelectMenuBuilder, TextInputBuilder, TextInputStyle,
 } from 'discord.js';
 import { normalizeAnnouncementImage, publishAnnouncement } from './announcementService.js';
+import { withManualAnnouncementWrite } from '../utils/manualAnnouncementWrite.js';
 
 const drafts = new Map();
 const TTL = 15 * 60_000;
@@ -81,6 +82,7 @@ function successPayload(draft) {
 }
 
 function publicationError(error) {
+  if (error?.code === 'MARKETING_PAUSED') return 'Kênh đang tạm dừng marketing tự động. Thông báo chưa được gửi; bạn có thể sửa bản nháp hoặc thử đăng lại.';
   if (error?.code === 50013 || error?.code === 50001) return 'Bot thiếu quyền truy cập hoặc gửi tin nhắn tại kênh này.';
   if (error?.code === 10003) return 'Kênh đăng thông báo không còn tồn tại.';
   return 'Không thể gửi thông báo. Kiểm tra quyền của bot, ảnh đính kèm và kết nối Discord rồi thử lại.';
@@ -156,14 +158,16 @@ export async function handleAnnouncementDraftInteraction(interaction) {
       const snapshot = { ...draft, roles: [...draft.roles] };
       const attemptAt = Date.now();
       try {
-        draft.result = await publishAnnouncement({ guild: interaction.guild, channelId: snapshot.channelId,
+        draft.result = await withManualAnnouncementWrite({ rest: interaction.guild?.client?.rest,
+          channelId: snapshot.channelId, nonce: draft.id }, () => publishAnnouncement({ guild: interaction.guild, channelId: snapshot.channelId,
           content: snapshot.content, roleIds: snapshot.roles, tagEveryone: snapshot.tagEveryone,
           tagHere: snapshot.tagHere, image: snapshot.image, nonce: draft.id,
-          onSend: () => { draft.sendStarted = true; } });
+          onSend: () => { draft.sendStarted = true; } }));
       } catch (error) {
         // A transport/server failure can hide an accepted message. Reuse this
         // nonce only inside Discord's short dedup window, never blindly later.
-        if (draft.sendStarted && !(Number(error?.status) >= 400 && Number(error?.status) < 500)) {
+        if (draft.sendStarted && error?.requestNotSent !== true && error?.code !== 'MARKETING_PAUSED'
+          && !(Number(error?.status) >= 400 && Number(error?.status) < 500)) {
           draft.uncertainAt ||= attemptAt;
         }
         throw error;

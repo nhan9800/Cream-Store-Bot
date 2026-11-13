@@ -2,6 +2,7 @@ import { config } from '../config.js';
 import { isMarketingWritePaused } from '../config/marketingAutomationPolicy.js';
 import { resolveLiveCustomEmoji, sanitizeCustomEmojiText } from '../services/emojiService.js';
 import { normalizeDiscordV2Layout } from './discordLayout.js';
+import { consumeManualAnnouncementWrite } from './manualAnnouncementWrite.js';
 
 const installed = Symbol('cenar.liveEmojiBoundary');
 const CUSTOM_TOKEN = /<a?:[A-Za-z0-9_]+:\d+>/g;
@@ -65,8 +66,11 @@ export function installDiscordEmojiBoundary(client) {
     const route=String(options?.fullRoute || '');
     const method=String(options?.method || '').toUpperCase();
     const channel=route.match(/^\/channels\/(\d+)\/messages(?:\/\d+)?(?:\?|$)/);
-    if (channel && ['POST','PATCH'].includes(method) && isMarketingWritePaused(channel[1])) {
-      return Promise.reject(Object.assign(new Error('Automatic marketing is paused by the owner.'), { code: 'MARKETING_PAUSED' }));
+    if (channel && ['POST','PATCH'].includes(method) && isMarketingWritePaused(channel[1])
+      && !consumeManualAnnouncementWrite(this, options)) {
+      return Promise.reject(Object.assign(new Error('Automatic marketing is paused by the owner.'), {
+        code: 'MARKETING_PAUSED', requestNotSent: true,
+      }));
     }
     const callback=/^\/interactions\/\d+\/[^/]+\/callback(?:\?|$)/.test(route);
     const webhook=(method==='POST' && /^\/webhooks\/\d+\/[^/]+(?:\?|$)/.test(route))
