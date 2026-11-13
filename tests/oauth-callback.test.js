@@ -27,7 +27,7 @@ const backupCount = () => guardDatabase.prepare('SELECT COUNT(*) AS n FROM oauth
 
 beforeAll(async () => {
   const app = express();
-  app.locals.discordClient = { isReady: () => true, guilds: { fetch: async (id) => id === guildId ? guild : null } };
+  app.locals.discordClient = { user: { id: fixtures.config.clientId }, isReady: () => true, guilds: { fetch: async (id) => id === guildId ? guild : null } };
   guardDatabase = new Database(':memory:');
   guardDatabase.exec(`CREATE TABLE oauth_backups(discord_id TEXT,guild_id TEXT,access_token TEXT,refresh_token TEXT,
     token_expires_at TEXT,username TEXT,email TEXT,avatar TEXT,scopes TEXT,recovery_consent_at TEXT,verified_at TEXT,
@@ -51,11 +51,15 @@ beforeEach(() => {
   if (guardDatabase.prepare("SELECT 1 FROM sqlite_master WHERE name='oauth_verification_welcomes'").get()) guardDatabase.exec('DELETE FROM oauth_verification_welcomes');
   member = { id: memberId, guild: { id: guildId }, roles: { cache: new Collection(), add: vi.fn().mockResolvedValue(undefined) },
     send: vi.fn().mockResolvedValue({ id: '1555555555555555555' }) };
-  const role = { id: '1282638730812854345', name: '⌘ Cenar Explorer', managed: false, position: 5, permissions: new PermissionsBitField(67108864n) };
-  guild = { id: guildId, name: 'Cenar test', roles: { cache: new Collection([[role.id, role]]) }, members: {
-    me: { permissions: new PermissionsBitField(PermissionFlagsBits.ManageRoles), roles: { highest: { position: 37 } } },
+  const role = { id: '1282638730812854345', name: '⌘ Cenar Explorer', managed: false, position: 5,
+    guild: { id: guildId }, permissions: new PermissionsBitField(67108864n) };
+  const botMember = { id: fixtures.config.clientId, guild: { id: guildId }, permissions: new PermissionsBitField(PermissionFlagsBits.ManageRoles), roles: { highest: { position: 37 } } };
+  guild = { id: guildId, name: 'Cenar test', client: { user: { id: fixtures.config.clientId } },
+    roles: { cache: new Collection([[role.id, role], [guildId, { ...role, id: guildId, name: '@everyone', position: 0 }]]) }, members: {
+    me: botMember, fetchMe: vi.fn(async () => botMember),
     fetch: vi.fn().mockResolvedValue(member),
   } };
+  guild.roles.fetch = vi.fn(async () => new Collection(guild.roles.cache));
   upstream = vi.fn(async (url) => new Response(JSON.stringify(String(url).endsWith('/token')
     ? { access_token: 'access-test', refresh_token: 'refresh-test', expires_in: 604800, scope: 'identify guilds.join' }
     : { id: memberId, username: 'Test Member', discriminator: '0' }), { headers: { 'Content-Type': 'application/json' } }));

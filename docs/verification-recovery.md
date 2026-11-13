@@ -33,6 +33,20 @@ the older completion. Queued callbacks take their own baseline when their
 turn begins, so a later valid completion can store its token pair normally.
 Role snapshots never create or renew OAuth consent.
 
+After the customer membership read, callback completion refreshes the full role
+list and the bot's own member from Discord. It selects the verification role
+from that returned list, not a stale cached alias, and rechecks its exact ID,
+permissions and current hierarchy immediately before granting. Failed metadata
+reads, deleted/managed roles or privileged roles withhold the role and welcome;
+valid OAuth consent can still be saved with an honest partial response. The
+consent comparison also runs after these additional REST waits.
+
+This refresh closes the demonstrated stale-cache window; it does not make a
+remote role edit and assignment atomic. A server administrator can still change
+a role after the final fetch. See Discord's
+[permission hierarchy](https://docs.discord.com/developers/topics/permissions#permission-hierarchy)
+and [role assignment endpoint](https://docs.discord.com/developers/resources/guild#add-guild-member-role).
+
 Optional welcome DMs have a durable per-member/verification-role claim and a
 deterministic nonce. Browser success and the next completion do not wait for
 that DM. Positive receipts are recorded; uncertain or failed welcomes are

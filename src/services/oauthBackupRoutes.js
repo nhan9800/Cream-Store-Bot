@@ -11,7 +11,7 @@ import {
 } from '../utils/oauthState.js';
 import { snapshotGuildForRecovery, updateOauthMemberSnapshot } from './guildRecoveryService.js';
 import { buildVerificationSuccessDmV2 } from './verificationPanelService.js';
-import { resolveVerificationRole } from './verificationRoleService.js';
+import { resolveFreshVerificationRole, resolveVerificationRole } from './verificationRoleService.js';
 import { createOAuthRequestGuard, DiscordOAuthRequestError, fetchDiscordOAuthJson } from './oauthRequestGuard.js';
 
 const defaultRequestGuard = createOAuthRequestGuard({ database: db });
@@ -284,12 +284,27 @@ export function registerOauthRoutes(app, { database = db, configuration = config
         // A queued callback takes its baseline only when its own turn begins.
         // The next member's verification is independent of this user's REST.
         const baseline = currentGrant(guildId, discordId);
+        const assertCompletionScope = () => {
+          if (discordClient?.user?.id !== identity.clientId || scope().clientId !== identity.clientId || scope().store !== identity.store
+            || verifiedState.clientId && verifiedState.clientId !== identity.clientId
+            || verifiedState.store && verifiedState.store !== identity.store) throw new OAuthCompletionError('COMPLETION_CHANGED', 409);
+        };
+        assertCompletionScope();
         const verifiedGuild = discordClient?.isReady?.()
           ? await discordClient.guilds.fetch(guildId).catch(() => null) : null;
         if (verifiedGuild?.id !== guildId) throw new OAuthCompletionError('MEMBER_UNVERIFIED', 400);
         const verifiedMember = await verifiedGuild.members.fetch({ user: discordId, force: true }).catch(() => null);
         if (verifiedMember?.id !== discordId || verifiedMember.guild?.id !== guildId || verifiedMember.partial === true
           || typeof verifiedMember.roles?.cache?.has !== 'function') throw new OAuthCompletionError('MEMBER_UNVERIFIED', 400);
+
+        // Member REST reads do not refresh role permissions or the bot's own
+        // hierarchy. Select only from one fresh role-list/member snapshot after
+        // those waits; a stale cached alias must never authorize a role PUT.
+        let role = null, roleRefreshFailed = false;
+        try { role = await resolveFreshVerificationRole(verifiedGuild, { botId: identity.clientId }); }
+        catch { roleRefreshFailed = true; }
+        assertCompletionScope();
+        if (verifiedGuild.id !== guildId || verifiedMember.guild?.id !== guildId) throw new OAuthCompletionError('MEMBER_UNVERIFIED', 400);
 
         const grant = database.transaction(() => {
           if (!sameGrant(baseline, currentGrant(guildId, discordId))) throw new OAuthCompletionError('COMPLETION_CHANGED', 409);
@@ -306,11 +321,15 @@ export function registerOauthRoutes(app, { database = db, configuration = config
           if (!sameGrant(grant, currentGrant(guildId, discordId))) throw new OAuthCompletionError('COMPLETION_CHANGED', 409);
         };
         let roleGranted = false, assignedRoleName = '', errorMsg = '', snapshotMember = verifiedMember, welcome;
-        const role = resolveVerificationRole(verifiedGuild);
         if (role) {
           const alreadyHadRole = verifiedMember.roles.cache.has(role.id);
+          const roleStillSafe = () => resolveVerificationRole(verifiedGuild, { roles: {
+            get: id => id === role.id ? role : undefined,
+            find: predicate => predicate(role) ? role : undefined,
+          } }) === role;
           try {
-            assertCurrentGrant();
+            assertCompletionScope(); assertCurrentGrant();
+            if (!roleStillSafe()) throw new Error('Verification role eligibility changed');
             if (!alreadyHadRole) {
               const updated = await verifiedMember.roles.add(role);
               // Singular discord.js PUT returns a clone before Gateway updates
@@ -320,6 +339,7 @@ export function registerOauthRoutes(app, { database = db, configuration = config
             // A consent change while Discord awaited its role response must not
             // trigger a welcome or a later recovery snapshot from this callback.
             assertCurrentGrant();
+            if (!roleStillSafe()) throw new Error('Verification role eligibility changed');
             roleGranted = true; assignedRoleName = role.name;
             if (!alreadyHadRole) welcome = claimWelcome(verifiedMember, role, verifiedGuild, identity, assertCurrentGrant);
             assertCurrentGrant();
@@ -328,7 +348,8 @@ export function registerOauthRoutes(app, { database = db, configuration = config
             console.warn('[OAuth Verify] Verification role update incomplete');
             errorMsg = 'Chưa cấp được vai trò xác minh. Vui lòng liên hệ hỗ trợ.';
           }
-        } else errorMsg = 'Không tìm thấy vai trò xác minh trong server.';
+        } else errorMsg = roleRefreshFailed ? 'Chưa cập nhật được quyền vai trò xác minh. Vui lòng kiểm tra lại sau.'
+          : 'Chưa tìm thấy vai trò xác minh an toàn với quyền hiện tại của bot.';
         assertCurrentGrant();
         updateMemberSnapshot(guildId, snapshotMember);
         return { verifiedGuild, roleGranted, assignedRoleName, errorMsg, welcome };

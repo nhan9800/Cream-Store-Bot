@@ -1,11 +1,12 @@
 import Database from 'better-sqlite3';
 import express from 'express';
 import http from 'node:http';
-import { Collection } from 'discord.js';
+import { Client, ClientUser, Collection, PermissionFlagsBits, PermissionsBitField } from 'discord.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('../src/database/db.js', () => ({ db: {} }));
 vi.mock('../src/config.js', () => ({ config: {} }));
 import { registerOauthRoutes } from '../src/services/oauthBackupRoutes.js';
+import { resolveVerificationRole } from '../src/services/verificationRoleService.js';
 import { createOAuthRequestGuard } from '../src/services/oauthRequestGuard.js';
 import { createOAuthState, oauthStateCookieName } from '../src/utils/oauthState.js';
 
@@ -24,11 +25,18 @@ async function fixture(options = {}) {
   database.exec(`CREATE TABLE IF NOT EXISTS oauth_backups(discord_id TEXT,guild_id TEXT,access_token TEXT,refresh_token TEXT,
     token_expires_at TEXT,username TEXT,email TEXT,avatar TEXT,scopes TEXT,recovery_consent_at TEXT,verified_at TEXT,UNIQUE(discord_id,guild_id));`);
   let time = Date.parse('2026-11-14T02:00:00Z');
-  const role = { id: '1282638730812854345', name: 'Cenar Explorer', position: 1, permissions: 0n, editable: true };
+  const role = { id: '1282638730812854345', name: 'Cenar Explorer', position: 1, permissions: new PermissionsBitField(),
+    managed: false, editable: true, guild: { id: guildId } };
   const member = { id: userId, guild: { id: guildId }, roles: { cache: new Collection(), add: vi.fn(async () => { member.roles.cache.set(role.id, role); }) },
     send: vi.fn(async () => ({ id: '1555555555555555555' })) };
-  const guild = { id: guildId, name: 'Cenar Store', roles: { cache: new Collection([[role.id, role]]) }, members: { fetch: vi.fn(async () => member) } };
-  const client = { isReady: () => true, guilds: { fetch: vi.fn(async () => guild) } };
+  const botId = options.configuration?.clientId ?? clientId;
+  const botMember = { id: botId, guild: { id: guildId }, permissions: new PermissionsBitField(PermissionFlagsBits.ManageRoles),
+    roles: { highest: { position: 10 } } };
+  const everyone = { ...role, id: guildId, name: '@everyone', position: 0 };
+  const guild = { id: guildId, name: 'Cenar Store', roles: { cache: new Collection([[role.id, role], [guildId, everyone]]) },
+    members: { me: botMember, fetch: vi.fn(async () => member), fetchMe: vi.fn(async () => botMember) } };
+  guild.roles.fetch = vi.fn(async () => new Collection(guild.roles.cache));
+  const client = { user: { id: botId }, isReady: () => true, guilds: { fetch: vi.fn(async () => guild) } }; guild.client = client;
   const fetchImpl = options.fetchImpl || vi.fn(async url => url.endsWith('/token')
     ? new Response(JSON.stringify({ access_token: 'synthetic-access', refresh_token: 'synthetic-refresh', scope: 'identify guilds.join', expires_in: 3600 }))
     : new Response(JSON.stringify({ id: userId, username: 'synthetic-user', discriminator: '0' })));
@@ -64,6 +72,87 @@ function jar() {
 }
 
 describe('real HTTP OAuth callback rate/replay handling', () => {
+  it.each(['safe', 'privileged', 'managed', 'deleted', 'hierarchy', 'bot-permission', 'role-unavailable', 'bot-unavailable'])
+    ('revalidates %s role metadata with real SDK managers after the awaited customer membership read', async mode => {
+      const t = await fixture(), protocol = new Client({ intents: [] });
+      const roleId = '1282638730812854345', botRole = '1282638730812854346';
+      protocol.user = new ClientUser(protocol, { id: clientId, username: 'Cenar bot', discriminator: '0', avatar: null, bot: true });
+      const roleData = (id, name, position, permissions) => ({ id, name, position, permissions: String(permissions),
+        managed: false, mentionable: false, hoist: false, colors: { primary_color: 0 } });
+      const safe = roleData(roleId, 'Cenar Explorer', 1, 0n), everyone = roleData(guildId, '@everyone', 0, 0n);
+      const bot = roleData(botRole, 'Cenar bot', 10, PermissionFlagsBits.Administrator);
+      const rawMember = { user: { id: userId, username: 'synthetic-user', discriminator: '0', avatar: null }, roles: [],
+        joined_at: '2026-01-01T00:00:00.000Z', deaf: false, mute: false };
+      const rawBot = { ...rawMember, user: { id: clientId, username: 'Cenar bot', discriminator: '0', avatar: null, bot: true }, roles: [botRole] };
+      const guild = protocol.guilds._add({ id: guildId, name: 'Cenar Store', owner_id: '1999999999999999999', features: [],
+        unavailable: false, roles: [everyone, safe, bot], members: [rawBot, rawMember] });
+      const member = guild.members.cache.get(userId); member.send = vi.fn(async () => ({ id: '1555555555555555555' }));
+      let release; const gate = new Promise(resolve => { release = resolve; }); let remoteChanged = false;
+      const get = vi.spyOn(protocol.rest, 'get').mockImplementation(async route => {
+        if (route === `/guilds/${guildId}/members/${userId}`) { await gate; return rawMember; }
+        if (route === `/guilds/${guildId}/members/${clientId}`) {
+          if (mode === 'bot-unavailable') throw new Error('secret-bot-REST-error');
+          return rawBot;
+        }
+        if (route === `/guilds/${guildId}/roles`) {
+          expect(remoteChanged).toBe(true);
+          if (mode === 'role-unavailable') throw new Error('secret-role-REST-error');
+          const current = { ...safe, ...(mode === 'privileged' ? { permissions: String(PermissionFlagsBits.Administrator) } : {}),
+            ...(mode === 'managed' ? { managed: true } : {}), ...(mode === 'hierarchy' ? { position: 20 } : {}) };
+          return [everyone, ...(mode === 'deleted' ? [] : [current]), mode === 'bot-permission' ? { ...bot, permissions: '0' } : bot];
+        }
+        throw new Error('Unexpected mocked REST route');
+      });
+      const put = vi.spyOn(protocol.rest, 'put').mockResolvedValue(undefined);
+      vi.spyOn(protocol.rest, 'post').mockRejectedValue(new Error('Unexpected mocked REST POST'));
+      t.client.guilds.fetch.mockImplementation(id => protocol.guilds.fetch(id));
+      try {
+        expect(resolveVerificationRole(guild)?.id).toBe(roleId);
+        const pending = t.callback(t.state());
+        await vi.waitFor(() => expect(get).toHaveBeenCalledWith(`/guilds/${guildId}/members/${userId}`));
+        // Server metadata changes without a Gateway event; the cached role is
+        // still safe until the callback's explicit role-list refresh.
+        remoteChanged = true;
+        expect(guild.roles.cache.get(roleId).permissions.has(PermissionFlagsBits.Administrator)).toBe(false);
+        release(); const response = await pending;
+        expect(response.status).toBe(200);
+        expect(get).toHaveBeenCalledWith(`/guilds/${guildId}/roles`);
+        expect(get).toHaveBeenCalledWith(`/guilds/${guildId}/members/${clientId}`);
+        if (mode === 'safe') {
+          expect(put).toHaveBeenCalledExactlyOnceWith(`/guilds/${guildId}/members/${userId}/roles/${roleId}`, { reason: undefined });
+          expect(response.body).toContain('Xác Minh Thành Công');
+        } else {
+          expect(put).not.toHaveBeenCalled(); expect(member.send).not.toHaveBeenCalled(); expect(t.snapshotGuild).not.toHaveBeenCalled();
+          expect(response.body).toContain('Tài khoản được lưu nhưng có lỗi cấp quyền');
+        }
+        expect(response.body).not.toMatch(/secret-role|secret-bot/);
+        expect(t.database.prepare('SELECT recovery_consent_at FROM oauth_backups').get().recovery_consent_at).toBeTruthy();
+      } finally { release(); await protocol.destroy(); }
+    });
+  it.each(['app', 'store', 'guild'])('rechecks %s ownership after the new role-refresh wait', async kind => {
+    const t = await fixture(); let release; const gate = new Promise(resolve => { release = resolve; });
+    const inventory = new Collection(t.guild.roles.cache);
+    t.guild.roles.fetch.mockImplementation(async () => { await gate; return inventory; });
+    const pending = t.callback(t.state()); await vi.waitFor(() => expect(t.guild.roles.fetch).toHaveBeenCalledOnce());
+    if (kind === 'app') t.client.user.id = '1382729296724099133';
+    if (kind === 'store') vi.stubEnv('ENV_FILE', '.env.store2');
+    if (kind === 'guild') t.guild.id = '1282637033340403755';
+    release(); expect((await pending).status).toBe(kind === 'guild' ? 400 : 409);
+    expect(t.database.prepare('SELECT COUNT(*) AS n FROM oauth_backups').get().n).toBe(0);
+    expect(t.member.roles.add).not.toHaveBeenCalled(); expect(t.member.send).not.toHaveBeenCalled();
+  });
+  it('preserves a consent revocation committed while fresh role metadata is awaiting REST', async () => {
+    const t = await fixture();
+    t.database.prepare(`INSERT INTO oauth_backups(discord_id,guild_id,access_token,refresh_token,scopes,recovery_consent_at,verified_at)
+      VALUES(?,?,'enc:previous-access','enc:previous-refresh','identify guilds.join','previous-consent','previous-verify')`).run(userId,guildId);
+    t.guild.roles.fetch.mockImplementation(async () => {
+      t.database.prepare('UPDATE oauth_backups SET recovery_consent_at=NULL').run();
+      return new Collection(t.guild.roles.cache);
+    });
+    expect((await t.callback(t.state())).status).toBe(409);
+    expect(t.database.prepare('SELECT recovery_consent_at FROM oauth_backups').get().recovery_consent_at).toBeNull();
+    expect(t.member.roles.add).not.toHaveBeenCalled(); expect(t.member.send).not.toHaveBeenCalled();
+  });
   it('serializes same-member completions through fresh membership and leaves the later queued grant canonical', async () => {
     let issued = 0;
     const fetchImpl = vi.fn(async url => url.endsWith('/token')
