@@ -11,9 +11,54 @@ import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { decrypt, encrypt } from '../utils/crypto.js';
 import { hasConfiguredOwnerRole, isBotDeveloper } from '../utils/permissions.js';
 import { getRecoveryRoleMapping } from '../services/guildRecoveryService.js';
+import { createOAuthRequestGuard, DiscordOAuthRequestError, fetchDiscordOAuthJson } from '../services/oauthRequestGuard.js';
 
 const DISCORD_REQUEST_ATTEMPTS = 5;
-const MAX_RETRY_WAIT_MS = 60_000;
+const MAX_INLINE_WAIT_MS = 5_000;
+const activeRuns = new Set();
+const defaultOAuthGuard = createOAuthRequestGuard({ database: db });
+const snowflake = value => typeof value === 'string' && /^\d{17,20}$/.test(value);
+const oauthScope = (configuration, env) => ({ clientId: String(configuration.clientId || 'unconfigured'),
+  store: String(env.ENV_FILE || '').includes('store2') ? 'store2' : 'store1' });
+const noMentions = { parse: [], users: [], roles: [], repliedUser: false };
+const safeName = value => String(value ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ')
+  .replace(/@/g, '＠').replace(/`/g, '′').replace(/</g, '‹').replace(/>/g, '›').slice(0, 80);
+
+export class RecoveryRequestError extends Error {
+  constructor(code, { status = null, retryAfterMs = null } = {}) {
+    super(code === 'TOKEN_COOLDOWN' ? 'Discord OAuth đang giới hạn; recovery tạm dừng.'
+      : status ? `Refresh thất bại: Discord HTTP ${status}` : 'Yêu cầu recovery chưa hoàn tất.');
+    this.name = 'RecoveryRequestError'; this.code = code; this.status = status; this.retryAfterMs = retryAfterMs;
+  }
+}
+
+/** Member-route waits never become OAuth-token cooldowns. No credentials stored. */
+export function createRecoveryMemberCooldownGuard({ database = db, now = Date.now } = {}) {
+  let initialized = false;
+  function init() {
+    if (initialized) return;
+    database.exec(`CREATE TABLE IF NOT EXISTS recovery_member_cooldowns (
+      application_id TEXT NOT NULL,bucket_key TEXT NOT NULL,retry_at INTEGER NOT NULL,
+      PRIMARY KEY(application_id,bucket_key));`);
+    initialized = true;
+  }
+  return Object.freeze({
+    retryAfter(applicationId, guildId) {
+      init();
+      const row = database.prepare('SELECT MAX(retry_at) AS retry_at FROM recovery_member_cooldowns WHERE application_id=? AND bucket_key IN (?,\'*\')')
+        .get(applicationId, guildId);
+      return Math.max(0, (row?.retry_at ?? 0) - now());
+    },
+    setCooldown(applicationId, guildId, waitMs, global = false) {
+      init();
+      const candidate = now() + waitMs;
+      const retryAt = Number.isSafeInteger(candidate) ? candidate : Number.MAX_SAFE_INTEGER;
+      database.prepare(`INSERT INTO recovery_member_cooldowns(application_id,bucket_key,retry_at) VALUES(?,?,?)
+        ON CONFLICT(application_id,bucket_key) DO UPDATE SET retry_at=MAX(retry_at,excluded.retry_at)`)
+        .run(applicationId, global ? '*' : guildId, retryAt);
+    },
+  });
+}
 
 export const data = new SlashCommandBuilder()
   .setName('chuyen-server')
@@ -31,31 +76,34 @@ export const data = new SlashCommandBuilder()
   );
 
 // Refresh access token dùng refresh_token
-export async function refreshAccessToken(refreshToken, { fetchImpl = fetch } = {}) {
-  const clientId = config.clientId;
-  const clientSecret = process.env.CLIENT_SECRET;
+export async function refreshAccessToken(refreshToken, { fetchImpl = fetch, configuration = config, env = process.env,
+  requestGuard = defaultOAuthGuard, now = Date.now, timeoutMs = 12_000 } = {}) {
+  const clientId = configuration.clientId;
+  const clientSecret = env.CLIENT_SECRET;
 
   if (!String(clientSecret || '').trim()) throw new Error('CLIENT_SECRET chưa được cấu hình');
   if (typeof refreshToken !== 'string' || !refreshToken.trim()) throw new Error('Token recovery không đầy đủ.');
 
-  const res = await fetchImpl('https://discord.com/api/oauth2/token', {
-    method: 'POST',
-    body: new URLSearchParams({
-      client_id: clientId,
-      client_secret: clientSecret,
-      grant_type: 'refresh_token',
-      refresh_token: refreshToken,
-    }),
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    signal: AbortSignal.timeout(12_000),
-  });
-
-  if (!res.ok) {
-    try { await res.body?.cancel(); } catch { /* Preserve the sanitized HTTP error. */ }
-    throw new Error(`Refresh thất bại: Discord HTTP ${res.status}`);
+  const scope = oauthScope(configuration, env), wait = requestGuard.retryAfter(scope);
+  if (wait) throw new RecoveryRequestError('TOKEN_COOLDOWN', { status: 429, retryAfterMs: wait });
+  let data;
+  try {
+    data = await fetchDiscordOAuthJson('https://discord.com/api/oauth2/token', {
+      method: 'POST', body: new URLSearchParams({ client_id: clientId, client_secret: clientSecret,
+        grant_type: 'refresh_token', refresh_token: refreshToken }),
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    }, { fetchImpl, now, timeoutMs,
+      onRateLimit: (retryMs, count, metadata) => metadata?.finalize
+        ? requestGuard.finalizeCooldown(scope, metadata.finalize, retryMs) : requestGuard.setCooldown(scope, retryMs, count) });
+  } catch (error) {
+    if (error instanceof DiscordOAuthRequestError) {
+      if (error.code === 'RATE_LIMITED') throw new RecoveryRequestError('TOKEN_COOLDOWN',
+        { status: 429, retryAfterMs: requestGuard.retryAfter(scope) || error.retryAfterMs });
+      throw new RecoveryRequestError(error.code, { status: error.status });
+    }
+    if (['TimeoutError', 'AbortError'].includes(error?.name)) throw error;
+    throw new RecoveryRequestError('TOKEN_REQUEST_UNAVAILABLE');
   }
-
-  const data = await res.json();
   if (!data || typeof data !== 'object'
     || typeof data.access_token !== 'string' || !data.access_token.trim()
     || (data.refresh_token != null && (typeof data.refresh_token !== 'string' || !data.refresh_token.trim()))
@@ -69,22 +117,57 @@ export async function refreshAccessToken(refreshToken, { fetchImpl = fetch } = {
   return {
     access_token: data.access_token,
     refresh_token: data.refresh_token || refreshToken,
-    expires_at: new Date(Date.now() + (data.expires_in || 604800) * 1000).toISOString(),
+    expires_at: new Date(now() + Number(data.expires_in) * 1000).toISOString(),
   };
 }
 
-function retryDelayMs(response, payload, attempt) {
-  const headerValue = response?.headers?.get?.('retry-after');
-  const retryAfterSeconds = Number(payload?.retry_after ?? headerValue);
-  if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds >= 0) {
-    return Math.min(MAX_RETRY_WAIT_MS, Math.max(50, retryAfterSeconds * 1000));
-  }
-  return Math.min(MAX_RETRY_WAIT_MS, 250 * (2 ** attempt));
+function retryWait(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const seconds = typeof value === 'number' ? value
+    : typeof value === 'string' && /^\d+(?:\.\d+)?$/.test(value.trim()) ? Number(value) : NaN;
+  if (seconds === Infinity) return Infinity;
+  if (!Number.isFinite(seconds) || seconds < 0) return null;
+  const milliseconds = Math.ceil(seconds * 1000);
+  return Number.isSafeInteger(milliseconds) ? Math.max(50, milliseconds) : Infinity;
 }
-
-async function readErrorPayload(response) {
-  if (typeof response.json !== 'function') return null;
-  return response.json().catch(() => null);
+function retryDelayMs(response, payload, attempt, now) {
+  const raw = response?.headers?.get?.('retry-after');
+  let header = retryWait(raw);
+  if (header === null && typeof raw === 'string') {
+    const deadline = Date.parse(raw);
+    if (Number.isFinite(deadline) && deadline >= now) header = Math.max(50, deadline - now);
+  }
+  const body = retryWait(payload?.retry_after);
+  const known = [header, body].filter(value => value !== null);
+  return known.length ? Math.max(...known) : response?.status === 429 ? 60_000 : 250 * (2 ** attempt);
+}
+function abortable(promise, signal) {
+  if (signal.aborted) return Promise.reject(signal.reason);
+  return new Promise((resolve, reject) => {
+    const abort = () => reject(signal.reason);
+    signal.addEventListener('abort', abort, { once: true });
+    Promise.resolve(promise).then(resolve, reject).finally(() => signal.removeEventListener('abort', abort));
+  });
+}
+async function readErrorPayload(response, signal) {
+  const reader = response.body?.getReader?.();
+  if (!reader) return null;
+  const chunks = []; let size = 0, complete = false;
+  try {
+    if (Number(response.headers?.get?.('content-length')) > 4096) return null;
+    while (true) {
+      const { done, value } = await abortable(reader.read(), signal);
+      if (done) break;
+      size += value?.byteLength || 0;
+      if (size > 4096) return null;
+      if (value?.byteLength) chunks.push(Buffer.from(value));
+    }
+    complete = true;
+    try { return JSON.parse(Buffer.concat(chunks, size).toString('utf8')); } catch { return null; }
+  } finally {
+    if (!complete) void reader.cancel().catch(() => {});
+    reader.releaseLock();
+  }
 }
 
 // Thêm user vào guild mới dùng access_token của họ.
@@ -96,44 +179,59 @@ export async function addMemberToGuild(
   accessToken,
   botToken,
   roles = [],
-  { fetchImpl = fetch, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) } = {},
+  { fetchImpl = fetch, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)), now = Date.now,
+    timeoutMs = 12_000, checkCooldown = () => 0, onRateLimit = () => {} } = {},
 ) {
   let lastStatus = 0;
   let lastError = '';
   let retries = 0;
   for (let attempt = 0; attempt < DISCORD_REQUEST_ATTEMPTS; attempt += 1) {
+    const cooling = checkCooldown();
+    if (cooling) return { status: 429, ok: false, deferred: true, retryAfterMs: cooling, global: false,
+      error: 'Discord đang giới hạn khôi phục; chưa gửi thêm yêu cầu.', retries };
     let res;
+    const signal = AbortSignal.timeout(timeoutMs);
     try {
-      res = await fetchImpl(`https://discord.com/api/v10/guilds/${newGuildId}/members/${discordId}`, {
+      res = await abortable(fetchImpl(`https://discord.com/api/v10/guilds/${newGuildId}/members/${discordId}`, {
         method: 'PUT',
+        redirect: 'error', signal,
         headers: {
           Authorization: `Bot ${botToken}`,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ access_token: accessToken, roles }),
-      });
-    } catch (error) {
+      }), signal);
+    } catch {
       lastStatus = 0;
-      lastError = String(error?.message || 'Lỗi mạng khi gọi Discord').slice(0, 120);
+      lastError = 'Không thể kết nối Discord trong thời hạn yêu cầu.';
       if (attempt >= DISCORD_REQUEST_ATTEMPTS - 1) break;
       retries += 1;
-      await sleep(retryDelayMs(null, null, attempt));
+      await sleep(retryDelayMs(null, null, attempt, now()));
       continue;
     }
     lastStatus = res.status;
 
     // 201 = thêm mới, 204 = đã có trong server.
     if (res.status === 201 || res.status === 204) {
+      void res.body?.cancel?.().catch(() => {});
       return { status: res.status, ok: true, error: '', retries };
     }
 
-    const payload = await readErrorPayload(res);
-    lastError = String(payload?.message || `HTTP ${res.status}`).slice(0, 120);
+    let payload;
+    try { payload = await readErrorPayload(res, signal); } catch { /* Keep only HTTP status and bounded wait metadata. */ }
+    lastError = `Discord HTTP ${Number.isInteger(res.status) ? res.status : 0}`;
     const retryable = res.status === 429 || res.status >= 500;
-    if (!retryable || attempt >= DISCORD_REQUEST_ATTEMPTS - 1) break;
+    if (!retryable) break;
+    const waitMs = retryDelayMs(res, payload, attempt, now());
+    const global = payload?.global === true || res.headers?.get?.('x-ratelimit-global') === 'true'
+      || res.headers?.get?.('x-ratelimit-scope') === 'global';
+    if (res.status === 429 || waitMs > MAX_INLINE_WAIT_MS) onRateLimit(waitMs, global);
+    if (global || waitMs > MAX_INLINE_WAIT_MS || attempt >= DISCORD_REQUEST_ATTEMPTS - 1) {
+      return { status: res.status, ok: false, deferred: true, retryAfterMs: waitMs, global, error: lastError, retries };
+    }
 
     retries += 1;
-    await sleep(retryDelayMs(res, payload, attempt));
+    await sleep(waitMs);
   }
 
   return { status: lastStatus, ok: false, error: lastError || `HTTP ${lastStatus}`, retries };
@@ -153,13 +251,20 @@ export async function syncMemberRoles(targetGuild, discordId, targetRoleIds) {
   try {
     await member.roles.add(missingRoleIds, 'Cenar recovery: đồng bộ role đã được khách đồng ý');
     return { synced: missingRoleIds.length, missing: 0, error: '' };
-  } catch (error) {
-    return { synced: 0, missing: missingRoleIds.length, error: error.message.slice(0, 120) };
+  } catch {
+    return { synced: 0, missing: missingRoleIds.length, error: 'Discord chưa thể đồng bộ vai trò.' };
   }
 }
 
-export async function execute(interaction) {
-  const E = createEmojiResolver(interaction.guildId);
+export function createRecoveryCommand({ database = db, configuration = config, env = process.env,
+  fetchImpl = (...args) => fetch(...args), sleep = ms => new Promise(resolve => setTimeout(resolve, ms)), now = Date.now,
+  decryptTokens = decrypt, encryptTokens = encrypt, roleMapping = getRecoveryRoleMapping,
+  syncRoles = syncMemberRoles, emojiResolver = createEmojiResolver, requestGuard, memberCooldownGuard,
+} = {}) {
+  const tokenGuard = requestGuard || createOAuthRequestGuard({ database, now });
+  const memberGuard = memberCooldownGuard || createRecoveryMemberCooldownGuard({ database, now });
+  return async function executeRecovery(interaction) {
+  const E = emojiResolver(interaction.guildId);
 
   // Kiểm tra quyền
   const canRunRecovery = interaction.memberPermissions?.has(PermissionFlagsBits.Administrator)
@@ -170,16 +275,31 @@ export async function execute(interaction) {
   }
 
   const newGuildId = interaction.options.getString('guild_id', true).trim();
-  const sourceGuildId = interaction.options.getString('nguon') || interaction.guildId;
+  const sourceGuildId = String(interaction.options.getString('nguon') || interaction.guildId).trim();
 
   // Validate guild ID format
-  if (!/^\d{17,20}$/.test(newGuildId)) {
+  if (!snowflake(newGuildId) || !snowflake(sourceGuildId)) {
     return interaction.reply({ content: 'ID server không hợp lệ. Phải là chuỗi số 17-20 chữ số.', ephemeral: true });
   }
 
+  const applicationId = String(configuration.clientId || interaction.client?.user?.id || 'unconfigured');
+  if (activeRuns.has(applicationId)) {
+    return interaction.reply({ content: `${E('status_warn')} Một tác vụ recovery của ứng dụng này đang chạy. Vui lòng chờ kết quả trước khi mở tác vụ khác.`,
+      flags: MessageFlags.Ephemeral, allowedMentions: noMentions });
+  }
+  activeRuns.add(applicationId);
+  try {
   await interaction.deferReply({ ephemeral: true });
 
-  const botToken = config.botToken;
+  const botToken = configuration.botToken;
+  if (!String(botToken || '').trim()) return interaction.editReply('Bot chưa có cấu hình xác thực recovery hợp lệ.');
+  const scope = oauthScope(configuration, env);
+  const initialWait = Math.max(tokenGuard.retryAfter(scope), memberGuard.retryAfter(applicationId, newGuildId));
+  if (initialWait) return interaction.editReply(`Discord đang giới hạn recovery. Chờ ít nhất ${Math.ceil(initialWait / 1000)} giây trước khi mở tác vụ mới; chưa gửi yêu cầu thêm thành viên.`);
+  const refresh = token => refreshAccessToken(token, { fetchImpl, configuration, env, requestGuard: tokenGuard, now });
+  const add = (discordId, accessToken, roles) => addMemberToGuild(newGuildId, discordId, accessToken, botToken, roles,
+    { fetchImpl, sleep, now, checkCooldown: () => Math.max(tokenGuard.retryAfter(scope), memberGuard.retryAfter(applicationId, newGuildId)),
+      onRateLimit: (waitMs, global) => memberGuard.setCooldown(applicationId, newGuildId, waitMs, global) });
 
   // Kiểm tra bot có trong server mới không
   let newGuild;
@@ -197,11 +317,11 @@ export async function execute(interaction) {
   }
 
   // Lấy danh sách user cần chuyển
-  const rows = db.prepare(
+  const rows = database.prepare(
     `SELECT discord_id, username, access_token, refresh_token, token_expires_at,
             member_roles_json, scopes, recovery_consent_at
      FROM oauth_backups
-     WHERE guild_id = ? AND recovery_consent_at IS NOT NULL
+     WHERE guild_id = ? AND recovery_consent_at IS NOT NULL AND TRIM(recovery_consent_at)!=''
      ORDER BY verified_at`
   ).all(sourceGuildId);
 
@@ -209,7 +329,7 @@ export async function execute(interaction) {
     return interaction.editReply(`Không có thành viên đã verify nào trong guild \`${sourceGuildId}\` được lưu trong hệ thống.`);
   }
 
-  const updateStmt = db.prepare(
+  const updateStmt = database.prepare(
     'UPDATE oauth_backups SET access_token = ?, refresh_token = ?, token_expires_at = ?, last_refreshed_at = CURRENT_TIMESTAMP WHERE discord_id = ? AND guild_id = ?'
   );
 
@@ -218,18 +338,31 @@ export async function execute(interaction) {
   let countFailed = 0;
   let countRoleSynced = 0;
   let countRoleFailed = 0;
+  let processed = 0;
+  let deferred = null;
   const failures = [];
+  const tokenStopped = error => error instanceof RecoveryRequestError && (error.code === 'TOKEN_COOLDOWN'
+    || ['TOKEN_REQUEST_UNAVAILABLE', 'INVALID_RESPONSE'].includes(error.code) || [401, 403].includes(error.status) || error.status >= 500)
+    || ['TimeoutError', 'AbortError'].includes(error?.name);
+  const stopForToken = error => ({ kind: error?.code === 'TOKEN_COOLDOWN' ? 'TOKEN_COOLDOWN' : 'TOKEN_UNAVAILABLE',
+    waitMs: error?.retryAfterMs ?? null });
 
   // Xử lý từng user với delay nhỏ để tránh rate limit
   for (const row of rows) {
+    processed++;
     try {
-      if (!String(row.scopes || '').split(/\s+/).includes('guilds.join')) {
-        failures.push({ user: row.username || row.discord_id, reason: 'Thiếu quyền guilds.join' });
+      const tokenWait = tokenGuard.retryAfter(scope);
+      if (tokenWait) { deferred = { kind: 'TOKEN_COOLDOWN', waitMs: tokenWait }; break; }
+      const memberWait = memberGuard.retryAfter(applicationId, newGuildId);
+      if (memberWait) { deferred = { kind: 'MEMBER_COOLDOWN', waitMs: memberWait }; break; }
+      const scopes = new Set(String(row.scopes || '').split(/\s+/));
+      if (!scopes.has('identify') || !scopes.has('guilds.join')) {
+        failures.push({ user: row.username || row.discord_id, reason: 'Thiếu quyền identify/guilds.join' });
         countFailed++;
         continue;
       }
-      let accessToken = decrypt(row.access_token);
-      let refreshToken = decrypt(row.refresh_token);
+      let accessToken = decryptTokens(row.access_token);
+      let refreshToken = decryptTokens(row.refresh_token);
       if (!accessToken || !refreshToken) {
         failures.push({ user: row.username || row.discord_id, reason: 'Token recovery không đầy đủ' });
         countFailed++;
@@ -237,44 +370,46 @@ export async function execute(interaction) {
       }
 
       // Refresh token nếu đã hết hạn hoặc sắp hết (trong vòng 1 giờ)
-      const expiresAt = row.token_expires_at ? new Date(row.token_expires_at) : null;
-      const needsRefresh = !expiresAt || expiresAt.getTime() - Date.now() < 3600 * 1000;
+      const expiresAt = Date.parse(row.token_expires_at || '');
+      const needsRefresh = !Number.isFinite(expiresAt) || expiresAt - now() < 3600 * 1000;
 
       if (needsRefresh && refreshToken) {
         try {
-          const refreshed = await refreshAccessToken(refreshToken);
+          const refreshed = await refresh(refreshToken);
           accessToken = refreshed.access_token;
           refreshToken = refreshed.refresh_token || refreshToken;
           // Lưu token mới vào DB ngay lập tức
-          updateStmt.run(encrypt(refreshed.access_token), encrypt(refreshToken), refreshed.expires_at, row.discord_id, sourceGuildId);
+          updateStmt.run(encryptTokens(refreshed.access_token), encryptTokens(refreshToken), refreshed.expires_at, row.discord_id, sourceGuildId);
         } catch (refreshErr) {
+          if (tokenStopped(refreshErr)) { deferred = stopForToken(refreshErr); break; }
           failures.push({ user: row.username || row.discord_id, reason: `Refresh token thất bại` });
           countFailed++;
           continue;
         }
       }
 
-      const roleMapping = getRecoveryRoleMapping(row.member_roles_json, newGuild);
-      const targetRoleIds = roleMapping.ids;
-      if (roleMapping.skipped.length) {
+      const mapped = roleMapping(row.member_roles_json, newGuild);
+      const targetRoleIds = mapped.ids;
+      if (mapped.skipped.length) {
         countRoleFailed++;
         failures.push({
           user: row.username || row.discord_id,
-          reason: `Không thể map role: ${roleMapping.skipped.slice(0, 3).join(', ')}`,
+          reason: 'Một số vai trò đã lưu không thể khôi phục với quyền hiện tại của bot.',
         });
       }
-      let result = await addMemberToGuild(newGuildId, row.discord_id, accessToken, botToken, targetRoleIds);
+      let result = await add(row.discord_id, accessToken, targetRoleIds);
 
       // Token có thể bị thu hồi giữa lần kiểm tra expiry và request. Refresh
       // một lần rồi thử lại để không làm mất khách chỉ vì access token cũ.
       if (result.status === 401 && refreshToken) {
         try {
-          const refreshed = await refreshAccessToken(refreshToken);
+          const refreshed = await refresh(refreshToken);
           accessToken = refreshed.access_token;
           refreshToken = refreshed.refresh_token || refreshToken;
-          updateStmt.run(encrypt(refreshed.access_token), encrypt(refreshToken), refreshed.expires_at, row.discord_id, sourceGuildId);
-          result = await addMemberToGuild(newGuildId, row.discord_id, accessToken, botToken, targetRoleIds);
-        } catch {
+          updateStmt.run(encryptTokens(refreshed.access_token), encryptTokens(refreshToken), refreshed.expires_at, row.discord_id, sourceGuildId);
+          result = await add(row.discord_id, accessToken, targetRoleIds);
+        } catch (refreshErr) {
+          if (tokenStopped(refreshErr)) { deferred = stopForToken(refreshErr); break; }
           // Giữ lỗi 401 ban đầu để báo cáo ngắn gọn cho Owner.
         }
       }
@@ -283,9 +418,11 @@ export async function execute(interaction) {
       // bot. Thử thêm thành viên trước với body roles rỗng, sau đó sync từng
       // role hợp lệ để phần di chuyển vẫn hoàn tất.
       if (!result.ok && [400, 403].includes(result.status) && targetRoleIds.length) {
-        const joinOnlyResult = await addMemberToGuild(newGuildId, row.discord_id, accessToken, botToken, []);
-        if (joinOnlyResult.ok) result = joinOnlyResult;
+        const joinOnlyResult = await add(row.discord_id, accessToken, []);
+        if (joinOnlyResult.ok || joinOnlyResult.deferred) result = joinOnlyResult;
       }
+
+      if (result.deferred) { deferred = { kind: result.global ? 'GLOBAL_COOLDOWN' : 'MEMBER_COOLDOWN', waitMs: result.retryAfterMs }; break; }
 
       if (result.status === 201) {
         countSuccess++;
@@ -299,30 +436,30 @@ export async function execute(interaction) {
 
       // 201 có thể vẫn không gán được role nếu bot thiếu hierarchy; 204 cũng
       // không đảm bảo body roles được áp dụng cho thành viên đã tồn tại.
-      const roleSync = await syncMemberRoles(newGuild, row.discord_id, targetRoleIds);
+      const roleSync = await syncRoles(newGuild, row.discord_id, targetRoleIds);
       countRoleSynced += roleSync.synced;
       if (roleSync.error || roleSync.missing > 0) {
         countRoleFailed++;
         failures.push({
           user: row.username || row.discord_id,
-          reason: `Gán role chưa đủ (${roleSync.error || `thiếu ${roleSync.missing}`})`,
+          reason: 'Chưa đồng bộ đủ các vai trò đã lưu; cần kiểm tra quyền và hierarchy.',
         });
       }
-    } catch (err) {
-      failures.push({ user: row.username || row.discord_id, reason: err.message.slice(0, 60) });
+    } catch {
+      failures.push({ user: row.username || row.discord_id, reason: 'Chưa thể xử lý bản ghi recovery này.' });
       countFailed++;
+    } finally {
+      // Pace every record, including continue, failure, and deferred exits.
+      await sleep(120);
     }
-
-    // Delay 120ms giữa mỗi request để tránh rate limit Discord
-    await new Promise(r => setTimeout(r, 120));
   }
 
-  const hasWarnings = countFailed > 0 || countRoleFailed > 0;
+  const hasWarnings = Boolean(deferred) || countFailed > 0 || countRoleFailed > 0;
   const icon = !hasWarnings ? E('status_check') : countSuccess > 0 || countAlready > 0 ? E('status_warn') : E('status_cross');
   const lines = [
-    `## ${icon} KHÔI PHỤC THÀNH VIÊN HOÀN TẤT`,
+    `## ${icon} ${deferred ? 'TẠM DỪNG KHÔI PHỤC THÀNH VIÊN' : 'KHÔI PHỤC THÀNH VIÊN HOÀN TẤT'}`,
     `> ${E('recovery_backup')} Nguồn: \`${sourceGuildId}\``,
-    `> ${E('recovery_restore')} Đích: **${newGuild.name}** (\`${newGuildId}\`)`,
+    `> ${E('recovery_restore')} Đích: **${safeName(newGuild.name)}** (\`${newGuildId}\`)`,
     '',
     `${E('status_check')} **Thêm mới:** ${countSuccess}`,
     `${E('icon_group')} **Đã có sẵn:** ${countAlready}`,
@@ -330,11 +467,16 @@ export async function execute(interaction) {
     `${E('status_warn')} **Ca role cần kiểm tra:** ${countRoleFailed}`,
     `${E('status_cross')} **Thất bại:** ${countFailed}`,
   ];
+  if (deferred) {
+    lines.push(`${E('status_warn')} **Chưa xử lý:** ${rows.length - processed + 1} bản ghi. Không tự chạy lại tác vụ.`,
+      deferred.waitMs === null ? 'Discord chưa sẵn sàng; kiểm tra cấu hình hoặc kết nối trước khi chạy lại.'
+        : `Chờ ít nhất ${Number.isFinite(deferred.waitMs) ? Math.ceil(deferred.waitMs / 1000) : 'thời gian Discord yêu cầu'} giây trước khi thử lại.`);
+  }
   if (failures.length > 0) {
     lines.push(
       '',
       `### ${E('status_warn')} CHI TIẾT CẦN KIỂM TRA`,
-      ...failures.slice(0, 8).map((failure) => `> \`${failure.user}\` • ${failure.reason}`),
+      ...failures.slice(0, 8).map((failure) => `> \`${safeName(failure.user)}\` • ${failure.reason}`),
     );
     if (failures.length > 8) lines.push(`-# Còn ${failures.length - 8} lỗi khác trong log hệ thống.`);
   }
@@ -346,5 +488,11 @@ export async function execute(interaction) {
   await interaction.editReply({
     components: [container],
     flags: MessageFlags.IsComponentsV2,
+    allowedMentions: noMentions,
   });
+  return { status: deferred ? 'DEFERRED' : 'COMPLETE', processed, remaining: deferred ? rows.length - processed + 1 : 0,
+    added: countSuccess, already: countAlready, failed: countFailed, retryAfterMs: deferred?.waitMs ?? null };
+  } finally { activeRuns.delete(applicationId); }
+  };
 }
+export const execute = createRecoveryCommand();
