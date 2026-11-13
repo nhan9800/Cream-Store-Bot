@@ -1,0 +1,438 @@
+{
+  "revision": "DOPERMIND-CATALOG-REVIEW-20261114-1",
+  "sourceCount": 103,
+  "products": [
+    {
+      "productKey": "desc_bb1eb346-b99a-460f-bab3-029c2241f5f0",
+      "name": "100$ API Claude 30D (BHF)",
+      "nameEn": "100$ API Claude 30D FW",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_8b19f48b-1594-49ac-8a55-b44ac7945f70",
+      "name": "100M Token 1 Ngày (BHF)",
+      "nameEn": "100M Token 1 Day (FW)",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_2b112db7-e852-41a0-8593-d674f3bf1efa",
+      "name": "100M Token 1 Ngày (BHF)",
+      "nameEn": "100M Token 1 Day (FW)",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_8052c21b-11e9-45a8-80bf-6b11ee48a017",
+      "name": "100M Token 3 Ngày (BHF)",
+      "nameEn": "100M Token 3 Days (FW)",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_decb8e3a-7dea-4e21-abd7-f2e71beb9d8b",
+      "name": "100M Token 3 Ngày (BHF)",
+      "nameEn": "100M Token 3 Days (FW)",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_2f38f0dd-bb7f-46b5-92e9-1727b1264585",
+      "name": "100M Token 3 Ngày (BHF)",
+      "nameEn": "100M Token 3 Days (FW)",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_596db8ad-76ab-4456-b90e-db25f7d41a2f",
+      "name": "100M Token 4 Ngày (BHF)",
+      "nameEn": "100M Token 4 Days (FW)",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_5b40fe21-6fc3-487b-9c6a-d128d038ee5b",
+      "name": "10M Token 1 Ngày (BHF)",
+      "nameEn": "10M Token 1 Day (FW)",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_2409d6d3-859f-4e9d-96dd-cb6fad27e245",
+      "name": "10M Token 1 Ngày (BHF)",
+      "nameEn": "10M Token 1 Day (FW)",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_ebc791bf-2b70-44f5-b287-485827760cc3",
+      "name": "10M Token 1 Ngày (BHF)-",
+      "nameEn": "10M Token 1 Day (FW)-",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_d113cff2-ce76-425a-9ef0-437dadf4a0bb",
+      "name": "10M Token 1 Ngày (BHF)-",
+      "nameEn": "10M Token 1 Day (FW)-",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_7bfb6258-b28c-458f-bf4d-2454397c8665",
+      "name": "200M Token 1 Ngày (BHF)",
+      "nameEn": "200M Token 1 Day (FW)",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_df5baa07-e137-4692-9ecb-7751b4c09600",
+      "name": "200M Token 7 Ngày (BHF)",
+      "nameEn": "200M Token 7 Days (FW)",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_23072ad8-9549-4847-aa57-81cb91b4bdee",
+      "name": "300M Token 15 Ngày (BH7D)",
+      "nameEn": "300M Token 15 Days (W7D)",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_f4f41af5-c6b5-4530-b6f9-01729804778c",
+      "name": "500$ API Claude 30D (BHF)",
+      "nameEn": "500$ API Claude 30D FW",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_a8a49620-8d65-40ff-aa3a-a437b0176b98",
+      "name": "500M Token 30 Ngày (BH7D)",
+      "nameEn": "500M Token 30 Days (W7D)",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_f4ffe12b-9e03-4a6d-b1c3-e1c5fdb826e9",
+      "name": "500M Token 6 Ngày (BHF)",
+      "nameEn": "500M Token 6 Days (FW)",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_be741cdd-b31d-4dd8-923e-5c2aa5d82043",
+      "name": "500M Token 6 Ngày (BHF)",
+      "nameEn": "500M Token 6 Days (FW)",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_ef8303c6-c0bb-48dd-bc16-4be7b27847d6",
+      "name": "500M Token 7 Ngày (BHF)",
+      "nameEn": "500M Token 7 Days (FW)",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_bb971c4f-bffd-402a-b966-57cfae3493a9",
+      "name": "50M Token 1 Ngày (BHF)",
+      "nameEn": "50M Token 1 Day (FW)",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_13fc4004-e7a0-48d4-b4f9-7c46727cc4cb",
+      "name": "50M Token 1 Ngày (BHF)",
+      "nameEn": "50M Token 1 Day (FW)",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_40491bde-0c8b-4ecc-967e-dd8dde92e5df",
+      "name": "50M Token 2 Ngày (BHF)",
+      "nameEn": "50M Token 2 Days (FW)",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_73bc45de-1976-4a3f-8224-172e5032cfa1",
+      "name": "50M Token 2 Ngày (BHF)",
+      "nameEn": "50M Token 2 Days (FW)",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_bf85530e-9d8c-4d7f-af2e-332751e69ffa",
+      "name": "50M Token 2 Ngày (BHF)",
+      "nameEn": "50M Token 2 Days (FW)",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_bcd608e6-12a0-4c10-9099-ef8b540d5562",
+      "name": "AppleTV Link Active 1 Năm",
+      "nameEn": "AppleTV Link Active 1 Year",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_5b938bc3-944b-4706-9749-dbfca8eb7c64",
+      "name": "Autodesk Admin 3000 Invite",
+      "nameEn": "Autodesk Admin 3000 Invite",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_c993444d-3c1c-47b4-86ff-11448ae5eca1",
+      "name": "Autodesk All Apps 1 Năm",
+      "nameEn": "Autodesk All Apps 1 Year",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_d7feeccc-3ec3-4ba1-b1fd-3618205a82ba",
+      "name": "ChatGPT Plus Codex 1T (BHF)",
+      "nameEn": "ChatGPT Plus Codex 1M (FW)",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_27578cf9-c3fe-4873-8877-6e1bd49d7b37",
+      "name": "ChatGPT Plus GGPay Codex 1T",
+      "nameEn": "ChatGPT Plus GGPay Codex 1M",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_2e80f86f-35d1-48ad-9c7c-740c682fabb1",
+      "name": "Coursera + Udemy 12 Tháng",
+      "nameEn": "Coursera + Udemy 12 Months",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_1cc0d7c4-3466-4911-be5b-147f517de0db",
+      "name": "Coursera + Udemy 6 Tháng",
+      "nameEn": "Coursera + Udemy 6 Months",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_8e78d999-0e30-4e7c-a063-a2f82ce56d77",
+      "name": "ElevenLabs API 131K Credit",
+      "nameEn": "ElevenLabs API 131K Credit",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_ffad3c15-50f7-4188-9ccf-a32fd617b4c0",
+      "name": "ElevenLabs Free 10k Cre",
+      "nameEn": "ElevenLabs Free 10k Cre",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_5c360c8c-9de1-4058-b4ba-923db31d6e25",
+      "name": "Full Source AutoSpam",
+      "nameEn": "Full Source AutoSpam",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_6fc42cff-1151-4d06-b9d9-e7c9bb17c77d",
+      "name": "Full Source Bot + AutoSpam",
+      "nameEn": "Full Source Bot + AutoSpam",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_319fa051-c5f2-4435-9dde-59960ea851a2",
+      "name": "Full Source Bot Telegram",
+      "nameEn": "Full Source Bot Telegram",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_97943b81-e77c-42af-8297-c48cf6c9cdf7",
+      "name": "Gemini Pro Link 18 Tháng",
+      "nameEn": "Gemini Pro Link 18 Months",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_a310d757-157a-4114-95d3-4e0166335361",
+      "name": "Gmail 2k6-2k16 Qua Trial YT",
+      "nameEn": "Gmail 2k6-2k16 Passed YT",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_de8b93da-9e97-4710-b8f8-22d4ec965b91",
+      "name": "Gmail Trâu Qua YT Ver Số",
+      "nameEn": "Gmail Old Passed YT Verify",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_391434d2-69c1-479d-8170-a60352dc33be",
+      "name": "Google Ultra Admin 20x 1y",
+      "nameEn": "Google Ultra Admin 20x 1y",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_68ae0ca6-596d-4dc7-9c9c-6e32b983a60c",
+      "name": "Grok Plus 1 Tháng (KBH)",
+      "nameEn": "Grok Plus 1 Month (NW)",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_7c96ab6a-184b-4ea6-b9b1-821a253e8b13",
+      "name": "Grok Plus 12 Tháng (BH1T)",
+      "nameEn": "Grok Plus 12 Moths (W1M)",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_a2c215b0-1b30-455a-91f7-b7f9f6027f27",
+      "name": "Grok Super 1 Tháng (BH7D)",
+      "nameEn": "Grok Super 1 Month (W7D)",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_4154d58a-5a6c-4212-871c-cefc80cd3e9d",
+      "name": "Grok Super CDK 1T (BHF)",
+      "nameEn": "Grok Super CDK 1M (FW)",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_e83df1d3-c1ad-4208-84a3-50de267d9372",
+      "name": "Grok Super CDK 3T (BHF)",
+      "nameEn": "Grok Super CDK 3M (FW)",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_81154520-794e-4b0d-8844-63cc18cead5a",
+      "name": "Grok Ultra 1 Tháng (BH2D)",
+      "nameEn": "Grok Ultra 1 Months (W2D)",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_a6d82ced-7a73-4c01-abc2-f4b17f104174",
+      "name": "Grok+Cursor Pre 14 Ngày",
+      "nameEn": "Grok+Cursor Pre 14 Days",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_91ec1cc0-fa95-4c45-b9ba-b91ed7a7266f",
+      "name": "iCloud 400GB Chính Chủ 12T",
+      "nameEn": "iCloud 400GB Your Mail 12M",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_306ad185-c078-4275-abcf-9e6263b97fa6",
+      "name": "Mix 100M Token 3 Ngày (BHF)",
+      "nameEn": "Mix 100M Token 3 Days (FW)",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_732c3336-332b-42a6-8b1e-950d0abefedf",
+      "name": "Mix 10M Token 1 Ngày (BHF)",
+      "nameEn": "Mix 10M Token 1 Days (FW)",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_96fc8c79-dbc9-44b9-aa8e-30927717bea6",
+      "name": "Mix 500M Token 6 Ngày (BHF)",
+      "nameEn": "Mix 500M Token 6 Days (FW)",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_4eee68c0-8fcb-4a34-b235-d0e24b2a125b",
+      "name": "Mix 50M Token 2 Ngày (BHF)",
+      "nameEn": "Mix 50M Token 2 Days (FW)",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_c98339b6-d93f-4dd4-8f78-6c2bac329866",
+      "name": "MS Office 365 Plus 1 Năm",
+      "nameEn": "MS Office 365 Plus 1 Year",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_b9bf47ce-f60e-4fcc-9db2-1a48e035a441",
+      "name": "Muse- Acc 1 Tỷ Token (KBH)",
+      "nameEn": "Muse- Acc 1B Token (NW)",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_11d5933d-30e6-411f-afa8-d97020f5ae45",
+      "name": "Muse- Acc 31 Tỷ Token (KBH)",
+      "nameEn": "Muse- Acc 31B Token (NW)",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_f8903574-9797-4a84-842b-24937f7e717a",
+      "name": "NortonVPN Ultimate 7D (BHF)",
+      "nameEn": "NortonVPN Ultimate 7D (FW)",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_2f17b9be-d791-4b33-b834-caa66f154067",
+      "name": "Perplexity CDK Max (KBH)",
+      "nameEn": "Perplexity CDK Max (NW)",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_9476530e-e339-4025-9eba-56a94934635d",
+      "name": "Prime Video 6 Tháng",
+      "nameEn": "Prime Video 6 Months",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_0a23be32-7f10-482b-810b-a8be84c07d1c",
+      "name": "Proxy Xoay Premium",
+      "nameEn": "Premium Rotating Proxy",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_97c249ed-fc43-4b7f-ac74-74281511d5fa",
+      "name": "Redeem 1M Credits (BHF)",
+      "nameEn": "Redeem 1M Credits (FW)",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_0ffbcb7d-6063-4d69-986f-133e02984d67",
+      "name": "Redeem 300k Credits (BHF)",
+      "nameEn": "Redeem 300k Credits (FW)",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_e2616537-473f-4645-81fb-ecfee99bd8bd",
+      "name": "Redeem 3M Credits (BHF)",
+      "nameEn": "Redeem 3M Credits (FW)",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_6ee7b7f8-3d76-4f19-a406-52923b5d9466",
+      "name": "Redeem 7M Credits (BHF)",
+      "nameEn": "Redeem 7M Credits (FW)",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_cac91c75-6ffd-4e16-b965-89b22860f767",
+      "name": "SCRIBD Trial 1 Tháng (BHF)",
+      "nameEn": "SCRIBD Trial 1 Month (FW)",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_561aadb7-f4f9-4cf9-9abb-0d496deddb44",
+      "name": "Spotify Pre Link 3 Tháng",
+      "nameEn": "Spotify Pre Link 3 Months",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_f9bbf6bc-9d80-405f-90b1-c5fb6e622b96",
+      "name": "Super Duolingo Link 1 Năm",
+      "nameEn": "Super Duolingo Link 1 Year",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_4e63d5ac-b3d4-425e-8a0d-48c34bd42da7",
+      "name": "Super Duolingo Slot 1 Năm",
+      "nameEn": "Super Duolingo Slot 1 Year",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_d85f4ecb-e00f-4718-99bd-2eb18606902a",
+      "name": "Super Grok 14 Ngày (BH24H)",
+      "nameEn": "Super Grok 14 Days (W24H)",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_a6081eef-4730-4e2d-8705-e0f1ce5adba4",
+      "name": "Super Grok 7 Ngày (BHF)",
+      "nameEn": "Super Grok 7 Days (FW)",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_6c849352-0ebf-4319-bd02-4fa09d2b525c",
+      "name": "Udemy + Coursera 12 Tháng",
+      "nameEn": "Udemy + Coursera 12 Months",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_2bb88755-933e-48d8-93d0-6c79f5a6b68b",
+      "name": "Udemy + Coursera 6 Tháng",
+      "nameEn": "Udemy + Coursera 6 Months",
+      "type": "product"
+    },
+    {
+      "productKey": "desc_e0e495ed-1da8-404e-9e32-bc3058f65dca",
+      "name": "Wispr Flow Edu 12 Tháng",
+      "nameEn": "Wispr Flow Edu 12 Months",
+      "type": "product"
+    }
+  ]
+}

@@ -244,6 +244,7 @@ export function createSupplierAutobuyCatalog({
   }
   function getHealth() { return Object.freeze({ enabled: Boolean(enabled()), status, reviewedCount, availableCount,
     checkedAt: checkedAtMs ? new Date(checkedAtMs).toISOString() : null, pricingVersion: policy.version,
+    reviewRevision: typeof policy.reviewRevision === 'string' ? policy.reviewRevision : null,
     ...coverage, blockedReasons: Object.freeze({ ...coverage.blockedReasons }) }); }
   // Operator-only cached source metadata. Never include this in public health.
   // It does not refresh the supplier, read credentials, expose costs or mutate DB.
