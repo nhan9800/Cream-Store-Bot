@@ -139,6 +139,22 @@ describe('durable supplier ticket interaction origin', () => {
     expect(deps.getOrder).toHaveBeenCalledOnce();
     expect(click.reply).not.toHaveBeenCalled();
   });
+  it('updates only the owner-bound ephemeral ticket status in place and preserves the durable notice', async () => {
+    const deps = dependencies(), handler = createSupplierAutobuyInteractionHandler(deps);
+    const publicNotice = fixture(id('order'), { deferUpdate: vi.fn().mockResolvedValue(undefined) });
+    await handler(publicNotice);
+    expect(publicNotice.deferReply).toHaveBeenCalledExactlyOnceWith({ flags: MessageFlags.Ephemeral });
+    expect(publicNotice.deferUpdate).not.toHaveBeenCalled();
+    const privateReceipt = fixtureEphemeral(id('order'), { deferUpdate: vi.fn().mockResolvedValue(undefined) });
+    await handler(privateReceipt);
+    expect(privateReceipt.deferUpdate).toHaveBeenCalledOnce(); expect(privateReceipt.deferReply).not.toHaveBeenCalled();
+    expect(privateReceipt.editReply).toHaveBeenCalledExactlyOnceWith({ components, flags: MessageFlags.IsComponentsV2,
+      allowedMentions: noMentions, attachments: [] });
+    expect(deps.getTicketContext).toHaveBeenLastCalledWith({ guildId, channelId, messageId: ephemeralId,
+      customerId, orderCode: cdkCode, ephemeral: true });
+    expect(deps.getOrder).toHaveBeenLastCalledWith({ client: privateReceipt.client, guildId, customerId, orderCode: cdkCode, provider: 'cdkvietnam' });
+    expect(deps.createPayment).not.toHaveBeenCalled();
+  });
 
   it('acknowledges retrieved credentials only after attaching them to an ephemeral reply', async () => {
     state.ready.cdkvietnam = false;

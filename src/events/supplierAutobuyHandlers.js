@@ -16,6 +16,7 @@ const ORDER_CODE = /^CN_\d{6,12}$/;
 const INTEGER = /^(?:0|[1-9]\d{0,3})$/;
 const PRIVATE_ACTIONS = new Set(['page', 'category', 'select', 'qty', 'qtymodal', 'confirm', 'pay', 'orders', 'order', 'orderselect', 'delivery', 'editprice', 'pricemodal']);
 const TICKET_ACTIONS = new Set(['pay', 'order', 'delivery']);
+const PRIVATE_VIEW_ACTIONS = new Set(['page', 'category', 'select', 'orders', 'order', 'orderselect']);
 
 async function replyInvalid(interaction) {
   if (interaction.deferred || interaction.replied) return;
@@ -111,6 +112,23 @@ async function freshManager(interaction) {
   } catch { return false; }
 }
 
+// This controls button visibility only. Opening/submitting a price change still
+// uses freshManager; browsing must not wait for a forced member REST request.
+function managerPresentationHint(interaction) {
+  try {
+    const permissions = interaction.memberPermissions;
+    if (permissions?.has(PermissionFlagsBits.Administrator) || permissions?.has(PermissionFlagsBits.ManageGuild)) return true;
+    const member = interaction.guild?.members?.cache?.get(interaction.user.id);
+    return member?.id === interaction.user.id && isManager(member);
+  } catch { return false; }
+}
+
+function canUpdatePrivateView(interaction, action, owner) {
+  const sourceUser = interaction.message?.interactionMetadata?.user?.id ?? interaction.message?.interaction?.user?.id;
+  return PRIVATE_VIEW_ACTIONS.has(action) && typeof interaction.deferUpdate === 'function'
+    && isEphemeral(interaction.message) && sourceUser === owner && !interaction.message?.webhookId;
+}
+
 const defaults = {
   getCatalog: async options => (await import('../services/supplierAutobuyCatalogService.js')).getSupplierOffers(options),
   prepareCheckout: async options => (await import('../services/supplierAutobuyOrderService.js')).prepareSupplierCheckout(options),
@@ -128,6 +146,41 @@ const defaults = {
 /** Every commerce action resolves its durable quote/order by the current user. */
 export function createSupplierAutobuyInteractionHandler(dependencies = {}) {
   const deps = { ...defaults, ...dependencies };
+  const catalogReads = new WeakMap();
+  const navigationViews = new WeakMap();
+  function catalogFor(client, provider) {
+    let pending = catalogReads.get(client);
+    if (!pending) { pending = new Map(); catalogReads.set(client, pending); }
+    if (pending.has(provider)) return pending.get(provider);
+    // Public catalog data is common to customers. Share only work already in
+    // progress; subsequent reads still go through the backend freshness rules.
+    const task = Promise.resolve().then(() => deps.getCatalog({ provider }));
+    pending.set(provider, task);
+    const release = () => { if (pending.get(provider) === task) pending.delete(provider); };
+    task.then(release, release);
+    return task;
+  }
+  function beginNavigation(interaction, provider) {
+    let views = navigationViews.get(interaction.client);
+    if (!views) { views = new Map(); navigationViews.set(interaction.client, views); }
+    const key = `${interaction.guildId}:${provider}:${interaction.user.id}:${interaction.message.id}`;
+    const view = views.get(key) || { latest: 0, publishing: Promise.resolve() };
+    views.set(key, view);
+    const revision = ++view.latest;
+    const current = () => views.get(key) === view && view.latest === revision;
+    return {
+      current,
+      publish: async send => {
+        const previous = view.publishing;
+        let release;
+        view.publishing = new Promise(resolve => { release = resolve; });
+        await previous;
+        try { return current() ? await send() : null; }
+        finally { release(); }
+      },
+      finish: () => { if (views.get(key) === view && view.latest === revision) views.delete(key); },
+    };
+  }
   return async function handle(interaction) {
     const customId = interaction?.customId;
     if (typeof customId !== 'string' || !customId.startsWith(PREFIX)) return false;
@@ -171,7 +224,15 @@ export function createSupplierAutobuyInteractionHandler(dependencies = {}) {
       return true;
     }
 
-    try { await interaction.deferReply({ flags: MessageFlags.Ephemeral }); } catch { return true; }
+    const inPlace = !publicAction && !modal && canUpdatePrivateView(interaction, action, owner);
+    // Reserve click order before Discord acknowledges it: a slower older ACK
+    // must not become a new revision after the newer view already completed.
+    const navigation = inPlace ? beginNavigation(interaction, scope.provider) : null;
+    try {
+      if (inPlace) await interaction.deferUpdate();
+      else await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    } catch { navigation?.finish(); return true; }
+    if (navigation && !navigation.current()) { navigation.finish(); return true; }
     let payload;
     let files;
     try {
@@ -188,7 +249,7 @@ export function createSupplierAutobuyInteractionHandler(dependencies = {}) {
             if (interaction.values?.length !== 1 || !INTEGER.test(interaction.values[0])) throw new Error('INVALID_CATEGORY');
             category = Number(interaction.values[0]);
           }
-          payload = presentation.buildSupplierCatalogView({ catalog: await deps.getCatalog({ provider: scope.provider }),
+          payload = presentation.buildSupplierCatalogView({ catalog: await catalogFor(interaction.client, scope.provider),
             customerId: context.customerId, page, category, provider: scope.provider });
         } else if (action === 'select' || action === 'qtymodal') {
           const productKey = action === 'select' ? interaction.values?.[0] : args[0];
@@ -196,7 +257,7 @@ export function createSupplierAutobuyInteractionHandler(dependencies = {}) {
           const rawQuantity = action === 'qtymodal' ? interaction.fields?.getTextInputValue('quantity')?.trim() : '1';
           if (!/^(?:[1-9]|10)$/.test(rawQuantity || '')) throw inputError('INVALID_QUANTITY');
           const quote = await deps.prepareCheckout({ ...context, productKey, quantity: Number(rawQuantity) });
-          payload = presentation.buildSupplierQuoteView({ quote, customerId: context.customerId, manager: await deps.canManage(interaction) });
+          payload = presentation.buildSupplierQuoteView({ quote, customerId: context.customerId, manager: managerPresentationHint(interaction) });
         } else if (action === 'confirm') {
           const order = await deps.confirmCheckout({ client: interaction.client, ...context, quoteId: args[0] });
           payload = presentation.buildSupplierOrderView({ order, customerId: context.customerId, ticketContext: scope.kind === 'ticket' });
@@ -248,20 +309,26 @@ export function createSupplierAutobuyInteractionHandler(dependencies = {}) {
         // Preserve a fixed private fallback for the original preparing card.
         if (!CUSTOMER_ID.test(interaction.user?.id || '')) {
           await interaction.editReply({ content: UNAVAILABLE, allowedMentions: NO_MENTIONS });
+          navigation?.finish();
           return true;
         }
         payload = presentation.buildSupplierNoticeView({ title: 'Cần kiểm tra lại', text: errorText(error), customerId: interaction.user.id,
           warning: true, ticketContext: scope.kind === 'ticket' });
-      } catch { return true; }
+      } catch { navigation?.finish(); return true; }
       files = undefined;
     }
     try {
+      // A slower prior navigation must not overwrite the latest selected view.
+      if (navigation && !navigation.current()) return true;
       const attachments = [...(payload.files || []), ...(files || [])];
-      const receipt = await interaction.editReply({ components: payload.components, flags: MessageFlags.IsComponentsV2, allowedMentions: NO_MENTIONS, ...(attachments.length ? { files: attachments } : {}) });
+      const send = () => interaction.editReply({ components: payload.components, flags: MessageFlags.IsComponentsV2, allowedMentions: NO_MENTIONS,
+        ...(inPlace ? { attachments: [] } : {}), ...(attachments.length ? { files: attachments } : {}) });
+      const receipt = navigation ? await navigation.publish(send) : await send();
       if (action === 'delivery' && files?.length) {
         await deps.acknowledgeDelivery({ ...dataContext(interaction, scope.provider), orderCode: args[0], messageId: receipt?.id, channelId: interaction.channelId });
       }
     } catch { /* Notification retries must never repeat payment or purchase. */ }
+    finally { navigation?.finish(); }
     return true;
   };
 }

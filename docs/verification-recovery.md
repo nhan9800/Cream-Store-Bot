@@ -1,5 +1,37 @@
 # Verification recovery — 2026-10-19
 
+## OAuth request controls — 2026-11-14
+
+The HTTP login and callback paths now have bounded local request budgets. A
+valid signed browser flow has its own budget, so the launcher's shared loopback
+address does not become a small server-wide login quota. Arbitrary forwarded-IP
+headers are not trusted. New login tabs reuse a still-valid matching browser
+flow; its cookie covers `/oauth` (or the configured path prefix), while legacy
+callback-only cookies are expired on set/clear.
+
+After HMAC, browser, application and store validation, SQLite atomically claims
+the SHA256 state identity before any token exchange. Concurrent callbacks and
+replays after a process restart cannot exchange the same state twice. Claims
+contain no raw state, authorization code, browser cookie or token. The requested
+scopes remain `identify guilds.join`, and membership, role and encryption checks
+remain required.
+
+A Discord HTTP429 becomes HTTP429 with a safe `Retry-After` and a clear wait
+message. A persisted per-application/store cooldown blocks both fresh logins
+and additional token exchanges. Header and bounded JSON `retry_after` values
+are honored; long valid waits are preserved. While a body-only limit is being
+read, a provisional cooldown blocks new work; only that exact observation can
+resolve its fallback, without shortening a newer concurrent provider wait.
+There is no automatic token POST retry and no raw provider-body logging. Success
+body reads retain the request deadline and a bounded response size.
+
+The browser success response no longer waits for a guild recovery snapshot.
+The existing per-guild snapshot lock and 30-minute freshness guard still apply.
+These changes control our requests; they do not prove whether Discord has
+restricted an application on its own authorization page or clear such a review.
+See [Discord rate-limit documentation](https://docs.discord.com/developers/topics/rate-limits)
+and [OAuth state guidance](https://docs.discord.com/developers/topics/oauth2#state-and-security).
+
 ## Diagnosis
 
 - The reported Discord page says the application is flagged by its anti-spam system pending review. This happens on Discord's authorization page before this application's callback. Resetting a token does not resolve that restriction; review it in Developer Portal and contact Discord Developer Support when needed.

@@ -104,6 +104,7 @@ export function createSupplierAutobuyCatalog({
     policies.set(item.productKey, item);
   }
   let initialized = false, products = [], checkedAtMs = 0, flight = null, reviewedRows = [];
+  let productsByKey = new Map(), sourceRevision = 0, readModel = null, readOverridesStatement;
   let status = 'NOT_STARTED', availableCount = 0, reviewedCount = 0;
   let coverage = { sourceCount: 0, blockedCount: 0, unreviewedCount: 0, outOfStockCount: 0,
     lockedCount: 0, manualDeliveryCount: 0, policyCount: policies.size, blockedReasons: {} };
@@ -119,32 +120,55 @@ export function createSupplierAutobuyCatalog({
       id INTEGER PRIMARY KEY AUTOINCREMENT, product_key TEXT NOT NULL, old_price_vnd INTEGER,
       new_price_vnd INTEGER NOT NULL, actor_id TEXT NOT NULL, created_at TEXT NOT NULL
     );`);
+    readOverridesStatement = database.prepare('SELECT product_key,price_vnd,revision FROM supplier_autobuy_price_overrides ORDER BY product_key');
     initialized = true;
   }
   function guard() { if (!enabled()) fail('AUTOBUY_DISABLED'); }
   async function refresh(force = false) {
     guard();
-    const age = now() - checkedAtMs;
-    if (checkedAtMs && age >= 0 && age < (force ? minimumRefreshMs : ttlMs)) return;
     if (flight) return flight;
+    const age = now() - checkedAtMs;
+    if (status === 'READY' && checkedAtMs && age >= 0 && age < (force ? minimumRefreshMs : ttlMs)) return;
     flight = Promise.resolve().then(async () => {
       const rows = await clientFactory().getStock();
       if (!Array.isArray(rows)) fail('SUPPLIER_UNAVAILABLE');
-      products = rows;
+      const indexed = new Map();
+      for (const row of rows) {
+        if (!validText(row?.productKey, 200) || indexed.has(row.productKey)) fail('SUPPLIER_UNAVAILABLE');
+        indexed.set(row.productKey, Object.freeze({ ...row }));
+      }
+      productsByKey = indexed;
+      products = [...indexed.values()];
+      sourceRevision++; readModel = null;
       checkedAtMs = now();
       status = 'READY';
     }).catch(() => { status = 'UNAVAILABLE'; fail('SUPPLIER_UNAVAILABLE'); }).finally(() => { flight = null; });
     return flight;
   }
-  function evaluate(product) {
+  function readOverrides() {
     initialize();
-    const override = database.prepare('SELECT * FROM supplier_autobuy_price_overrides WHERE product_key=?').get(product.productKey);
-    return priceSupplierProduct(product, policies.get(product.productKey), policy, { nowMs: now(), override });
+    // One live batch read also catches same-connection or external edits that
+    // bypass this service, including a changed price with an unchanged revision.
+    const rows = readOverridesStatement.all();
+    return { byKey: new Map(rows.map(row => [row.product_key, row])), signature: JSON.stringify(rows) };
   }
-  function allEvaluated() { return products.map(product => ({ product, price: evaluate(product) })); }
-  async function getOffers({ force = false } = {}) {
-    await refresh(force);
-    const rows = allEvaluated();
+  function nextReferenceBoundary(nowMs) {
+    let boundary = Infinity;
+    const maxAge = Number(policy.referenceMaxAgeDays || 30) * 86400000;
+    for (const reference of Object.values(policy.references || {})) {
+      const checked = dateMs(reference.checkedAt);
+      for (const instant of [checked - 300000, checked + maxAge]) {
+        if (Number.isFinite(instant) && instant > nowMs) boundary = Math.min(boundary, instant);
+      }
+    }
+    return boundary;
+  }
+  function currentReadModel(overrides) {
+    const nowMs = now();
+    if (readModel && readModel.sourceRevision === sourceRevision && readModel.overrideSignature === overrides.signature
+      && nowMs >= readModel.builtAt && nowMs < readModel.validUntil) return readModel;
+    const rows = products.map(product => ({ product,
+      price: priceSupplierProduct(product, policies.get(product.productKey), policy, { nowMs, override: overrides.byKey.get(product.productKey) }) }));
     reviewedRows = rows;
     const offers = rows.filter(row => row.price.ok).map(({ product, price }) => ({
       productKey: product.productKey, name: product.name, priceVnd: price.priceVnd, unitPriceVnd: price.priceVnd,
@@ -165,15 +189,23 @@ export function createSupplierAutobuyCatalog({
       lockedCount: products.filter(product => product.locked === true).length,
       manualDeliveryCount: products.filter(product => product.delivery === 'manual').length,
       policyCount: policies.size, blockedReasons };
-    return { status: 'READY', checkedAt: new Date(checkedAtMs).toISOString(), offers,
-      ...coverage, blockedReasons: { ...blockedReasons } };
+    readModel = { sourceRevision, overrideSignature: overrides.signature, builtAt: nowMs,
+      validUntil: nextReferenceBoundary(nowMs), offers: offers.map(offer => Object.freeze(offer)) };
+    return readModel;
+  }
+  async function getOffers({ force = false } = {}) {
+    await refresh(force);
+    const model = currentReadModel(readOverrides());
+    return { status: 'READY', checkedAt: new Date(checkedAtMs).toISOString(), offers: model.offers.map(offer => ({ ...offer })),
+      ...coverage, blockedReasons: { ...coverage.blockedReasons } };
   }
   async function getQuote(productKey, quantity = 1, { force = false } = {}) {
     if (!validText(productKey, 200) || !integer(quantity, 1) || quantity > 10) fail('INVALID_QUANTITY');
     await refresh(force);
-    const product = products.find(row => row.productKey === productKey);
+    const product = productsByKey.get(productKey);
     if (!product) fail('PRODUCT_UNAVAILABLE');
-    const price = evaluate(product);
+    const price = priceSupplierProduct(product, policies.get(productKey), policy,
+      { nowMs: now(), override: readOverrides().byKey.get(productKey) });
     if (!price.ok) fail(price.reason);
     if (!product.unlimited && product.stock < quantity) fail('OUT_OF_STOCK');
     if (price.priceVnd * quantity > MAX_TOTAL) fail('INVALID_AMOUNT');
@@ -193,7 +225,7 @@ export function createSupplierAutobuyCatalog({
     if (guildId !== STORE_ONE_GUILD_ID || !authorized || !/^\d{17,20}$/.test(String(actorId || ''))) fail('ACCESS_DENIED');
     if (!integer(priceVnd, 1) || priceVnd > MAX_TOTAL) fail('INVALID_AMOUNT');
     await refresh(true);
-    const product = products.find(row => row.productKey === productKey);
+    const product = productsByKey.get(productKey);
     if (!product || !priceSupplierProduct(product, policies.get(productKey), policy, { nowMs: now() }).ok) fail('PRODUCT_UNAVAILABLE');
     const price = priceSupplierProduct(product, policies.get(productKey), policy, { nowMs: now(), override: { price_vnd: priceVnd } });
     if (!price.ok) fail(price.reason);
@@ -207,6 +239,7 @@ export function createSupplierAutobuyCatalog({
       database.prepare('INSERT INTO supplier_autobuy_price_events (product_key,old_price_vnd,new_price_vnd,actor_id,created_at) VALUES (?,?,?,?,?)')
         .run(productKey, old?.price_vnd ?? null, priceVnd, actorId, timestamp);
     }).immediate();
+    readModel = null;
     return { productKey, priceVnd, revision };
   }
   function getHealth() { return Object.freeze({ enabled: Boolean(enabled()), status, reviewedCount, availableCount,
@@ -217,6 +250,8 @@ export function createSupplierAutobuyCatalog({
   function getReviewSnapshot() {
     return { status, pricingVersion: policy.version, products: reviewedRows.map(({ product, price }) => ({
       productKey: product.productKey, name: product.name, delivery: product.delivery || null,
+      nameEn: typeof product.nameEn === 'string' ? product.nameEn : null,
+      type: typeof product.type === 'string' ? product.type : null,
       locked: product.locked === true, description: product.description || null,
       stock: product.stock, unlimited: product.unlimited === true,
       reviewReason: price.ok ? (product.unlimited || product.stock > 0 ? 'SELLABLE' : 'OUT_OF_STOCK')

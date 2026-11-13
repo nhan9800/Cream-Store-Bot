@@ -42,6 +42,8 @@ import { ensureSupplierAutobuyChannel } from './services/supplierAutobuyPanelSer
 import { repairSupplierTicketOrderNotices, startSupplierTicketNoticeMaintenance } from './services/supplierAutobuyTicketNoticeService.js';
 import { runShopRelaunchRelease } from './services/shopRelaunchReleaseService.js';
 import { runCompactSaleRelease } from './services/compactSaleReleaseService.js';
+import { installDiscordRateLimitHealth } from './services/discordRateLimitHealthService.js';
+import { runDopermindCatalogReview } from './services/dopermindCatalogReview20261114.js';
 
 export async function buildClient() {
   initDatabase();
@@ -108,6 +110,7 @@ export async function buildClient() {
       setTimeout(() => process.exit(1), 50).unref();
       return;
     }
+    installDiscordRateLimitHealth(readyClient, { guildId: config.guildId, envFile: process.env.ENV_FILE });
     // Probe from this hosting process only after it owns the HTTP port. The
     // runtime restricts credentials to Store 1 and never submits a purchase.
     // Supplier downtime must not block commerce or Discord startup.
@@ -131,6 +134,9 @@ export async function buildClient() {
       try {
         if (supplierSalesConfigured(process.env, config.guildId, provider)) {
           const catalog = await getSupplierOffers({ provider });
+          if (provider === 'dopermind') runDopermindCatalogReview(readyClient, {
+            guildId: config.guildId, envFile: process.env.ENV_FILE,
+          });
           supplierWorker ||= startSupplierAutobuyWorker(readyClient);
           const worker = await supplierWorker;
           snapshot = runtime.setSalesEnabled(worker.workerRunning === true && catalog.offers.some(offer => offer.available));

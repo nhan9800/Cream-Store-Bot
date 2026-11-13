@@ -7,10 +7,20 @@ import {
   SeparatorBuilder,
   SeparatorSpacingSize,
   TextDisplayBuilder,
+  escapeMarkdown,
 } from 'discord.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { accentFor, brandName } from '../utils/uiKit.js';
 import { isInternationalGuild } from '../utils/locale.js';
+import { stripPresentationEmoji, withUniqueCustomEmoji } from '../utils/uniqueCustomEmoji.js';
+
+const NO_MENTIONS = { parse: [], users: [], roles: [], repliedUser: false };
+const safeText = value => escapeMarkdown(stripPresentationEmoji(value)
+  .replace(/[\u0000-\u001f\u007f\u200e\u200f\u202a-\u202e\u2066-\u2069]/g, ' ')
+  .replace(/@/g, '＠').replace(/</g, '‹').replace(/>/g, '›')
+  .replace(/(https?):\/\//gi, '$1:\u200b//').replace(/\s+/g, ' ').trim().slice(0, 100), { maskedLink: true });
+const presentation = (payload, guildId, seed) => withUniqueCustomEmoji({ ...payload,
+  allowedMentions: { ...NO_MENTIONS } }, { guildId, seed: `verification:${seed}` });
 
 function title(icon, text, level = 1) {
   return `${'#'.repeat(level)} ${[icon, text].filter(Boolean).join(' ')}`;
@@ -54,15 +64,15 @@ export function buildVerificationPanelV2(guildId, storeName = brandName()) {
       `${E('status_info')} Access can be revoked at any time from Discord Authorized Apps.`,
       `-# ${E('icon_sparkle')} The verification role is granted only after the signed Discord callback succeeds.`,
     ].join('\n')));
-    return {
+    return presentation({
       components: [container, new ActionRowBuilder().addComponents(verificationButton(E, 'oauth:verify:button', 'Verify with Discord'))],
       flags: MessageFlags.IsComponentsV2,
-    };
+    }, guildId, 'public');
   }
 
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent([
-      title(E('verify_shield'), `${storeName.toUpperCase()} ID • XÁC MINH & KHÔI PHỤC`),
+      title(E('verify_shield'), `${safeText(storeName).toUpperCase()} ID • XÁC MINH & KHÔI PHỤC`),
       `-# ${E('brand_discord')} Một lần ủy quyền, mở khóa cộng đồng và bảo vệ liên kết khách hàng của bạn.`,
     ].join('\n')),
   );
@@ -72,7 +82,7 @@ export function buildVerificationPanelV2(guildId, storeName = brandName()) {
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent([
       title(E('icon_lock'), 'XÁC MINH AN TOÀN', 2),
-      `> ${E('verify_shield')} Chặn tài khoản ảo, spam và raid trước khi mở quyền truy cập.`,
+      `> ${E('verify_shield')} Xác nhận danh tính Discord trước khi mở quyền truy cập cộng đồng.`,
       `> ${E('icon_unlock')} Mở bảng giá, phòng cộng đồng và luồng ticket mua hàng.`,
       `> ${E('status_check')} Không yêu cầu và không lưu mật khẩu Discord.`,
     ].join('\n')),
@@ -92,62 +102,56 @@ export function buildVerificationPanelV2(guildId, storeName = brandName()) {
     new TextDisplayBuilder().setContent([
       `${E('icon_key')} **Quyền sử dụng:** \`identify\` + \`guilds.join\``,
       `${E('status_info')} Chỉ tài khoản tự bấm đồng ý mới có thể khôi phục; bạn có thể thu hồi quyền trong Discord bất cứ lúc nào.`,
-      `-# ${E('icon_sparkle')} Bấm nút bên dưới, kiểm tra đúng ứng dụng ${storeName} rồi xác nhận.`,
+      `-# ${E('icon_sparkle')} Bấm nút bên dưới, kiểm tra đúng ứng dụng ${safeText(storeName)} rồi xác nhận.`,
     ].join('\n')),
   );
 
-  return {
+  return presentation({
     components: [
       container,
       new ActionRowBuilder().addComponents(verificationButton(E)),
     ],
     flags: MessageFlags.IsComponentsV2,
-  };
+  }, guildId, 'public');
 }
 
 export function buildVerificationPromptV2({ guildId, username, loginUrl, hasRole = false, recoveryActive = false }) {
   const E = createEmojiResolver(guildId);
   const international = isInternationalGuild(guildId);
-  const active = hasRole && recoveryActive;
-  const container = new ContainerBuilder().setAccentColor(active ? accentFor('success') : accentFor('primary'));
+  const complete = hasRole && recoveryActive;
+  const name = safeText(username) || (international ? 'Member' : 'Thành viên');
+  const container = new ContainerBuilder().setAccentColor(complete ? accentFor('success') : accentFor('primary'));
+  const heading = international
+    ? complete ? 'VERIFIED · CONSENT RECORDED' : hasRole ? 'COMMUNITY ACCESS · RECOVERY CONSENT NEEDED'
+      : recoveryActive ? 'CONSENT RECORDED · VERIFICATION ROLE MISSING' : 'STEP 1/2 • DISCORD CONSENT REQUIRED'
+    : complete ? 'ĐÃ XÁC MINH · ĐÃ LƯU ĐỒNG Ý' : hasRole ? 'ĐÃ CÓ QUYỀN · CHỜ ĐỒNG Ý RECOVERY'
+      : recoveryActive ? 'ĐÃ LƯU ĐỒNG Ý · CHƯA CÓ VAI TRÒ' : 'BƯỚC 1/2 • CHỜ XÁC NHẬN OAUTH';
+  const lines = international ? [
+    title(E(complete ? 'status_check' : 'verify_shield'), heading, 2),
+    hasRole ? `**${name}** currently has the verification role.`
+      : `Hi **${name}**. Your account **does not currently have the verification role**.`,
+    `> ${E('recovery_backup')} ${recoveryActive ? 'Recovery consent has been recorded.' : 'Required recovery consent has not been recorded.'}`,
+    recoveryActive ? `> ${E('status_info')} Stored consent cannot confirm whether you later revoked access in Discord.` : null,
+    !complete ? `> ${E('icon_lock')} Continue with Discord using the account you want to verify. Only a validated callback can grant the role.` : null,
+    complete ? `-# ${E('icon_key')} Update consent only if you revoked the app in Discord.` : null,
+    `-# ${E('icon_sparkle')} Open one consent page and finish it. Repeated clicks do not remove a Discord restriction.`,
+  ] : [
+    title(E(complete ? 'status_check' : 'verify_shield'), heading, 2),
+    hasRole ? `**${name}** hiện đã có vai trò xác minh.`
+      : `Chào **${name}**, tài khoản hiện **chưa có vai trò xác minh**.`,
+    `> ${E('recovery_backup')} ${recoveryActive ? 'Đồng ý OAuth recovery đã được ghi nhận.' : 'Chưa ghi nhận đầy đủ đồng ý OAuth recovery.'}`,
+    recoveryActive ? `> ${E('status_info')} Dữ liệu đã lưu không xác nhận được bạn đã thu hồi quyền trong Discord hay chưa.` : null,
+    !complete ? `> ${E('icon_lock')} Tiếp tục với Discord bằng tài khoản cần xác minh. Vai trò chỉ được cấp sau khi callback được xác nhận thành công.` : null,
+    complete ? `-# ${E('icon_key')} Chỉ cập nhật ủy quyền nếu bạn đã thu hồi ứng dụng trong Discord.` : null,
+    `-# ${E('icon_sparkle')} Chỉ mở một trang ủy quyền và hoàn tất. Bấm liên tục không gỡ được hạn chế từ Discord.`,
+  ];
 
-  const lines = international
-    ? (active
-      ? [
-          title(E('status_check'), 'ACCOUNT VERIFIED & PROTECTED', 2),
-          `**${username}** has community access and an active recovery link.`,
-          `> ${E('recovery_backup')} OAuth consent and eligible roles are recorded securely.`,
-          `-# ${E('icon_heart_purple')} No further verification is required right now.`,
-        ]
-      : [
-          title(E('verify_shield'), 'STEP 1/2 • DISCORD CONSENT REQUIRED', 2),
-          `Hi **${username}**. The bot received your request but **has not granted the verification role yet**.`,
-          `> ${E('icon_lock')} Complete the Discord consent page using the same account.`,
-          `> ${E('recovery_backup')} Recovery data is encrypted before storage.`,
-          `> ${E('status_info')} Access is granted only after the callback is validated successfully.`,
-        ])
-    : active
-    ? [
-        title(E('status_check'), 'TÀI KHOẢN ĐÃ ĐƯỢC BẢO VỆ', 2),
-        `**${username}** đã có quyền truy cập và recovery backup đang hoạt động.`,
-        `> ${E('recovery_backup')} Liên kết OAuth và vai trò đã được ghi nhận.`,
-        `> ${E('icon_group')} Hồ sơ khách hàng được đồng bộ theo Discord ID.`,
-        `-# ${E('icon_heart_purple')} Bạn không cần xác minh lại ở thời điểm này.`,
-      ]
-    : [
-        title(E('verify_shield'), 'BƯỚC 1/2 • CHỜ XÁC NHẬN OAUTH', 2),
-        `Chào **${username}**, yêu cầu đã được bot tiếp nhận nhưng **chưa cấp vai trò xác minh**.`,
-        `> ${E('icon_lock')} Discord chỉ chia sẻ danh tính cơ bản và quyền tham gia server dự phòng.`,
-        `> ${E('recovery_backup')} Token recovery được mã hóa trước khi lưu vào database backup.`,
-        `> ${E('status_info')} Vai trò chỉ được cấp sau khi Discord callback thành công và bot xác nhận đúng tài khoản.`,
-        `-# ${E('icon_sparkle')} Bấm nút bên dưới, xem đúng ứng dụng Cenar Store rồi chọn Ủy quyền.`,
-      ];
-
-  container.addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.join('\n')));
+  container.addTextDisplayComponents(new TextDisplayBuilder().setContent(lines.filter(Boolean).join('\n')));
   const components = [container];
-  if (!active && loginUrl) {
+  if (loginUrl) {
     const linkButton = new ButtonBuilder()
-      .setLabel(international ? 'Continue with Discord' : 'Xác Minh Với Discord')
+      .setLabel(complete ? (international ? 'Update consent if revoked' : 'Cập nhật ủy quyền nếu đã thu hồi')
+        : international ? 'Continue with Discord' : 'Xác Minh Với Discord')
       .setStyle(ButtonStyle.Link)
       .setURL(loginUrl);
     const emoji = E.component('verify_shield') || E.component('status_check');
@@ -155,13 +159,15 @@ export function buildVerificationPromptV2({ guildId, username, loginUrl, hasRole
     components.push(new ActionRowBuilder().addComponents(linkButton));
   }
 
-  return {
+  return presentation({
     components,
     flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
-  };
+  }, guildId, 'prompt');
 }
 
 export function buildVerificationSuccessDmV2({ guildId, guildName, roleName }) {
+  guildName = safeText(guildName);
+  roleName = safeText(roleName);
   const E = createEmojiResolver(guildId);
   const international = isInternationalGuild(guildId);
   const container = new ContainerBuilder().setAccentColor(accentFor('success'));
@@ -186,30 +192,36 @@ export function buildVerificationSuccessDmV2({ guildId, guildName, roleName }) {
       `-# ${E('icon_heart_purple')} ${guildName} • Bảo mật minh bạch, phục hồi có sự đồng ý`,
     ]).join('\n')),
   );
-  return { components: [container], flags: MessageFlags.IsComponentsV2 };
+  return presentation({ components: [container], flags: MessageFlags.IsComponentsV2 }, guildId, 'success');
 }
 
-export function buildVerificationUnavailableV2(guildId) {
+export function buildVerificationUnavailableV2(guildId, { reason = 'configuration' } = {}) {
   const E = createEmojiResolver(guildId);
   const international = isInternationalGuild(guildId);
   const container = new ContainerBuilder().setAccentColor(accentFor('warning'));
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent((international ? [
-      title(E('status_warn'), 'RECOVERY SETUP PENDING', 2),
-      `> ${E('icon_lock')} The Owner must configure \`CLIENT_SECRET\` and \`ENCRYPTION_KEY\` on the hosting panel.`,
-      `> ${E('status_info')} OAuth is disabled until tokens can be encrypted safely.`,
-      `> ${E('recovery_restore')} Verification will become available after configuration and restart.`,
+      title(E('status_warn'), 'VERIFICATION TEMPORARILY UNAVAILABLE', 2),
+      `> ${E('icon_lock')} ${reason === 'guild' ? 'Open verification from inside the Discord server.'
+        : reason === 'member' ? 'The bot could not confirm your membership. Please try again shortly.'
+        : reason === 'launch' ? 'The shop is correcting its secure verification link.'
+        : reason === 'temporary' ? 'The bot could not check verification status. Please try again shortly.'
+        : 'The shop is completing verification setup.'}`,
+      `> ${E('status_info')} This action has not granted a role or started OAuth authorization.`,
       `-# ${E('icon_heart_purple')} Please open one support ticket; repeated clicks are not necessary.`,
     ] : [
-      title(E('status_warn'), 'RECOVERY ĐANG CHỜ CẤU HÌNH', 2),
-      `> ${E('icon_lock')} Owner cần thêm \`CLIENT_SECRET\` và \`ENCRYPTION_KEY\` trên hosting.`,
-      `> ${E('status_info')} Bot đã khóa luồng OAuth để không yêu cầu bạn cấp quyền khi chưa thể lưu token an toàn.`,
-      `> ${E('recovery_restore')} Sau khi cấu hình và restart, nút xác minh sẽ hoạt động ngay.`,
+      title(E('status_warn'), 'XÁC MINH TẠM CHƯA SẴN SÀNG', 2),
+      `> ${E('icon_lock')} ${reason === 'guild' ? 'Vui lòng mở xác minh từ trong server Discord.'
+        : reason === 'member' ? 'Bot chưa kiểm tra được tư cách thành viên. Vui lòng thử lại sau ít phút.'
+        : reason === 'launch' ? 'Shop đang kiểm tra lại đường dẫn xác minh an toàn.'
+        : reason === 'temporary' ? 'Bot chưa đọc được trạng thái xác minh. Vui lòng thử lại sau ít phút.'
+        : 'Shop đang hoàn tất cấu hình xác minh.'}`,
+      `> ${E('status_info')} Thao tác này chưa cấp vai trò và chưa mở phiên ủy quyền OAuth.`,
       `-# ${E('icon_heart_purple')} Vui lòng báo Owner hoặc mở ticket hỗ trợ; không cần bấm thử nhiều lần.`,
     ]).join('\n')),
   );
-  return {
+  return presentation({
     components: [container],
     flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral,
-  };
+  }, guildId, 'unavailable');
 }

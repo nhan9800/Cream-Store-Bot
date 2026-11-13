@@ -20,6 +20,7 @@ const state = vi.hoisted(() => ({
   supplierWorker: vi.fn(),
   supplierTicketRepair: vi.fn(),
   supplierTicketMaintenance: vi.fn(),
+  discordRateLimitHealth: vi.fn(),
   supplierRuntimes: new Map(),
 }));
 
@@ -50,6 +51,8 @@ vi.mock('../src/services/supplierAutobuyCatalogService.js', () => ({
 vi.mock('../src/services/supplierAutobuyOrderService.js', () => ({ startSupplierAutobuyWorker: state.supplierWorker }));
 vi.mock('../src/services/shopRelaunchReleaseService.js', () => ({ runShopRelaunchRelease: vi.fn() }));
 vi.mock('../src/services/compactSaleReleaseService.js', () => ({ runCompactSaleRelease: vi.fn() }));
+vi.mock('../src/services/discordRateLimitHealthService.js', () => ({ installDiscordRateLimitHealth: state.discordRateLimitHealth }));
+vi.mock('../src/services/dopermindCatalogReview20261114.js', () => ({ runDopermindCatalogReview: vi.fn() }));
 vi.mock('../src/services/supplierAutobuyPanelService.js', () => ({ ensureSupplierAutobuyChannel: state.supplierPanel }));
 vi.mock('../src/services/supplierAutobuyTicketNoticeService.js', () => ({
   repairSupplierTicketOrderNotices: state.supplierTicketRepair,
@@ -140,6 +143,9 @@ describe('independent price-board publication at startup', () => {
     void state.handlers.get('clientReady')(client);
     await vi.waitFor(() => expect(state.supplierPanel).toHaveBeenCalledTimes(2));
     expect(state.supplierWorker).toHaveBeenCalledTimes(1);
+    expect(state.discordRateLimitHealth).toHaveBeenCalledExactlyOnceWith(client, {
+      guildId: '1282637033340403754', envFile: '.env',
+    });
     expect(state.supplierPanel.mock.calls.map(([, options]) => options.provider).sort()).toEqual(['cdkvietnam', 'dopermind']);
     expect(state.supplierPanel.mock.calls.every(([, options]) => options.snapshot.purchasesEnabled)).toBe(true);
     await vi.waitFor(() => expect(state.supplierTicketRepair).toHaveBeenCalledExactlyOnceWith(client, {

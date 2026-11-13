@@ -95,9 +95,7 @@ import { handleSupplierAutobuyInteraction } from './supplierAutobuyHandlers.js';
 import { getCenarHub } from '../services/cenarHub.js';
 import { createEmojiResolver, withButtonEmoji } from '../utils/emojiHelper.js';
 import { isInternationalGuild } from '../utils/locale.js';
-import { buildVerificationPromptV2, buildVerificationUnavailableV2 } from '../services/verificationPanelService.js';
-import { getRecoveryStatus } from '../services/guildRecoveryService.js';
-import { memberHasVerificationRole, resolveVerificationRole } from '../services/verificationRoleService.js';
+import { handleVerificationInteraction } from '../services/verificationInteractionService.js';
 import { refreshAllShopPanels } from '../services/shopPanelService.js';
 import { handleAnnouncementDraftInteraction } from '../services/announcementDraftService.js';
 import {
@@ -2071,33 +2069,7 @@ export function registerInteractionHandler(client, commands) {
       ensureRateLimit({ guildId: interaction.guildId, userId: interaction.user.id, action: `BUTTON_${interaction.customId.split(':')[0]}`, limit: 1, windowSeconds: config.buttonCooldownSeconds, message: 'Bạn bấm nút quá nhanh, vui lòng chờ vài giây.' });
 
       if (interaction.customId === 'oauth:verify:button') {
-        const E = createEmojiResolver(interaction.guildId);
-        if (!String(process.env.CLIENT_SECRET || '').trim() || !String(process.env.ENCRYPTION_KEY || '').trim()) {
-          await safeReply(interaction, buildVerificationUnavailableV2(interaction.guildId));
-          return;
-        }
-        const member = await interaction.guild.members.fetch(interaction.user.id).catch(() => null);
-        const verificationRole = resolveVerificationRole(interaction.guild);
-        const hasRole = memberHasVerificationRole(member, verificationRole);
-        const recovery = getRecoveryStatus(interaction.guildId, interaction.user.id);
-        const recoveryActive = Boolean(recovery?.recovery_consent_at && String(recovery.scopes || '').includes('guilds.join'));
-        const host = String(config.publicBaseUrl || '').trim().replace(/\/$/, '');
-
-        if (!host && !recoveryActive) {
-          await safeReply(interaction, {
-            content: `${E('status_cross')} Hệ thống OAuth đang thiếu PUBLIC_BASE_URL. Vui lòng báo quản trị viên cấu hình trước khi xác minh.`,
-            flags: MessageFlags.Ephemeral,
-          });
-          return;
-        }
-
-        await safeReply(interaction, buildVerificationPromptV2({
-          guildId: interaction.guildId,
-          username: interaction.user.username,
-          loginUrl: host ? `${host}/oauth/login?guild_id=${interaction.guildId}` : null,
-          hasRole,
-          recoveryActive,
-        }));
+        await handleVerificationInteraction(interaction);
         return;
       }
 

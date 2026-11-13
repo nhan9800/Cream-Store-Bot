@@ -1,4 +1,5 @@
 import express from 'express';
+import Database from 'better-sqlite3';
 import { Collection, PermissionsBitField, PermissionFlagsBits } from 'discord.js';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -15,16 +16,19 @@ vi.mock('../src/services/verificationPanelService.js', () => ({ buildVerificatio
 import { registerOauthRoutes } from '../src/services/oauthBackupRoutes.js';
 import { createOAuthState, oauthStateCookieName, verifyOAuthState } from '../src/utils/oauthState.js';
 import { resolveOAuthCallbackStore } from '../src/utils/oauthCallbackRouting.js';
+import { createOAuthRequestGuard } from '../src/services/oauthRequestGuard.js';
 
 const nativeFetch = globalThis.fetch;
 const guildId = fixtures.config.guildId;
 const memberId = '200000000000000001';
 let server, base, guild, member, upstream;
+let guardDatabase;
 
 beforeAll(async () => {
   const app = express();
   app.locals.discordClient = { isReady: () => true, guilds: { fetch: async (id) => id === guildId ? guild : null } };
-  registerOauthRoutes(app);
+  guardDatabase = new Database(':memory:');
+  registerOauthRoutes(app, { requestGuard: createOAuthRequestGuard({ database: guardDatabase }) });
   server = app.listen(0, '127.0.0.1');
   await new Promise((resolve) => server.once('listening', resolve));
   base = `http://127.0.0.1:${server.address().port}`;
@@ -51,7 +55,7 @@ beforeEach(() => {
   vi.stubGlobal('fetch', upstream);
 });
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); vi.unstubAllGlobals(); });
-afterAll(async () => { await new Promise((resolve) => server.close(resolve)); });
+afterAll(async () => { await new Promise((resolve) => server.close(resolve)); guardDatabase.close(); });
 
 async function callback({ state, error, code = 'one-use-code', cookie = true, extraCookie = '' } = {}) {
   const session = state ?? createOAuthState(guildId, Date.now(), { clientId: fixtures.config.clientId, store: 'store1' });
@@ -75,6 +79,7 @@ describe('verification callback integrity and delivery', () => {
     expect(resolveOAuthCallbackStore(`/oauth/callback?state=${state}`)).toBe('store2');
     expect(r.headers.get('cache-control')).toContain('no-store');
     expect(r.headers.get('set-cookie')).toContain('Path=/oauth/callback; HttpOnly; SameSite=Lax; Secure');
+    expect(r.headers.get('set-cookie')).toContain('Path=/oauth; HttpOnly; SameSite=Lax; Secure');
   });
   it('grants the renamed real Explorer role only after signed OAuth and matching membership, encrypting stored tokens', async () => {
     const r = await callback({ extraCookie: '; unrelated=%E0%A4%A' });

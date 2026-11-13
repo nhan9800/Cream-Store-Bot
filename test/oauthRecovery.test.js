@@ -17,7 +17,7 @@ const GUILD_ID = '1282637033340403754';
 const DEFAULT_EMOJI = /[\u{1F000}-\u{1FAFF}\u2600-\u27BF]/u;
 
 function serializedText(payload) {
-  return JSON.stringify(payload.components.map((component) => component.toJSON()));
+  return JSON.stringify(payload.components.map((component) => component.toJSON?.() || component));
 }
 
 describe('OAuth recovery security', () => {
@@ -79,7 +79,7 @@ describe('verification Components V2', () => {
     });
     const text = serializedText(prompt);
     expect(text).toContain('BƯỚC 1/2 • CHỜ XÁC NHẬN OAUTH');
-    expect(text).toContain('chưa cấp vai trò xác minh');
+    expect(text).toContain('chưa có vai trò xác minh');
     expect(text).toContain('Xác Minh Với Discord');
     expect(text).not.toContain('HOÀN TẤT XÁC MINH DISCORD');
   });

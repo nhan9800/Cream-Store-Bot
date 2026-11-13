@@ -199,6 +199,28 @@ Quote, intent, completion-notice, payment-method, ticket-create and override/aud
 
 ## Health and verification
 
+### Interaction latency · 2026-11-14
+
+Catalog navigation reads price overrides in one current SQLite batch per view
+and reuses a priced read model only while source, overrides and reference
+validity remain unchanged. Selected quotes re-evaluate their product and current
+override; confirmation/payment retain forced source freshness. A failed forced
+refresh is not hidden by an older cached source. Tests include direct changes
+from a second SQLite connection.
+
+Changing pages or opening read views edits the same verified owner-bound
+ephemeral card, with serialized edits so an older response cannot overwrite a
+newer selection. Public panels, order confirmation, payment and delivered files
+remain separate private responses. Only an already-running public catalog read
+is shared per client/provider; quotes, customer orders and payments are not.
+Showing the Admin price button uses local permission hints; opening/submitting
+the price control still requires a freshly fetched manager.
+
+Controlled tests for 20 views of 103/500 products measure 20 batch reads instead
+of 2,060/10,000 individual override reads. A synthetic quote path with 350ms
+provider time and 250ms member-fetch time renders at 350ms instead of 600ms.
+These are algorithm measurements, not a guarantee of upstream network latency.
+
 `/api/health` and `/store2/api/health` expose the exact commit and cached aggregate `supplierAutobuy`, `supplierAutobuyPanel`, `supplierAutobuyCatalog`, `supplierAutobuyOrders` snapshots. Store2 must stay disabled. Health reads make no provider requests and expose no costs, balances, goods or customer identities. Discord readiness does not prove a paid supplier order.
 
 Focused suites cover transport/schema/rates; policy caps/margins/freshness; owner/Admin boundaries; ticket uncertainty; wallet/PayOS locks; zero-source-balance prepayment and finite-stock reservations; paid funds-wait/restart/resume; idempotency/leases; malformed receipts; DM retry and completion deduplication. Run affected suites plus required full CI, dependency/security and smoke checks before exact-SHA production promotion. Then verify both live health endpoints and the retained Discord panel. Record any explicitly authorized paid test separately; mocked fulfillment/read diagnostics are not real purchases.

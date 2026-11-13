@@ -84,6 +84,8 @@ import { getSupplierTicketOrderNoticeHealth } from './supplierAutobuyTicketNotic
 import { getCoreEmojiPackStatus } from './coreEmojiPackService.js';
 import { getShopRelaunchReleaseHealth } from './shopRelaunchReleaseService.js';
 import { getCompactSaleReleaseHealth } from './compactSaleReleaseService.js';
+import { getDiscordRateLimitHealth } from './discordRateLimitHealthService.js';
+import { getOAuthRequestGuardHealth } from './oauthBackupRoutes.js';
 
 let storeInviteCache = { url: '', expiresAt: 0 };
 const websiteSupportProvisioning = new Map();
@@ -508,6 +510,8 @@ export function registerBotApiRoutes(app) {
             service: 'cenar-store-bot',
             commitSha: runtimeCommitSha,
             discordReady,
+            discordRateLimits: getDiscordRateLimitHealth(),
+            verificationRequests: getOAuthRequestGuardHealth(),
             // Cached, status-only startup probe; reading health never calls
             // the supplier or changes the store's Discord readiness.
             supplierAutobuy: supplierAutobuyRuntime.getHealth(),
