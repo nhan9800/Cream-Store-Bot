@@ -96,6 +96,7 @@ function dependencies() {
     createPayment: vi.fn(async () => ({ orderCode: order.orderCode, method: 'WALLET', paid: true, status: 'PROCESSING' })),
     getOrder: vi.fn(async context => ({ ...order, provider: context.provider })),
     listOrders: vi.fn(async () => []), getDelivery: vi.fn(async () => ({ items: ['owned-item'] })),
+    prepareDeliveryPublication: vi.fn(async () => () => ({ items: ['owned-item'] })),
     acknowledgeDelivery: vi.fn(async () => {}), canManage: vi.fn(async () => false), setPrice: vi.fn(),
   };
 }

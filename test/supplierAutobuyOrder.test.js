@@ -65,7 +65,10 @@ function setup(options = {}) {
     encrypt: value => `enc:v1:${Buffer.from(value).toString('base64')}`,
     decrypt: value => Buffer.from(value.slice(7), 'base64').toString('utf8'),
     providerFactory: () => wireProvider(provider), enabled: () => enabled, customerBlocked: () => blocked,
-    sendDelivery, notifyCompletion, reconcileInvoices, now: () => time, ...options.settings };
+    sendDelivery: async (...args) => {
+      if (args[4].beforeSend({ channelId: CHANNEL }) !== true) throw new Error('Synthetic delivery veto');
+      return sendDelivery(...args);
+    }, notifyCompletion, reconcileInvoices, now: () => time, ...options.settings };
   const service = createSupplierAutobuyOrderService(settings); service.init();
   const context = { guildId: STORE_ONE_GUILD_ID, customerId: CUSTOMER };
   async function create(quantity = 1) {
@@ -477,7 +480,7 @@ describe('paid-only supplier fulfillment and recovery', () => {
     expect(t.provider.createOrder.mock.calls[0][0].requestId).toBe(original);
   });
   it('retries a blocked DM from encrypted payload without purchasing again', async () => {
-    const t = setup(); const o = await t.create(); t.pay(o.order_code); t.sendDelivery.mockRejectedValueOnce(new Error('private-DM-data'));
+    const t = setup(); const o = await t.create(); t.pay(o.order_code); t.sendDelivery.mockRejectedValueOnce(Object.assign(new Error('private-DM-data'), { status: 403, code: 50007 }));
     expect((await t.service.fulfillSupplierOrder({}, o.order_code)).status).toBe('DELIVERY_PENDING');
     expect(t.intent(o.order_code).last_error).toBe('DELIVERY_RETRY'); t.advance(120001);
     await t.service.processPendingSupplierOrders({}, 3);

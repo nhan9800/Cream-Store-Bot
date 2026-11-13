@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MessageFlags, PermissionsBitField } from 'discord.js';
+import QRCode from 'qrcode';
 const state = vi.hoisted(() => ({ snapshot: {}, panel: {} }));
 vi.mock('../src/config.js', () => ({ config: { guildId: '1282637033340403754' } }));
 vi.mock('../src/database/db.js', () => ({ db: { prepare: () => { throw new Error('No database in interaction test'); } } }));
@@ -39,6 +40,7 @@ function dependencies(patch = {}) {
     createPayment: vi.fn().mockResolvedValue({ orderCode: order.orderCode, method: 'payos', paid: false, checkoutUrl: 'https://pay.payos.vn/web/test' }),
     getOrder: vi.fn().mockResolvedValue(order), listOrders: vi.fn().mockResolvedValue([order]),
     getDelivery: vi.fn().mockResolvedValue({ orderCode: order.orderCode, items: ['secret-account|secret-password'] }),
+    prepareDeliveryPublication: vi.fn(async () => () => ({ orderCode: order.orderCode, items: ['secret-account|secret-password'] })),
     acknowledgeDelivery: vi.fn().mockResolvedValue({ status: 'COMPLETED' }),
     setPrice: vi.fn().mockResolvedValue(undefined), canManage: vi.fn().mockResolvedValue(false), ...patch,
   };
@@ -255,6 +257,30 @@ describe('supplier autobuy customer commerce interactions', () => {
     expect(deps.createPayment).toHaveBeenCalledTimes(1);
     expect(deps.confirmCheckout).not.toHaveBeenCalled();
   });
+  it('locally removes an invoice that expires while its private edit is queued, without another status poll or PNG', async () => {
+    let now = Date.UTC(2026, 10, 14), finishFirst;
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const qr = vi.spyOn(QRCode, 'toBuffer').mockResolvedValue(Buffer.from('89504e470d0a1a0a', 'hex'));
+    try {
+      const deps = dependencies({ getOrder: vi.fn(async () => ({ ...order, provider: 'cdkvietnam',
+        payment: { method: 'PAYOS', paid: false, expiresAt: new Date(now + 100).toISOString(), checkoutUrl: 'https://pay.payos.vn/web/queue-expiry' } })) });
+      const handler = createSupplierAutobuyInteractionHandler(deps);
+      const first = fixture(privateId('page', '0:0'), { deferUpdate: vi.fn().mockResolvedValue(undefined),
+        editReply: vi.fn(() => new Promise(resolve => { finishFirst = resolve; })) });
+      const a = handler(first); await vi.waitFor(() => expect(first.editReply).toHaveBeenCalledOnce());
+      const next = fixture(privateId('order', order.orderCode), { client: first.client, deferUpdate: vi.fn().mockResolvedValue(undefined) });
+      const b = handler(next); await vi.waitFor(() => expect(qr).toHaveBeenCalledOnce());
+      for (let step = 0; step < 10; step++) await Promise.resolve();
+      now += 1000; finishFirst({ id: first.message.id }); await Promise.all([a, b]);
+      const payload = next.editReply.mock.calls[0][0];
+      const all = payload.components.flatMap(function visit(node) { return [node, ...(node.components || []).flatMap(visit)]; });
+      expect(payload.files).toBeUndefined(); expect(payload.attachments).toEqual([]);
+      expect(all.some(node => node.type === 12 || node.url || node.custom_id?.includes(':pay:'))).toBe(false);
+      expect(JSON.stringify(payload.components)).toContain('Hóa đơn đã hết hạn');
+      expect(qr).toHaveBeenCalledOnce(); expect(deps.getOrder).toHaveBeenCalledOnce();
+      expect(deps.createPayment).not.toHaveBeenCalled(); expect(deps.confirmCheckout).not.toHaveBeenCalled();
+    } finally { qr.mockRestore(); clock.mockRestore(); }
+  });
   it.each(['PAYOS', 'WALLET'])('preserves the authoritative Dopermind source and paid amount in a %s fallback receipt', async method => {
     state.panel = { ...state.panel, provider: 'dopermind' };
     state.snapshot = { ...state.snapshot, provider: 'dopermind' };
@@ -348,7 +374,9 @@ describe('supplier autobuy customer commerce interactions', () => {
   it('retrieves credentials only as a private attachment and acknowledges delivery after a successful edit', async () => {
     const deps = dependencies(), interaction = fixture(privateId('delivery', 'CN_123456'));
     await createSupplierAutobuyInteractionHandler(deps)(interaction);
-    expect(deps.getDelivery).toHaveBeenCalledExactlyOnceWith({ ...context, orderCode: 'CN_123456' });
+    expect(deps.getDelivery).toHaveBeenCalledOnce();
+    expect(deps.prepareDeliveryPublication).toHaveBeenCalledExactlyOnceWith({ ...context, orderCode: 'CN_123456' });
+    expect(deps.getDelivery).toHaveBeenLastCalledWith({ ...context, orderCode: 'CN_123456' });
     const payload = interaction.editReply.mock.calls[0][0];
     expect(JSON.stringify(payload.components)).not.toMatch(/secret-account|secret-password/);
     expect(payload.files).toHaveLength(1);

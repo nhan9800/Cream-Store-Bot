@@ -296,6 +296,12 @@ function paymentState(order, payment) {
   return { unpaid, expiresAt, expired: expiresAt !== null && expiresAt <= Date.now() };
 }
 
+/** Local clock check for a view that may have waited in the publication queue. */
+export function isSupplierPaymentViewExpired({ order, payment = order?.payment ?? null } = {}) {
+  const expiresAt = paymentExpiry(payment);
+  return expiresAt !== null && expiresAt <= Date.now();
+}
+
 export function buildSupplierOrderView({ order, customerId, payment = order?.payment ?? null, qrAttachmentName = null, qrUnavailable = false, ticketContext = false } = {}) {
   requireOwner(customerId);
   const code = orderCodeOf(order) ?? payment?.orderCode;
@@ -373,7 +379,7 @@ export function buildSupplierOrderListView({ orders, customerId, provider = 'cdk
   const text = safe.length ? safe.map(order => publicOrderText(order, 70, E)).join('\n\n') : 'Bạn chưa có đơn autobuy. Vào Danh mục để chọn gói và xem điều kiện.';
   const components = [containerWithTitle(`## ${E('icon_doc')} Đơn autobuy của tôi · ${sourceLabel(provider)}`, text)];
   if (safe.length) components.push(new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId(`supplier-autobuy:orderselect:${customerId}`)
-    .setPlaceholder('Chọn đơn để kiểm tra hoặc nhận hàng').addOptions(safe.map(order => ({ label: orderCodeOf(order), value: orderCodeOf(order), description: displayText(orderProductName(order), 100) })))));
+    .setPlaceholder('Chọn đơn để kiểm tra hoặc nhận hàng').addOptions(safe.map(order => ({ label: orderCodeOf(order), value: orderCodeOf(order), description: productLabel(orderProductName(order), 100) })))));
   components.push(nav(customerId));
   return privatePayload(components);
 }

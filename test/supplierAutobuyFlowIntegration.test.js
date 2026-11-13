@@ -102,7 +102,7 @@ function fixture({ supplierFunds = 500000, blockDm = false } = {}) {
     expect(getOrderByCode(owned.order_code).payment_status).toBe('PAID');
     expect(payload.allowedMentions).toEqual({ parse: [], users: [], roles: [], repliedUser: false });
     expect(payload.files[0].attachment.toString('utf8')).toContain(DELIVERABLE);
-    if (blockDm) throw new Error('Synthetic DM blocked');
+    if (blockDm) throw Object.assign(new Error('Synthetic DM blocked'), { status: 403, code: 50007 });
     return { id: dmMessageId };
   });
   const createDM = vi.fn(async () => ({ id: dmChannelId, send: dmSend }));

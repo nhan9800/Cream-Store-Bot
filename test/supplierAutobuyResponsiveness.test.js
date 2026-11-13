@@ -16,6 +16,7 @@ vi.mock('../src/services/supplierAutobuyPanelService.js', () => ({
   buildSupplierAutobuyReply: options => state.replyView(options),
   buildSupplierOrderListView: () => view('orders'),
   buildSupplierPaymentView: async options => view(`order:${options.order.orderCode}`),
+  isSupplierPaymentViewExpired: () => false,
   buildSupplierOrderView: () => view('order'),
   hasSupplierPrepayDisclosure: () => true,
 }));
@@ -149,6 +150,7 @@ describe('AutoBuy interaction responsiveness', () => {
     const deps = { confirmCheckout: vi.fn(async () => ({ orderCode: 'CN_123456' })),
       createPayment: vi.fn(async () => ({ orderCode: 'CN_123456' })), getOrder: vi.fn(async () => ({ orderCode: 'CN_123456' })),
       getDelivery: vi.fn(async () => ({ items: ['private-owned-secret'] })), acknowledgeDelivery: vi.fn(),
+      prepareDeliveryPublication: vi.fn(async () => () => ({ items: ['private-owned-secret'] })),
       prepareCheckout: vi.fn(async () => ({ quoteId, productKey })) };
     await createSupplierAutobuyInteractionHandler(deps)(click);
     expect(click.deferUpdate).not.toHaveBeenCalled(); expect(click.deferReply).toHaveBeenCalledExactlyOnceWith({ flags: MessageFlags.Ephemeral });

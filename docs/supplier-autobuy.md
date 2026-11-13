@@ -148,6 +148,15 @@ receipt; a lost send response is reconciled against bot-authored exact-order
 controls before any retry. Definitive rejections remain retryable. Incomplete
 history or uncertain absence never authorizes a blind duplicate send.
 
+For a newly created order, the confirmation facade captures the private
+channel's exact last-message ID before creating the order and stores it once
+in the notice journal. Receipt discovery checks all markers on a fetched page
+before stopping at that exact pre-order anchor. A long reused ticket therefore
+does not require scanning its older unrelated history. Retries never advance
+the anchor. Legacy NULL anchors, deleted anchors and overflow above an anchor
+retain conservative discovery; attempts=0 and local timestamps do not prove
+that a previous send was absent.
+
 After custom artwork is ready, Store1 startup repairs open active supplier
 orders missing their receipt. A coalesced background pass retries bounded
 batches each minute and pauses while Discord disconnects. It only reads owned
@@ -193,7 +202,25 @@ Timeout, network loss, malformed response, pending history or a crashed submitti
 
 The cost ceiling is checked before POST and against its receipt; it is not an undocumented field sent to the provider. An unexpectedly higher charge retains encrypted goods and charged totals for review. Never discard that receipt or buy again. Same-ID replay at a now-higher cost is also held to avoid a first purchase above the original ceiling.
 
-Encryption is checked before submission. Validated goods are encrypted with the existing key in `supplier_autobuy_intents`, never account-stock rows/public logs/health. Private DM attachment failures retry from that stored payload without repurchase. The paid owner can also retrieve an ephemeral attachment through **Đơn của tôi → Nhận hàng riêng**. Completion is acknowledged only after Discord returns a private message receipt, then records delivery and uses existing completion/feedback flow. A separate durable claim prevents repeated uncertain completion notices.
+Encryption is checked before submission. Validated goods are encrypted with the existing key in `supplier_autobuy_intents`, never account-stock rows/public logs/health. Definitively rejected private DMs retry from that stored payload without repurchase. The paid owner can also retrieve an ephemeral attachment through **Đơn của tôi → Nhận hàng riêng**. Completion is acknowledged only after Discord returns a private message receipt, then records delivery and uses existing completion/feedback flow. A separate durable claim prevents repeated uncertain completion notices.
+
+`supplier_autobuy_delivery_attempts` records metadata before a DM send. The
+transport checks the current paid owner, immutable payload, live lease and
+deadline after user/DM preparation, immediately before sending. A timed-out
+preparation cannot later send goods. A late positive send receipt is retained
+before completion checks; cancellation, refund or changed identity leaves it
+for review. Unknown sends are reconciled through exact bot/customer/channel,
+request and attachment markers, never blindly resent after Discord's short
+nonce window. Existing encrypted payloads without trustworthy legacy send
+evidence are held for review/retrieval rather than assumed unsent. The journal
+contains no goods, source prices or credentials.
+
+`supplierAutobuyDelivery` in health is a cached aggregate of journal attempts,
+including unknown sends, reviewed receipts and completion retries. Reading
+health creates no journal or Discord/provider work. These are attempt counts,
+not a complete count of paid orders. Legacy positive receipts are adopted only
+from the verified customer's DM with the exact old request nonce and unique
+message/attachment markers; missing nonce or uncertain discovery stays held.
 
 Quote, intent, completion-notice, payment-method, ticket-create and override/audit tables are recovery data, not disposable caches. Preserve SQLite, encryption keys, environment files, backups and history. Do not clear requests/leases/payment rows to make a stuck order look new.
 

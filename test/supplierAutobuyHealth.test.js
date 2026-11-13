@@ -62,10 +62,12 @@ describe('supplier startup evidence in public bot health', () => {
       });
       expect(payloads[index].supplierAutobuy).toEqual(supplierAutobuyRuntime.getHealth());
       expect(payloads[index].supplierAutobuyPanel).toEqual(getSupplierAutobuyPanelHealth());
+      expect(payloads[index].supplierAutobuyDelivery).toMatchObject({ status: 'UNINITIALIZED', journalAttempts: 0 });
       expect(JSON.stringify(payloads[index])).not.toContain('supplier-private');
     }
     expect(payloads[0].supplierAutobuy).toEqual(payloads[1].supplierAutobuy);
     expect(providerCalls).toBe(3);
+    expect(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='supplier_autobuy_delivery_attempts'").get()).toBeUndefined();
   });
 
   it('keeps Discord-unavailable health at503 regardless of cached supplier status', async () => {

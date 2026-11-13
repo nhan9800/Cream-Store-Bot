@@ -203,6 +203,16 @@ describe('unique sourced custom artwork for AutoBuy', () => {
       expect(menus.flatMap(menu => menu.options).every(option => option.label.isWellFormed())).toBe(true);
     }
   });
+  it('keeps order history usable when a source product name contains only decorative artwork', () => {
+    const payload = buildSupplierOrderListView({ customerId: user, orders: [
+      { ...order, productName: '👨‍👩‍👧‍👦' },
+      { ...order, orderCode: 'CN_123457', productName: '<:merchant_logo:1999999999999999999>' },
+    ] });
+    verified(payload);
+    const menu = payload.components.filter(node => node.type === 1).flatMap(node => node.components).find(node => node.type === 3);
+    expect(menu.options).toHaveLength(2);
+    expect(menu.options.every(option => option.description === 'Sản phẩm AutoBuy')).toBe(true);
+  });
   it('preserves protocol fields, links, files and authored literal spans exactly', () => {
     const attachment = { attachment: Buffer.from('private bytes'), name: 'owned.png' };
     const literal = '`password:<:old:1999999999999999999>` https://example.com/:secret:';

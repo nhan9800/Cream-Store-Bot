@@ -3,11 +3,11 @@ import { STORE_ONE_GUILD_ID } from '../utils/locale.js';
 import { createDopermindClient, DopermindError } from './dopermindClient.js';
 import { createCdkVietnamClient, CdkVietnamError } from './cdkVietnamClient.js';
 import { isSupplierProvider, SUPPLIER_PROVIDERS, supplierProviderForProductKey } from '../utils/supplierProvider.js';
+import { createSupplierDeliveryService, sendSupplierDeliveryDm } from './supplierAutobuyDeliveryService.js';
 
 const LEASE_MS = 120000;
 const MAX_QUANTITY = 10;
 const MAX_ATTEMPTS = 5;
-const NO_MENTIONS = Object.freeze({ parse: [], users: [], roles: [], repliedUser: false });
 const RETRY_STATES = ['PENDING', 'WAITING_STOCK', 'WAITING_SUPPLIER_FUNDS', 'UNKNOWN', 'RECONCILING', 'SUBMITTING', 'DELIVERY_PENDING', 'DELIVERING'];
 const integer = (value, min = 0) => Number.isSafeInteger(value) && value >= min;
 const snowflake = value => typeof value === 'string' && /^\d{17,20}$/.test(value);
@@ -63,23 +63,11 @@ function safeOrder(order, intent) {
     retryAt: intent.retry_at, errorCode: intent.last_error };
 }
 
-async function defaultSendDelivery(client, order, items, requestId) {
-  const customer = await client.users.fetch(order.customer_id);
-  if (customer?.id !== order.customer_id) fail('DELIVERY_OWNER_MISMATCH');
-  const channel = await customer.createDM();
-  const attachment = Buffer.from(`Đơn hàng: ${order.order_code}\n\n${items.map((item, index) => `${index + 1}. ${item}`).join('\n\n')}`, 'utf8');
-  const message = await channel.send({ content: `AutoBuy ${order.order_code} — sản phẩm của bạn được đính kèm trong tệp riêng tư.`,
-    files: [{ attachment, name: `${order.order_code}-autobuy.txt` }], allowedMentions: NO_MENTIONS,
-    nonce: createHash('sha256').update(`supplier-delivery:${requestId}`).digest('hex').slice(0, 24), enforceNonce: true });
-  if (!message?.id || !channel?.id) fail('DELIVERY_RECEIPT_MISSING');
-  return { messageId: message.id, channelId: channel.id };
-}
-
 /** Durable state is isolated from account-stock delivery and from the old supplier. */
 export function createSupplierAutobuyOrderService({
   db, getQuote, createOrder, markOrderCompleted, saveDelivery = () => {}, encrypt, decrypt,
   providerFactory = createDopermindClient, enabled = () => false, customerBlocked = () => false,
-  sendDelivery = defaultSendDelivery, now = Date.now, id = randomUUID,
+  sendDelivery = sendSupplierDeliveryDm, now = Date.now, id = randomUUID,
   notifyCompletion = async () => {},
   reconcileInvoices = async client => (await import('./supplierAutobuyInvoiceService.js')).reconcileSupplierInvoices(client),
 } = {}) {
@@ -92,6 +80,7 @@ export function createSupplierAutobuyOrderService({
   let workerRunning = false;
   let workTail = Promise.resolve();
   const running = new Map();
+  const deliveryService = createSupplierDeliveryService({ db, now, id });
   let health = Object.freeze({ enabled: false, workerRunning: false, busy: false, lastRunAt: null, processed: 0 });
   const timestamp = () => new Date(now()).toISOString();
   const nextRetry = (minutes = 2) => new Date(now() + minutes * 60000).toISOString();
@@ -141,6 +130,7 @@ export function createSupplierAutobuyOrderService({
     db.exec(`CREATE TABLE IF NOT EXISTS supplier_autobuy_completion_notices (
       order_code TEXT PRIMARY KEY,status TEXT NOT NULL DEFAULT 'PENDING',attempted_at TEXT,finished_at TEXT,last_error TEXT,
       FOREIGN KEY(order_code) REFERENCES orders(order_code));`);
+    deliveryService.init();
     initialized = true;
     hasWalletLedger = Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='wallet_transactions'").get());
   }
@@ -496,15 +486,27 @@ export function createSupplierAutobuyOrderService({
       const intent = intentByCode(code); const order = orderByCode(code);
       if (!paid(order, intent)) return pending('BLOCKED', 'ORDER_NOT_DELIVERABLE');
       const items = decoded(intent);
-      let deliveryTimer;
-      let delivery;
-      try {
-        delivery = await Promise.race([sendDelivery(client, order, items, intent.request_id), new Promise((_, reject) => {
-          deliveryTimer = setTimeout(() => reject(new SupplierAutobuyOrderError('DELIVERY_TIMEOUT')), 15000);
-        })]);
-      } finally { clearTimeout(deliveryTimer); }
-      if (!snowflake(delivery?.messageId) || !snowflake(delivery?.channelId)) fail('DELIVERY_RECEIPT_MISSING');
-      return completeDelivery(code, delivery, 'DM', lease);
+      const identityFields = ['provider', 'guild_id', 'customer_id', 'quote_id', 'product_key', 'quantity', 'sale_amount',
+        'max_unit_cost', 'request_id', 'request_json', 'request_hash', 'supplier_order_code', 'encrypted_payload'];
+      const sameDelivery = current => current && identityFields.every(field => current[field] === intent[field]);
+      const delivery = await deliveryService.deliver({ client, order, intent, lease, items, sendDelivery, freshPurchase: !purchaseExists,
+        beforeSend: () => {
+          const current = intentByCode(code), ownedOrder = orderByCode(code);
+          return sameDelivery(current) && current.status === 'DELIVERING' && current.lease_token === lease
+            && Number.isFinite(Date.parse(current.lease_until)) && Date.parse(current.lease_until) > now()
+            && active(current.provider) && paid(ownedOrder, current);
+        },
+        complete: receipt => db.transaction(() => {
+          const current = intentByCode(code), ownedOrder = orderByCode(code);
+          if (!sameDelivery(current) || !paid(ownedOrder, current)) fail('ORDER_NOT_DELIVERABLE');
+          // A positive receipt can arrive after its lease timed out. It proves
+          // delivery of this exact immutable payload; keep it before completing.
+          return completeDelivery(code, receipt, 'DM');
+        }).immediate() });
+      if (delivery.outcome === 'SENT') return delivery.result;
+      if (delivery.outcome === 'REVIEW') return pending('REVIEW', 'DELIVERY_RECEIPT_REVIEW');
+      if (!paid(orderByCode(code), intentByCode(code))) return pending('BLOCKED', 'ORDER_NOT_DELIVERABLE');
+      return pending('DELIVERY_PENDING', delivery.errorCode ?? (delivery.outcome === 'UNKNOWN' ? 'DELIVERY_UNKNOWN' : 'DELIVERY_RETRY'));
     } catch (error) {
       if (submissionVeto) return submissionVeto;
       const current = intentByCode(code);
@@ -623,6 +625,13 @@ export const getSupplierQuoteForCustomer = async input => (await defaultService(
 export const getSupplierOrderForCustomer = async input => (await defaultService()).getSupplierOrderForCustomer(input);
 export const listSupplierOrdersForCustomer = async input => (await defaultService()).listSupplierOrdersForCustomer(input);
 export const getSupplierDeliveryForCustomer = async input => (await defaultService()).getSupplierDeliveryForCustomer(input);
+// Resolve service loading before a private UI publication fence. The returned
+// reader always rechecks the current owned/paid state synchronously.
+export async function prepareSupplierDeliveryPublication(input) {
+  const service = await defaultService();
+  const bound = { ...input };
+  return () => service.getSupplierDeliveryForCustomer(bound);
+}
 export const acknowledgeSupplierDeliveryRetrieval = async input => (await defaultService()).acknowledgeSupplierDeliveryRetrieval(input);
 export const validateSupplierOrderForPayment = async input => (await defaultService()).validateSupplierOrderForPayment(input);
 export const fulfillSupplierOrder = async (client, code) => (await defaultService()).fulfillSupplierOrder(client, code);

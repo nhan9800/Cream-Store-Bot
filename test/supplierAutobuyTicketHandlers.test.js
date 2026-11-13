@@ -14,6 +14,7 @@ vi.mock('../src/services/supplierAutobuyPanelService.js', () => ({
   hasSupplierPrepayDisclosure: message => JSON.stringify(message?.components).includes('Thanh toán trước:'),
   buildSupplierOrderView: options => state.render.order(options),
   buildSupplierPaymentView: options => state.render.payment(options),
+  isSupplierPaymentViewExpired: () => false,
   buildSupplierNoticeView: options => state.render.notice(options),
 }));
 
@@ -59,8 +60,8 @@ function fixtureEphemeral(customId = id('order'), patch = {}) {
 }
 function dependencies(patch = {}) {
   const providerFor = code => code === doperCode ? 'dopermind' : 'cdkvietnam';
-  return {
-    getTicketContext: vi.fn(async args => {
+  const deps = {
+    getTicketContext: vi.fn(args => {
       if (args.guildId !== guildId || args.channelId !== channelId || args.customerId !== customerId
         || ![cdkCode, doperCode].includes(args.orderCode) || (!args.ephemeral && args.messageId !== noticeId)) return null;
       return { provider: providerFor(args.orderCode), orderCode: args.orderCode, customerId, channelId,
@@ -71,16 +72,21 @@ function dependencies(patch = {}) {
     createPayment: vi.fn(async args => ({ provider: providerFor(args.orderCode), orderCode: args.orderCode,
       method: args.method, paid: false, totalAmount: 55000 })),
     getDelivery: vi.fn(async args => ({ provider: providerFor(args.orderCode), orderCode: args.orderCode, items: ['private-account|private-password'] })),
+    readDeliveryPublication: vi.fn(args => ({ provider: providerFor(args.orderCode), orderCode: args.orderCode, items: ['private-account|private-password'] })),
     acknowledgeDelivery: vi.fn().mockResolvedValue({ status: 'COMPLETED' }),
     prepareCheckout: vi.fn(), confirmCheckout: vi.fn(), getCatalog: vi.fn(), listOrders: vi.fn(), setPrice: vi.fn(), canManage: vi.fn(),
     ...patch,
   };
+  deps.prepareTicketPublication = vi.fn(async args => () => deps.getTicketContext(args));
+  deps.prepareDeliveryPublication = vi.fn(async args => () => deps.readDeliveryPublication(args));
+  return deps;
 }
 function expectNoCommerce(deps) {
   for (const name of ['getOrder', 'createPayment', 'getDelivery', 'acknowledgeDelivery', 'prepareCheckout', 'confirmCheckout', 'getCatalog', 'listOrders', 'setPrice']) {
     expect(deps[name], name).not.toHaveBeenCalled();
   }
 }
+function pending() { let resolve; const promise = new Promise(done => { resolve = done; }); return { promise, resolve }; }
 async function rejected(click, patch = {}) {
   const deps = dependencies(patch);
   await createSupplierAutobuyInteractionHandler(deps)(click);
@@ -99,10 +105,142 @@ beforeEach(() => {
 afterEach(() => { vi.unstubAllEnvs(); vi.restoreAllMocks(); });
 
 describe('durable supplier ticket interaction origin', () => {
+  it.each(['pay', 'order', 'delivery'].flatMap(action => ['closed', 'owner'].map(change => ({ action, change }))))
+    ('rejects $change during ticket-reader preparation before any $action effect', async ({ action, change }) => {
+      const preparation = pending(), deps = dependencies();
+      const originalContext = deps.getTicketContext.getMockImplementation(); let changed = false;
+      deps.getTicketContext.mockImplementation(args => !changed ? originalContext(args)
+        : change === 'closed' ? null : { ...originalContext(args), customerId: otherId });
+      deps.prepareTicketPublication.mockImplementationOnce(() => preparation.promise);
+      const click = fixture(id(action, cdkCode, action === 'pay' ? 'wallet' : ''));
+      const task = createSupplierAutobuyInteractionHandler(deps)(click);
+      await vi.waitFor(() => expect(deps.prepareTicketPublication).toHaveBeenCalledOnce());
+      changed = true; preparation.resolve(() => deps.getTicketContext({ guildId, channelId, customerId,
+        orderCode: cdkCode, messageId: noticeId, ephemeral: false })); await task;
+      expectNoCommerce(deps); expect(click.editReply).toHaveBeenCalledOnce();
+      expect(click.editReply.mock.calls[0][0]).not.toHaveProperty('files');
+    });
+  it.each(['closed', 'owner'])('rechecks ticket %s after the final delivery-reader preparation wait', async change => {
+    const preparation = pending(), deps = dependencies();
+    const originalContext = deps.getTicketContext.getMockImplementation(); let changed = false;
+    deps.getTicketContext.mockImplementation(args => !changed ? originalContext(args)
+      : change === 'closed' ? null : { ...originalContext(args), customerId: otherId });
+    deps.prepareDeliveryPublication.mockImplementationOnce(() => preparation.promise);
+    const click = fixture(id('delivery')), task = createSupplierAutobuyInteractionHandler(deps)(click);
+    await vi.waitFor(() => expect(deps.prepareDeliveryPublication).toHaveBeenCalledOnce());
+    changed = true; preparation.resolve(() => ({ items: ['private-stale-preparation-goods'] })); await task;
+    expectNoCommerce(deps); expect(click.editReply).toHaveBeenCalledOnce();
+    expect(click.editReply.mock.calls[0][0]).not.toHaveProperty('files');
+    expect(JSON.stringify(click.editReply.mock.calls)).not.toContain('private-stale-preparation-goods');
+  });
+  it.each(['pay', 'order', 'delivery'].flatMap(action => ['closed', 'owner', 'privacy', 'provider'].map(change => ({ action, change }))))
+    ('revalidates $change after ACK before ticket $action work', async ({ action, change }) => {
+      const acknowledgement = pending(), deps = dependencies();
+      let changed = false; const originalContext = deps.getTicketContext.getMockImplementation();
+      deps.getTicketContext.mockImplementation(args => {
+        const context = originalContext(args);
+        if (!changed) return context;
+        if (change === 'closed') return null;
+        return { ...context, ...(change === 'owner' ? { customerId: otherId } : change === 'provider' ? { provider: 'dopermind' } : {}) };
+      });
+      const click = fixture(id(action, cdkCode, action === 'pay' ? 'wallet' : ''), { deferReply: vi.fn(() => acknowledgement.promise) });
+      const task = createSupplierAutobuyInteractionHandler(deps)(click);
+      await vi.waitFor(() => expect(click.deferReply).toHaveBeenCalledOnce());
+      changed = true; if (change === 'privacy') click.channel.permissionOverwrites.cache.clear();
+      acknowledgement.resolve(); await task;
+      expectNoCommerce(deps); expect(click.editReply).toHaveBeenCalledOnce();
+      expect(click.editReply.mock.calls[0][0]).not.toHaveProperty('files');
+      expect(deps.acknowledgeDelivery).not.toHaveBeenCalled();
+      expect(state.render.notice.mock.calls.at(-1)[0].text).toContain('Ticket đã đóng');
+    });
+  it.each(['order', 'delivery'].flatMap(action => ['closed', 'owner', 'privacy', 'provider'].map(change => ({ action, change }))))
+    ('revalidates $change after a pending ticket $action read before publishing private data', async ({ action, change }) => {
+      const read = pending(), deps = dependencies();
+      let changed = false; const originalContext = deps.getTicketContext.getMockImplementation();
+      deps.getTicketContext.mockImplementation(args => {
+        const context = originalContext(args);
+        if (!changed) return context;
+        if (change === 'closed') return null;
+        return { ...context, ...(change === 'owner' ? { customerId: otherId } : change === 'provider' ? { provider: 'dopermind' } : {}) };
+      });
+      const operation = action === 'order' ? deps.getOrder : deps.getDelivery;
+      operation.mockImplementationOnce(() => read.promise);
+      const click = fixture(id(action)); const task = createSupplierAutobuyInteractionHandler(deps)(click);
+      await vi.waitFor(() => expect(operation).toHaveBeenCalledOnce());
+      changed = true; if (change === 'privacy') click.channel.permissionOverwrites.cache.clear();
+      read.resolve(action === 'order' ? { orderCode: cdkCode, provider: 'cdkvietnam', totalAmount: 55000 }
+        : { items: ['private-snapshot-before-revocation'] });
+      await task;
+      expect(click.editReply).toHaveBeenCalledOnce(); expect(click.editReply.mock.calls[0][0]).not.toHaveProperty('files');
+      expect(deps.acknowledgeDelivery).not.toHaveBeenCalled(); expect(deps.createPayment).not.toHaveBeenCalled();
+      expect(JSON.stringify(click.editReply.mock.calls)).not.toContain('private-snapshot-before-revocation');
+    });
+  it.each(['CUSTOMER_BLOCKED', 'ORDER_NOT_FOUND', 'DELIVERY_UNAVAILABLE'])
+    ('rechecks owned delivery eligibility before publishing when the second read rejects with %s', async code => {
+      const deps = dependencies();
+      deps.getDelivery.mockResolvedValueOnce({ items: ['private-snapshot-before-state-change'] });
+      deps.readDeliveryPublication.mockImplementationOnce(() => { throw Object.assign(new Error('private-revocation-reason'), { code }); });
+      const click = fixture(id('delivery')); await createSupplierAutobuyInteractionHandler(deps)(click);
+      expect(deps.getDelivery).toHaveBeenCalledOnce(); expect(deps.readDeliveryPublication).toHaveBeenCalledOnce(); expect(click.editReply).toHaveBeenCalledOnce();
+      expect(click.editReply.mock.calls[0][0]).not.toHaveProperty('files'); expect(deps.acknowledgeDelivery).not.toHaveBeenCalled();
+      expect(JSON.stringify(click.editReply.mock.calls)).not.toMatch(/private-snapshot|private-revocation/);
+    });
+  it('checks owned delivery with the final synchronous ticket read, so a concurrent refund cannot publish cached goods', async () => {
+    const deps = dependencies(), originalContext = deps.getTicketContext.getMockImplementation();
+    let contextReads = 0, refunded = false;
+    deps.getTicketContext.mockImplementation(args => {
+      if (++contextReads === 3) refunded = true;
+      return originalContext(args);
+    });
+    deps.readDeliveryPublication.mockImplementation(() => {
+      if (refunded) throw Object.assign(new Error('private-refund-detail'), { code: 'DELIVERY_UNAVAILABLE' });
+      return { items: ['private-goods-before-refund'] };
+    });
+    const click = fixture(id('delivery')); await createSupplierAutobuyInteractionHandler(deps)(click);
+    expect(contextReads).toBe(3); expect(deps.getDelivery).toHaveBeenCalledOnce(); expect(deps.readDeliveryPublication).toHaveBeenCalledOnce();
+    expect(click.editReply).toHaveBeenCalledOnce(); expect(click.editReply.mock.calls[0][0]).not.toHaveProperty('files');
+    expect(deps.acknowledgeDelivery).not.toHaveBeenCalled();
+    expect(JSON.stringify(click.editReply.mock.calls)).not.toMatch(/private-goods|private-refund/);
+  });
+  it.each([true, false])('preserves paid=%s truthfully after a completed payment and ticket revocation, without goods or a new QR', async paid => {
+    const payment = pending(), deps = dependencies(); let revoked = false;
+    const originalContext = deps.getTicketContext.getMockImplementation();
+    deps.getTicketContext.mockImplementation(args => revoked ? null : originalContext(args));
+    deps.createPayment.mockImplementationOnce(() => payment.promise);
+    deps.getOrder.mockRejectedValueOnce(new Error('private-owner-changed'));
+    state.render.payment.mockImplementation(async () => ({ components, files: [{ attachment: Buffer.from('private-old-qr'), name: 'invoice.png' }] }));
+    const click = fixture(id('pay', doperCode, paid ? 'wallet' : 'payos'));
+    const task = createSupplierAutobuyInteractionHandler(deps)(click);
+    await vi.waitFor(() => expect(deps.createPayment).toHaveBeenCalledOnce());
+    revoked = true; payment.resolve({ provider: 'dopermind', orderCode: doperCode, method: paid ? 'WALLET' : 'PAYOS',
+      paid, status: paid ? 'PROCESSING' : 'PENDING_PAYMENT', totalAmount: 55000 }); await task;
+    expect(deps.createPayment).toHaveBeenCalledOnce(); expect(deps.getOrder).toHaveBeenCalledExactlyOnceWith({
+      guildId, customerId, provider: 'dopermind', orderCode: doperCode });
+    expect(click.deferReply).toHaveBeenCalledExactlyOnceWith({ flags: MessageFlags.Ephemeral });
+    expect(click.editReply).toHaveBeenCalledOnce(); expect(click.editReply.mock.calls[0][0]).not.toHaveProperty('files');
+    const notice = state.render.notice.mock.calls.at(-1)[0];
+    expect(notice.ticketContext).toBe(true);
+    if (paid) {
+      expect(notice.title).toBe('Đã ghi nhận thanh toán'); expect(notice.text).toContain('55.000đ');
+      expect(notice.text).toContain('Dopermind'); expect(notice.text).toContain(doperCode); expect(notice.text).toContain('Không thanh toán lại');
+    } else expect(notice.title).toBe('Cần mở lại thẻ đơn');
+    expect(deps.getDelivery).not.toHaveBeenCalled(); expect(deps.acknowledgeDelivery).not.toHaveBeenCalled();
+    expect(JSON.stringify(click.editReply.mock.calls)).not.toMatch(/private-old-qr|private-owner/);
+  });
+  it('rechecks channel privacy after an asynchronous persisted-context lookup', async () => {
+    const read = pending(), deps = dependencies(), click = fixture();
+    deps.getTicketContext.mockImplementationOnce(() => read.promise);
+    const work = createSupplierAutobuyInteractionHandler(deps)(click);
+    await vi.waitFor(() => expect(deps.getTicketContext).toHaveBeenCalledOnce());
+    click.channel.permissionOverwrites.cache.clear(); read.resolve({ provider: 'cdkvietnam', orderCode: cdkCode,
+      customerId, channelId, ticketId: 1483, expectedTopic, categoryId }); await work;
+    expect(click.reply).toHaveBeenCalledOnce(); expect(click.deferReply).not.toHaveBeenCalled(); expectNoCommerce(deps);
+  });
   it.each([[cdkCode, 'cdkvietnam'], [doperCode, 'dopermind']])('reads %s from its persisted provider in the same shared customer ticket', async (orderCode, provider) => {
     const deps = dependencies(), click = fixture(id('order', orderCode));
     await createSupplierAutobuyInteractionHandler(deps)(click);
-    expect(deps.getTicketContext).toHaveBeenCalledExactlyOnceWith({ guildId, channelId, messageId: noticeId, customerId, orderCode, ephemeral: false });
+    expect(deps.getTicketContext).toHaveBeenCalledTimes(3);
+    expect(deps.getTicketContext).toHaveBeenLastCalledWith({ guildId, channelId, messageId: noticeId, customerId, orderCode, ephemeral: false });
     expect(deps.getOrder).toHaveBeenCalledExactlyOnceWith({ client: click.client, guildId, customerId, orderCode, provider });
     expect(state.render.payment).toHaveBeenCalledExactlyOnceWith({ order: expect.objectContaining({ orderCode, provider }), customerId, ticketContext: true });
     expect(click.deferReply).toHaveBeenCalledExactlyOnceWith({ flags: MessageFlags.Ephemeral });
@@ -135,7 +273,8 @@ describe('durable supplier ticket interaction origin', () => {
   it('accepts the customer’s subsequent ephemeral receipt only against the same persisted ticket order', async () => {
     const deps = dependencies(), click = fixtureEphemeral();
     await createSupplierAutobuyInteractionHandler(deps)(click);
-    expect(deps.getTicketContext).toHaveBeenCalledExactlyOnceWith({ guildId, channelId, messageId: ephemeralId, customerId, orderCode: cdkCode, ephemeral: true });
+    expect(deps.getTicketContext).toHaveBeenCalledTimes(3);
+    expect(deps.getTicketContext).toHaveBeenLastCalledWith({ guildId, channelId, messageId: ephemeralId, customerId, orderCode: cdkCode, ephemeral: true });
     expect(deps.getOrder).toHaveBeenCalledOnce();
     expect(click.reply).not.toHaveBeenCalled();
   });
@@ -172,7 +311,8 @@ describe('durable supplier ticket interaction origin', () => {
       expect(click.message.interactionMetadata.user.id).toBe(customerId);
       expect(click.message.webhookId).toBe(botId); expect(click.message.applicationId).toBe(botId);
       await createSupplierAutobuyInteractionHandler(deps)(click);
-      expect(deps.getTicketContext).toHaveBeenCalledExactlyOnceWith({ guildId, channelId, messageId: ephemeralId,
+      expect(deps.getTicketContext).toHaveBeenCalledTimes(3);
+      expect(deps.getTicketContext).toHaveBeenLastCalledWith({ guildId, channelId, messageId: ephemeralId,
         customerId, orderCode: cdkCode, ephemeral: true });
       expect(deps.getOrder).toHaveBeenCalledOnce(); expect(click.reply).not.toHaveBeenCalled();
       expect(click.deferUpdate).toHaveBeenCalledOnce();
@@ -199,7 +339,8 @@ describe('durable supplier ticket interaction origin', () => {
     state.ready.cdkvietnam = false;
     const deps = dependencies(), click = fixture(id('delivery'));
     await createSupplierAutobuyInteractionHandler(deps)(click);
-    expect(deps.getDelivery).toHaveBeenCalledExactlyOnceWith({ guildId, customerId, provider: 'cdkvietnam', orderCode: cdkCode });
+    expect(deps.getDelivery).toHaveBeenCalledOnce(); expect(deps.readDeliveryPublication).toHaveBeenCalledOnce();
+    expect(deps.getDelivery).toHaveBeenLastCalledWith({ guildId, customerId, provider: 'cdkvietnam', orderCode: cdkCode });
     const payload = click.editReply.mock.calls[0][0];
     expect(payload.files).toHaveLength(1);
     expect(payload.files[0].attachment.toString('utf8')).toBe('private-account|private-password');
@@ -213,7 +354,7 @@ describe('durable supplier ticket interaction origin', () => {
   it('does not acknowledge delivery after Discord fails to send the private attachment', async () => {
     const deps = dependencies(), click = fixture(id('delivery'), { editReply: vi.fn().mockRejectedValue(new Error('unknown Discord result')) });
     await createSupplierAutobuyInteractionHandler(deps)(click);
-    expect(deps.getDelivery).toHaveBeenCalledOnce(); expect(deps.acknowledgeDelivery).not.toHaveBeenCalled();
+    expect(deps.getDelivery).toHaveBeenCalledOnce(); expect(deps.readDeliveryPublication).toHaveBeenCalledOnce(); expect(deps.acknowledgeDelivery).not.toHaveBeenCalled();
   });
 
   it('keeps owned status readable while its provider is paused but refuses new payment', async () => {

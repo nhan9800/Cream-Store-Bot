@@ -57,29 +57,47 @@ function scopedOrigin(interaction) {
   return matches.length === 1 ? { ...matches[0], botId, kind: 'storefront' } : null;
 }
 
-async function scopedTicketOrigin(interaction, { action, owner, args, getTicketContext }) {
+function privateTicketChannel(interaction, owner, botId) {
+  const channel = interaction.channel;
+  if (channel?.id !== interaction.channelId || channel.guildId !== STORE_ONE_GUILD_ID || channel.type !== ChannelType.GuildText) return false;
+  const everyone = channel.permissionOverwrites?.cache?.get(STORE_ONE_GUILD_ID);
+  const customer = channel.permissionOverwrites?.cache?.get(owner);
+  return everyone?.deny?.has(PermissionFlagsBits.ViewChannel) && customer?.allow?.has(PermissionFlagsBits.ViewChannel)
+    && channel.permissionsFor?.(botId)?.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory]);
+}
+
+function ticketContextInput(interaction, owner, args) {
+  return { guildId: interaction.guildId, channelId: interaction.channelId,
+    messageId: interaction.message?.id, customerId: owner, orderCode: args[0], ephemeral: isEphemeral(interaction.message) };
+}
+
+function validTicketEnvelope(interaction, { action, owner, args }) {
   if (!TICKET_ACTIONS.has(action) || !validArguments(action, args) || interaction.isButton?.() !== true
     || interaction.guildId !== STORE_ONE_GUILD_ID || config.guildId !== STORE_ONE_GUILD_ID || process.env.ENV_FILE !== '.env'
-    || !CUSTOMER_ID.test(owner || '') || interaction.user?.id !== owner) return null;
+    || !CUSTOMER_ID.test(owner || '') || interaction.user?.id !== owner) return false;
   const botId = interaction.client?.user?.id;
   const message = interaction.message, channel = interaction.channel;
   if (!CUSTOMER_ID.test(botId || '') || !CUSTOMER_ID.test(message?.id || '')
-    || !botAuthoredMessage(interaction, owner, { ephemeralWebhook: true })
-    || channel?.id !== interaction.channelId || channel.guildId !== STORE_ONE_GUILD_ID || channel.type !== ChannelType.GuildText) return null;
+    || !botAuthoredMessage(interaction, owner, { ephemeralWebhook: true }) || !privateTicketChannel(interaction, owner, botId)) return false;
   const ephemeral = isEphemeral(message);
   const sourceUser = sourceUserOf(message);
-  if (ephemeral && sourceUser !== owner) return null;
-  const everyone = channel.permissionOverwrites?.cache?.get(STORE_ONE_GUILD_ID);
-  const customer = channel.permissionOverwrites?.cache?.get(owner);
-  if (!everyone?.deny?.has(PermissionFlagsBits.ViewChannel) || !customer?.allow?.has(PermissionFlagsBits.ViewChannel)
-    || !channel.permissionsFor?.(botId)?.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages, PermissionFlagsBits.ReadMessageHistory])) return null;
-  const context = await getTicketContext({ guildId: interaction.guildId, channelId: interaction.channelId,
-    messageId: message.id, customerId: owner, orderCode: args[0], ephemeral });
+  return !ephemeral || sourceUser === owner;
+}
+
+function validatedTicketOrigin(interaction, options, context) {
+  if (!validTicketEnvelope(interaction, options)) return null;
+  const { owner, args } = options, channel = interaction.channel, botId = interaction.client.user.id;
   if (!context || !['cdkvietnam', 'dopermind'].includes(context.provider) || context.orderCode !== args[0]
     || context.customerId !== owner || context.channelId !== interaction.channelId
     || (context.expectedTopic && context.expectedTopic !== channel.topic)
-    || (context.categoryId && context.categoryId !== channel.parentId)) return null;
+    || (context.categoryId && context.categoryId !== channel.parentId) || !privateTicketChannel(interaction, owner, botId)) return null;
   return { ...context, botId, kind: 'ticket' };
+}
+
+async function scopedTicketOrigin(interaction, options) {
+  // Validate the local envelope before allowing a persisted-context lookup.
+  if (!validTicketEnvelope(interaction, options)) return null;
+  return validatedTicketOrigin(interaction, options, await options.getTicketContext(ticketContextInput(interaction, options.owner, options.args)));
 }
 
 function validPrivateOrigin(interaction, scope, owner, modal) {
@@ -108,6 +126,7 @@ function errorText(error) {
   let code = '';
   try { code = safeText(error?.code); } catch { /* Never expose arbitrary exception accessors. */ }
   if (code === 'INVALID_QUANTITY') return 'Số lượng hợp lệ từ 1 đến 10 sản phẩm. Vui lòng chọn lại số lượng trước khi xem báo giá.';
+  if (code === 'TICKET_SCOPE_CHANGED') return 'Ticket đã đóng hoặc quyền truy cập thẻ đơn đã thay đổi. Vui lòng mở Đơn của tôi trong kênh AutoBuy để kiểm tra lại.';
   if (/QUOTE.*(?:EXPIRED|CHANGED)|PRICE_CHANGED|QUOTE_EXPIRED|QUOTE_CHANGED/.test(code)) return 'Báo giá đã hết hạn hoặc thay đổi. Vui lòng chọn lại sản phẩm và xác nhận giá mới; đơn đã thanh toán giữ nguyên số tiền được ghi nhận.';
   if (/STOCK|PRODUCT_UNAVAILABLE|PRODUCT_NOT_FOUND|NOT_AVAILABLE/.test(code)) return 'Gói vừa hết hàng hoặc tạm dừng bán. Vui lòng quay lại Danh mục để chọn gói khác.';
   if (code === 'SUPPLIER_UNFUNDED') return 'Đơn có thể đang chờ shop bổ sung nguồn. Nếu đã thanh toán, hệ thống ghi nhận khoản thanh toán và tự tiếp tục khi nguồn sẵn sàng. Bấm Kiểm tra đơn để theo dõi; không thanh toán lại.';
@@ -150,6 +169,13 @@ function providerSnapshot(provider) {
     : { status: 'NOT_STARTED', provider, purchasesEnabled: false };
 }
 
+function deliveryAttachment(delivery, orderCode) {
+  if (!Array.isArray(delivery?.items) || !delivery.items.length || !delivery.items.every(item => typeof item === 'string' && item.length > 0)) throw new Error('DELIVERY_PENDING');
+  const content = delivery.items.join('\n\n');
+  if (Buffer.byteLength(content, 'utf8') > 1024 * 1024) throw new Error('DELIVERY_TOO_LARGE');
+  return new AttachmentBuilder(Buffer.from(content, 'utf8'), { name: orderCode + '-hang-da-mua.txt' });
+}
+
 const defaults = {
   getCatalog: async options => (await import('../services/supplierAutobuyCatalogService.js')).getSupplierOffers(options),
   prepareCheckout: async options => (await import('../services/supplierAutobuyOrderService.js')).prepareSupplierCheckout(options),
@@ -158,10 +184,16 @@ const defaults = {
   getOrder: async options => (await import('../services/supplierAutobuyCheckoutService.js')).getSupplierCheckoutStatus(options),
   listOrders: async options => (await import('../services/supplierAutobuyOrderService.js')).listSupplierOrdersForCustomer(options),
   getDelivery: async options => (await import('../services/supplierAutobuyOrderService.js')).getSupplierDeliveryForCustomer(options),
+  prepareDeliveryPublication: async options => (await import('../services/supplierAutobuyOrderService.js')).prepareSupplierDeliveryPublication(options),
   acknowledgeDelivery: async options => (await import('../services/supplierAutobuyOrderService.js')).acknowledgeSupplierDeliveryRetrieval(options),
   setPrice: async options => (await import('../services/supplierAutobuyCatalogService.js')).setSupplierPriceOverride(options),
   canManage: freshManager,
   getTicketContext: async options => (await import('../services/supplierAutobuyTicketNoticeService.js')).getSupplierTicketOrderNoticeContext(options),
+  prepareTicketPublication: async options => {
+    const notices = await import('../services/supplierAutobuyTicketNoticeService.js');
+    const bound = { ...options };
+    return () => notices.getSupplierTicketOrderNoticeContext(bound);
+  },
 };
 
 /** Every commerce action resolves its durable quote/order by the current user. */
@@ -253,7 +285,35 @@ export function createSupplierAutobuyInteractionHandler(dependencies = {}) {
     if (navigation && !navigation.current()) { navigation.finish(); return true; }
     let payload;
     let files;
+    let knownPayment = null, paymentRenderInputs = null, ticketRevoked = false, deliveryPublished = false;
+    let readTicketPublication, readDeliveryPublication;
+    const ticketCurrent = () => {
+      if (scope.kind !== 'ticket') return true;
+      if (ticketRevoked) return false;
+      try {
+        const current = typeof readTicketPublication === 'function'
+          ? validatedTicketOrigin(interaction, { action, owner, args }, readTicketPublication()) : null;
+        ticketRevoked = !current || ['provider', 'orderCode', 'customerId', 'channelId', 'ticketId'].some(key => current[key] !== scope[key]);
+      } catch { ticketRevoked = true; }
+      return !ticketRevoked;
+    };
+    const renderPayment = options => { paymentRenderInputs = options; return presentation.buildSupplierPaymentView(options); };
+    const changedTicketNotice = () => presentation.buildSupplierNoticeView({ title: 'Cần mở lại thẻ đơn',
+      text: errorText(inputError('TICKET_SCOPE_CHANGED')), customerId: owner, warning: true, ticketContext: true });
+    const paidTicketReceipt = () => {
+      const amount = Number.isSafeInteger(knownPayment?.totalAmount) && knownPayment.totalAmount > 0
+        ? `${new Intl.NumberFormat('vi-VN').format(knownPayment.totalAmount)}đ` : 'Đã ghi nhận';
+      return presentation.buildSupplierNoticeView({ title: 'Đã ghi nhận thanh toán', customerId: owner, ticketContext: true,
+        order: { provider: scope.provider }, text: `Mã đơn: ${args[0]}. Nguồn: ${scope.provider === 'dopermind' ? 'Dopermind' : 'CDK Việt Nam'}. Số tiền: ${amount}.\n`
+          + 'Khoản thanh toán đã được ghi nhận. Ticket đã đóng hoặc đổi quyền; mở Đơn của tôi trong kênh AutoBuy để kiểm tra. Không thanh toán lại.' });
+    };
     try {
+      if (scope.kind === 'ticket') readTicketPublication = await deps.prepareTicketPublication(ticketContextInput(interaction, owner, args));
+      if (action === 'delivery') {
+        readDeliveryPublication = await deps.prepareDeliveryPublication({ ...dataContext(interaction, scope.provider), orderCode: args[0] });
+        if (typeof readDeliveryPublication !== 'function') throw inputError('DELIVERY_UNAVAILABLE');
+      }
+      if (!ticketCurrent()) throw inputError('TICKET_SCOPE_CHANGED');
       if (publicAction && (snapshot?.purchasesEnabled !== true || action === 'status')) {
         payload = presentation.buildSupplierAutobuyReply({ client: interaction.client, snapshot, action,
           provider: scope.provider,
@@ -285,9 +345,10 @@ export function createSupplierAutobuyInteractionHandler(dependencies = {}) {
             // Buttons from before the policy change refresh the owned invoice
             // and disclose prepayment first; only a subsequent click can pay.
             const order = await deps.getOrder({ client: interaction.client, ...context, orderCode });
-            payload = await presentation.buildSupplierPaymentView({ order, customerId: context.customerId, ticketContext: scope.kind === 'ticket' });
+            payload = await renderPayment({ order, customerId: context.customerId, ticketContext: scope.kind === 'ticket' });
           } else {
             const payment = await deps.createPayment({ client: interaction.client, ...context, orderCode, method: args[1] });
+            knownPayment = payment;
             // A successful invoice must remain visible even if its subsequent
             // status lookup fails. The server payment result contains no client price.
             // Read the owned persisted snapshot without polling the just-created
@@ -296,7 +357,7 @@ export function createSupplierAutobuyInteractionHandler(dependencies = {}) {
               provider: scope.provider, orderCode, totalAmount: payment.totalAmount, status: payment.status,
               paymentStatus: payment.paid ? 'PAID' : 'UNPAID',
             }));
-            payload = await presentation.buildSupplierPaymentView({ order, customerId: context.customerId, payment, ticketContext: scope.kind === 'ticket' });
+            payload = await renderPayment({ order, customerId: context.customerId, payment, ticketContext: scope.kind === 'ticket' });
           }
         } else if (action === 'orders') {
           payload = presentation.buildSupplierOrderListView({ orders: await deps.listOrders({ ...context, limit: 10 }),
@@ -304,13 +365,10 @@ export function createSupplierAutobuyInteractionHandler(dependencies = {}) {
         } else if (action === 'order' || action === 'orderselect') {
           const orderCode = action === 'orderselect' ? interaction.values?.[0] : args[0];
           if ((action === 'orderselect' && interaction.values?.length !== 1) || !ORDER_CODE.test(orderCode || '')) throw new Error('INVALID_ORDER');
-          payload = await presentation.buildSupplierPaymentView({ order: await deps.getOrder({ client: interaction.client, ...context, orderCode }), customerId: context.customerId, ticketContext: scope.kind === 'ticket' });
+          payload = await renderPayment({ order: await deps.getOrder({ client: interaction.client, ...context, orderCode }), customerId: context.customerId, ticketContext: scope.kind === 'ticket' });
         } else if (action === 'delivery') {
           const delivery = await deps.getDelivery({ ...context, orderCode: args[0] });
-          if (!Array.isArray(delivery?.items) || !delivery.items.length || !delivery.items.every(item => typeof item === 'string' && item.length > 0)) throw new Error('DELIVERY_PENDING');
-          const content = delivery.items.join('\n\n');
-          if (Buffer.byteLength(content, 'utf8') > 1024 * 1024) throw new Error('DELIVERY_TOO_LARGE');
-          files = [new AttachmentBuilder(Buffer.from(content, 'utf8'), { name: args[0] + '-hang-da-mua.txt' })];
+          files = [deliveryAttachment(delivery, args[0])];
           payload = presentation.buildSupplierNoticeView({ title: 'Hàng đã mua của bạn',
             text: 'Mã đơn ' + args[0] + '. Nội dung giao hàng nằm trong file đính kèm riêng tư. Bạn có thể nhận lại bằng nút Nhận hàng trên thẻ đơn.',
             customerId: context.customerId, ticketContext: scope.kind === 'ticket' });
@@ -340,8 +398,22 @@ export function createSupplierAutobuyInteractionHandler(dependencies = {}) {
     try {
       // A slower prior navigation must not overwrite the latest selected view.
       if (navigation && !navigation.current()) return true;
-      const send = () => {
+      const send = async () => {
         let currentPayload = payload;
+        let currentFiles = files;
+        if (!ticketCurrent()) { currentPayload = knownPayment?.paid === true ? paidTicketReceipt() : changedTicketNotice(); currentFiles = undefined; }
+        if (navigation && !navigation.current()) return null;
+        if (action === 'delivery' && currentFiles?.length) {
+          try {
+            // Both readers use current local persisted state. Loading finishes
+            // before effects; no await may split the final publication fence.
+            currentFiles = [deliveryAttachment(readDeliveryPublication(), args[0])];
+          } catch (error) {
+            currentPayload = presentation.buildSupplierNoticeView({ title: 'Không thể hiển thị hàng', text: errorText(error),
+              customerId: owner, warning: true, ticketContext: scope.kind === 'ticket' });
+            currentFiles = undefined;
+          }
+        }
         if (BROWSE_ACTIONS.has(action) && snapshot?.purchasesEnabled === true) {
           const latest = providerSnapshot(scope.provider);
           if (latest?.purchasesEnabled !== true) currentPayload = presentation.buildSupplierAutobuyReply({
@@ -349,12 +421,21 @@ export function createSupplierAutobuyInteractionHandler(dependencies = {}) {
             ...(CUSTOMER_ID.test(interaction.user?.id || '') ? { customerId: interaction.user.id } : {}),
           });
         }
-        const attachments = [...(currentPayload.files || []), ...(files || [])];
-        return interaction.editReply({ components: currentPayload.components, flags: MessageFlags.IsComponentsV2, allowedMentions: NO_MENTIONS,
+        if (!ticketRevoked && paymentRenderInputs && presentation.isSupplierPaymentViewExpired(paymentRenderInputs)) {
+          // The expired card needs no PNG generation. Rebuild synchronously
+          // from owned inputs after every queued edit/access check, right before
+          // sending, with no invoice creation or status/provider polling.
+          currentPayload = presentation.buildSupplierOrderView(paymentRenderInputs);
+          currentFiles = undefined;
+        }
+        const attachments = [...(currentPayload.files || []), ...(currentFiles || [])];
+        const result = await interaction.editReply({ components: currentPayload.components, flags: MessageFlags.IsComponentsV2, allowedMentions: NO_MENTIONS,
           ...(inPlace ? { attachments: [] } : {}), ...(attachments.length ? { files: attachments } : {}) });
+        deliveryPublished = action === 'delivery' && Boolean(currentFiles?.length);
+        return result;
       };
       const receipt = navigation ? await navigation.publish(send) : await send();
-      if (action === 'delivery' && files?.length) {
+      if (deliveryPublished) {
         await deps.acknowledgeDelivery({ ...dataContext(interaction, scope.provider), orderCode: args[0], messageId: receipt?.id, channelId: interaction.channelId });
       }
     } catch { /* Notification retries must never repeat payment or purchase. */ }
