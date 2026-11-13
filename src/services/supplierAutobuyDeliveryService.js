@@ -5,6 +5,7 @@ const noMentions = Object.freeze({ parse: [], users: [], roles: [], repliedUser:
 const hash = value => createHash('sha256').update(value).digest('hex');
 const rejected = error => [400, 401, 403, 404, 413, 429].includes(Number(error?.status))
   || [50001, 50007, 50013].includes(Number(error?.code));
+const transientSqlite = error => typeof error?.code === 'string' && /^SQLITE_(?:BUSY|LOCKED)(?:_[A-Z0-9_]+)?$/.test(error.code);
 const failure = code => Object.assign(new Error('Chưa thể giao AutoBuy riêng tư. Vui lòng xem trạng thái đơn.'), { code });
 const emptyHealth = () => ({ status: 'UNINITIALIZED', checkedAt: null, journalAttempts: 0, preparing: 0, sending: 0,
   unknown: 0, sent: 0, retry: 0, vetoed: 0, review: 0, legacyUnknown: 0, legacyRecovered: 0, completionRetry: 0 });
@@ -128,7 +129,7 @@ export function createSupplierDeliveryService({ db, now = Date.now, id } = {}) {
       if (!valid) return { outcome: 'REVIEW' };
       try { return { outcome: 'SENT', result: complete(receipt) }; }
       catch (error) {
-        if (typeof error?.code === 'string' && /^SQLITE_(?:BUSY|LOCKED)(?:_[A-Z0-9_]+)?$/.test(error.code)) {
+        if (transientSqlite(error)) {
           db.prepare("UPDATE supplier_autobuy_delivery_attempts SET last_error='DELIVERY_COMPLETION_RETRY' WHERE attempt_id=?").run(row.attempt_id);
           publishHealth();
           return { outcome: 'RETRY', errorCode: 'DELIVERY_COMPLETION_RETRY' };
@@ -153,11 +154,15 @@ export function createSupplierDeliveryService({ db, now = Date.now, id } = {}) {
         const receipt = await discover(client, existing);
         return receipt ? recordReceipt(existing, receipt, true) : { outcome: 'UNKNOWN' };
       }
-      attempt = db.transaction(() => {
+      const attemptId = id();
+      const createAttempt = retry => db.transaction(() => {
         const current = latest(order.order_code);
         if (current?.attempt_id !== existing?.attempt_id) return null;
+        // Only this live, fresh-purchase call proves it has not invoked any DM
+        // transport. Never infer that from a persisted legacy/UNKNOWN intent.
+        if (retry && (current || !freshPurchase || closed || now() >= deadlineAt || beforeSend() !== true
+          || closed || now() >= deadlineAt)) return null;
         if (current?.status === 'PREPARING') update(current.attempt_id, 'VETOED', 'DELIVERY_PREPARATION_REPLACED');
-        const attemptId = id();
         const status = !current && !freshPurchase ? 'UNKNOWN' : 'PREPARING';
         const legacy = status === 'UNKNOWN';
         db.prepare(`INSERT INTO supplier_autobuy_delivery_attempts(attempt_id,order_code,request_id,provider,guild_id,customer_id,product_key,
@@ -167,11 +172,22 @@ export function createSupplierDeliveryService({ db, now = Date.now, id } = {}) {
             legacy ? 'LEGACY' : 'CURRENT', legacy ? legacyAfter : null);
         return byId(attemptId);
       }).immediate();
+      try { attempt = createAttempt(false); }
+      catch (error) {
+        if (existing || !freshPurchase || !transientSqlite(error) || closed || now() >= deadlineAt) throw error;
+        // One metadata-only retry, same identity, before any Discord/source
+        // call. The already-encrypted supplier receipt remains durable.
+        attempt = createAttempt(true);
+      }
       publishHealth();
       if (!attempt) return { outcome: 'UNKNOWN' };
       if (attempt.status === 'UNKNOWN') {
         const receipt = await discover(client, attempt);
         return receipt ? recordReceipt(attempt, receipt, true) : { outcome: 'UNKNOWN' };
+      }
+      if (closed || now() >= deadlineAt) {
+        update(attempt.attempt_id, 'VETOED', 'DELIVERY_TIMEOUT_BEFORE_SEND');
+        return { outcome: 'RETRY' };
       }
       let admitted = false;
       const controls = { payload: { content, files: [{ attachment: bytes, name: fileName }], allowedMentions: noMentions, nonce, enforceNonce: true },
@@ -208,7 +224,7 @@ export function createSupplierDeliveryService({ db, now = Date.now, id } = {}) {
             if (row?.status === 'SENDING') update(row.attempt_id, 'UNKNOWN', 'DELIVERY_TIMEOUT');
             resolve({ outcome: row?.status === 'PREPARING' ? 'RETRY' : 'UNKNOWN' });
           } catch { resolve({ outcome: 'UNKNOWN' }); }
-        }, 15000);
+        }, Math.max(0, deadlineAt - now()));
       })]);
     } finally { clearTimeout(timer); }
   }

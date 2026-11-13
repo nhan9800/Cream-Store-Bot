@@ -1,5 +1,8 @@
 import Database from 'better-sqlite3';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import assert from 'node:assert/strict';
 import { afterEach, it as test, vi, expect } from 'vitest';
 const mock = { fn: vi.fn, timers: { enable: () => vi.useFakeTimers(), tick: ms => vi.advanceTimersByTime(ms), reset: () => vi.useRealTimers() } };
@@ -10,8 +13,8 @@ import { createSupplierDeliveryService, getSupplierAutobuyDeliveryHealth } from 
 const GUILD = '1282637033340403754', CUSTOMER = '111111111111111111', CHANNEL = '333333333333333333';
 const MESSAGE = '555555555555555555', LOG = '444444444444444444', KEY = 'desc_synthetic-delivery';
 function deferred() { let resolve; const promise = new Promise(yes => { resolve = yes; }); return { promise, resolve }; }
-function fixture() {
-  const database = new Database(':memory:');
+function fixture(databasePath = ':memory:') {
+  const database = new Database(databasePath);
   database.exec(`CREATE TABLE tickets(id INTEGER PRIMARY KEY,guild_id TEXT,customer_id TEXT,channel_id TEXT,status TEXT);
     CREATE TABLE orders(order_code TEXT PRIMARY KEY,guild_id TEXT,customer_id TEXT,product_name TEXT,product_id INTEGER,
       ticket_id INTEGER,ticket_channel_id TEXT,order_log_channel_id TEXT,quantity INTEGER,total_amount INTEGER,amount_paid INTEGER,
@@ -414,6 +417,154 @@ test('retains legacy evidence for review if a refund commits during history disc
     expect(await t.restart().fulfillSupplierOrder(t.client, t.order.order_code)).toMatchObject({ status: 'REVIEW' });
     expect(t.journal()).toMatchObject({ status: 'REVIEW', message_format: 'LEGACY', message_id: MESSAGE, channel_id: CHANNEL });
     expect(t.database.prepare('SELECT status FROM orders').get().status).toBe('REFUNDED'); expect(t.send).toHaveBeenCalledOnce();
+  } finally { t.database.close(); }
+});
+
+function journalContention(t, codes, change = () => {}) {
+  const prepare = t.database.prepare.bind(t.database), attempts = [];
+  const transaction = t.database.transaction.bind(t.database);
+  let injected;
+  t.database.transaction = callback => {
+    const wrapped = transaction(callback);
+    return Object.assign((...args) => wrapped(...args), { immediate: (...args) => {
+      try { return wrapped.immediate(...args); }
+      catch (error) {
+        // Runs after SQLite rolled back the failed metadata transaction,
+        // matching a committed external change before the bounded retry.
+        if (error === injected) { injected = null; change(); }
+        throw error;
+      }
+    } });
+  };
+  t.database.prepare = sql => {
+    const statement = prepare(sql);
+    if (!/^INSERT INTO supplier_autobuy_delivery_attempts/.test(sql)) return statement;
+    return { run: (...args) => {
+      attempts.push(args[0]);
+      if (codes.length) { const code = codes.shift(); injected = Object.assign(new Error('Synthetic journal preparation error'), { code }); throw injected; }
+      return statement.run(...args);
+    } };
+  };
+  return attempts;
+}
+
+test.each(['SQLITE_BUSY', 'SQLITE_BUSY_SNAPSHOT', 'SQLITE_LOCKED', 'SQLITE_LOCKED_SHAREDCACHE'])('retries fresh pre-transport journal %s once with the same attempt identity and survives restart', async code => {
+  const t = fixture(), attempts = journalContention(t, [code]);
+  try {
+    const order = await t.paid(); t.fetchWait.resolve();
+    expect(await t.service.fulfillSupplierOrder(t.client, order.order_code)).toMatchObject({ delivered: true });
+    expect(attempts).toHaveLength(2); expect(attempts[0]).toBe(attempts[1]);
+    expect(t.journal()).toMatchObject({ status: 'SENT', message_format: 'CURRENT', message_id: MESSAGE });
+    expect(t.database.prepare('SELECT COUNT(*) AS n FROM supplier_autobuy_delivery_attempts').get().n).toBe(1);
+    expect(await t.restart().fulfillSupplierOrder(t.client, order.order_code)).toMatchObject({ delivered: true, reused: true });
+    expect(t.send).toHaveBeenCalledOnce(); expect(t.provider.createOrder).toHaveBeenCalledOnce();
+  } finally { t.database.close(); }
+});
+
+test('keeps a durable source receipt held without sends or repurchase after both fresh metadata attempts are busy', async () => {
+  const t = fixture(), attempts = journalContention(t, ['SQLITE_BUSY', 'SQLITE_BUSY']);
+  t.client.users.fetch = vi.fn(async () => ({ id: CUSTOMER, createDM: async () => ({ id: CHANNEL, type: 1, recipientId: CUSTOMER,
+    send: t.send, messages: { fetch: vi.fn(async () => new Map()) } }) }));
+  try {
+    const order = await t.paid();
+    expect(await t.service.fulfillSupplierOrder(t.client, order.order_code)).toMatchObject({ status: 'DELIVERY_PENDING' });
+    expect(attempts).toHaveLength(2); expect(attempts[0]).toBe(attempts[1]);
+    expect(t.database.prepare('SELECT COUNT(*) AS n FROM supplier_autobuy_delivery_attempts').get().n).toBe(0);
+    expect(t.intent().encrypted_payload).toMatch(/^enc:v1:/); expect(t.send).not.toHaveBeenCalled();
+    t.advance(120001); await t.restart().fulfillSupplierOrder(t.client, order.order_code);
+    expect(t.journal()).toMatchObject({ status: 'UNKNOWN', message_format: 'LEGACY' });
+    expect(t.send).not.toHaveBeenCalled(); expect(t.provider.createOrder).toHaveBeenCalledOnce();
+    expect(t.service.getSupplierDeliveryForCustomer({ guildId: GUILD, customerId: CUSTOMER, orderCode: order.order_code }).items).toHaveLength(1);
+  } finally { t.database.close(); }
+});
+
+test.each(['ORDER_NOT_DELIVERABLE', 'SQLITE_CONSTRAINT', 'SQLITE_IOERR', 'UNRELATED_BUSY'])('does not broaden metadata retries to %s', async code => {
+  const t = fixture(), attempts = journalContention(t, [code]);
+  try {
+    const order = await t.paid();
+    expect(await t.service.fulfillSupplierOrder(t.client, order.order_code)).toMatchObject({ status: 'DELIVERY_PENDING' });
+    expect(attempts).toHaveLength(1); expect(t.send).not.toHaveBeenCalled(); expect(t.provider.createOrder).toHaveBeenCalledOnce();
+    expect(t.intent().encrypted_payload).toMatch(/^enc:v1:/);
+  } finally { t.database.close(); }
+});
+
+test.each(['cancel', 'owner', 'provider', 'lease'])('rechecks current immutable ownership and lease after journal contention during %s', async change => {
+  const t = fixture(), attempts = journalContention(t, ['SQLITE_BUSY'], () => {
+    if (change === 'cancel') t.database.prepare("UPDATE orders SET status='CANCELLED'").run();
+    if (change === 'owner') t.database.prepare("UPDATE orders SET customer_id='222222222222222222'").run();
+    if (change === 'provider') t.database.prepare("UPDATE supplier_autobuy_intents SET provider='cdkvietnam',product_key='cdkvietnam:1'").run();
+    if (change === 'lease') t.database.prepare("UPDATE supplier_autobuy_intents SET lease_token='new-worker'").run();
+  });
+  try {
+    const order = await t.paid(); await t.service.fulfillSupplierOrder(t.client, order.order_code);
+    expect(attempts).toHaveLength(1); expect(t.send).not.toHaveBeenCalled();
+    expect(t.provider.createOrder).toHaveBeenCalledOnce(); expect(t.intent().encrypted_payload).toMatch(/^enc:v1:/);
+    if (change === 'lease') expect(t.intent().lease_token).toBe('new-worker');
+  } finally { t.database.close(); }
+});
+
+test('recovers one real two-connection SQLite writer lock before the first journal metadata transaction', async () => {
+  const databasePath = path.join(os.tmpdir(), `cenar-delivery-journal-lock-${randomUUID()}.sqlite`);
+  const t = fixture(databasePath), writer = new Database(databasePath), errors = [];
+  t.database.pragma('busy_timeout=0'); writer.pragma('busy_timeout=0');
+  const transaction = t.database.transaction.bind(t.database);
+  let injectLock = true;
+  t.database.transaction = callback => {
+    const wrapped = transaction(callback);
+    return Object.assign((...args) => wrapped(...args), { immediate: (...args) => {
+      if (!injectLock || !String(callback).includes('INSERT INTO supplier_autobuy_delivery_attempts')) return wrapped.immediate(...args);
+      injectLock = false;
+      writer.exec('BEGIN IMMEDIATE');
+      expect(writer.prepare('SELECT encrypted_payload FROM supplier_autobuy_intents').get().encrypted_payload).toMatch(/^enc:v1:/);
+      try { return wrapped.immediate(...args); }
+      catch (error) { errors.push(error.code); throw error; }
+      finally { writer.exec('ROLLBACK'); }
+    } });
+  };
+  try {
+    const order = await t.paid(); t.fetchWait.resolve();
+    expect(await t.service.fulfillSupplierOrder(t.client, order.order_code)).toMatchObject({ delivered: true });
+    expect(errors).toEqual(['SQLITE_BUSY']); expect(t.journal()).toMatchObject({ status: 'SENT', message_format: 'CURRENT' });
+    expect(t.send).toHaveBeenCalledOnce(); expect(t.provider.createOrder).toHaveBeenCalledOnce();
+    expect(await t.restart().fulfillSupplierOrder(t.client, order.order_code)).toMatchObject({ delivered: true, reused: true });
+  } finally {
+    writer.close(); t.database.close();
+    for (const suffix of ['', '-wal', '-shm']) fs.rmSync(databasePath + suffix, { force: true });
+  }
+});
+
+test('checks the elapsed deadline after a blocking journal retry before any DM preparation', async () => {
+  const t = fixture(), prepare = t.database.prepare.bind(t.database), attempts = [];
+  t.database.prepare = sql => {
+    const statement = prepare(sql);
+    if (!/^INSERT INTO supplier_autobuy_delivery_attempts/.test(sql)) return statement;
+    return { run: (...args) => {
+      attempts.push(args[0]); t.advance(8000);
+      if (attempts.length === 1) throw Object.assign(new Error('Synthetic busy wait'), { code: 'SQLITE_BUSY' });
+      return statement.run(...args);
+    } };
+  };
+  try {
+    const order = await t.paid(); await t.service.fulfillSupplierOrder(t.client, order.order_code);
+    expect(attempts).toHaveLength(2); expect(t.journal().status).toBe('VETOED');
+    expect(t.send).not.toHaveBeenCalled(); expect(t.client.users.fetch).not.toHaveBeenCalled(); expect(t.provider.createOrder).toHaveBeenCalledOnce();
+  } finally { t.database.close(); }
+});
+
+test.each(['existing-unknown', 'legacy-without-journal'])('does not promote or retry metadata creation for %s', async mode => {
+  const t = fixture();
+  t.send.mockRejectedValueOnce(mode === 'existing-unknown' ? new Error('Synthetic uncertain network response')
+    : Object.assign(new Error('Synthetic old DM rejection'), { status: 403, code: 50007 }));
+  try {
+    const order = await t.paid(); t.fetchWait.resolve(); await t.service.fulfillSupplierOrder(t.client, order.order_code);
+    if (mode === 'legacy-without-journal') t.database.prepare('DELETE FROM supplier_autobuy_delivery_attempts').run();
+    const attempts = journalContention(t, ['SQLITE_BUSY']); t.advance(120001);
+    await t.restart().fulfillSupplierOrder(t.client, order.order_code);
+    expect(attempts).toHaveLength(mode === 'existing-unknown' ? 0 : 1);
+    if (mode === 'existing-unknown') expect(t.journal()).toMatchObject({ status: 'UNKNOWN', message_format: 'CURRENT' });
+    else expect(t.database.prepare('SELECT COUNT(*) AS n FROM supplier_autobuy_delivery_attempts').get().n).toBe(0);
+    expect(t.send).toHaveBeenCalledOnce(); expect(t.provider.createOrder).toHaveBeenCalledOnce();
+    expect(t.service.getSupplierDeliveryForCustomer({ guildId: GUILD, customerId: CUSTOMER, orderCode: order.order_code }).items).toHaveLength(1);
   } finally { t.database.close(); }
 });
 

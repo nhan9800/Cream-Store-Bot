@@ -220,7 +220,20 @@ including unknown sends, reviewed receipts and completion retries. Reading
 health creates no journal or Discord/provider work. These are attempt counts,
 not a complete count of paid orders. Legacy positive receipts are adopted only
 from the verified customer's DM with the exact old request nonce and unique
-message/attachment markers; missing nonce or uncertain discovery stays held.
+message/attachment markers. This can use a still-cached `MESSAGE_CREATE` event;
+it is not general recovery through REST history after a restart. Discord does
+not include nonce in subsequent message fetches ([SDK contract](https://discord.js.org/docs/packages/discord.js/14.27.0/APIBaseMessageNoChannel:Interface#nonce)).
+Missing nonce or uncertain discovery stays `UNKNOWN`; the paid owner can use
+**Nhận hàng riêng**. The current request/payload-hash filename remains usable
+for exact REST-history discovery without nonce. No attachment download is used.
+
+A fresh purchase may retry its journal preparation once for SQLite BUSY/LOCKED
+while the same live invocation proves no DM transport has been called. The
+attempt ID stays fixed and paid ownership, lease and deadline are rechecked.
+This is metadata recovery, not a source/Discord retry. If both writes fail,
+the encrypted source receipt remains available through owned retrieval. A
+process crash before a durable journal remains ambiguous and is held; no
+persisted legacy/unknown row is assumed unsent.
 
 Quote, intent, completion-notice, payment-method, ticket-create and override/audit tables are recovery data, not disposable caches. Preserve SQLite, encryption keys, environment files, backups and history. Do not clear requests/leases/payment rows to make a stuck order look new.
 
