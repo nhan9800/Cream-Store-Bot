@@ -5,6 +5,7 @@ import { isManager } from '../utils/permissions.js';
 import { supplierAutobuyRuntime } from '../services/supplierAutobuyRuntime.js';
 import * as presentation from '../services/supplierAutobuyPanelService.js';
 import { isSupplierAutobuyProductKey } from '../utils/supplierAutobuyIdentifiers.js';
+import { isSupplierCategoryKey, resolveSupplierCategorySelection } from '../utils/supplierAutobuyCategory.js';
 
 const PREFIX = 'supplier-autobuy:';
 const INVALID_PANEL = 'Bảng autobuy này không còn khả dụng. Vui lòng mở bảng mới nhất trong kênh autobuy của Cenar Store.';
@@ -30,6 +31,18 @@ function isEphemeral(message) {
   } catch { return false; }
 }
 
+const sourceUserOf = message => message?.interactionMetadata?.user?.id ?? message?.interaction?.user?.id;
+function botAuthoredMessage(interaction, owner, { ephemeralWebhook = false } = {}) {
+  const message = interaction.message, botId = interaction.client?.user?.id;
+  if (message?.author?.id !== botId) return false;
+  if (!message.webhookId) return true;
+  // Discord's own interaction replies are application webhooks. Admit only the
+  // exact current app's private response with explicit customer provenance.
+  return ephemeralWebhook && isEphemeral(message) && message.webhookId === botId && message.applicationId === botId
+    && [interaction.applicationId, interaction.client?.application?.id].every(id => id == null || id === botId)
+    && sourceUserOf(message) === owner;
+}
+
 function scopedOrigin(interaction) {
   if (interaction.guildId !== STORE_ONE_GUILD_ID || config.guildId !== STORE_ONE_GUILD_ID || process.env.ENV_FILE !== '.env') return null;
   const botId = interaction.client?.user?.id;
@@ -50,10 +63,10 @@ async function scopedTicketOrigin(interaction, { action, owner, args, getTicketC
   const botId = interaction.client?.user?.id;
   const message = interaction.message, channel = interaction.channel;
   if (!CUSTOMER_ID.test(botId || '') || !CUSTOMER_ID.test(message?.id || '')
-    || message?.author?.id !== botId || message.webhookId
+    || !botAuthoredMessage(interaction, owner, { ephemeralWebhook: true })
     || channel?.id !== interaction.channelId || channel.guildId !== STORE_ONE_GUILD_ID || channel.type !== ChannelType.GuildText) return null;
   const ephemeral = isEphemeral(message);
-  const sourceUser = message.interactionMetadata?.user?.id ?? message.interaction?.user?.id;
+  const sourceUser = sourceUserOf(message);
   if (ephemeral && sourceUser !== owner) return null;
   const everyone = channel.permissionOverwrites?.cache?.get(STORE_ONE_GUILD_ID);
   const customer = channel.permissionOverwrites?.cache?.get(owner);
@@ -70,16 +83,16 @@ async function scopedTicketOrigin(interaction, { action, owner, args, getTicketC
 
 function validPrivateOrigin(interaction, scope, owner, modal) {
   if (!CUSTOMER_ID.test(owner || '') || interaction.user?.id !== owner) return false;
-  if (scope.kind === 'ticket') return !modal && interaction.message?.author?.id === scope.botId && !interaction.message?.webhookId;
-  if (modal) return interaction.isModalSubmit?.() === true && (!interaction.message || interaction.message.author?.id === scope.botId);
-  if (interaction.message?.author?.id !== scope.botId || !isEphemeral(interaction.message)) return false;
-  const sourceUser = interaction.message.interactionMetadata?.user?.id ?? interaction.message.interaction?.user?.id;
+  if (scope.kind === 'ticket') return !modal && botAuthoredMessage(interaction, owner, { ephemeralWebhook: true });
+  if (modal) return interaction.isModalSubmit?.() === true && (!interaction.message || botAuthoredMessage(interaction, owner, { ephemeralWebhook: true }));
+  if (!botAuthoredMessage(interaction, owner, { ephemeralWebhook: true }) || !isEphemeral(interaction.message)) return false;
+  const sourceUser = sourceUserOf(interaction.message);
   return !sourceUser || sourceUser === owner;
 }
 
 function validArguments(action, args) {
   if (action === 'orders') return args.length === 0;
-  if (action === 'page') return args.length === 2 && args.every(value => INTEGER.test(value));
+  if (action === 'page') return args.length === 2 && (INTEGER.test(args[0]) || isSupplierCategoryKey(args[0])) && INTEGER.test(args[1]);
   if (['select', 'category', 'orderselect'].includes(action)) return args.length === 0;
   if (['qty', 'qtymodal', 'editprice', 'pricemodal'].includes(action)) return args.length === 1 && isSupplierAutobuyProductKey(args[0]);
   if (action === 'confirm') return args.length === 1 && QUOTE_ID.test(args[0]);
@@ -117,16 +130,16 @@ async function freshManager(interaction) {
 function managerPresentationHint(interaction) {
   try {
     const permissions = interaction.memberPermissions;
-    if (permissions?.has(PermissionFlagsBits.Administrator) || permissions?.has(PermissionFlagsBits.ManageGuild)) return true;
+    if (typeof permissions?.has === 'function') return permissions.has(PermissionFlagsBits.Administrator) || permissions.has(PermissionFlagsBits.ManageGuild);
     const member = interaction.guild?.members?.cache?.get(interaction.user.id);
     return member?.id === interaction.user.id && isManager(member);
   } catch { return false; }
 }
 
 function canUpdatePrivateView(interaction, action, owner) {
-  const sourceUser = interaction.message?.interactionMetadata?.user?.id ?? interaction.message?.interaction?.user?.id;
+  const sourceUser = sourceUserOf(interaction.message);
   return PRIVATE_VIEW_ACTIONS.has(action) && typeof interaction.deferUpdate === 'function'
-    && isEphemeral(interaction.message) && sourceUser === owner && !interaction.message?.webhookId;
+    && isEphemeral(interaction.message) && sourceUser === owner && botAuthoredMessage(interaction, owner, { ephemeralWebhook: true });
 }
 
 const defaults = {
@@ -194,7 +207,7 @@ export function createSupplierAutobuyInteractionHandler(dependencies = {}) {
       if (['qty', 'qtymodal', 'editprice', 'pricemodal'].includes(action) && args.length === 1) args[0] = decodeURIComponent(args[0]);
       scope = scopedOrigin(interaction) || await scopedTicketOrigin(interaction, { action, owner, args, getTicketContext: deps.getTicketContext });
       const publicValid = publicAction && interaction.isButton?.() === true
-        && interaction.message?.id === scope?.panel.messageId && interaction.message?.author?.id === scope?.botId;
+        && interaction.message?.id === scope?.panel.messageId && interaction.message?.author?.id === scope?.botId && !interaction.message?.webhookId;
       const privateValid = PRIVATE_ACTIONS.has(action) && validArguments(action, args)
         && scope && validPrivateOrigin(interaction, scope, owner, modal)
         && (modal || (['select', 'category', 'orderselect'].includes(action) ? interaction.isStringSelectMenu?.() === true : interaction.isButton?.() === true));
@@ -243,11 +256,11 @@ export function createSupplierAutobuyInteractionHandler(dependencies = {}) {
       } else {
         const context = dataContext(interaction, scope.provider);
         if (action === 'catalog' || action === 'page' || action === 'category') {
-          let category = action === 'page' ? Number(args[0]) : 0;
+          let category = action === 'page' ? resolveSupplierCategorySelection(interaction.message, args[0], owner) : 0;
           const page = action === 'page' ? Number(args[1]) : 0;
           if (action === 'category') {
-            if (interaction.values?.length !== 1 || !INTEGER.test(interaction.values[0])) throw new Error('INVALID_CATEGORY');
-            category = Number(interaction.values[0]);
+            if (interaction.values?.length !== 1 || !(INTEGER.test(interaction.values[0]) || isSupplierCategoryKey(interaction.values[0]))) throw new Error('INVALID_CATEGORY');
+            category = resolveSupplierCategorySelection(interaction.message, interaction.values[0], owner);
           }
           payload = presentation.buildSupplierCatalogView({ catalog: await catalogFor(interaction.client, scope.provider),
             customerId: context.customerId, page, category, provider: scope.provider });

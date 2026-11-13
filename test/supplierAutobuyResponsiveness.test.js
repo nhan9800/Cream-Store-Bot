@@ -91,6 +91,19 @@ describe('AutoBuy interaction responsiveness', () => {
     }
     expect(setPrice).not.toHaveBeenCalled();
   });
+  it('uses an explicit negative interaction permission snapshot before an older positive guild cache hint', async () => {
+    const click = fixture(); click.guild.members.cache.get(userId).permissions = new PermissionsBitField(['Administrator']);
+    await createSupplierAutobuyInteractionHandler({ prepareCheckout: async () => ({ quoteId, productKey }) })(click);
+    expect(state.quoteView).toHaveBeenLastCalledWith(expect.objectContaining({ manager: false }));
+    expect(click.guild.members.fetch).not.toHaveBeenCalled();
+  });
+  it('updates a genuine own-application ephemeral webhook response in place', async () => {
+    const click = fixture('select', { deferUpdate: vi.fn(async () => {}) });
+    click.message.webhookId = botId; click.message.applicationId = botId;
+    await createSupplierAutobuyInteractionHandler({ prepareCheckout: async () => ({ quoteId, productKey }) })(click);
+    expect(click.deferUpdate).toHaveBeenCalledOnce(); expect(click.deferReply).not.toHaveBeenCalled();
+    expect(click.editReply).toHaveBeenCalledOnce();
+  });
   it.each(['page', 'category', 'select', 'orders', 'order', 'orderselect'])
     ('updates the verified private %s view in place and removes old attachments', async action => {
       const args = action === 'page' ? '0:1' : action === 'order' ? 'CN_123456' : '';

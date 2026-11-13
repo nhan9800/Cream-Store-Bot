@@ -10,6 +10,7 @@ import { createEmojiResolver, withButtonEmoji } from '../utils/emojiHelper.js';
 import { STORE_ONE_GUILD_ID } from '../utils/locale.js';
 import { isSupplierAutobuyProductKey } from '../utils/supplierAutobuyIdentifiers.js';
 import { stripPresentationEmoji, withUniqueCustomEmoji } from '../utils/uniqueCustomEmoji.js';
+import { isSupplierCategoryKey, supplierCategoryKey } from '../utils/supplierAutobuyCategory.js';
 
 const CATEGORY_ID = '1514606994256957600';
 const CHANNEL_NAME = '🛒・autobuy';
@@ -104,7 +105,12 @@ export function buildSupplierAutobuyReply({ client, snapshot, action, customerId
 const PAGE_SIZE = 8;
 const ownerId = value => typeof value === 'string' && /^\d{17,20}$/.test(value);
 const identifier = value => typeof value === 'string' && /^[A-Za-z0-9_.:-]{1,100}$/.test(value);
-const clean = (value, limit = 200) => String(value ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, limit);
+function clipText(value, limit) {
+  let end = Math.min(value.length, limit);
+  if (end > 0 && end < value.length && /[\uD800-\uDBFF]/.test(value[end - 1]) && /[\uDC00-\uDFFF]/.test(value[end])) end--;
+  return value.slice(0, end);
+}
+const clean = (value, limit = 200) => clipText(String(value ?? '').replace(/[\u0000-\u001f\u007f]/g, ' ').replace(/\s+/g, ' ').trim(), limit);
 // Supplier artwork never enters a name as Discord markup. The view supplies
 // verified custom artwork separately, and names remain inert readable text.
 const displayText = (value, limit = 200) => clean(stripPresentationEmoji(value)
@@ -168,13 +174,23 @@ export function buildSupplierCatalogView({ catalog, customerId, page = 0, catego
   requireOwner(customerId);
   const E = createEmojiResolver(STORE_ONE_GUILD_ID);
   const offers = Array.isArray(catalog?.offers) ? catalog.offers.filter(validOffer) : [];
-  const categories = [...new Set(offers.map(offer => displayText(offer.category, 60) || 'Khác'))].sort().slice(0, 24);
-  const categoryIndex = Number.isInteger(category) && category >= 0 && category <= categories.length ? category : 0;
-  const filtered = categoryIndex === 0 ? offers : offers.filter(offer => (displayText(offer.category, 60) || 'Khác') === categories[categoryIndex - 1]);
+  const allCategories = [...new Set(offers.map(offer => displayText(offer.category, 60) || 'Khác'))].sort();
+  // Numeric arguments remain usable for internal/legacy callers. Handlers map
+  // old numeric controls through the original menu, never a refreshed index.
+  const categoryToken = isSupplierCategoryKey(category) ? category : Number.isInteger(category) && category > 0 && category <= allCategories.length
+    ? supplierCategoryKey(allCategories[category - 1]) : category === null ? null : 0;
+  const matches = allCategories.filter(name => supplierCategoryKey(name) === categoryToken);
+  const selectedCategory = matches.length === 1 ? matches[0] : null;
+  const missingCategory = categoryToken !== 0 && !selectedCategory;
+  let categories = allCategories.slice(0, 24);
+  if (selectedCategory && !categories.includes(selectedCategory)) categories = [...categories.slice(0, 23), selectedCategory];
+  const filtered = categoryToken === 0 ? offers : selectedCategory
+    ? offers.filter(offer => (displayText(offer.category, 60) || 'Khác') === selectedCategory) : [];
   const pages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
   const currentPage = Number.isInteger(page) ? Math.max(0, Math.min(page, pages - 1)) : 0;
   const visible = filtered.slice(currentPage * PAGE_SIZE, (currentPage + 1) * PAGE_SIZE);
   const text = visible.length ? visible.map(offer => `${E(productIcon(offer.name)) || E('order_product')} **${markdown(productLabel(offer.name, 90), 90)}**\n${E('icon_price')} **${money(priceOf(offer))}** · ${markdown(offer.termLabel || 'Xem điều kiện gói', 65)}`).join('\n\n')
+    : missingCategory ? 'Nhóm vừa chọn đã thay đổi hoặc tạm hết hàng. Bấm Tất cả sản phẩm để chọn lại nhóm; bot chưa chuyển bạn sang nhóm khác.'
     : 'Chưa có gói phù hợp còn hàng. Bạn có thể quay lại sau hoặc tạo ticket để shop kiểm tra.';
   const sourceNote = Number.isSafeInteger(catalog?.sourceCount) && catalog.sourceCount > offers.length
     ? `\n-# Nguồn đang kết nối: ${catalog.sourceCount} gói. Những gói chưa đủ giá hoặc điều kiện được giữ lại để shop kiểm tra.` : '';
@@ -183,18 +199,19 @@ export function buildSupplierCatalogView({ catalog, customerId, page = 0, catego
   if (categories.length > 1) {
     components.push(new ActionRowBuilder().addComponents(new StringSelectMenuBuilder()
       .setCustomId(`supplier-autobuy:category:${customerId}`).setPlaceholder('Lọc theo nhu cầu')
-      .addOptions([{ label: 'Tất cả sản phẩm', value: '0', default: categoryIndex === 0, ...selectEmoji(E, 'icon_store') },
-        ...categories.map((name, index) => ({ label: clean(name, 100), value: String(index + 1), default: categoryIndex === index + 1, ...selectEmoji(E, categoryIcon(name)) }))])));
+      .addOptions([{ label: 'Tất cả sản phẩm', value: '0', default: categoryToken === 0, ...selectEmoji(E, 'icon_store') },
+        ...categories.map(name => ({ label: clean(name, 100), value: supplierCategoryKey(name), default: name === selectedCategory, ...selectEmoji(E, categoryIcon(name)) }))])));
   }
   if (visible.length) {
     components.push(new ActionRowBuilder().addComponents(new StringSelectMenuBuilder()
       .setCustomId(`supplier-autobuy:select:${customerId}`).setPlaceholder('Chọn sản phẩm để xem điều kiện')
       .addOptions(visible.map(offer => ({ label: productLabel(offer.name, 100), value: offer.productKey,
-        description: `${money(priceOf(offer))} · ${displayText(offer.warrantyLabel || 'Xem bảo hành', 55)}`.slice(0, 100), ...selectEmoji(E, productIcon(offer.name)) })))));
+        description: clipText(`${money(priceOf(offer))} · ${displayText(offer.warrantyLabel || 'Xem bảo hành', 55)}`, 100), ...selectEmoji(E, productIcon(offer.name)) })))));
   }
   const controls = [];
-  if (currentPage > 0) controls.push(button(`supplier-autobuy:page:${customerId}:${categoryIndex}:${currentPage - 1}`, 'Trang trước', 'icon_prev'));
-  if (currentPage + 1 < pages) controls.push(button(`supplier-autobuy:page:${customerId}:${categoryIndex}:${currentPage + 1}`, 'Trang sau', 'icon_next'));
+  if (currentPage > 0) controls.push(button(`supplier-autobuy:page:${customerId}:${categoryToken}:${currentPage - 1}`, 'Trang trước', 'icon_prev'));
+  if (currentPage + 1 < pages) controls.push(button(`supplier-autobuy:page:${customerId}:${categoryToken}:${currentPage + 1}`, 'Trang sau', 'icon_next'));
+  if (missingCategory) controls.push(button(`supplier-autobuy:page:${customerId}:0:0`, 'Tất cả sản phẩm', 'icon_store'));
   controls.push(button(`supplier-autobuy:orders:${customerId}`, 'Đơn của tôi', 'icon_doc'));
   components.push(row(...controls));
   return privatePayload(components);
@@ -342,6 +359,10 @@ export async function buildSupplierPaymentView({ order, customerId, payment = or
       } catch { /* Keep the existing invoice link; never create another one. */ }
     }
   }
+  // Rendering is asynchronous. An invoice may expire before its PNG is ready;
+  // discard the bytes as well as the gallery/link rather than attaching old QR.
+  const current = paymentState(order, payment);
+  if (!current.unpaid || current.expired) { qrAttachmentName = null; files = undefined; }
   return { ...buildSupplierOrderView({ order, customerId, payment, qrAttachmentName, qrUnavailable: payos && !qrAttachmentName, ticketContext }), ...(files ? { files } : {}) };
 }
 

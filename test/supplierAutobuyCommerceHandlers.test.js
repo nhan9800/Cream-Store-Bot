@@ -10,6 +10,7 @@ vi.mock('../src/utils/emojiHelper.js', () => ({
 vi.mock('../src/services/supplierAutobuyRuntime.js', () => ({ supplierAutobuyRuntime: { getHealth: () => state.snapshot } }));
 vi.mock('../src/services/supplierAutobuyPanelService.js', async importOriginal => ({ ...await importOriginal(), getSupplierAutobuyPanelHealth: () => state.panel }));
 import { createSupplierAutobuyInteractionHandler } from '../src/events/supplierAutobuyHandlers.js';
+import { supplierCategoryKey } from '../src/utils/supplierAutobuyCategory.js';
 
 const guildId = '1282637033340403754', customerId = '111111111111111111', otherId = '222222222222222222';
 const botId = '1382729296724099132', channelId = '1569729564115206214', messageId = '1569729568695255211';
@@ -77,6 +78,47 @@ describe('supplier autobuy customer commerce interactions', () => {
     expect(JSON.stringify(interaction.editReply.mock.calls)).toContain(quoteId);
     expect(deps.confirmCheckout).not.toHaveBeenCalled();
     expect(deps.createPayment).not.toHaveBeenCalled();
+  });
+  it.each(['category', 'page'])('keeps stable category identity on %s controls across a source reorder', async action => {
+    const key = supplierCategoryKey('Z Creative');
+    const offers = [
+      { productKey: 'cdkvietnam:1', name: 'Wrong AI', priceVnd: 55000, available: true, category: 'AI' },
+      { productKey: 'cdkvietnam:2', name: 'Wrong Business', priceVnd: 55000, available: true, category: 'Business' },
+      ...Array.from({ length: 10 }, (_, index) => ({ productKey: `cdkvietnam:${100 + index}`, name: `Z package ${index}`,
+        priceVnd: 55000, available: true, category: 'Z Creative' })),
+    ];
+    const deps = dependencies({ getCatalog: vi.fn(async () => ({ offers })) });
+    const click = fixture(privateId(action, action === 'page' ? key + ':1' : ''), {
+      isButton: () => action === 'page', isStringSelectMenu: () => action === 'category', values: [key],
+    });
+    await createSupplierAutobuyInteractionHandler(deps)(click);
+    const output = JSON.stringify(click.editReply.mock.calls[0][0]);
+    expect(output).not.toMatch(/Wrong AI|Wrong Business/); expect(output).toContain('Z package');
+    expect(deps.getCatalog).toHaveBeenCalledExactlyOnceWith({ provider: 'cdkvietnam' });
+    expect(deps.prepareCheckout).not.toHaveBeenCalled(); expect(deps.createPayment).not.toHaveBeenCalled();
+  });
+  it.each(['category', 'page'])('recovers legacy numeric %s identity from its original menu instead of a refreshed index', async action => {
+    const deps = dependencies({ getCatalog: vi.fn(async () => ({ offers: [
+      { productKey: 'cdkvietnam:1', name: 'Wrong AI', priceVnd: 55000, available: true, category: 'AI' },
+      { productKey: 'cdkvietnam:2', name: 'Wrong Business', priceVnd: 55000, available: true, category: 'Business' },
+      { productKey: 'cdkvietnam:3', name: 'Right creative', priceVnd: 55000, available: true, category: 'Z Creative' },
+    ] })) });
+    const click = fixture(privateId(action, action === 'page' ? '2:0' : ''), {
+      isButton: () => action === 'page', isStringSelectMenu: () => action === 'category', values: ['2'],
+    });
+    click.message.components = [{ type: 1, components: [{ type: 3, custom_id: privateId('category'),
+      options: [{ label: 'AI', value: '1' }, { label: 'Z Creative', value: '2' }] }] }];
+    await createSupplierAutobuyInteractionHandler(deps)(click);
+    const output = JSON.stringify(click.editReply.mock.calls[0][0]);
+    expect(output).toContain('Right creative'); expect(output).not.toMatch(/Wrong AI|Wrong Business/);
+    expect(deps.createPayment).not.toHaveBeenCalled();
+  });
+  it('resets an unreadable old category rather than silently assigning the same index to another group', async () => {
+    const deps = dependencies(), click = fixture(privateId('page', '2:0'));
+    await createSupplierAutobuyInteractionHandler(deps)(click);
+    const output = JSON.stringify(click.editReply.mock.calls[0][0]);
+    expect(output).toContain('Nhóm vừa chọn'); expect(output).toContain(privateId('page', '0:0'));
+    expect(output).not.toContain('Capcut Pro'); expect(deps.prepareCheckout).not.toHaveBeenCalled();
   });
   it('carries the namespaced CDK identity through select, quantity and manager price modals', async () => {
     const key = 'cdkvietnam:6';

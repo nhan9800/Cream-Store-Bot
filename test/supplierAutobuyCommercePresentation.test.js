@@ -59,6 +59,42 @@ describe('supplier autobuy commerce presentation', () => {
     expect(nodes(empty).filter(node => node.type === 3)).toHaveLength(0);
     expect(JSON.stringify(empty)).toContain('Chưa có gói');
   });
+  it('keeps the selected category stable when a new group sorts before it', () => {
+    const original = [offer(1, { category: 'AI', name: 'AI package' }),
+      ...Array.from({ length: 10 }, (_, index) => offer(100 + index, { category: 'Z Creative', name: `Z package ${index}` }))];
+    const initial = buildSupplierCatalogView({ customerId: user, catalog: { offers: original } });
+    const selected = nodes(initial).find(node => node.custom_id === 'supplier-autobuy:category:' + user)
+      .options.find(option => option.label === 'Z Creative').value;
+    const refreshed = buildSupplierCatalogView({ customerId: user, category: /^\d+$/.test(selected) ? Number(selected) : selected,
+      catalog: { offers: [...original, offer(200, { category: 'Business', name: 'Business package' })] } });
+    expect(nodes(refreshed).find(node => node.custom_id === 'supplier-autobuy:select:' + user).options
+      .every(option => option.label.startsWith('Z package'))).toBe(true);
+  });
+  it('shows an explicit category reset when a selected group disappears', () => {
+    const original = [offer(1, { category: 'AI' }), offer(2, { category: 'Z Creative' })];
+    const initial = buildSupplierCatalogView({ customerId: user, catalog: { offers: original } });
+    const selected = nodes(initial).find(node => node.custom_id === 'supplier-autobuy:category:' + user)
+      .options.find(option => option.label === 'Z Creative').value;
+    const refreshed = buildSupplierCatalogView({ customerId: user, category: /^\d+$/.test(selected) ? Number(selected) : selected,
+      catalog: { offers: [original[0], offer(200, { category: 'Business', name: 'Business package' })] } });
+    expect(nodes(refreshed).some(node => node.custom_id === 'supplier-autobuy:select:' + user)).toBe(false);
+    expect(ids(refreshed)).toContain(`supplier-autobuy:page:${user}:0:0`);
+    expect(JSON.stringify(refreshed.components)).toContain('Nhóm vừa chọn');
+  });
+  it('retains a selected category even after it moves outside the first twenty-four menu groups', () => {
+    const original = [offer(1, { category: 'AI' }), offer(2, { category: 'Z Creative', name: 'Selected creative package' })];
+    const initial = buildSupplierCatalogView({ customerId: user, catalog: { offers: original } });
+    const selected = nodes(initial).find(node => node.custom_id === 'supplier-autobuy:category:' + user)
+      .options.find(option => option.label === 'Z Creative').value;
+    const payload = buildSupplierCatalogView({ customerId: user, category: selected,
+      catalog: { offers: [...original, ...Array.from({ length: 30 }, (_, index) => offer(100 + index, { category: 'Category ' + index }))] } });
+    const menu = nodes(payload).find(node => node.custom_id === 'supplier-autobuy:category:' + user);
+    expect(menu.options).toHaveLength(25);
+    expect(menu.options.find(option => option.value === selected)).toMatchObject({ label: 'Z Creative', default: true });
+    expect(nodes(payload).find(node => node.custom_id === 'supplier-autobuy:select:' + user).options)
+      .toEqual([expect.objectContaining({ label: 'Selected creative package' })]);
+    expect(ids(payload).every(id => id.length <= 100)).toBe(true);
+  });
   it('neutralizes Markdown and mention-like supplier names, while using sourced custom emoji', () => {
     const payload = buildSupplierQuoteView({ quote: { ...quote, productName: '@everyone **unsafe** [link]', accountForm: '@here link' }, customerId: user });
     const text = JSON.stringify(payload);
@@ -202,6 +238,22 @@ describe('supplier autobuy commerce presentation', () => {
       expect(JSON.stringify(payload.components)).toContain('Chưa hiển thị được ảnh QR');
       expect(JSON.stringify(payload.components)).not.toContain('private-render-error');
     } finally { render.mockRestore(); }
+  });
+  it('discards a QR attachment when the invoice expires while the local PNG is rendering', async () => {
+    let now = Date.UTC(2026, 10, 14);
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => now);
+    const render = vi.spyOn(QRCode, 'toBuffer').mockImplementation(async () => {
+      now += 1000; return Buffer.from('89504e470d0a1a0a', 'hex');
+    });
+    try {
+      const payload = await buildSupplierPaymentView({ customerId: user,
+        order: { orderCode: 'CN_123456', totalAmount: 55000, paymentStatus: 'UNPAID', status: 'PENDING_PAYMENT' },
+        payment: { method: 'PAYOS', expiresAt: new Date(now + 100).toISOString(), checkoutUrl: 'https://pay.payos.vn/web/expiring' } });
+      expect(payload.files).toBeUndefined();
+      expect(nodes(payload).some(node => node.type === 12 || node.url)).toBe(false);
+      expect(ids(payload).some(id => id.includes(':pay:'))).toBe(false);
+      expect(JSON.stringify(payload.components)).toContain('Hóa đơn đã hết hạn');
+    } finally { render.mockRestore(); clock.mockRestore(); }
   });
   it('shows paid unknown/review delivery states and never overrides terminal/refunded status', () => {
     const order = { orderCode: 'CN_123456', paymentStatus: 'PAID', status: 'PROCESSING', deliveryStatus: 'UNKNOWN' };

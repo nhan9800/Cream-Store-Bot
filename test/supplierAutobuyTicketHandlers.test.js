@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { ChannelType, MessageFlags, PermissionFlagsBits, PermissionsBitField } from 'discord.js';
+import { ChannelType, Client, Message, MessageFlags, PermissionFlagsBits, PermissionsBitField } from 'discord.js';
 
 const state = vi.hoisted(() => ({ ready: {}, render: {} }));
 vi.mock('../src/config.js', () => ({ config: { guildId: '1282637033340403754' } }));
@@ -154,6 +154,45 @@ describe('durable supplier ticket interaction origin', () => {
       customerId, orderCode: cdkCode, ephemeral: true });
     expect(deps.getOrder).toHaveBeenLastCalledWith({ client: privateReceipt.client, guildId, customerId, orderCode: cdkCode, provider: 'cdkvietnam' });
     expect(deps.createPayment).not.toHaveBeenCalled();
+  });
+  it('accepts the exact owner-bound application-webhook shape of a Discord ephemeral ticket receipt', async () => {
+    const deps = dependencies(), click = fixtureEphemeral(id('order'), { deferUpdate: vi.fn().mockResolvedValue(undefined) });
+    const protocolClient = new Client({ intents: [] });
+    try {
+      // Exercise discord.js's raw API transformation rather than inventing a
+      // camelCase metadata fixture that could hide a production mismatch.
+      click.message = new Message(protocolClient, { id: ephemeralId, channel_id: channelId, guild_id: guildId,
+        type: 0, timestamp: '2026-11-14T00:00:00.000Z', content: '', attachments: [], embeds: [], components: [],
+        mention_everyone: false, mentions: [], mention_roles: [], pinned: false, tts: false,
+        author: { id: botId, username: 'Cenar Store', discriminator: '0', avatar: null, bot: true },
+        flags: MessageFlags.Ephemeral | MessageFlags.IsComponentsV2, webhook_id: botId, application_id: botId,
+        interaction_metadata: { id: '1571000000000000010', type: 3,
+          user: { id: customerId, username: 'Buyer', discriminator: '0', avatar: null },
+          authorizing_integration_owners: { 0: guildId }, interacted_message_id: noticeId } });
+      expect(click.message.interactionMetadata.user.id).toBe(customerId);
+      expect(click.message.webhookId).toBe(botId); expect(click.message.applicationId).toBe(botId);
+      await createSupplierAutobuyInteractionHandler(deps)(click);
+      expect(deps.getTicketContext).toHaveBeenCalledExactlyOnceWith({ guildId, channelId, messageId: ephemeralId,
+        customerId, orderCode: cdkCode, ephemeral: true });
+      expect(deps.getOrder).toHaveBeenCalledOnce(); expect(click.reply).not.toHaveBeenCalled();
+      expect(click.deferUpdate).toHaveBeenCalledOnce();
+    } finally { await protocolClient.destroy(); }
+  });
+  it.each([
+    { webhookId: otherId, applicationId: botId },
+    { webhookId: botId, applicationId: otherId },
+    { webhookId: botId },
+    { webhookId: botId, applicationId: botId, flags: 0 },
+    { webhookId: botId, applicationId: botId, interactionMetadata: undefined },
+    { webhookId: botId, applicationId: botId, interactionMetadata: { user: { id: otherId } } },
+  ])('rejects ordinary or mismatched webhook provenance before ticket lookup %j', async patch => {
+    const click = fixtureEphemeral(); Object.assign(click.message, patch);
+    const deps = await rejected(click); expect(deps.getTicketContext).not.toHaveBeenCalled();
+  });
+  it('rejects an application webhook response if the executing interaction belongs to another app', async () => {
+    const click = fixtureEphemeral(); click.message.webhookId = botId; click.message.applicationId = botId;
+    click.applicationId = otherId;
+    const deps = await rejected(click); expect(deps.getTicketContext).not.toHaveBeenCalled();
   });
 
   it('acknowledges retrieved credentials only after attaching them to an ephemeral reply', async () => {

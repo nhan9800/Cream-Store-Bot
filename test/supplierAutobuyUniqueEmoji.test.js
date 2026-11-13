@@ -192,6 +192,17 @@ describe('unique sourced custom artwork for AutoBuy', () => {
     expect(menus.flatMap(menu => menu.options).filter(option => option.value.startsWith('cdkvietnam:'))
       .every(option => option.label === 'Sản phẩm AutoBuy')).toBe(true);
   });
+  it('never truncates merchant Unicode in the middle of a supplementary character', () => {
+    for (const prefix of [89, 99]) {
+      const payload = buildSupplierCatalogView({ customerId: user, catalog: { offers: [
+        { ...offers[0], name: 'a'.repeat(prefix) + '𠮷' + '後'.repeat(20) },
+      ] } });
+      const text = verified(payload).strings.join('\n');
+      expect(text.isWellFormed()).toBe(true);
+      const menus = payload.components.filter(node => node.type === 1).flatMap(node => node.components).filter(node => node.type === 3);
+      expect(menus.flatMap(menu => menu.options).every(option => option.label.isWellFormed())).toBe(true);
+    }
+  });
   it('preserves protocol fields, links, files and authored literal spans exactly', () => {
     const attachment = { attachment: Buffer.from('private bytes'), name: 'owned.png' };
     const literal = '`password:<:old:1999999999999999999>` https://example.com/:secret:';
