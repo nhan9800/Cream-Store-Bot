@@ -64,8 +64,10 @@ export async function runShopRelaunchRelease(client, {
     console.log('[SHOP-RELAUNCH]', JSON.stringify(getShopRelaunchReleaseHealth()));
     return getShopRelaunchReleaseHealth();
   } catch (error) {
+    const journal = getShopRelaunchPublicationHealth({ dbInstance });
     status = { ...status, status: 'RELEASE_FAILED', lastError: /^[A-Z0-9_]{3,80}$/.test(String(error?.code || ''))
-      ? error.code : 'SHOP_RELAUNCH_FAILED' };
+      ? error.code : 'SHOP_RELAUNCH_FAILED', links: journal.links || [], parts: journal.parts,
+      ...(error?.publicVerification ? { verification: error.publicVerification } : {}) };
     console.warn('[SHOP-RELAUNCH]', JSON.stringify({ status: status.status, code: status.lastError }));
     return getShopRelaunchReleaseHealth();
   }

@@ -65,9 +65,25 @@ async function history(channel) {
 }
 
 function verify(message, payload, expectedChannel, botId, part) {
+  const actualText = textOf(message);
+  const expectedText = textOf(payload);
   if (!message?.id || String(message.author?.id) !== String(botId)
     || String(message.channelId || message.channel?.id) !== String(expectedChannel)
-    || textOf(message) !== textOf(payload) || !hasMarker(message, part)) throw fail('RELAUNCH_PUBLICATION_CONTENT_MISMATCH');
+    || actualText !== expectedText || !hasMarker(message, part)) {
+    const owned = String(message?.author?.id) === String(botId)
+      && String(message?.channelId || message?.channel?.id) === String(expectedChannel);
+    let difference = 0;
+    while (difference < Math.min(actualText.length, expectedText.length)
+      && actualText[difference] === expectedText[difference]) difference++;
+    throw Object.assign(fail('RELAUNCH_PUBLICATION_CONTENT_MISMATCH'), { publicVerification: {
+      messageId: message?.id || null, owned, markerPresent: hasMarker(message, part),
+      expectedCharacters: expectedText.length, actualCharacters: actualText.length,
+      firstDifference: difference,
+      // Only already-public, bot-owned campaign text is eligible for excerpts.
+      ...(owned ? { expectedExcerpt: expectedText.slice(Math.max(0, difference - 80), difference + 140),
+        actualExcerpt: actualText.slice(Math.max(0, difference - 80), difference + 140) } : {}),
+    } });
+  }
   const roles = [...(message.mentions?.roles?.keys?.() || [])].map(String).sort();
   const users = [...(message.mentions?.users?.keys?.() || [])];
   if (message.mentions?.everyone || users.length
