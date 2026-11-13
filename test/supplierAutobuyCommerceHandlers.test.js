@@ -321,6 +321,7 @@ describe('supplier autobuy customer commerce interactions', () => {
   it.each([
     ['SUPPLIER_UNFUNDED', 'không thanh toán lại'],
     ['PAYMENT_METHOD_LOCKED', 'Đơn đã chọn một phương thức thanh toán'],
+    ['PAYMENT_RECONCILIATION_REQUIRED', 'không thanh toán lại bằng QR cũ'],
   ])('shows a safe payment preflight notice for %s without retrying another method', async (code, message) => {
     const deps = dependencies({ createPayment: vi.fn().mockRejectedValue(Object.assign(new Error('provider-secret-private'), { code })) });
     const interaction = fixture(privateId('pay', 'CN_123456:wallet'));

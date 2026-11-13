@@ -19,6 +19,9 @@ const deny = code => { throw new SupplierCheckoutError(code); };
 const snowflake = value => typeof value === 'string' && /^\d{17,20}$/.test(value);
 const providers = new Set(['cdkvietnam', 'dopermind']);
 const validAmount = amount => Number.isSafeInteger(amount) && amount > 0 && amount <= 100_000_000;
+const immutableOrderFields = ['order_code', 'guild_id', 'customer_id', 'fulfillment_mode', 'total_amount', 'quantity', 'payos_order_code', 'payment_code'];
+const immutableIntentFields = ['order_code', 'guild_id', 'customer_id', 'provider', 'product_key', 'quote_id', 'quantity', 'sale_amount',
+  'request_id', 'request_json', 'request_hash', 'max_unit_cost'];
 const providerScope = provider => provider === undefined ? {} : { provider };
 function checkedProvider(supplied, record) {
   const saved = record?.provider;
@@ -102,11 +105,18 @@ export function createSupplierAutobuyCheckout({
     void settled.then(() => { if (turns.get(key) === settled) turns.delete(key); });
     return task;
   }
-  function admissionKey(guildId, customerId, orderCode, provider) {
-    const intent = database.prepare('SELECT provider,product_key FROM supplier_autobuy_intents WHERE order_code=? AND guild_id=? AND customer_id=?')
+  function ownedPaymentIntent(guildId, customerId, orderCode, provider) {
+    const intent = database.prepare('SELECT * FROM supplier_autobuy_intents WHERE order_code=? AND guild_id=? AND customer_id=?')
       .get(orderCode, guildId, customerId);
     if (!intent || !providers.has(intent.provider) || supplierProviderForProductKey(intent.product_key) !== intent.provider) deny('ORDER_NOT_FOUND');
     checkedProvider(provider, intent);
+    return intent;
+  }
+  function paymentIdentity(order, intent) {
+    return [...immutableOrderFields.map(field => order[field]), ...immutableIntentFields.map(field => intent[field])];
+  }
+  function admissionKey(guildId, customerId, orderCode, provider) {
+    const intent = ownedPaymentIntent(guildId, customerId, orderCode, provider);
     return `${guildId}:${intent.provider}:${intent.product_key}`;
   }
   function paidMetadata(order, requestedMethod, provider, status = order.status) {
@@ -212,7 +222,7 @@ export function createSupplierAutobuyCheckout({
       if (!own || !order || order.guild_id !== guildId || order.customer_id !== customerId || order.fulfillment_mode !== 'SUPPLIER') deny('ORDER_NOT_FOUND');
       if (order.payment_status === 'PAID') return paidMetadata(order, method, resolvedProvider, own.status || order.status);
       if (order.status !== 'PENDING_PAYMENT' || order.payment_status !== 'UNPAID') deny('ORDER_NOT_PAYABLE');
-      let walletDebited = false;
+      let walletDebited = false, admittedIdentity;
       order = await serialize(admissionTurns, admissionKey(guildId, customerId, orderCode, resolvedProvider), async () => {
         // Claims are stock reservations. Serialize only same-source/SKU admission
         // through preflight and atomic wallet debit, then release before any
@@ -255,6 +265,7 @@ export function createSupplierAutobuyCheckout({
             throw error;
           }
         }
+        if (method === 'PAYOS') admittedIdentity = paymentIdentity(order, ownedPaymentIntent(guildId, customerId, orderCode, resolvedProvider));
         return order;
       });
       if (method === 'WALLET' && walletDebited) {
@@ -268,7 +279,22 @@ export function createSupplierAutobuyCheckout({
       const linked = await payosLink(order);
       if (!linked || linked.order_code !== orderCode || linked.guild_id !== guildId || linked.customer_id !== customerId
         || linked.fulfillment_mode !== 'SUPPLIER') deny('ORDER_NOT_FOUND');
-      if (linked.payment_status === 'PAID') return paidMetadata(linked, method, resolvedProvider);
+      if (!validAmount(linked.total_amount)) deny('INVALID_AMOUNT');
+      // Invoice creation is external: a cancellation, payment or staff edit can
+      // commit while it is pending. The returned DTO cannot authorize stale QR
+      // controls or override the owned order/intent now stored in the database.
+      const latestOwned = await orders.getSupplierOrderForCustomer({ guildId, customerId, orderCode, ...providerScope(resolvedProvider) });
+      checkedProvider(resolvedProvider, latestOwned);
+      const fresh = readOrder(orderCode);
+      if (!fresh || fresh.guild_id !== guildId || fresh.customer_id !== customerId || fresh.fulfillment_mode !== 'SUPPLIER') deny('ORDER_NOT_FOUND');
+      const currentIdentity = paymentIdentity(fresh, ownedPaymentIntent(guildId, customerId, orderCode, resolvedProvider));
+      if (!admittedIdentity || currentIdentity.some((value, index) => value !== admittedIdentity[index])
+        || linked.total_amount !== fresh.total_amount
+        || (order.payment_link_id && fresh.payment_link_id !== order.payment_link_id)
+        || (fresh.payment_link_id && linked.payment_link_id !== fresh.payment_link_id)) deny('ORDER_CHANGED');
+      if (['CANCELLED', 'REFUNDED'].includes(fresh.status) || ['CANCELLED', 'REFUNDED'].includes(fresh.payment_status)) deny('ORDER_NOT_PAYABLE');
+      if (fresh.payment_status === 'PAID') return paidMetadata(fresh, method, resolvedProvider);
+      if (fresh.status !== 'PENDING_PAYMENT' || fresh.payment_status !== 'UNPAID') deny('ORDER_NOT_PAYABLE');
       return privatePaymentMetadata(linked, resolvedProvider);
     }).finally(() => paymentFlights.delete(key));
     paymentFlights.set(key, task);

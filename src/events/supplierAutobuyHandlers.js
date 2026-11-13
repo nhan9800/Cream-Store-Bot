@@ -112,6 +112,7 @@ function errorText(error) {
   if (/STOCK|PRODUCT_UNAVAILABLE|PRODUCT_NOT_FOUND|NOT_AVAILABLE/.test(code)) return 'Gói vừa hết hàng hoặc tạm dừng bán. Vui lòng quay lại Danh mục để chọn gói khác.';
   if (code === 'SUPPLIER_UNFUNDED') return 'Đơn có thể đang chờ shop bổ sung nguồn. Nếu đã thanh toán, hệ thống ghi nhận khoản thanh toán và tự tiếp tục khi nguồn sẵn sàng. Bấm Kiểm tra đơn để theo dõi; không thanh toán lại.';
   if (code === 'PAYMENT_METHOD_LOCKED') return 'Đơn đã chọn một phương thức thanh toán. Vui lòng dùng phương thức đó hoặc bấm Kiểm tra đơn; tránh thanh toán lại qua phương thức khác.';
+  if (code === 'PAYMENT_RECONCILIATION_REQUIRED') return 'Hóa đơn cũ cần cập nhật trạng thái. Bấm Kiểm tra đơn trước khi tiếp tục; không thanh toán lại bằng QR cũ.';
   if (/INSUFFICIENT.*BALANCE|WALLET.*(?:LOW|INSUFFICIENT)|INSUFFICIENT_FUNDS/.test(code)) return 'Số dư ví chưa đủ hoặc nguồn hàng chưa thể xử lý. Bạn có thể kiểm tra đơn, chọn phương thức thanh toán phù hợp hoặc tạo ticket hỗ trợ.';
   if (/NOT_READY|NOT_DELIVERED|DELIVERY_PENDING|DELIVERY_UNAVAILABLE|FULFILLMENT_PENDING|PAYMENT_REQUIRED|UNPAID/.test(code)) return 'Đơn chưa có hàng để nhận. Nếu đã thanh toán, hệ thống đang xử lý hoặc đối soát; bấm Kiểm tra đơn để xem trạng thái. Không cần tạo đơn mới cho cùng lần thanh toán.';
   if (/OWNER|CUSTOMER|ACCESS|FORBIDDEN|NOT_FOUND/.test(code)) return 'Không tìm thấy đơn hoặc báo giá thuộc tài khoản của bạn.';

@@ -14,14 +14,16 @@ function fixture() {
   const database = new Database(':memory:'); databases.push(database);
   database.exec(`CREATE TABLE orders(order_code TEXT PRIMARY KEY,guild_id TEXT,customer_id TEXT,fulfillment_mode TEXT,payment_status TEXT,
     status TEXT,total_amount INTEGER,quantity INTEGER,payment_link_id TEXT,payment_checkout_url TEXT,payment_qr_code TEXT,payment_qr_text TEXT,payment_expired_at TEXT);
-    CREATE TABLE supplier_autobuy_intents(order_code TEXT PRIMARY KEY,guild_id TEXT,customer_id TEXT,provider TEXT,product_key TEXT,quantity INTEGER);
+    CREATE TABLE supplier_autobuy_intents(order_code TEXT PRIMARY KEY,guild_id TEXT,customer_id TEXT,provider TEXT,product_key TEXT,quantity INTEGER,
+      quote_id TEXT,sale_amount INTEGER,request_id TEXT,request_json TEXT,request_hash TEXT,max_unit_cost INTEGER);
     CREATE TABLE test_wallets(customer_id TEXT PRIMARY KEY,balance INTEGER);
     CREATE TABLE test_debits(order_code TEXT PRIMARY KEY,amount INTEGER);`);
   for (const user of users) database.prepare('INSERT INTO test_wallets VALUES(?,?)').run(user, 1000000);
   const add = (orderCode, user = users[0], provider = 'dopermind', key = 'desc_shared') => {
     database.prepare(`INSERT INTO orders(order_code,guild_id,customer_id,fulfillment_mode,payment_status,status,total_amount,quantity)
       VALUES(?,?,?,'SUPPLIER','UNPAID','PENDING_PAYMENT',61000,1)`).run(orderCode, guildId, user);
-    database.prepare('INSERT INTO supplier_autobuy_intents VALUES(?,?,?,?,?,1)').run(orderCode, guildId, user, provider, key);
+    database.prepare('INSERT INTO supplier_autobuy_intents VALUES(?,?,?,?,?,1,?,61000,?,?,?,50000)')
+      .run(orderCode, guildId, user, provider, key, `quote-${orderCode}`, `request-${orderCode}`, '{"quantity":1}', 'synthetic-hash');
     return { guildId, customerId: user, orderCode, provider, method: 'payos' };
   };
   const a = add('CN_123456'), b = add('CN_123457', users[1], 'cdkvietnam', 'cdkvietnam:1');
@@ -186,6 +188,57 @@ describe('independent financial checkout progress', () => {
     });
     expect(await t.checkout.payment(t.a)).toMatchObject({ paid: true, status: 'PROCESSING', totalAmount: 61000 });
     expect(t.fulfill).not.toHaveBeenCalled(); expect(t.debitWallet).not.toHaveBeenCalled();
+  });
+  it.each(['CANCELLED', 'REFUNDED'])('does not expose a stale payable invoice after %s while PayOS is pending', async status => {
+    const t = fixture(), wait = deferred(), normalLink = t.payosLink.getMockImplementation();
+    t.payosLink.mockImplementationOnce(async order => {
+      const stale = await normalLink(order);
+      await wait.promise;
+      return stale;
+    });
+    const pending = t.checkout.payment(t.a);
+    const check = expect(pending).rejects.toMatchObject({ code: 'ORDER_NOT_PAYABLE' });
+    await vi.waitFor(() => expect(t.payosLink).toHaveBeenCalledOnce());
+    t.database.prepare('UPDATE orders SET status=?,payment_status=? WHERE order_code=?').run(status, status, t.a.orderCode);
+    wait.resolve(); await check;
+    expect(t.readOrder(t.a.orderCode)).toMatchObject({ status, payment_link_id: `link-${t.a.orderCode}` });
+    expect(t.database.prepare('SELECT method FROM supplier_autobuy_payment_methods WHERE order_code=?').get(t.a.orderCode).method).toBe('PAYOS');
+    await expect(t.checkout.payment(t.a)).rejects.toMatchObject({ code: 'ORDER_NOT_PAYABLE' });
+    expect(t.payosLink).toHaveBeenCalledOnce(); expect(t.debitWallet).not.toHaveBeenCalled(); expect(t.fulfill).not.toHaveBeenCalled();
+  });
+  it('uses fresh persisted payment state when the invoice result is still unpaid', async () => {
+    const t = fixture(), normalLink = t.payosLink.getMockImplementation();
+    t.payosLink.mockImplementationOnce(async order => {
+      const stale = await normalLink(order);
+      t.database.prepare("UPDATE orders SET payment_status='PAID',status='PROCESSING' WHERE order_code=?").run(order.order_code);
+      return stale;
+    });
+    const paid = await t.checkout.payment(t.a);
+    expect(paid).toMatchObject({ paid: true, status: 'PROCESSING', totalAmount: 61000, method: 'PAYOS' });
+    expect(paid.checkoutUrl).toBeUndefined(); expect(paid.qrCode).toBeUndefined();
+    expect(t.payosLink).toHaveBeenCalledOnce(); expect(t.debitWallet).not.toHaveBeenCalled(); expect(t.fulfill).not.toHaveBeenCalled();
+  });
+  it.each([
+    ['customer', "UPDATE orders SET customer_id='222222222222222222'", 'ORDER_NOT_FOUND'],
+    ['amount', 'UPDATE orders SET total_amount=62000', 'ORDER_CHANGED'],
+    ['quantity', 'UPDATE orders SET quantity=2', 'ORDER_CHANGED'],
+    ['provider', "UPDATE supplier_autobuy_intents SET provider='cdkvietnam',product_key='cdkvietnam:1'", 'PROVIDER_MISMATCH'],
+    ['product', "UPDATE supplier_autobuy_intents SET product_key='desc_other'", 'ORDER_CHANGED'],
+    ['quote', "UPDATE supplier_autobuy_intents SET quote_id='other-quote'", 'ORDER_CHANGED'],
+    ['request', "UPDATE supplier_autobuy_intents SET request_json='{\"quantity\":2}'", 'ORDER_CHANGED'],
+    ['invoice identity', 'UPDATE orders SET payos_order_code=987654', 'ORDER_CHANGED'],
+  ])('rejects a changed %s while retaining the single original invoice', async (_label, mutation, expectedCode) => {
+    const t = fixture(), normalLink = t.payosLink.getMockImplementation();
+    if (mutation.includes('payos_order_code')) t.database.exec('ALTER TABLE orders ADD COLUMN payos_order_code INTEGER DEFAULT 123456');
+    t.payosLink.mockImplementationOnce(async order => {
+      const stale = await normalLink(order);
+      t.database.exec(mutation);
+      return stale;
+    });
+    await expect(t.checkout.payment(t.a)).rejects.toMatchObject({ code: expectedCode });
+    expect(t.readOrder(t.a.orderCode).payment_link_id).toBe(`link-${t.a.orderCode}`);
+    expect(t.database.prepare('SELECT method FROM supplier_autobuy_payment_methods WHERE order_code=?').get(t.a.orderCode).method).toBe('PAYOS');
+    expect(t.payosLink).toHaveBeenCalledOnce(); expect(t.debitWallet).not.toHaveBeenCalled(); expect(t.fulfill).not.toHaveBeenCalled();
   });
   it('refuses foreign or untrusted invoice DTO amounts without exposing them or debiting a wallet', async () => {
     const t = fixture();

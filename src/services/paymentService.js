@@ -190,6 +190,39 @@ function buildCheckoutUrlFromLinkId(paymentLinkId) {
   return `https://pay.payos.vn/web/${paymentLinkId}`;
 }
 
+function assertPayOSLookupIdentity(order, info) {
+  const numericCode = value => (typeof value === 'number' || (typeof value === 'string' && /^\d+$/.test(value)))
+    && Number.isSafeInteger(Number(value)) && Number(value) > 0;
+  if (!numericCode(info?.orderCode) || !numericCode(order.payos_order_code)
+    || Number(info.orderCode) !== Number(order.payos_order_code)
+    || (order.payment_link_id && String(info.id || '') !== String(order.payment_link_id))) {
+    throw new OrderPaymentError('PAYMENT_IDENTITY_MISMATCH', 'Thông tin PayOS không khớp đơn cần đối soát.');
+  }
+}
+
+function assertInvoiceOrderSnapshot(expected, fresh, invoiceId) {
+  const fields = ['order_code', 'guild_id', 'customer_id', 'fulfillment_mode', 'total_amount', 'quantity', 'payos_order_code', 'payment_code'];
+  if (!fresh || fields.some(field => fresh[field] !== expected[field])
+    || (expected.payment_link_id && fresh.payment_link_id !== expected.payment_link_id)
+    || (fresh.payment_link_id && String(invoiceId || '') !== String(fresh.payment_link_id))) {
+    throw new OrderPaymentError('PAYMENT_IDENTITY_MISMATCH', 'Thông tin PayOS không khớp đơn cần đối soát.');
+  }
+}
+
+function applyPayOSTerminalInfo(order, info, state) {
+  // A webhook or replacement invoice may have committed during the lookup.
+  return db.transaction(() => {
+    const fresh = getOrderByCode(order.order_code);
+    const matches = fresh?.status === 'PENDING_PAYMENT' && fresh.payment_status === 'UNPAID'
+      && Number(fresh.payos_order_code) === Number(info.orderCode)
+      && (!fresh.payment_link_id || String(fresh.payment_link_id) === String(info.id || ''));
+    if (!matches) return null;
+    db.prepare('UPDATE orders SET payment_cancel_reason=? WHERE order_code=?')
+      .run(state === 'EXPIRED' ? 'Thanh toán PayOS đã hết hạn' : 'Thanh toán bị hủy (PayOS)', order.order_code);
+    return setOrderStatus(order.order_code, 'CANCELLED');
+  }).immediate();
+}
+
 async function renderPaymentQrImage(order) {
   const qrData = order.payment_qr_code || order.payment_checkout_url || order.payment_code || order.order_code;
   if (!qrData) return null;
@@ -228,37 +261,87 @@ export async function createOrLoadPayOSLink(order) {
   const payos_order_code = order.payosOrderCode ?? order.payos_order_code;
   const payment_qr_code = order.paymentQrCode ?? order.payment_qr_code;
   const payment_qr_text = order.paymentQrText ?? order.payment_qr_text;
+  const lookupOrder = { ...order, order_code, payos_order_code, payment_link_id,
+    guild_id: order.guild_id ?? persisted?.guild_id, customer_id: order.customer_id ?? persisted?.customer_id,
+    fulfillment_mode: order.fulfillment_mode ?? persisted?.fulfillment_mode };
+
+  async function recoverKnownInvoice(info, fallbackExpiry) {
+    assertPayOSLookupIdentity(lookupOrder, info);
+    if (typeof info.id !== 'string' || !info.id.trim() || info.id.length > 200
+      || (info.amount !== undefined && (!Number.isSafeInteger(info.amount) || info.amount !== Number(order.totalAmount ?? order.total_amount)))) {
+      throw new OrderPaymentError('PAYMENT_IDENTITY_MISMATCH', 'Thông tin PayOS không khớp đơn cần đối soát.');
+    }
+    const state = typeof info.status === 'string' ? info.status.toUpperCase() : '';
+    const rawExpiry = info.expiredAt ?? fallbackExpiry;
+    const expiry = rawExpiry === undefined || rawExpiry === null ? order.payment_expired_at ?? order.paymentExpiredAt ?? null
+      : new Date(Number(rawExpiry) * 1000);
+    if (expiry instanceof Date && !Number.isFinite(expiry.getTime())) {
+      throw new OrderPaymentError('PAYMENT_RECONCILIATION_REQUIRED', 'Hóa đơn cần được đối soát. Vui lòng kiểm tra trạng thái đơn trước khi thanh toán.');
+    }
+    const saved = db.transaction(() => {
+      const fresh = getOrderByCode(order_code);
+      assertInvoiceOrderSnapshot(persisted ?? lookupOrder, fresh, info.id);
+      if (!fresh || fresh.guild_id !== lookupOrder.guild_id || fresh.customer_id !== lookupOrder.customer_id
+        || fresh.fulfillment_mode !== lookupOrder.fulfillment_mode || fresh.total_amount !== Number(order.totalAmount ?? order.total_amount)) {
+        throw new OrderPaymentError('PAYMENT_IDENTITY_MISMATCH', 'Thông tin PayOS không khớp đơn cần đối soát.');
+      }
+      assertPayOSLookupIdentity(fresh, info);
+      const offerable = state === 'PENDING' && fresh.status === 'PENDING_PAYMENT' && fresh.payment_status === 'UNPAID';
+      const checkoutUrl = offerable ? payment_checkout_url ?? buildCheckoutUrlFromLinkId(info.id) : null;
+      return savePaymentLinkData(order_code, {
+        paymentLinkId: info.id, checkoutUrl,
+        qrCode: offerable ? info.qrCode ?? payment_qr_code ?? null : null,
+        qrUrl: checkoutUrl, qrText: offerable ? info.qrCode ?? payment_qr_text ?? null : null,
+        expiredAt: expiry instanceof Date ? expiry.toISOString() : expiry,
+      });
+    }).immediate();
+    if (['CANCELLED', 'EXPIRED'].includes(state)) applyPayOSTerminalInfo(lookupOrder, info, state);
+    if (state !== 'PENDING' || saved.status !== 'PENDING_PAYMENT' || saved.payment_status !== 'UNPAID') {
+      // PAID still requires a real received amount through the existing worker/
+      // webhook path. Retain its ID, but never turn invoice amount into a receipt
+      // or expose a payable QR for terminal, processing or unknown states.
+      throw new OrderPaymentError('PAYMENT_RECONCILIATION_REQUIRED', 'Hóa đơn cần được đối soát. Vui lòng kiểm tra trạng thái đơn trước khi thanh toán.');
+    }
+    return saved;
+  }
 
   if (payment_link_id && payment_checkout_url) {
     return order;
   }
+  if (payment_link_id) return recoverKnownInvoice(await getPayOSPaymentInfo(payment_link_id));
 
   const payload = buildPayOSRequestPayload(order);
 
   try {
     const created = await callPayOSApi('POST', '/v2/payment-requests', payload);
-    return savePaymentLinkData(order_code, {
-      paymentLinkId: created.paymentLinkId ?? created.id ?? null,
-      checkoutUrl: created.checkoutUrl ?? buildCheckoutUrlFromLinkId(created.paymentLinkId ?? created.id),
-      qrCode: created.qrCode ?? null,
-      qrUrl: created.checkoutUrl ?? buildCheckoutUrlFromLinkId(created.paymentLinkId ?? created.id),
-      qrText: created.qrCode ?? null,
-      expiredAt: new Date(Number(created.expiredAt ?? payload.expiredAt) * 1000).toISOString(),
-    });
+    if (created.status !== undefined && String(created.status).toUpperCase() !== 'PENDING') {
+      return recoverKnownInvoice({ ...created, id: created.paymentLinkId ?? created.id, orderCode: created.orderCode ?? payload.orderCode }, payload.expiredAt);
+    }
+    const saved = db.transaction(() => {
+      const fresh = getOrderByCode(order_code), invoiceId = created.paymentLinkId ?? created.id ?? null;
+      assertInvoiceOrderSnapshot(persisted ?? lookupOrder, fresh, invoiceId);
+      if (fresh.total_amount !== payload.amount || (created.amount !== undefined && created.amount !== payload.amount)) {
+        throw new OrderPaymentError('PAYMENT_IDENTITY_MISMATCH', 'Thông tin PayOS không khớp đơn cần đối soát.');
+      }
+      if (created.orderCode !== undefined) assertPayOSLookupIdentity(fresh, { ...created, id: invoiceId });
+      const offerable = fresh.status === 'PENDING_PAYMENT' && fresh.payment_status === 'UNPAID';
+      const checkoutUrl = offerable ? created.checkoutUrl ?? buildCheckoutUrlFromLinkId(invoiceId) : null;
+      return savePaymentLinkData(order_code, {
+        paymentLinkId: invoiceId, checkoutUrl, qrCode: offerable ? created.qrCode ?? null : null,
+        qrUrl: checkoutUrl, qrText: offerable ? created.qrCode ?? null : null,
+        expiredAt: new Date(Number(created.expiredAt ?? payload.expiredAt) * 1000).toISOString(),
+      });
+    }).immediate();
+    if (saved.status !== 'PENDING_PAYMENT' || saved.payment_status !== 'UNPAID') {
+      throw new OrderPaymentError('PAYMENT_RECONCILIATION_REQUIRED', 'Hóa đơn cần được đối soát. Vui lòng kiểm tra trạng thái đơn trước khi thanh toán.');
+    }
+    return saved;
   } catch (error) {
     const knownDuplicate = /đơn thanh toán đã tồn tại|already exists/i.test(error.message);
     if (!knownDuplicate) throw error;
 
     const info = await getPayOSPaymentInfo(payos_order_code);
-    return savePaymentLinkData(order_code, {
-      paymentLinkId: info.id ?? payment_link_id ?? null,
-      checkoutUrl: payment_checkout_url ?? buildCheckoutUrlFromLinkId(info.id),
-      qrCode: payment_qr_code ?? null,
-      qrUrl: payment_checkout_url ?? buildCheckoutUrlFromLinkId(info.id),
-      qrText: payment_qr_text ?? null,
-      expiredAt: info.expiredAt ? new Date(Number(info.expiredAt) * 1000).toISOString()
-        : order.payment_expired_at ?? order.paymentExpiredAt ?? null,
-    });
+    return recoverKnownInvoice(info);
   }
 }
 
@@ -518,8 +601,8 @@ function normalizePayOSWebhookBody(body) {
   };
 }
 
-export async function finalizePaidOrder(client, order, paymentData, transactionId, transactionContent, provider = 'PAYOS') {
-  const payment = recordOrderPayment({
+export async function finalizePaidOrder(client, order, paymentData, transactionId, transactionContent, provider = 'PAYOS', invoiceGuard = null) {
+  const recordPayment = () => recordOrderPayment({
     orderCode: order.order_code,
     provider,
     transactionId,
@@ -527,6 +610,14 @@ export async function finalizePaidOrder(client, order, paymentData, transactionI
     content: transactionContent,
     rawPayload: paymentData,
   });
+  // The paid lookup and receipt commit share the same SQLite write lock. A
+  // replacement invoice or owner/amount edit must not receive an old receipt.
+  const payment = invoiceGuard ? db.transaction(() => {
+    const fresh = getOrderByCode(order.order_code);
+    assertInvoiceOrderSnapshot(invoiceGuard.order, fresh, invoiceGuard.info.id);
+    assertPayOSLookupIdentity(fresh, invoiceGuard.info);
+    return recordPayment();
+  }).immediate() : recordPayment();
   // Role recovery is independent of delivery/DM logs and duplicate webhooks.
   await syncCustomerRolesNow(client, payment.updated.guild_id, payment.updated.customer_id).catch((error) => {
     console.error('[CUSTOMER-ROLES] Payment role sync deferred:', error.code || error.name);
@@ -713,10 +804,7 @@ export async function syncPaymentStatusFromPayOS({ client, orderCode = null, pay
 
   const info = await getPayOSPaymentInfo(order.payment_link_id || order.payos_order_code);
   const state = String(info.status ?? '').toUpperCase();
-  if (Number(info.orderCode) !== Number(order.payos_order_code)
-    || (order.payment_link_id && String(info.id || '') !== String(order.payment_link_id))) {
-    throw new OrderPaymentError('PAYMENT_IDENTITY_MISMATCH', 'Thông tin PayOS không khớp đơn cần đối soát.');
-  }
+  assertPayOSLookupIdentity(order, info);
 
   const needsNotificationRepair = order.payment_status === 'PAID'
     && !hasPaymentConfirmationLog(order.order_code);
@@ -729,6 +817,7 @@ export async function syncPaymentStatusFromPayOS({ client, orderCode = null, pay
       { ...info, invoiceAmount: info.amount, amount: getPayOSReceivedAmount(info) },
       transaction?.reference || order.paid_transaction_id || `PAYOS_LOOKUP_${info.id ?? order.payos_order_code}`,
       transaction?.description || order.paid_transaction_content || order.payment_code || order.order_code,
+      'PAYOS', { order, info },
     );
     return { order: result.updated, state: 'PAID', synced: true, repairedNotification: needsNotificationRepair };
   }
@@ -736,16 +825,7 @@ export async function syncPaymentStatusFromPayOS({ client, orderCode = null, pay
   if (['CANCELLED', 'EXPIRED'].includes(state) && order.status === 'PENDING_PAYMENT') {
     // Only an authoritative matching provider result releases a pending order.
     // A webhook may have committed payment while this lookup was in flight.
-    const updated = db.transaction(() => {
-      const fresh = getOrderByCode(order.order_code);
-      const matches = fresh?.status === 'PENDING_PAYMENT' && fresh.payment_status === 'UNPAID'
-        && Number(fresh.payos_order_code) === Number(info.orderCode)
-        && (!fresh.payment_link_id || String(fresh.payment_link_id) === String(info.id || ''));
-      if (!matches) return null;
-      db.prepare('UPDATE orders SET payment_cancel_reason=? WHERE order_code=?')
-        .run(state === 'EXPIRED' ? 'Thanh toán PayOS đã hết hạn' : 'Thanh toán bị hủy (PayOS)', order.order_code);
-      return setOrderStatus(order.order_code, 'CANCELLED');
-    }).immediate();
+    const updated = applyPayOSTerminalInfo(order, info, state);
     if (updated && client?.guilds?.fetch) {
       const guild = await client.guilds.fetch(updated.guild_id).catch(() => null);
       if (guild) {

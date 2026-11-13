@@ -1726,6 +1726,21 @@ export function registerBotApiRoutes(app) {
                         payment_checkout_url = payosOrder.payment_checkout_url || payosOrder.payment_qr_url;
                         payment_qr_code = payosOrder.payment_qr_code;
                     } catch (err) {
+                        const freshInvoice = db.prepare('SELECT * FROM orders WHERE order_code=?').get(order.order_code);
+                        const identityChanged = !freshInvoice || freshInvoice.guild_id !== order.guild_id
+                            || freshInvoice.customer_id !== order.customer_id || freshInvoice.fulfillment_mode !== order.fulfillment_mode
+                            || freshInvoice.total_amount !== order.total_amount
+                            || freshInvoice.quantity !== order.quantity || freshInvoice.payos_order_code !== order.payos_order_code;
+                        const guardedCode = ['PAYMENT_RECONCILIATION_REQUIRED', 'PAYMENT_IDENTITY_MISMATCH'].includes(err?.code)
+                            ? err.code : identityChanged ? 'PAYMENT_IDENTITY_MISMATCH'
+                            : freshInvoice.payment_link_id || freshInvoice.status !== 'PENDING_PAYMENT' || freshInvoice.payment_status !== 'UNPAID'
+                                ? 'PAYMENT_RECONCILIATION_REQUIRED' : null;
+                        if (guardedCode) {
+                            // A known or changed invoice must retain its original
+                            // identity; a bank fallback would expose another way
+                            // to pay and clear the existing recovery receipt.
+                            throw Object.assign(new Error('Hóa đơn cần được kiểm tra lại trước khi thanh toán.'), { code: guardedCode });
+                        }
                         console.error('[WEB ORDER] Lỗi tạo cổng thanh toán PayOS:', err);
                         // Fallback sang VietQR thường bên dưới
                     }
@@ -1892,6 +1907,10 @@ export function registerBotApiRoutes(app) {
             }
             
         } catch (e) {
+            if (['PAYMENT_RECONCILIATION_REQUIRED', 'PAYMENT_IDENTITY_MISMATCH'].includes(e?.code)) {
+                return res.status(409).json({ ok: false, code: e.code,
+                    error: 'Hóa đơn cần được kiểm tra lại. Vui lòng kiểm tra trạng thái đơn trước khi thanh toán tiếp.' });
+            }
             if (e?.code === 'CAPCUT_PRICE_CHANGED') {
                 return res.status(409).json({ ok: false, code: e.code, current_price: e.current_price,
                     product_id: e.product_id, error: e.message });

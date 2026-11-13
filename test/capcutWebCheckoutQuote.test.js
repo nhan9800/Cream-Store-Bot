@@ -5,7 +5,10 @@ vi.hoisted(() => Object.assign(process.env, {
   ENV_FILE: '.env.capcut-web-test-absent', DATABASE_PATH: `./data/test-capcut-web-${process.pid}-${Date.now()}.sqlite`,
   BOT_API_KEY: 'capcut-local-test-api-key', WEB_CHECKOUT_ENABLED: 'true', GUILD_ID: '1282637033340403754', PAYMENT_PROVIDER: 'VIETQR',
 }));
+const payosLink = vi.hoisted(() => vi.fn());
+vi.mock('../src/services/paymentService.js', async original => ({ ...await original(), createOrLoadPayOSLink: payosLink }));
 import { db, initDatabase } from '../src/database/db.js';
+import { config } from '../src/config.js';
 import { registerBotApiRoutes } from '../src/services/botApiRoutes.js';
 import { getEditableCapcutProducts, updateCapcutPrice } from '../src/services/capcutPricingService.js';
 import { addWalletBalance, getWalletBalance } from '../src/services/walletService.js';
@@ -33,6 +36,7 @@ beforeAll(async () => {
   endpoint = `http://127.0.0.1:${server.address().port}/api/bot/web-orders`;
 });
 beforeEach(() => {
+  config.paymentProvider = 'VIETQR'; payosLink.mockReset();
   db.exec(`DELETE FROM order_delivery_items; DELETE FROM order_fulfillments; DELETE FROM payment_events;
     DELETE FROM checkout_requests; DELETE FROM wallet_transactions; DELETE FROM staff_logs; DELETE FROM orders;
     DELETE FROM tickets; DELETE FROM customer_profiles; DELETE FROM system_settings WHERE key LIKE 'capcut:price:%';`);
@@ -45,6 +49,23 @@ afterAll(async () => {
 });
 
 describe('CapCut website quote confirmation and original-invoice retries', () => {
+  it.each(['PAYMENT_RECONCILIATION_REQUIRED', 'PAYMENT_IDENTITY_MISMATCH', 'KNOWN_LINK_TIMEOUT', 'PAID_DURING_REQUEST', 'CANCELLED_DURING_REQUEST'])('does not replace a guarded PayOS invoice with bank QR (%s)', async reason => {
+    config.paymentProvider = 'PAYOS';
+    payosLink.mockImplementation(async order => {
+      if (reason === 'KNOWN_LINK_TIMEOUT') db.prepare("UPDATE orders SET payment_link_id='original-link',payment_checkout_url=NULL WHERE order_code=?").run(order.order_code);
+      if (reason === 'PAID_DURING_REQUEST') db.prepare("UPDATE orders SET status='PROCESSING',payment_status='PAID',amount_paid=total_amount WHERE order_code=?").run(order.order_code);
+      if (reason === 'CANCELLED_DURING_REQUEST') db.prepare("UPDATE orders SET status='CANCELLED' WHERE order_code=?").run(order.order_code);
+      throw Object.assign(new Error('private-provider-message'), { code: reason });
+    });
+    const result = await request({ expectedPrice: 100000, provider: 'PAYOS' });
+    expect(result.status).toBe(409);
+    expect(result.body).toMatchObject({ ok: false, code: reason === 'PAYMENT_IDENTITY_MISMATCH' ? reason : 'PAYMENT_RECONCILIATION_REQUIRED' });
+    expect(JSON.stringify(result.body)).not.toMatch(/private-provider|img\.vietqr|payment_qr|checkout_url/);
+    expect(orderCount()).toBe(1); expect(paymentCount()).toBe(0);
+    const saved = db.prepare('SELECT * FROM orders').get();
+    if (reason === 'KNOWN_LINK_TIMEOUT') expect(saved.payment_link_id).toBe('original-link');
+    expect(saved.payment_qr_code).toBeNull();
+  });
   it.each([undefined, null, '100000', -1, 100000.5, 90000])('rejects missing, malformed or stale new-order quotes without order/debit (%s)', async expectedPrice => {
     const result = await request({ expectedPrice });
     expect(result.status).toBe(409);
