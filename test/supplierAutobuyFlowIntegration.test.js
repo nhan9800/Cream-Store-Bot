@@ -219,7 +219,8 @@ describe('supplier autobuy real commerce integration without external I/O', () =
     const args = { client: t.client, ...t.context, orderCode: order.orderCode, method: 'wallet' };
     const [first, duplicate] = await Promise.all([t.checkout.payment(args), t.checkout.payment(args)]);
     expect(first).toEqual(duplicate);
-    expect(first).toMatchObject({ paid: true, status: 'COMPLETED' });
+    expect(first).toMatchObject({ paid: true, status: 'PROCESSING', totalAmount: 61000 });
+    await t.engine.fulfillSupplierOrder(t.client, order.orderCode);
     expect(getWalletBalance(t.context.guildId, t.context.customerId)).toBe(39000);
     expect(ledgerFor(order.orderCode)).toHaveLength(1);
     expect(ledgerFor(order.orderCode)[0].amount).toBe(-61000);
@@ -252,6 +253,7 @@ describe('supplier autobuy real commerce integration without external I/O', () =
     const args = { client: t.client, ...t.context, orderCode: order.orderCode, method: 'wallet' };
     expect(await t.checkout.payment(args)).toMatchObject({ paid: true });
     await t.checkout.payment(args);
+    await t.engine.fulfillSupplierOrder(t.client, order.orderCode);
     expect(getWalletBalance(t.context.guildId, t.context.customerId)).toBe(39000);
     expect(ledgerFor(order.orderCode)).toHaveLength(1);
     expect(getOrderByCode(order.orderCode)).toMatchObject({ status: 'PROCESSING', payment_status: 'PAID', amount_paid: 61000 });
@@ -273,6 +275,7 @@ describe('supplier autobuy real commerce integration without external I/O', () =
     const { order } = await t.confirm();
     addWalletBalance(t.context.guildId, t.context.customerId, 100000, 'TOPUP', 'Synthetic test funds');
     await t.checkout.payment({ client: t.client, ...t.context, orderCode: order.orderCode, method: 'wallet' });
+    await t.engine.fulfillSupplierOrder(t.client, order.orderCode);
     expect(intentFor(order.orderCode).status).toBe('DELIVERY_PENDING');
     expect(getOrderByCode(order.orderCode).status).toBe('PROCESSING');
     expect(t.engine.getSupplierDeliveryForCustomer({ ...t.context, orderCode: order.orderCode }).items).toEqual([DELIVERABLE]);

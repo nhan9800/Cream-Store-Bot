@@ -14,7 +14,9 @@ function fixture(options = {}) {
   database.exec(`CREATE TABLE orders(order_code TEXT PRIMARY KEY,guild_id TEXT,customer_id TEXT,fulfillment_mode TEXT,payment_status TEXT,status TEXT,total_amount INTEGER,quantity INTEGER,payment_link_id TEXT,
     payment_checkout_url TEXT,payment_qr_code TEXT,payment_qr_text TEXT,payment_expired_at TEXT);
     INSERT INTO orders(order_code,guild_id,customer_id,fulfillment_mode,payment_status,status,total_amount,quantity) VALUES('CN_123456','${guildId}','${customerId}','SUPPLIER','UNPAID','PENDING_PAYMENT',61000,1);
-    CREATE TABLE tickets(id INTEGER PRIMARY KEY,ticket_code TEXT,guild_id TEXT,customer_id TEXT,channel_id TEXT,status TEXT);`);
+    CREATE TABLE tickets(id INTEGER PRIMARY KEY,ticket_code TEXT,guild_id TEXT,customer_id TEXT,channel_id TEXT,status TEXT);
+    CREATE TABLE supplier_autobuy_intents(order_code TEXT PRIMARY KEY,guild_id TEXT,customer_id TEXT,provider TEXT,product_key TEXT);
+    INSERT INTO supplier_autobuy_intents VALUES('CN_123456','${guildId}','${customerId}','dopermind','desc_test');`);
   const readOrder = vi.fn(code => database.prepare('SELECT * FROM orders WHERE order_code=?').get(code));
   const safeOrder = () => ({ orderCode: 'CN_123456', productName: 'CapCut Pro', status: readOrder('CN_123456').status });
   const owned = vi.fn(async args => { if (args.customerId !== customerId) throw Object.assign(new Error('not found'), { code: 'ORDER_NOT_FOUND' }); return safeOrder(); });
@@ -197,6 +199,8 @@ describe('supplier private ticket confirmation', () => {
 describe('provider-bound checkout from separate supplier channels', () => {
   const mismatch = () => Object.assign(new Error('provider mismatch'), { code: 'PROVIDER_MISMATCH' });
   function bindProvider(t, provider) {
+    t.database.prepare('UPDATE supplier_autobuy_intents SET provider=?,product_key=?')
+      .run(provider, provider === 'cdkvietnam' ? 'cdkvietnam:1' : 'desc_test');
     const check = args => {
       if (args.provider !== undefined && args.provider !== provider) throw mismatch();
       if (args.customerId !== customerId) throw Object.assign(new Error('not found'), { code: 'ORDER_NOT_FOUND' });

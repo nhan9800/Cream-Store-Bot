@@ -10,6 +10,7 @@ import { createOrLoadPayOSLink, syncPaymentStatusFromPayOS } from './paymentServ
 import { supplierSalesConfigured } from './supplierAutobuyCatalogService.js';
 import { buildOrderLogV2Update } from '../utils/embeds.js';
 import { sendSupplierTicketOrderNotice } from './supplierAutobuyTicketNoticeService.js';
+import { supplierProviderForProductKey } from '../utils/supplierProvider.js';
 
 export class SupplierCheckoutError extends Error {
   constructor(code) { super('Chưa thể tiếp tục thanh toán. Vui lòng kiểm tra trạng thái đơn hoặc tạo ticket hỗ trợ.'); this.name = 'SupplierCheckoutError'; this.code = code; }
@@ -17,6 +18,7 @@ export class SupplierCheckoutError extends Error {
 const deny = code => { throw new SupplierCheckoutError(code); };
 const snowflake = value => typeof value === 'string' && /^\d{17,20}$/.test(value);
 const providers = new Set(['cdkvietnam', 'dopermind']);
+const validAmount = amount => Number.isSafeInteger(amount) && amount > 0 && amount <= 100_000_000;
 const providerScope = provider => provider === undefined ? {} : { provider };
 function checkedProvider(supplied, record) {
   const saved = record?.provider;
@@ -26,6 +28,7 @@ function checkedProvider(supplied, record) {
 }
 
 function privatePaymentMetadata(order, provider) {
+  if (!validAmount(order.total_amount)) deny('INVALID_AMOUNT');
   let checkoutUrl = null;
   try {
     const url = new URL(order.payment_checkout_url);
@@ -38,6 +41,11 @@ function privatePaymentMetadata(order, provider) {
     ? new Date(order.payment_expired_at).toISOString() : null;
   return { orderCode: order.order_code, method: 'PAYOS', paid: false, status: 'PENDING_PAYMENT',
     totalAmount: order.total_amount, checkoutUrl, qrCode, expiresAt, ...providerScope(provider) };
+}
+
+function paidPaymentMetadata(order, method, provider, status = order.status) {
+  if (!validAmount(order.total_amount)) deny('INVALID_AMOUNT');
+  return { orderCode: order.order_code, method, paid: true, status, totalAmount: order.total_amount, ...providerScope(provider) };
 }
 
 async function publishSupplierOrderLog(client, order) {
@@ -58,8 +66,7 @@ export function createSupplierAutobuyCheckout({
   syncPayos = syncPaymentStatusFromPayOS, publishOrder = publishSupplierOrderLog,
   publishTicketOrder = sendSupplierTicketOrderNotice,
 } = {}) {
-  const ticketFlights = new Map(), paymentFlights = new Map();
-  let paymentTurn = Promise.resolve();
+  const ticketFlights = new Map(), paymentFlights = new Map(), orderTurns = new Map(), admissionTurns = new Map();
   let initialized = false;
   function initialize() {
     if (initialized) return;
@@ -87,6 +94,25 @@ export function createSupplierAutobuyCheckout({
     await publishOrder(client, order).catch(() => {});
   }
   const service = async () => typeof engine === 'function' ? engine() : engine;
+  function serialize(turns, key, operation) {
+    const previous = turns.get(key) || Promise.resolve();
+    const task = previous.then(operation);
+    const settled = task.then(() => {}, () => {});
+    turns.set(key, settled);
+    void settled.then(() => { if (turns.get(key) === settled) turns.delete(key); });
+    return task;
+  }
+  function admissionKey(guildId, customerId, orderCode, provider) {
+    const intent = database.prepare('SELECT provider,product_key FROM supplier_autobuy_intents WHERE order_code=? AND guild_id=? AND customer_id=?')
+      .get(orderCode, guildId, customerId);
+    if (!intent || !providers.has(intent.provider) || supplierProviderForProductKey(intent.product_key) !== intent.provider) deny('ORDER_NOT_FOUND');
+    checkedProvider(provider, intent);
+    return `${guildId}:${intent.provider}:${intent.product_key}`;
+  }
+  function paidMetadata(order, requestedMethod, provider, status = order.status) {
+    const saved = database.prepare('SELECT method FROM supplier_autobuy_payment_methods WHERE order_code=?').get(order.order_code);
+    return paidPaymentMetadata(order, saved?.method || requestedMethod, provider, status);
+  }
   function guard(guildId, customerId, newSale = true, provider) {
     checkedProvider(provider);
     if (guildId !== STORE_ONE_GUILD_ID || !snowflake(customerId)) deny('AUTOBUY_DISABLED');
@@ -175,49 +201,76 @@ export function createSupplierAutobuyCheckout({
     guard(guildId, customerId, true, provider);
     method = typeof method === 'string' ? method.toUpperCase() : '';
     if (!['PAYOS', 'WALLET'].includes(method)) deny('INVALID_PAYMENT_METHOD');
-    const key = `${guildId}:${customerId}:${orderCode}:${provider || 'persisted'}`;
+    const key = `${guildId}:${customerId}:${orderCode}:${provider || 'persisted'}:${method}`;
     if (paymentFlights.has(key)) return paymentFlights.get(key);
-    const task = paymentTurn.then(async () => {
+    const task = serialize(orderTurns, `${guildId}:${orderCode}`, async () => {
       const orders = await service();
       const own = await orders.getSupplierOrderForCustomer({ guildId, customerId, orderCode, ...providerScope(provider) });
       const resolvedProvider = checkedProvider(provider, own);
       guard(guildId, customerId, true, resolvedProvider);
       let order = readOrder(orderCode);
       if (!own || !order || order.guild_id !== guildId || order.customer_id !== customerId || order.fulfillment_mode !== 'SUPPLIER') deny('ORDER_NOT_FOUND');
-      if (order.payment_status === 'PAID') return { orderCode, method, paid: true, status: own.status || order.status, ...providerScope(resolvedProvider) };
+      if (order.payment_status === 'PAID') return paidMetadata(order, method, resolvedProvider, own.status || order.status);
       if (order.status !== 'PENDING_PAYMENT' || order.payment_status !== 'UNPAID') deny('ORDER_NOT_PAYABLE');
-      const insertedChoice = database.transaction(() => {
-        const current = readOrder(orderCode);
-        if (current.payment_status === 'PAID') return false;
-        const chosen = database.prepare('SELECT method FROM supplier_autobuy_payment_methods WHERE order_code=?').get(orderCode);
-        if (chosen && chosen.method !== method) deny('PAYMENT_METHOD_LOCKED');
-        return database.prepare('INSERT INTO supplier_autobuy_payment_methods (order_code,method,created_at) VALUES (?,?,?) ON CONFLICT(order_code) DO NOTHING')
-          .run(orderCode, method, new Date().toISOString()).changes === 1;
-      }).immediate();
-      order = readOrder(orderCode);
-      if (order.payment_status === 'PAID') return { orderCode, method, paid: true, status: order.status, ...providerScope(resolvedProvider) };
-      try { await orders.validateSupplierOrderForPayment({ guildId, customerId, orderCode, ...providerScope(resolvedProvider) }); }
-      catch (error) {
-        // No invoice/debit was attempted by this new method claim. A previous
-        // uncertain PayOS claim is retained so another method cannot race it.
-        if (insertedChoice) database.prepare(`DELETE FROM supplier_autobuy_payment_methods WHERE order_code=?
-          AND EXISTS (SELECT 1 FROM orders WHERE order_code=? AND payment_status='UNPAID' AND payment_link_id IS NULL)`).run(orderCode, orderCode);
-        throw error;
-      }
-      if (method === 'WALLET') {
-        try { order = debitWallet({ orderCode, guildId, customerId, amount: order.total_amount }).order; }
+      let walletDebited = false;
+      order = await serialize(admissionTurns, admissionKey(guildId, customerId, orderCode, resolvedProvider), async () => {
+        // Claims are stock reservations. Serialize only same-source/SKU admission
+        // through preflight and atomic wallet debit, then release before any
+        // invoice network request or paid supplier fulfillment can stall.
+        guard(guildId, customerId, true, resolvedProvider);
+        order = readOrder(orderCode);
+        if (!order || order.guild_id !== guildId || order.customer_id !== customerId || order.fulfillment_mode !== 'SUPPLIER') deny('ORDER_NOT_FOUND');
+        if (order.payment_status === 'PAID') return order;
+        if (order.status !== 'PENDING_PAYMENT' || order.payment_status !== 'UNPAID') deny('ORDER_NOT_PAYABLE');
+        const insertedChoice = database.transaction(() => {
+          const current = readOrder(orderCode);
+          if (current.payment_status === 'PAID') return false;
+          const chosen = database.prepare('SELECT method FROM supplier_autobuy_payment_methods WHERE order_code=?').get(orderCode);
+          if (chosen && chosen.method !== method) deny('PAYMENT_METHOD_LOCKED');
+          return database.prepare('INSERT INTO supplier_autobuy_payment_methods (order_code,method,created_at) VALUES (?,?,?) ON CONFLICT(order_code) DO NOTHING')
+            .run(orderCode, method, new Date().toISOString()).changes === 1;
+        }).immediate();
+        order = readOrder(orderCode);
+        if (order.payment_status === 'PAID') return order;
+        try {
+          await orders.validateSupplierOrderForPayment({ guildId, customerId, orderCode, ...providerScope(resolvedProvider) });
+          guard(guildId, customerId, true, resolvedProvider);
+          order = readOrder(orderCode);
+          if (!order || order.guild_id !== guildId || order.customer_id !== customerId || order.fulfillment_mode !== 'SUPPLIER') deny('ORDER_NOT_FOUND');
+          if (order.payment_status === 'PAID') return order;
+          if (order.status !== 'PENDING_PAYMENT' || order.payment_status !== 'UNPAID') deny('ORDER_NOT_PAYABLE');
+        }
         catch (error) {
-          if (error?.code === 'INSUFFICIENT_BALANCE') database.prepare(`DELETE FROM supplier_autobuy_payment_methods
-            WHERE order_code=? AND method='WALLET' AND EXISTS (SELECT 1 FROM orders WHERE order_code=? AND payment_status='UNPAID')`).run(orderCode, orderCode);
+          // No invoice/debit was attempted by this new method claim. A previous
+          // uncertain PayOS claim is retained so another method cannot race it.
+          if (insertedChoice) database.prepare(`DELETE FROM supplier_autobuy_payment_methods WHERE order_code=?
+            AND EXISTS (SELECT 1 FROM orders WHERE order_code=? AND payment_status='UNPAID' AND payment_link_id IS NULL)`).run(orderCode, orderCode);
           throw error;
         }
-        const result = await orders.fulfillSupplierOrder(client, orderCode);
-        return { orderCode, method, paid: true, status: result.updated?.status || order.status, ...providerScope(resolvedProvider) };
+        if (method === 'WALLET') {
+          try { order = debitWallet({ orderCode, guildId, customerId, amount: order.total_amount }).order; walletDebited = true; }
+          catch (error) {
+            if (error?.code === 'INSUFFICIENT_BALANCE') database.prepare(`DELETE FROM supplier_autobuy_payment_methods
+              WHERE order_code=? AND method='WALLET' AND EXISTS (SELECT 1 FROM orders WHERE order_code=? AND payment_status='UNPAID')`).run(orderCode, orderCode);
+            throw error;
+          }
+        }
+        return order;
+      });
+      if (method === 'WALLET' && walletDebited) {
+        // Paid state and the intent are already durable. Do not make the buyer
+        // wait for the shared source/DM worker; retries recover this same order.
+        // A failure remains worker-owned and must never expose source errors.
+        void Promise.resolve().then(() => orders.fulfillSupplierOrder(client, orderCode)).catch(() => {});
+        return paidMetadata(order, method, resolvedProvider);
       }
+      if (order.payment_status === 'PAID') return paidMetadata(order, method, resolvedProvider);
       const linked = await payosLink(order);
+      if (!linked || linked.order_code !== orderCode || linked.guild_id !== guildId || linked.customer_id !== customerId
+        || linked.fulfillment_mode !== 'SUPPLIER') deny('ORDER_NOT_FOUND');
+      if (linked.payment_status === 'PAID') return paidMetadata(linked, method, resolvedProvider);
       return privatePaymentMetadata(linked, resolvedProvider);
     }).finally(() => paymentFlights.delete(key));
-    paymentTurn = task.catch(() => {});
     paymentFlights.set(key, task);
     return task;
   }
