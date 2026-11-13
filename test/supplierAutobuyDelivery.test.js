@@ -533,6 +533,62 @@ test('recovers one real two-connection SQLite writer lock before the first journ
   }
 });
 
+test('does not treat a real failed admission COMMIT as an unknown Discord send and retries without rebuying', async () => {
+  const databasePath = path.join(os.tmpdir(), `cenar-delivery-admission-lock-${randomUUID()}.sqlite`);
+  const t = fixture(databasePath), reader = new Database(databasePath), errors = [];
+  t.database.pragma('busy_timeout=0'); reader.pragma('busy_timeout=0');
+  const transaction = t.database.transaction.bind(t.database);
+  let injectLock = true;
+  t.database.transaction = callback => {
+    const wrapped = transaction(callback);
+    return Object.assign((...args) => wrapped(...args), { immediate: (...args) => {
+      if (!injectLock || !String(callback).includes("SET status='SENDING'")) return wrapped.immediate(...args);
+      injectLock = false;
+      reader.exec('BEGIN'); reader.prepare('SELECT * FROM supplier_autobuy_delivery_attempts').all();
+      try { return wrapped.immediate(...args); }
+      catch (error) { errors.push(error.code); throw error; }
+      finally { reader.exec('ROLLBACK'); }
+    } });
+  };
+  try {
+    const order = await t.paid(); t.fetchWait.resolve();
+    expect(await t.service.fulfillSupplierOrder(t.client, order.order_code)).toMatchObject({ status: 'DELIVERY_PENDING' });
+    expect(errors).toEqual(['SQLITE_BUSY']); expect(t.send).not.toHaveBeenCalled();
+    expect(t.journal()).toMatchObject({ status: 'RETRY', channel_id: null, send_started_at: null });
+    expect(t.intent().encrypted_payload).toMatch(/^enc:v1:/);
+    t.advance(120001);
+    expect(await t.restart().fulfillSupplierOrder(t.client, order.order_code)).toMatchObject({ delivered: true });
+    expect(t.journal()).toMatchObject({ status: 'SENT', message_id: MESSAGE, message_format: 'CURRENT' });
+    expect(t.send).toHaveBeenCalledOnce(); expect(t.provider.createOrder).toHaveBeenCalledOnce();
+  } finally {
+    reader.close(); t.database.close();
+    for (const suffix of ['', '-wal', '-shm']) fs.rmSync(databasePath + suffix, { force: true });
+  }
+});
+
+test('vetoes a committed admission after the deadline before calling Discord and retries only the known unsent attempt', async () => {
+  const t = fixture(), transaction = t.database.transaction.bind(t.database);
+  let blockCommit = true;
+  t.database.transaction = callback => {
+    const wrapped = transaction(callback);
+    return Object.assign((...args) => wrapped(...args), { immediate: (...args) => {
+      const result = wrapped.immediate(...args);
+      if (blockCommit && String(callback).includes("SET status='SENDING'")) { blockCommit = false; t.advance(16000); }
+      return result;
+    } });
+  };
+  try {
+    const order = await t.paid(); t.fetchWait.resolve();
+    expect(await t.service.fulfillSupplierOrder(t.client, order.order_code)).toMatchObject({ status: 'DELIVERY_PENDING' });
+    expect(t.send).not.toHaveBeenCalled();
+    expect(t.journal()).toMatchObject({ status: 'RETRY', channel_id: CHANNEL });
+    expect(t.journal().send_started_at).not.toBeNull();
+    t.advance(120001);
+    expect(await t.restart().fulfillSupplierOrder(t.client, order.order_code)).toMatchObject({ delivered: true });
+    expect(t.send).toHaveBeenCalledOnce(); expect(t.provider.createOrder).toHaveBeenCalledOnce();
+  } finally { t.database.close(); }
+});
+
 test('checks the elapsed deadline after a blocking journal retry before any DM preparation', async () => {
   const t = fixture(), prepare = t.database.prepare.bind(t.database), attempts = [];
   t.database.prepare = sql => {

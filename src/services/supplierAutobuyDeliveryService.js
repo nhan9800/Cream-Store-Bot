@@ -191,16 +191,21 @@ export function createSupplierDeliveryService({ db, now = Date.now, id } = {}) {
       }
       let admitted = false;
       const controls = { payload: { content, files: [{ attachment: bytes, name: fileName }], allowedMentions: noMentions, nonce, enforceNonce: true },
-        beforeSend: ({ channelId } = {}) => db.transaction(() => {
-          const row = byId(attempt.attempt_id);
-          if (closed || now() >= deadlineAt || admitted || !snowflake(channelId) || row?.status !== 'PREPARING'
-            || latest(order.order_code)?.attempt_id !== row.attempt_id) return false;
-          if (beforeSend() !== true || closed || now() >= deadlineAt) return false;
-          const changed = db.prepare("UPDATE supplier_autobuy_delivery_attempts SET status='SENDING',channel_id=?,send_started_at=? WHERE attempt_id=? AND status='PREPARING'")
-            .run(channelId, stamp(), row.attempt_id);
-          admitted = changed.changes === 1;
-          return admitted;
-        }).immediate() };
+        beforeSend: ({ channelId } = {}) => {
+          const committed = db.transaction(() => {
+            const row = byId(attempt.attempt_id);
+            if (closed || now() >= deadlineAt || admitted || !snowflake(channelId) || row?.status !== 'PREPARING'
+              || latest(order.order_code)?.attempt_id !== row.attempt_id) return false;
+            if (beforeSend() !== true || closed || now() >= deadlineAt) return false;
+            return db.prepare("UPDATE supplier_autobuy_delivery_attempts SET status='SENDING',channel_id=?,send_started_at=? WHERE attempt_id=? AND status='PREPARING'")
+              .run(channelId, stamp(), row.attempt_id).changes === 1;
+          }).immediate();
+          // COMMIT itself can block or fail. Until it succeeds and the live
+          // deadline still holds, channel.send has not been admitted.
+          if (!committed || closed || now() >= deadlineAt) return false;
+          admitted = true;
+          return true;
+        } };
       try {
         const receipt = await sendDelivery(client, order, items, intent.request_id, controls);
         return recordReceipt(byId(attempt.attempt_id), receipt, admitted);
