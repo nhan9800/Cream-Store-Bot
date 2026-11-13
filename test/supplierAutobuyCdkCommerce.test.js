@@ -66,7 +66,7 @@ function fixture() {
     expect(request.method).toBe('GET');
     return new Response(JSON.stringify({ products: reviewed.map(product => ({
       id: Number(product.productKey.split(':')[1]), name: product.expectedName, description: 'Synthetic test stock',
-      currency: 'VND', prices: [{ min_quantity: 1, unit_price: 100000 }], stock: 10, locked: false, delivery: 'automatic',
+      currency: 'VND', prices: [{ min_quantity: 1, unit_price: 100000 }], stock: 10, locked: false, delivery: product.deliveryMode,
     })), next_after: null }), { status: 200, headers: { 'content-type': 'application/json' } });
   });
   const provider = createCdkVietnamClient({ apiKey: 'synthetic-local-test-key', fetchImpl });
@@ -106,8 +106,18 @@ describe('reviewed CDK catalog to private payment selection', () => {
     const t = fixture();
     const entry = interaction('supplier-autobuy:catalog');
     await t.handler(entry);
-    const menu = nodes(entry.editReply.mock.calls[0][0]).find(node => node.custom_id === id('select'));
-    expect(menu.options.map(option => option.value).sort()).toEqual(t.reviewed.map(product => product.productKey).sort());
+    const shown = new Set();
+    let payload = entry.editReply.mock.calls[0][0];
+    for (let page = 0; page < t.reviewed.length; page++) {
+      const parts = nodes(payload);
+      parts.find(node => node.custom_id === id('select')).options.forEach(option => shown.add(option.value));
+      const next = parts.find(node => node.custom_id?.startsWith(id('page')) && node.label === 'Trang sau' && !node.disabled);
+      if (!next) break;
+      const navigation = interaction(next.custom_id);
+      await t.handler(navigation);
+      payload = navigation.editReply.mock.calls[0][0];
+    }
+    expect([...shown].sort()).toEqual(t.reviewed.map(product => product.productKey).sort());
     let firstQuote;
     for (const product of t.reviewed) {
       const select = interaction(id('select'), { isButton: () => false, isStringSelectMenu: () => true, values: [product.productKey] });
@@ -121,10 +131,10 @@ describe('reviewed CDK catalog to private payment selection', () => {
     }
     const confirm = interaction(id('confirm', firstQuote));
     await t.handler(confirm);
-    const payload = confirm.editReply.mock.calls[0][0], ids = nodes(payload).map(node => node.custom_id).filter(Boolean);
+    const confirmedPayload = confirm.editReply.mock.calls[0][0], ids = nodes(confirmedPayload).map(node => node.custom_id).filter(Boolean);
     expect(ids).toContain(id('pay', 'CN_123456:payos'));
     expect(ids).toContain(id('pay', 'CN_123456:wallet'));
-    expect(JSON.stringify(payload)).toContain('Thanh toán trước');
+    expect(JSON.stringify(confirmedPayload)).toContain('Thanh toán trước');
     expect(t.database.prepare('SELECT product_key,status FROM supplier_autobuy_intents').get())
       .toEqual({ product_key: t.reviewed[0].productKey, status: 'PENDING' });
     await t.handler(interaction(id('confirm', firstQuote)));

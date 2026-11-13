@@ -183,14 +183,14 @@ describe('Cenar price board V3', () => {
     expect(creativePayload).toContain('7 ngày');
   });
 
-  it('publishes both current Nitro Login 2-month options at 115k and 140k', () => {
+  it('publishes both current Nitro Login 2-month options at 115k and 136k', () => {
     const nitroSeedProducts = DEFAULT_PRODUCT_CATALOG
       .filter((product) => product.name.includes('Discord Nitro Boost 2 Tháng (Login ·'));
     const sevenDayMail = nitroSeedProducts.find((product) => product.name.includes('Giữ Mail 7 Ngày'));
     const guaranteedMail = nitroSeedProducts.find((product) => product.name.includes('Mail Bao Sống'));
 
     expect(sevenDayMail?.price).toBe(115000);
-    expect(guaranteedMail?.price).toBe(140000);
+    expect(guaranteedMail?.price).toBe(136000);
 
     const products = [
       ...getActiveProducts(GUILD_ID).filter((product) => (
@@ -204,7 +204,7 @@ describe('Cenar price board V3', () => {
     expect(nitroPayload).toContain('Giữ Mail 7 Ngày');
     expect(nitroPayload).toContain('Mail Bao Sống');
     expect(nitroPayload).toContain('115.000');
-    expect(nitroPayload).toContain('140.000');
+    expect(nitroPayload).toContain('136.000');
 
     const nitroPanel = buildPriceBoardPayloads(GUILD_ID, {}, products)
       .map((payload) => payload.components[0].toJSON())
@@ -217,13 +217,13 @@ describe('Cenar price board V3', () => {
 
     const announcement = buildPriceAnnouncementContent(GUILD_ID, nitroSeedProducts);
     expect(announcement).toContain('115.000');
-    expect(announcement).toContain('140.000');
+    expect(announcement).toContain('136.000');
     expect(announcement).not.toContain('99k');
   });
 
   it('shows the complete eligibility for the first-offer Nitro Trial 3-month package', () => {
     const trial = getActiveProducts(GUILD_ID).find(p => p.product_key === 'discord-nitro-boost-trial-3-months-first-offer');
-    expect(trial).toMatchObject({ price: 65000, duration_months: 3, is_active: 1 });
+    expect(trial).toMatchObject({ price: 64000, duration_months: 3, is_active: 1 });
     expect(trial.description).toContain('chưa từng sử dụng Nitro');
     expect(trial.description).toContain('trên 1 tháng');
 
@@ -240,7 +240,7 @@ describe('Cenar price board V3', () => {
 
     const announcement = buildPriceAnnouncementContent(GUILD_ID, products);
     expect(announcement).toContain('Nitro Trial 3 Tháng · Ưu Đãi Lần Đầu');
-    expect(announcement).toContain('65.000');
+    expect(announcement).toContain('64.000');
     expect(announcement).not.toContain('12 tháng liên tục');
   });
 

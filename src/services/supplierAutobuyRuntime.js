@@ -158,4 +158,31 @@ export function createSupplierAutobuyRuntime({
   return Object.freeze({ start, getHealth: () => snapshot, setSalesEnabled });
 }
 
-export const supplierAutobuyRuntime = createSupplierAutobuyRuntime();
+// Each provider keeps its own probe and readiness. The worker remains shared.
+export function createSupplierAutobuyRuntimeRegistry({ runtimeFactory = createSupplierAutobuyRuntime,
+  defaultProvider = () => ['cdkvietnam', 'dopermind'].includes(process.env.SUPPLIER_AUTOBUY_PROVIDER)
+    ? process.env.SUPPLIER_AUTOBUY_PROVIDER : 'daiphuc' } = {}) {
+  const runtimes = new Map();
+  function forProvider(provider) {
+    if (!['cdkvietnam', 'dopermind', 'daiphuc'].includes(provider)) throw new Error('Supplier provider is invalid.');
+    if (!runtimes.has(provider)) {
+      const runtime = runtimeFactory();
+      const initial = Object.freeze({ ...runtime.getHealth(), provider });
+      // Bind the registry entry to its provider even when a caller omits or
+      // accidentally supplies another source in the startup options.
+      runtimes.set(provider, Object.freeze({
+        start: (options = {}) => runtime.start({ ...options, provider }),
+        getHealth: () => runtime.getHealth().status === 'NOT_STARTED' ? initial : runtime.getHealth(),
+        setSalesEnabled: enabled => runtime.setSalesEnabled(enabled),
+      }));
+    }
+    return runtimes.get(provider);
+  }
+  return Object.freeze({ forProvider,
+    start: (options = {}) => forProvider(options.provider ?? defaultProvider()).start(options),
+    getHealth: () => forProvider(defaultProvider()).getHealth(),
+    getAllHealth: () => Object.freeze(Object.fromEntries([...runtimes].map(([provider, runtime]) => [provider, runtime.getHealth()]))),
+    setSalesEnabled: (enabled, provider = defaultProvider()) => forProvider(provider).setSalesEnabled(enabled),
+  });
+}
+export const supplierAutobuyRuntime = createSupplierAutobuyRuntimeRegistry();

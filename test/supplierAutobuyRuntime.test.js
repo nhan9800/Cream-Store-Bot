@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createSupplierAutobuyRuntime } from '../src/services/supplierAutobuyRuntime.js';
+import { createSupplierAutobuyRuntime, createSupplierAutobuyRuntimeRegistry } from '../src/services/supplierAutobuyRuntime.js';
 import { DaiphucPartnerError } from '../src/services/daiphucPartnerClient.js';
 import { STORE_ONE_GUILD_ID } from '../src/utils/locale.js';
 
@@ -19,6 +19,26 @@ function setup(overrides = {}, options = {}) {
 }
 
 afterEach(() => vi.useRealTimers());
+
+describe('independent provider runtime registry', () => {
+  it('binds startup to each entry and never borrows the other source readiness', async () => {
+    const cdk = { getBalance: vi.fn(async () => ({ balanceVnd: 0 })), getStock: vi.fn(async () => [1, 2]), createOrder: vi.fn() };
+    const doper = { getBalance: vi.fn(async () => { throw new Error('Synthetic provider outage'); }), getStock: vi.fn(async () => [1]), createOrder: vi.fn() };
+    const cdkFactory = vi.fn(() => cdk), doperFactory = vi.fn(() => doper);
+    const registry = createSupplierAutobuyRuntimeRegistry({ defaultProvider: () => 'cdkvietnam',
+      runtimeFactory: () => createSupplierAutobuyRuntime({ cdkVietnamClientFactory: cdkFactory, dopermindClientFactory: doperFactory, now: () => NOW }) });
+    expect(registry.forProvider('cdkvietnam').getHealth()).toMatchObject({ provider: 'cdkvietnam', status: 'NOT_STARTED' });
+    await Promise.all([registry.forProvider('cdkvietnam').start({ ...context, provider: 'dopermind', envFile: '.env' }),
+      registry.forProvider('dopermind').start({ ...context, envFile: '.env' })]);
+    registry.forProvider('cdkvietnam').setSalesEnabled(true); registry.forProvider('dopermind').setSalesEnabled(true);
+    expect(registry.getHealth()).toMatchObject({ provider: 'cdkvietnam', purchasesEnabled: true });
+    expect(registry.getAllHealth()).toMatchObject({ cdkvietnam: { status: 'CONNECTED', productCount: 2, purchasesEnabled: true },
+      dopermind: { status: 'CHECK_FAILED', purchasesEnabled: false } });
+    expect(registry.forProvider('cdkvietnam')).toBe(registry.forProvider('cdkvietnam'));
+    expect(cdkFactory).toHaveBeenCalledOnce(); expect(doperFactory).toHaveBeenCalledOnce();
+    expect(cdk.createOrder).not.toHaveBeenCalled(); expect(doper.createOrder).not.toHaveBeenCalled();
+  });
+});
 
 describe('supplier one-shot read-only runtime', () => {
   it('performs no work on construction or health reads', () => {

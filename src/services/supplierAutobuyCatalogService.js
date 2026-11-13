@@ -7,6 +7,7 @@ import { createDopermindClient } from './dopermindClient.js';
 import { createCdkVietnamClient } from './cdkVietnamClient.js';
 import { getGuildConfig } from './guildConfigService.js';
 import { isManager } from '../utils/permissions.js';
+import { configuredSupplierProvider, isSupplierProvider, supplierProviderForProductKey } from '../utils/supplierProvider.js';
 
 const MAX_TOTAL = 100_000_000;
 const NO_PROFILE = 'Tài khoản hoặc mã kích hoạt theo mô tả sản phẩm';
@@ -18,19 +19,19 @@ const integer = (n, min = 0) => Number.isSafeInteger(n) && n >= min;
 const dateMs = value => typeof value === 'string' ? Date.parse(value) : NaN;
 const validText = (s, max = 1000) => typeof s === 'string' && s.trim() && s.length <= max && !/[\u0000-\u001f\u007f]/.test(s);
 
-export function supplierSalesConfigured(env = process.env, guildId = config.guildId) {
+export function supplierSalesConfigured(env = process.env, guildId = config.guildId, provider = configuredSupplierProvider(env)) {
   if (guildId !== STORE_ONE_GUILD_ID || env.ENV_FILE !== '.env' || env.SUPPLIER_AUTOBUY_ENABLED !== 'true') return false;
-  if (env.SUPPLIER_AUTOBUY_PROVIDER === 'dopermind') return typeof env.DOPERMIND_API_KEY === 'string' && Boolean(env.DOPERMIND_API_KEY.trim());
-  if (env.SUPPLIER_AUTOBUY_PROVIDER === 'cdkvietnam') return typeof env.CDKVIETNAM_API_KEY === 'string' && Boolean(env.CDKVIETNAM_API_KEY.trim());
+  if (provider === 'dopermind') return typeof env.DOPERMIND_API_KEY === 'string' && Boolean(env.DOPERMIND_API_KEY.trim());
+  if (provider === 'cdkvietnam') return typeof env.CDKVIETNAM_API_KEY === 'string' && Boolean(env.CDKVIETNAM_API_KEY.trim());
   return false;
 }
 
 function activeProvider(env = process.env) {
-  return env.SUPPLIER_AUTOBUY_PROVIDER === 'cdkvietnam' ? 'cdkvietnam' : 'dopermind';
+  return configuredSupplierProvider(env) || 'dopermind';
 }
 
-function configuredClientFactory(env = process.env) {
-  return activeProvider(env) === 'cdkvietnam'
+function configuredClientFactory(env = process.env, provider = activeProvider(env)) {
+  return provider === 'cdkvietnam'
     ? () => createCdkVietnamClient({ apiKey: env.CDKVIETNAM_API_KEY })
     : () => createDopermindClient({ apiKey: env.DOPERMIND_API_KEY });
 }
@@ -107,7 +108,8 @@ export function createSupplierAutobuyCatalog({
   let coverage = { sourceCount: 0, blockedCount: 0, unreviewedCount: 0, outOfStockCount: 0,
     lockedCount: 0, manualDeliveryCount: 0, policyCount: policies.size, blockedReasons: {} };
   const safeReasons = new Set(['NOT_REVIEWED', 'SOURCE_LOCKED', 'SOURCE_CHANGED', 'REFERENCE_UNVERIFIED',
-    'REFERENCE_STALE', 'INVALID_PRICING_POLICY', 'TERMS_UNVERIFIED', 'INVALID_OVERRIDE', 'NO_PROFITABLE_PRICE']);
+    'REFERENCE_STALE', 'INVALID_PRICING_POLICY', 'TERMS_UNVERIFIED', 'INVALID_OVERRIDE', 'NO_PROFITABLE_PRICE',
+    'SUPPLIER_DURATION_UNCONFIRMED', 'SUPPLIER_ACTIVATION_UNCONFIRMED']);
   function initialize() {
     if (initialized) return;
     database.exec(`CREATE TABLE IF NOT EXISTS supplier_autobuy_price_overrides (
@@ -224,29 +226,41 @@ export function createSupplierAutobuyCatalog({
   return Object.freeze({ getOffers, getQuote, setPriceOverride, getHealth, getReviewSnapshot });
 }
 
-let singleton;
-function catalog() {
-  if (!singleton) {
-    const provider = activeProvider();
+const catalogs = new Map();
+function catalog(provider = activeProvider()) {
+  if (!isSupplierProvider(provider)) fail('INVALID_PROVIDER');
+  if (!catalogs.has(provider)) {
     const policyFile = provider === 'cdkvietnam' ? 'cdkVietnamAutobuyPricingPolicy.json' : 'supplierAutobuyPricingPolicy.json';
     const policy = JSON.parse(readFileSync(new URL(`../data/${policyFile}`, import.meta.url), 'utf8'));
-    singleton = createSupplierAutobuyCatalog({ policy, clientFactory: configuredClientFactory() });
+    catalogs.set(provider, createSupplierAutobuyCatalog({ policy, clientFactory: configuredClientFactory(process.env, provider),
+      enabled: () => supplierSalesConfigured(process.env, config.guildId, provider) }));
   }
-  return singleton;
+  return catalogs.get(provider);
 }
-export const getSupplierOffers = options => catalog().getOffers(options);
-export const getSupplierQuote = (key, quantity, options) => catalog().getQuote(key, quantity, options);
-export function getSupplierCatalogHealth() {
-  if (!singleton) return { enabled: supplierSalesConfigured(), status: 'NOT_STARTED', reviewedCount: 0, availableCount: 0, checkedAt: null };
-  return singleton.getHealth();
+export const getSupplierOffers = async (options = {}) => {
+  const provider = options.provider ?? activeProvider();
+  return { ...await catalog(provider).getOffers(options), provider };
+};
+export const getSupplierQuote = async (key, quantity, options = {}) => {
+  const provider = options.provider ?? supplierProviderForProductKey(key);
+  if (!provider || supplierProviderForProductKey(key) !== provider) fail('PROVIDER_MISMATCH');
+  return { ...await catalog(provider).getQuote(key, quantity, options), provider };
+};
+export function getSupplierCatalogHealth(provider = activeProvider()) {
+  if (!isSupplierProvider(provider)) fail('INVALID_PROVIDER');
+  if (!catalogs.has(provider)) return { provider, enabled: supplierSalesConfigured(process.env, config.guildId, provider), status: 'NOT_STARTED', reviewedCount: 0, availableCount: 0, checkedAt: null };
+  return { ...catalogs.get(provider).getHealth(), provider };
 }
-export function getSupplierCatalogReviewSnapshot() {
-  return { provider: activeProvider(), ...(singleton ? singleton.getReviewSnapshot() : { status: 'NOT_STARTED', products: [] }) };
+export function getSupplierCatalogReviewSnapshot(provider = activeProvider()) {
+  if (!isSupplierProvider(provider)) fail('INVALID_PROVIDER');
+  return { provider, ...(catalogs.has(provider) ? catalogs.get(provider).getReviewSnapshot() : { status: 'NOT_STARTED', products: [] }) };
 }
-export async function setSupplierPriceOverride({ guildId, productKey, priceVnd, actorId, client } = {}) {
+export async function setSupplierPriceOverride({ guildId, productKey, priceVnd, actorId, client, provider } = {}) {
+  const source = supplierProviderForProductKey(productKey);
+  if (!source || (provider !== undefined && provider !== source)) fail('PROVIDER_MISMATCH');
   if (guildId !== STORE_ONE_GUILD_ID || !client?.guilds) fail('ACCESS_DENIED');
   const guild = await client.guilds.fetch(guildId).catch(() => null);
   const member = await guild?.members.fetch({ user: actorId, force: true }).catch(() => null);
   if (!isManager(member, getGuildConfig(guildId))) fail('ACCESS_DENIED');
-  return catalog().setPriceOverride({ guildId, productKey, priceVnd, actorId, authorized: true });
+  return catalog(source).setPriceOverride({ guildId, productKey, priceVnd, actorId, authorized: true });
 }

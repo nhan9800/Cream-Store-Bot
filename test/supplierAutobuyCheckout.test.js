@@ -170,3 +170,101 @@ describe('supplier private ticket confirmation', () => {
     await expect(facade.confirm({ client, guildId, customerId, quoteId: 'same-quote' })).rejects.toMatchObject({ code: 'TICKET_ACCESS_UNVERIFIED' });
   });
 });
+
+describe('provider-bound checkout from separate supplier channels', () => {
+  const mismatch = () => Object.assign(new Error('provider mismatch'), { code: 'PROVIDER_MISMATCH' });
+  function bindProvider(t, provider) {
+    const check = args => {
+      if (args.provider !== undefined && args.provider !== provider) throw mismatch();
+      if (args.customerId !== customerId) throw Object.assign(new Error('not found'), { code: 'ORDER_NOT_FOUND' });
+    };
+    t.engine.getSupplierQuoteForCustomer.mockImplementation(async args => {
+      check(args); return { quoteId: args.quoteId, provider };
+    });
+    t.engine.getSupplierOrderForCustomer.mockImplementation(async args => {
+      check(args); return { orderCode: args.orderCode, productName: 'Owned supplier product', provider,
+        status: t.readOrder(args.orderCode)?.status };
+    });
+    t.engine.confirmSupplierCheckout.mockImplementation(async args => {
+      check(args); return { orderCode: payment.orderCode, productName: 'Owned supplier product', provider };
+    });
+    t.engine.validateSupplierOrderForPayment.mockImplementation(async args => { check(args); return { provider }; });
+  }
+
+  it.each(['cdkvietnam', 'dopermind'])('preserves trusted %s context through quote, ticket confirmation and payment preflight', async provider => {
+    const enabled = vi.fn(() => true);
+    const t = fixture({ enabled, publishOrder: vi.fn(async () => {}) }); bindProvider(t, provider);
+    const confirmed = await t.facade.confirm({ client: t.client, guildId, customerId, quoteId: 'owned-quote', provider });
+    expect(confirmed.provider).toBe(provider);
+    expect(t.engine.getSupplierQuoteForCustomer).toHaveBeenCalledWith({ guildId, customerId, quoteId: 'owned-quote', provider });
+    expect(t.engine.confirmSupplierCheckout).toHaveBeenCalledWith(expect.objectContaining({ provider, ticketId: 1 }));
+    const paid = await t.facade.payment({ ...payment, client: t.client, provider });
+    expect(paid.provider).toBe(provider);
+    expect(t.engine.validateSupplierOrderForPayment).toHaveBeenCalledWith({ guildId, customerId, orderCode: payment.orderCode, provider });
+    expect(enabled.mock.calls.every(([selected, guild]) => selected === provider && guild === guildId)).toBe(true);
+    expect(t.debitWallet).toHaveBeenCalledTimes(1);
+  });
+
+  it('derives omitted legacy context from the persisted quote before creating a ticket', async () => {
+    const t = fixture({ publishOrder: vi.fn(async () => {}) }); bindProvider(t, 'dopermind');
+    await t.facade.confirm({ client: t.client, guildId, customerId, quoteId: 'old-quote' });
+    expect(t.engine.confirmSupplierCheckout).toHaveBeenCalledWith(expect.objectContaining({ provider: 'dopermind' }));
+  });
+
+  it('rejects a quote from the other supplier before ticket or order-log side effects', async () => {
+    const publishOrder = vi.fn(async () => {});
+    const t = fixture({ publishOrder }); bindProvider(t, 'dopermind');
+    await expect(t.facade.confirm({ client: t.client, guildId, customerId, quoteId: 'doper-quote', provider: 'cdkvietnam' }))
+      .rejects.toMatchObject({ code: 'PROVIDER_MISMATCH' });
+    expect(t.guild.channels.create).not.toHaveBeenCalled();
+    expect(t.engine.confirmSupplierCheckout).not.toHaveBeenCalled();
+    expect(publishOrder).not.toHaveBeenCalled();
+  });
+
+  it('does not let a mismatched provider attach to an in-flight payment and receive its invoice', async () => {
+    const t = fixture(); bindProvider(t, 'cdkvietnam');
+    let release;
+    const gate = new Promise(resolve => { release = resolve; });
+    t.payosLink.mockImplementation(async order => {
+      await gate;
+      return { ...order, payment_checkout_url: 'https://pay.payos.vn/web/owned-link', payment_qr_code: '000201owned-qr' };
+    });
+    const accepted = t.facade.payment({ ...payment, method: 'payos', provider: 'cdkvietnam' });
+    await vi.waitFor(() => expect(t.payosLink).toHaveBeenCalledTimes(1));
+    const rejected = t.facade.payment({ ...payment, provider: 'dopermind' }).catch(error => error);
+    release();
+    expect((await accepted).provider).toBe('cdkvietnam');
+    expect(await rejected).toMatchObject({ code: 'PROVIDER_MISMATCH' });
+    expect(t.payosLink).toHaveBeenCalledTimes(1); expect(t.debitWallet).not.toHaveBeenCalled();
+    expect(t.database.prepare('SELECT method FROM supplier_autobuy_payment_methods').get().method).toBe('PAYOS');
+  });
+
+  it('rejects cross-provider status before PayOS reconciliation, while owned history stays readable during a pause', async () => {
+    let opened = true;
+    const syncPayos = vi.fn(async () => {});
+    const t = fixture({ enabled: () => opened, syncPayos }); bindProvider(t, 'cdkvietnam');
+    await t.facade.status({ guildId, customerId, orderCode: payment.orderCode, provider: 'cdkvietnam' });
+    t.database.prepare("INSERT INTO supplier_autobuy_payment_methods VALUES (?,'PAYOS',?)").run(payment.orderCode, new Date().toISOString());
+    t.database.prepare("UPDATE orders SET payment_link_id='link',payment_checkout_url='https://pay.payos.vn/web/owned',payment_qr_code='000201owned-invoice'").run();
+    await expect(t.facade.status({ client: t.client, guildId, customerId, orderCode: payment.orderCode, provider: 'dopermind' }))
+      .rejects.toMatchObject({ code: 'PROVIDER_MISMATCH' });
+    expect(syncPayos).not.toHaveBeenCalled();
+    opened = false;
+    const recovered = await t.facade.status({ guildId, customerId, orderCode: payment.orderCode, provider: 'cdkvietnam' });
+    expect(recovered.provider).toBe('cdkvietnam'); expect(recovered.payment.provider).toBe('cdkvietnam');
+    expect(recovered.payment.qrCode).toBe('000201owned-invoice');
+    expect(t.payosLink).not.toHaveBeenCalled(); expect(t.debitWallet).not.toHaveBeenCalled();
+  });
+
+  it('checks each provider configuration independently and rejects another store before readiness reads', async () => {
+    const enabled = vi.fn(provider => provider === 'dopermind');
+    const t = fixture({ enabled, publishOrder: vi.fn(async () => {}) }); bindProvider(t, 'dopermind');
+    await expect(t.facade.confirm({ client: t.client, guildId, customerId, quoteId: 'q', provider: 'cdkvietnam' }))
+      .rejects.toMatchObject({ code: 'AUTOBUY_DISABLED' });
+    await t.facade.confirm({ client: t.client, guildId, customerId, quoteId: 'q', provider: 'dopermind' });
+    enabled.mockClear();
+    await expect(t.facade.payment({ ...payment, guildId: 'another-store', provider: 'dopermind' })).rejects.toMatchObject({ code: 'AUTOBUY_DISABLED' });
+    expect(enabled).not.toHaveBeenCalled();
+    await expect(t.facade.payment({ ...payment, provider: 'unknown-provider' })).rejects.toMatchObject({ code: 'PROVIDER_MISMATCH' });
+  });
+});

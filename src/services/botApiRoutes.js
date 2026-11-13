@@ -77,7 +77,7 @@ import {
 import { buildPublicFeedbackView } from './publicFeedbackView.js';
 import { getMusicRuntimeStatus } from './musicPlayerService.js';
 import { supplierAutobuyRuntime } from './supplierAutobuyRuntime.js';
-import { getSupplierAutobuyPanelHealth } from './supplierAutobuyPanelService.js';
+import { getSupplierAutobuyPanelHealth, getSupplierAutobuyPanelsHealth } from './supplierAutobuyPanelService.js';
 import { getSupplierCatalogHealth } from './supplierAutobuyCatalogService.js';
 import { getSupplierAutobuyOrderHealth } from './supplierAutobuyOrderService.js';
 import { getCoreEmojiPackStatus } from './coreEmojiPackService.js';
@@ -513,6 +513,9 @@ export function registerBotApiRoutes(app) {
             supplierAutobuyPanel: getSupplierAutobuyPanelHealth(),
             supplierAutobuyCatalog: getSupplierCatalogHealth(),
             supplierAutobuyOrders: getSupplierAutobuyOrderHealth(),
+            supplierAutobuySources: supplierAutobuyRuntime.getAllHealth?.(),
+            supplierAutobuyCatalogs: { cdkvietnam: getSupplierCatalogHealth('cdkvietnam'), dopermind: getSupplierCatalogHealth('dopermind') },
+            supplierAutobuyPanels: getSupplierAutobuyPanelsHealth(),
             botUi: { icons: getCoreEmojiPackStatus(req.app.locals.discordClient) },
             shopRelaunch: getShopRelaunchReleaseHealth(),
             compactSale: getCompactSaleReleaseHealth(),

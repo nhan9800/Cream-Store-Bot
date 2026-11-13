@@ -74,6 +74,112 @@ function setup(options = {}) {
 }
 afterEach(() => { vi.useRealTimers(); for (const database of open.splice(0)) database.close(); });
 
+describe('durable provider isolation', () => {
+  const CDK = 'cdkvietnam:1';
+  function sources(options = {}) {
+    let t;
+    const factory = vi.fn(provider => provider === 'cdkvietnam' ? cdk : t.provider);
+    const cdk = { getStock: vi.fn(async () => [{ productKey: CDK, name: 'Subscription 1 tháng', priceVnd: 42000, stock: 20 }]),
+      getBalance: vi.fn(async () => ({ currency: 'VND', balanceVnd: 1000000 })),
+      createOrder: vi.fn(async request => ({ requestId: request.requestId, productKey: request.productKey, quantity: request.quantity,
+        orderCode: 'ord_cdk_test', unitPriceVnd: 42000, totalAmountVnd: 42000 * request.quantity,
+        items: Array.from({ length: request.quantity }, () => 'synthetic-cdk-delivery') })) };
+    t = setup({ settings: { providerFactory: factory, ...options } });
+    const createCdk = async () => {
+      const q = await t.service.prepareSupplierCheckout({ ...t.context, provider: 'cdkvietnam', productKey: CDK });
+      return t.service.confirmSupplierCheckout({ ...t.context, provider: 'cdkvietnam', quoteId: q.quoteId,
+        ticketId: 1, ticketChannelId: CHANNEL, orderLogChannelId: LOG });
+    };
+    return { ...t, cdk, factory, createCdk };
+  }
+  it('rejects a source/key mismatch before reading a quote and rejects a dishonest quote source', async () => {
+    const t = sources();
+    await expect(t.service.prepareSupplierCheckout({ ...t.context, provider: 'dopermind', productKey: CDK })).rejects.toMatchObject({ code: 'PROVIDER_MISMATCH' });
+    expect(t.getQuote).not.toHaveBeenCalled();
+    t.getQuote.mockImplementation(async (key, quantity) => ({ ...t.quote(key, quantity), provider: 'dopermind' }));
+    await expect(t.service.prepareSupplierCheckout({ ...t.context, provider: 'cdkvietnam', productKey: CDK })).rejects.toMatchObject({ code: 'PROVIDER_MISMATCH' });
+    expect(t.database.prepare('SELECT COUNT(*) AS n FROM supplier_autobuy_quotes').get().n).toBe(0);
+  });
+  it('binds quote confirmations to their saved source before order creation', async () => {
+    const t = sources();
+    const q = await t.service.prepareSupplierCheckout({ ...t.context, provider: 'cdkvietnam', productKey: CDK });
+    expect(q.provider).toBe('cdkvietnam');
+    expect(t.getQuote).toHaveBeenCalledWith(CDK, 1, { force: true, provider: 'cdkvietnam' });
+    await expect(t.service.confirmSupplierCheckout({ ...t.context, provider: 'dopermind', quoteId: q.quoteId,
+      ticketId: 1, ticketChannelId: CHANNEL, orderLogChannelId: LOG })).rejects.toMatchObject({ code: 'PROVIDER_MISMATCH' });
+    expect(t.createOrder).not.toHaveBeenCalled();
+    expect(() => t.service.getSupplierQuoteForCustomer({ ...t.context, quoteId: q.quoteId, provider: 'dopermind' })).toThrowError(/AutoBuy/);
+  });
+  it('routes preflight, wallet funds and purchases by immutable order source', async () => {
+    const t = sources(); const c = await t.createCdk(), d = await t.create();
+    expect(t.intent(c.order_code).provider).toBe('cdkvietnam');
+    expect(t.intent(d.order_code).provider).toBe('dopermind');
+    await expect(t.service.validateSupplierOrderForPayment({ ...t.context, orderCode: c.order_code, provider: 'dopermind' })).rejects.toMatchObject({ code: 'PROVIDER_MISMATCH' });
+    expect(t.factory).not.toHaveBeenCalled();
+    await t.service.validateSupplierOrderForPayment({ ...t.context, orderCode: c.order_code, provider: 'cdkvietnam' });
+    expect(t.cdk.getStock).toHaveBeenCalledOnce();
+    expect(t.provider.getStock).not.toHaveBeenCalled();
+    t.pay(c.order_code); t.pay(d.order_code);
+    t.cdk.getBalance.mockResolvedValue({ currency: 'VND', balanceVnd: 0 });
+    expect(await t.service.fulfillSupplierOrder({}, c.order_code)).toMatchObject({ status: 'WAITING_SUPPLIER_FUNDS' });
+    expect(await t.service.fulfillSupplierOrder({}, d.order_code)).toMatchObject({ delivered: true });
+    expect(t.cdk.createOrder).not.toHaveBeenCalled(); expect(t.provider.createOrder).toHaveBeenCalledOnce();
+    expect(t.factory.mock.calls.map(([provider]) => provider)).toEqual(['cdkvietnam', 'cdkvietnam', 'dopermind']);
+  });
+  it('filters history and blocks cross-source delivery retrieval and acknowledgment', async () => {
+    const t = sources(); const c = await t.createCdk(), d = await t.create();
+    expect(t.service.listSupplierOrdersForCustomer({ ...t.context, provider: 'cdkvietnam' })).toMatchObject([{ orderCode: c.order_code, provider: 'cdkvietnam' }]);
+    expect(t.service.listSupplierOrdersForCustomer({ ...t.context, provider: 'dopermind' })).toMatchObject([{ orderCode: d.order_code, provider: 'dopermind' }]);
+    expect(() => t.service.getSupplierOrderForCustomer({ ...t.context, orderCode: c.order_code, provider: 'dopermind' })).toThrow();
+    expect(() => t.service.getSupplierDeliveryForCustomer({ ...t.context, orderCode: c.order_code, provider: 'dopermind' })).toThrow();
+    expect(() => t.service.acknowledgeSupplierDeliveryRetrieval({ ...t.context, orderCode: c.order_code, provider: 'dopermind', messageId: MESSAGE })).toThrow();
+    expect(t.markOrderCompleted).not.toHaveBeenCalled();
+  });
+  it('does not let a paused source consume the shared worker queue for a ready source', async () => {
+    let cdkEnabled = true;
+    const t = sources({ enabled: provider => provider === 'dopermind' || cdkEnabled });
+    const c = await t.createCdk(), d = await t.create(); t.pay(c.order_code); t.pay(d.order_code);
+    cdkEnabled = false;
+    await expect(t.service.prepareSupplierCheckout({ ...t.context, provider: 'cdkvietnam', productKey: CDK })).rejects.toMatchObject({ code: 'AUTOBUY_DISABLED' });
+    expect(await t.service.processPendingSupplierOrders({}, 1)).toEqual({ processed: 1 });
+    expect(t.intent(c.order_code).status).toBe('PENDING'); expect(t.intent(d.order_code).status).toBe('DELIVERED');
+    expect(t.cdk.createOrder).not.toHaveBeenCalled();
+  });
+  it('migrates legacy paid CDK and Dopermind records without changing request identities or receipts', async () => {
+    const t = sources(); const c = await t.createCdk(), d = await t.create(); t.pay(c.order_code); t.pay(d.order_code);
+    const before = [t.intent(c.order_code), t.intent(d.order_code)];
+    t.database.exec('ALTER TABLE supplier_autobuy_quotes DROP COLUMN provider; ALTER TABLE supplier_autobuy_intents DROP COLUMN provider');
+    for (const row of t.database.prepare('SELECT quote_id,quote_json FROM supplier_autobuy_quotes').all()) {
+      const quote = JSON.parse(row.quote_json); delete quote.provider;
+      t.database.prepare('UPDATE supplier_autobuy_quotes SET quote_json=? WHERE quote_id=?').run(JSON.stringify(quote), row.quote_id);
+    }
+    // Simulates changing the shop default between process restarts. Routing
+    // remains entirely determined by saved product identities.
+    const factory = vi.fn(provider => provider === 'cdkvietnam' ? t.cdk : t.provider);
+    const restart = createSupplierAutobuyOrderService({ ...t.settings, providerFactory: factory }); restart.init();
+    for (const original of before) {
+      const saved = t.intent(original.order_code);
+      expect(saved).toMatchObject({ provider: original.provider, request_id: original.request_id,
+        request_json: original.request_json, request_hash: original.request_hash, quote_id: original.quote_id,
+        status: original.status, supplier_order_code: original.supplier_order_code });
+      expect(restart.getSupplierOrderForCustomer({ ...t.context, orderCode: original.order_code }).provider).toBe(original.provider);
+    }
+    await restart.fulfillSupplierOrder({}, c.order_code); await restart.fulfillSupplierOrder({}, d.order_code);
+    expect(factory.mock.calls.map(([provider]) => provider)).toEqual(['cdkvietnam', 'dopermind']);
+    expect(t.cdk.createOrder).toHaveBeenCalledOnce(); expect(t.provider.createOrder).toHaveBeenCalledOnce();
+  });
+  it('polls a CDK manual receipt on its saved client while Dopermind remains separate', async () => {
+    const t = sources(); const c = await t.createCdk(); t.pay(c.order_code);
+    t.database.prepare("UPDATE supplier_autobuy_intents SET status='RECONCILING',supplier_order_code='ord_saved_cdk' WHERE order_code=?").run(c.order_code);
+    t.cdk.getOrder = vi.fn(async () => ({ orderCode: 'ord_saved_cdk', status: 'delivered', productId: 1, quantity: 1,
+      unitPriceVnd: 42000, totalAmountVnd: 42000, items: ['synthetic-manual-delivery'] }));
+    await t.service.processPendingSupplierOrders({}, 1);
+    expect(t.cdk.getOrder).toHaveBeenCalledWith({ orderId: 'ord_saved_cdk' });
+    expect(t.cdk.createOrder).not.toHaveBeenCalled(); expect(t.provider.createOrder).not.toHaveBeenCalled();
+    expect(t.intent(c.order_code).status).toBe('DELIVERED');
+  });
+});
+
 describe('durable supplier checkout and ownership', () => {
   it('reconciles old customer invoices before the enabled worker fulfills paid orders and tolerates lookup outages', async () => {
     vi.useFakeTimers();

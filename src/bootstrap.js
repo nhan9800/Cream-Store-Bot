@@ -110,27 +110,37 @@ export async function buildClient() {
     // Probe from this hosting process only after it owns the HTTP port. The
     // runtime restricts credentials to Store 1 and never submits a purchase.
     // Supplier downtime must not block commerce or Discord startup.
-    const supplierProbe = Promise.resolve().then(() => supplierAutobuyRuntime.start({
-      guildId: config.guildId,
-      envFile: process.env.ENV_FILE,
-      provider: process.env.SUPPLIER_AUTOBUY_PROVIDER || 'daiphuc',
-      apiKey: process.env.SUPPLIER_AUTOBUY_PROVIDER === 'dopermind'
-        ? process.env.DOPERMIND_API_KEY
-        : process.env.SUPPLIER_AUTOBUY_PROVIDER === 'cdkvietnam'
-          ? process.env.CDKVIETNAM_API_KEY : process.env.DAIPHUC_PARTNER_API_KEY,
-    })).catch(() => {
-      console.warn('[SUPPLIER-AUTOBUY] STARTUP_PROBE_FAILED');
-      return null;
-    });
-    const supplierSalesSetup = supplierProbe.then(async snapshot => {
-      if (!supplierSalesConfigured()) return snapshot;
-      const catalog = await getSupplierOffers();
-      const worker = await startSupplierAutobuyWorker(readyClient);
-      return supplierAutobuyRuntime.setSalesEnabled(worker.workerRunning === true && catalog.offers.some(offer => offer.available));
-    }).catch(() => {
-      console.warn('[SUPPLIER-AUTOBUY] SALES_NOT_READY');
-      return supplierAutobuyRuntime.setSalesEnabled(false);
-    });
+    const separateSupplierSources = config.guildId === STORE_ONE_GUILD_ID && process.env.ENV_FILE === '.env';
+    const activeSupplierProvider = process.env.SUPPLIER_AUTOBUY_PROVIDER || 'daiphuc';
+    const supplierProviders = separateSupplierSources ? ['cdkvietnam', 'dopermind'] : [activeSupplierProvider];
+    const supplierSnapshots = new Map();
+    let supplierWorker;
+    const supplierSalesSetup = Promise.all(supplierProviders.map(async provider => {
+      const runtime = separateSupplierSources ? supplierAutobuyRuntime.forProvider(provider) : supplierAutobuyRuntime;
+      let snapshot;
+      try {
+        snapshot = await runtime.start({ guildId: config.guildId, envFile: process.env.ENV_FILE, provider,
+          apiKey: provider === 'dopermind' ? process.env.DOPERMIND_API_KEY
+            : provider === 'cdkvietnam' ? process.env.CDKVIETNAM_API_KEY : process.env.DAIPHUC_PARTNER_API_KEY });
+      } catch {
+        console.warn('[SUPPLIER-AUTOBUY] STARTUP_PROBE_FAILED');
+        supplierSnapshots.set(provider, null);
+        return null;
+      }
+      try {
+        if (supplierSalesConfigured(process.env, config.guildId, provider)) {
+          const catalog = await getSupplierOffers({ provider });
+          supplierWorker ||= startSupplierAutobuyWorker(readyClient);
+          const worker = await supplierWorker;
+          snapshot = runtime.setSalesEnabled(worker.workerRunning === true && catalog.offers.some(offer => offer.available));
+        }
+      } catch {
+        console.warn('[SUPPLIER-AUTOBUY] SALES_NOT_READY');
+        snapshot = runtime.setSalesEnabled(false);
+      }
+      supplierSnapshots.set(provider, snapshot);
+      return snapshot;
+    })).then(snapshots => supplierSnapshots.get(activeSupplierProvider) || snapshots[0]);
 
     // Chỉ một tiến trình giữ được cổng HTTP production mới được chạy
     // scheduler. Điều này loại bỏ cửa sổ vài giây mà một bot trùng phiên có
@@ -148,8 +158,18 @@ export async function buildClient() {
       .catch(() => console.warn('[COMPACT-SALE] RELEASE_FAILED'));
     // The owner requested this dedicated channel. Persist and reuse its one
     // panel; other marketing and price-board publication stays paused.
-    void Promise.all([supplierSalesSetup, iconSetup]).then(([snapshot]) => {
+    void Promise.all([supplierSalesSetup, iconSetup]).then(async ([snapshot]) => {
       if (getCoreEmojiPackStatus(readyClient).status !== 'ready') return;
+      if (separateSupplierSources) {
+        const results = await Promise.all(supplierProviders.map(provider => ensureSupplierAutobuyChannel(readyClient, {
+          guildId: config.guildId, envFile: process.env.ENV_FILE,
+          snapshot: supplierSnapshots.get(provider), provider,
+        })));
+        for (let index = 0; index < results.length; index++) {
+          console.log('[SUPPLIER-STOREFRONT]', JSON.stringify({ provider: supplierProviders[index], ...results[index] }));
+        }
+        return results;
+      }
       return ensureSupplierAutobuyChannel(readyClient, {
         guildId: config.guildId, envFile: process.env.ENV_FILE, snapshot,
       });

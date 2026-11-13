@@ -1,6 +1,6 @@
 # Supplier AutoBuy — Dopermind / CDK Việt Nam
 
-This describes the implementation and owner's updated prepayment policy as of 2026-11-11. It does not establish that a revision is deployed, the production flag is enabled, or a real paid purchase has been tested. Verify the release record, exact live commit, health and Discord panel separately. Read-only connection success is distinct from purchase/delivery evidence.
+This describes the implementation and owner's updated policies as of 2026-11-14. It does not establish that a revision is deployed, the production flag is enabled, or a real paid purchase has been tested. Verify the release record, exact live commit, health and Discord panel separately. Read-only connection success is distinct from purchase/delivery evidence.
 
 ### CDK storefront repair · 2026-11-13
 
@@ -10,14 +10,17 @@ are URI-encoded and decoded exactly once before validation. This repairs the
 case where provider/catalog health was ready but the storefront filtered out
 every CDK offer or split its quantity control at the namespace colon.
 
-Integration coverage exercises all six reviewed CDK products through private
+Integration coverage exercises all 12 reviewed CDK products through paginated private
 quotes, one owned SQLite order and payment-method selection. These checks do
 not charge a customer, purchase supplier goods or claim a real paid delivery.
 
 ### Source catalog coverage
 
-The active provider is selected explicitly. A CDK connection does not merge the
-separate Dopermind catalog into the same fulfillment engine. The CDK source can
+CDK and Dopermind have separate saved storefront channels, catalogs, policies,
+credential/client instances and readiness probes. `SUPPLIER_AUTOBUY_PROVIDER`
+retains the legacy default for diagnostics; an explicit trusted channel provider
+can use either configured key. A CDK connection never grants Dopermind readiness.
+The CDK source can
 return more products than the reviewed sale manifest: unreviewed identity,
 missing activation/warranty evidence, changed terms, supplier locks, stale
 references or margin limits keep a source product out of sale. A stock count is
@@ -30,6 +33,18 @@ No source costs, balances, goods, credentials or free-form provider explanations
 are exposed. Operator review can read a separate cached metadata snapshot for
 unreviewed names, delivery mode and descriptions; it is not a public-health
 field and performs no extra provider request.
+
+One shared durable worker uses the immutable `provider` saved on each quote and
+purchase intent. Product keys, persisted request IDs, request JSON/hash, invoices
+and purchase receipts retain their original identity. The additive database
+migration identifies old CDK records from `cdkvietnam:<id>` and legacy Dopermind
+records from their opaque keys, never the currently selected environment source.
+Quote, order, payment and delivery APIs reject a supplied channel provider that
+differs from the stored record before any financial side effect. Customer
+history is filtered by the source channel, and a paused source cannot occupy the
+ready source's bounded worker batch. CDK 202 receipts still poll their exact
+saved source order ID; Dopermind uncertain requests still replay their original
+request ID with the Dopermind client.
 
 The CDK adapter follows every `next_after` page within a 5,000-product bound,
 using the provider's documented 100-item page maximum. Invalid or repeating
@@ -48,15 +63,14 @@ Store1 hosting configuration uses:
 ```dotenv
 SUPPLIER_AUTOBUY_PROVIDER=dopermind
 DOPERMIND_API_KEY=
-# For the CDK Việt Nam source instead:
-# SUPPLIER_AUTOBUY_PROVIDER=cdkvietnam
-# CDKVIETNAM_API_KEY=
+# Configure both keys to expose the two separate Store1 storefronts:
+CDKVIETNAM_API_KEY=
 SUPPLIER_AUTOBUY_ENABLED=false
 ```
 
 Keep the key in protected hosting configuration, never source, CLI arguments or Discord. The example deliberately defaults to closed sales. After release checks, `SUPPLIER_AUTOBUY_ENABLED=true` explicitly opts in. Both canonical Store1 guild `1282637033340403754` and `ENV_FILE=.env` are required. Store2 stays disabled despite inherited launcher environment. Missing keys, unsupported providers and a false flag do not enable this purchase flow. Environment-file edits require a normal restart; editing the file is not a hot reload.
 
-After the process owns its HTTP port, `src/bootstrap.js` starts one bounded read-only balance/stock probe. If sales are configured, it loads reviewed offers and starts the durable worker. `setSalesEnabled()` promotes the panel only with a `CONNECTED` provider probe, a running worker and an available reviewed offer. A valid zero balance does not prevent prepayment. Supplier failure does not block Discord, HTTP or legacy commerce startup. This readiness snapshot is a startup result; payment rechecks stock, prices, terms and safe storage, while supplier funds are checked before first purchase submission.
+After the process owns its HTTP port, `src/bootstrap.js` starts a bounded read-only balance/stock probe for each configured source, loads its reviewed offers and starts the shared durable worker once. `setSalesEnabled()` promotes each source panel only with its own `CONNECTED` probe, a running worker and an available reviewed offer. A valid zero balance does not prevent prepayment. Supplier failure does not block Discord, HTTP or legacy commerce startup. This readiness snapshot is a startup result; payment rechecks stock, prices, terms and safe storage, while the correct supplier's funds are checked before first purchase submission.
 
 The existing bot-owned read-only channel/panel is persisted and reused under Cửa hàng Cenar. Inaccessible, foreign or ambiguous saved targets degrade instead of creating duplicates. Closed mode shows preparation/status information; open mode exposes **Danh mục & giá** and a private commerce flow. Automatic marketing, price-board resends and role/everyone pings remain paused.
 
@@ -65,7 +79,7 @@ The existing bot-owned read-only channel/panel is persisted and reused under C�
 | Layer | Responsibility |
 | --- | --- |
 | `dopermindClient.js` / `cdkVietnamClient.js` | Fixed-origin bounded transports, strict read/purchase schemas, provider-specific idempotency and no generated purchase IDs or automatic POST retry. |
-| `supplierAutobuyRuntime.js` | One cached Store1 startup probe and safe readiness metadata. |
+| `supplierAutobuyRuntime.js` | Independent cached Store1 startup probes and safe readiness metadata per source. |
 | `supplierAutobuyCatalogService.js` | Reviewed policy plus live cost/stock; integer sale prices, expiring private quotes and audited Admin overrides. |
 | `supplierAutobuyCheckoutService.js` | Private owned ticket, durable payment-method choice, current terms/stock/storage preflight and wallet/PayOS prepayment integration. |
 | `supplierAutobuyInvoiceService.js` | Bounded reconciliation of claimed unpaid PayOS invoices; releases their local stock reservation only after a matching authoritative terminal result. |

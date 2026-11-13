@@ -15,8 +15,16 @@ export class SupplierCheckoutError extends Error {
 }
 const deny = code => { throw new SupplierCheckoutError(code); };
 const snowflake = value => typeof value === 'string' && /^\d{17,20}$/.test(value);
+const providers = new Set(['cdkvietnam', 'dopermind']);
+const providerScope = provider => provider === undefined ? {} : { provider };
+function checkedProvider(supplied, record) {
+  const saved = record?.provider;
+  if ((supplied !== undefined && !providers.has(supplied)) || (saved !== undefined && !providers.has(saved))
+    || (supplied !== undefined && saved !== undefined && supplied !== saved)) deny('PROVIDER_MISMATCH');
+  return saved ?? supplied;
+}
 
-function privatePaymentMetadata(order) {
+function privatePaymentMetadata(order, provider) {
   let checkoutUrl = null;
   try {
     const url = new URL(order.payment_checkout_url);
@@ -28,7 +36,7 @@ function privatePaymentMetadata(order) {
   const expiresAt = typeof order.payment_expired_at === 'string' && Number.isFinite(Date.parse(order.payment_expired_at))
     ? new Date(order.payment_expired_at).toISOString() : null;
   return { orderCode: order.order_code, method: 'PAYOS', paid: false, status: 'PENDING_PAYMENT',
-    totalAmount: order.total_amount, checkoutUrl, qrCode, expiresAt };
+    totalAmount: order.total_amount, checkoutUrl, qrCode, expiresAt, ...providerScope(provider) };
 }
 
 async function publishSupplierOrderLog(client, order) {
@@ -42,7 +50,7 @@ async function publishSupplierOrderLog(client, order) {
 
 /** Existing payment/ledger boundaries; provider purchases remain in its own worker. */
 export function createSupplierAutobuyCheckout({
-  database = db, enabled = () => supplierSalesConfigured(), engine = () => import('./supplierAutobuyOrderService.js'),
+  database = db, enabled = (provider, guildId) => supplierSalesConfigured(process.env, guildId, provider), engine = () => import('./supplierAutobuyOrderService.js'),
   guildConfig = getGuildConfig, customerFlag = getCustomerFlag, ticketMute = getTicketMuteStatus,
   findOpenTicket = getOpenTicketByCustomer, insertTicket = createTicket,
   readOrder = getOrderByCode, debitWallet = payOrderWithWallet, payosLink = createOrLoadPayOSLink,
@@ -73,8 +81,10 @@ export function createSupplierAutobuyCheckout({
     await publishOrder(client, order).catch(() => {});
   }
   const service = async () => typeof engine === 'function' ? engine() : engine;
-  function guard(guildId, customerId, newSale = true) {
-    if ((newSale && !enabled()) || guildId !== STORE_ONE_GUILD_ID || !snowflake(customerId)) deny('AUTOBUY_DISABLED');
+  function guard(guildId, customerId, newSale = true, provider) {
+    checkedProvider(provider);
+    if (guildId !== STORE_ONE_GUILD_ID || !snowflake(customerId)) deny('AUTOBUY_DISABLED');
+    if (newSale && !enabled(provider, guildId)) deny('AUTOBUY_DISABLED');
     if (Number(customerFlag(guildId, customerId)?.is_blacklisted) === 1 || ticketMute(guildId, customerId)?.is_ticket_muted) deny('CUSTOMER_RESTRICTED');
     initialize();
   }
@@ -135,33 +145,40 @@ export function createSupplierAutobuyCheckout({
     ticketFlights.set(key, task);
     return task;
   }
-  async function confirm({ client, guildId, customerId, quoteId }) {
-    guard(guildId, customerId);
+  async function confirm({ client, guildId, customerId, quoteId, provider }) {
+    guard(guildId, customerId, true, provider);
     const orders = await service();
-    const quote = await orders.getSupplierQuoteForCustomer({ guildId, customerId, quoteId });
+    const quote = await orders.getSupplierQuoteForCustomer({ guildId, customerId, quoteId, ...providerScope(provider) });
+    provider = checkedProvider(provider, quote);
+    guard(guildId, customerId, true, provider);
     if (quote?.orderCode) {
+      const owned = await orders.getSupplierOrderForCustomer({ guildId, customerId, orderCode: quote.orderCode, ...providerScope(provider) });
+      checkedProvider(provider, owned);
       await notifyCreated(client, quote.orderCode);
-      return orders.getSupplierOrderForCustomer({ guildId, customerId, orderCode: quote.orderCode });
+      return owned;
     }
     const { ticket, settings } = await ensureTicket(client, guildId, customerId, quoteId);
-    guard(guildId, customerId);
+    guard(guildId, customerId, true, provider);
     const confirmed = await orders.confirmSupplierCheckout({ guildId, customerId, quoteId, ticketId: ticket.id,
-      ticketChannelId: ticket.channel_id, orderLogChannelId: settings.order_log_channel_id, createdById: client.user.id });
+      ticketChannelId: ticket.channel_id, orderLogChannelId: settings.order_log_channel_id, createdById: client.user.id, ...providerScope(provider) });
+    checkedProvider(provider, confirmed);
     await notifyCreated(client, confirmed.orderCode);
     return confirmed;
   }
-  async function payment({ client, guildId, customerId, orderCode, method }) {
-    guard(guildId, customerId);
+  async function payment({ client, guildId, customerId, orderCode, method, provider }) {
+    guard(guildId, customerId, true, provider);
     method = typeof method === 'string' ? method.toUpperCase() : '';
     if (!['PAYOS', 'WALLET'].includes(method)) deny('INVALID_PAYMENT_METHOD');
-    const key = `${guildId}:${customerId}:${orderCode}`;
+    const key = `${guildId}:${customerId}:${orderCode}:${provider || 'persisted'}`;
     if (paymentFlights.has(key)) return paymentFlights.get(key);
     const task = paymentTurn.then(async () => {
       const orders = await service();
-      const own = await orders.getSupplierOrderForCustomer({ guildId, customerId, orderCode });
+      const own = await orders.getSupplierOrderForCustomer({ guildId, customerId, orderCode, ...providerScope(provider) });
+      const resolvedProvider = checkedProvider(provider, own);
+      guard(guildId, customerId, true, resolvedProvider);
       let order = readOrder(orderCode);
       if (!own || !order || order.guild_id !== guildId || order.customer_id !== customerId || order.fulfillment_mode !== 'SUPPLIER') deny('ORDER_NOT_FOUND');
-      if (order.payment_status === 'PAID') return { orderCode, method, paid: true, status: own.status || order.status };
+      if (order.payment_status === 'PAID') return { orderCode, method, paid: true, status: own.status || order.status, ...providerScope(resolvedProvider) };
       if (order.status !== 'PENDING_PAYMENT' || order.payment_status !== 'UNPAID') deny('ORDER_NOT_PAYABLE');
       const insertedChoice = database.transaction(() => {
         const current = readOrder(orderCode);
@@ -172,8 +189,8 @@ export function createSupplierAutobuyCheckout({
           .run(orderCode, method, new Date().toISOString()).changes === 1;
       }).immediate();
       order = readOrder(orderCode);
-      if (order.payment_status === 'PAID') return { orderCode, method, paid: true, status: order.status };
-      try { await orders.validateSupplierOrderForPayment({ guildId, customerId, orderCode }); }
+      if (order.payment_status === 'PAID') return { orderCode, method, paid: true, status: order.status, ...providerScope(resolvedProvider) };
+      try { await orders.validateSupplierOrderForPayment({ guildId, customerId, orderCode, ...providerScope(resolvedProvider) }); }
       catch (error) {
         // No invoice/debit was attempted by this new method claim. A previous
         // uncertain PayOS claim is retained so another method cannot race it.
@@ -189,31 +206,33 @@ export function createSupplierAutobuyCheckout({
           throw error;
         }
         const result = await orders.fulfillSupplierOrder(client, orderCode);
-        return { orderCode, method, paid: true, status: result.updated?.status || order.status };
+        return { orderCode, method, paid: true, status: result.updated?.status || order.status, ...providerScope(resolvedProvider) };
       }
       const linked = await payosLink(order);
-      return privatePaymentMetadata(linked);
+      return privatePaymentMetadata(linked, resolvedProvider);
     }).finally(() => paymentFlights.delete(key));
     paymentTurn = task.catch(() => {});
     paymentFlights.set(key, task);
     return task;
   }
-  async function status({ client, guildId, customerId, orderCode }) {
-    guard(guildId, customerId, false);
+  async function status({ client, guildId, customerId, orderCode, provider }) {
+    guard(guildId, customerId, false, provider);
     const orders = await service();
-    await orders.getSupplierOrderForCustomer({ guildId, customerId, orderCode });
+    const first = await orders.getSupplierOrderForCustomer({ guildId, customerId, orderCode, ...providerScope(provider) });
+    provider = checkedProvider(provider, first);
     const current = readOrder(orderCode);
     if (client && current?.status === 'PENDING_PAYMENT' && current.payment_link_id) {
       await syncPayos({ client, orderCode }).catch(() => null);
     }
-    const owned = await orders.getSupplierOrderForCustomer({ guildId, customerId, orderCode });
+    const owned = await orders.getSupplierOrderForCustomer({ guildId, customerId, orderCode, ...providerScope(provider) });
+    checkedProvider(provider, owned);
     const fresh = readOrder(orderCode);
     if (!fresh || fresh.guild_id !== guildId || fresh.customer_id !== customerId || fresh.fulfillment_mode !== 'SUPPLIER') deny('ORDER_NOT_FOUND');
     const chosen = database.prepare('SELECT method FROM supplier_autobuy_payment_methods WHERE order_code=?').get(orderCode);
     // Recover only the customer's already-created invoice. This path never
     // creates a link, debits a wallet, or reads the supplier to buy anything.
     const payment = fresh.status === 'PENDING_PAYMENT' && fresh.payment_status === 'UNPAID'
-      && chosen?.method === 'PAYOS' && fresh.payment_link_id ? privatePaymentMetadata(fresh) : null;
+      && chosen?.method === 'PAYOS' && fresh.payment_link_id ? privatePaymentMetadata(fresh, provider) : null;
     return { ...owned, ...(payment ? { payment } : {}) };
   }
   return { confirm, payment, status };

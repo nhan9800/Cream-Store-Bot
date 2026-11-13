@@ -14,6 +14,11 @@ const state = vi.hoisted(() => ({
   pauseMarketing: vi.fn(() => ({ paused: true })),
   supplierStart: vi.fn(),
   supplierPanel: vi.fn(),
+  guildId: '1070676180103086132',
+  supplierConfigured: vi.fn(),
+  supplierOffers: vi.fn(),
+  supplierWorker: vi.fn(),
+  supplierRuntimes: new Map(),
 }));
 
 vi.mock('discord.js', async (importOriginal) => ({
@@ -29,12 +34,20 @@ vi.mock('discord.js', async (importOriginal) => ({
   Routes: { applicationGuildCommands: () => '/test-commands' },
 }));
 vi.mock('../src/config.js', () => ({
-  config: { guildId: '1070676180103086132', httpPort: 4200 }, assertRuntimeConfig: vi.fn(),
+  config: { get guildId() { return state.guildId; }, httpPort: 4200 }, assertRuntimeConfig: vi.fn(),
 }));
 vi.mock('../src/database/db.js', () => ({ initDatabase: vi.fn() }));
 vi.mock('../src/services/reminderRoutingService.js', () => ({ adoptStoreOneReminderRouting: vi.fn() }));
 vi.mock('../src/services/marketingPauseService.js', () => ({ pauseAutomaticMarketing: state.pauseMarketing }));
-vi.mock('../src/services/supplierAutobuyRuntime.js', () => ({ supplierAutobuyRuntime: { start: state.supplierStart } }));
+vi.mock('../src/services/supplierAutobuyRuntime.js', () => ({ supplierAutobuyRuntime: {
+  start: state.supplierStart, forProvider: provider => state.supplierRuntimes.get(provider),
+} }));
+vi.mock('../src/services/supplierAutobuyCatalogService.js', () => ({
+  supplierSalesConfigured: state.supplierConfigured, getSupplierOffers: state.supplierOffers,
+}));
+vi.mock('../src/services/supplierAutobuyOrderService.js', () => ({ startSupplierAutobuyWorker: state.supplierWorker }));
+vi.mock('../src/services/shopRelaunchReleaseService.js', () => ({ runShopRelaunchRelease: vi.fn() }));
+vi.mock('../src/services/compactSaleReleaseService.js', () => ({ runCompactSaleRelease: vi.fn() }));
 vi.mock('../src/services/supplierAutobuyPanelService.js', () => ({ ensureSupplierAutobuyChannel: state.supplierPanel }));
 vi.mock('../src/events/interactionCreate.js', () => ({ getClientOptions: () => ({}), loadCommands: async () => new Map(), registerInteractionHandler: vi.fn() }));
 vi.mock('../src/services/schedulerService.js', () => ({ startScheduler: state.scheduler }));
@@ -82,6 +95,11 @@ const previousClient = global.discordClient;
 beforeEach(() => {
   vi.clearAllMocks();
   state.handlers.clear();
+  state.guildId = '1070676180103086132';
+  state.supplierConfigured.mockReturnValue(false);
+  state.supplierOffers.mockResolvedValue({ offers: [{ available: true }] });
+  state.supplierWorker.mockResolvedValue({ workerRunning: true });
+  state.supplierRuntimes.clear();
   state.webhook.mockResolvedValue(undefined);
   state.cleanup.mockImplementation(() => new Promise(() => {}));
   state.publish.mockImplementation(() => new Promise(() => {}));
@@ -101,6 +119,42 @@ afterEach(() => {
 });
 
 describe('independent price-board publication at startup', () => {
+  it('starts both requested storefronts independently while sharing one durable worker', async () => {
+    state.guildId = '1282637033340403754';
+    vi.stubEnv('ENV_FILE', '.env');
+    vi.stubEnv('SUPPLIER_AUTOBUY_PROVIDER', 'cdkvietnam');
+    state.supplierConfigured.mockReturnValue(true);
+    for (const provider of ['cdkvietnam', 'dopermind']) {
+      const snapshot = { provider, status: 'CONNECTED' };
+      state.supplierRuntimes.set(provider, { start: vi.fn(async () => snapshot),
+        setSalesEnabled: vi.fn(enabled => ({ ...snapshot, purchasesEnabled: enabled })) });
+    }
+    const client = await buildClient();
+    void state.handlers.get('clientReady')(client);
+    await vi.waitFor(() => expect(state.supplierPanel).toHaveBeenCalledTimes(2));
+    expect(state.supplierWorker).toHaveBeenCalledTimes(1);
+    expect(state.supplierPanel.mock.calls.map(([, options]) => options.provider).sort()).toEqual(['cdkvietnam', 'dopermind']);
+    expect(state.supplierPanel.mock.calls.every(([, options]) => options.snapshot.purchasesEnabled)).toBe(true);
+    expect(state.scheduler).toHaveBeenCalledWith(client);
+  });
+  it('keeps the connected source and commerce available when the other provider probe fails', async () => {
+    state.guildId = '1282637033340403754';
+    vi.stubEnv('ENV_FILE', '.env');
+    vi.stubEnv('SUPPLIER_AUTOBUY_PROVIDER', 'cdkvietnam');
+    state.supplierConfigured.mockReturnValue(true);
+    state.supplierRuntimes.set('cdkvietnam', { start: vi.fn(async () => ({ provider: 'cdkvietnam', status: 'CONNECTED' })),
+      setSalesEnabled: vi.fn(enabled => ({ provider: 'cdkvietnam', purchasesEnabled: enabled })) });
+    state.supplierRuntimes.set('dopermind', { start: vi.fn(async () => { throw new Error('private provider response'); }) });
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const client = await buildClient();
+    void state.handlers.get('clientReady')(client);
+    await vi.waitFor(() => expect(state.supplierPanel).toHaveBeenCalledTimes(2));
+    expect(state.supplierPanel.mock.calls.find(([, options]) => options.provider === 'cdkvietnam')[1].snapshot.purchasesEnabled).toBe(true);
+    expect(state.supplierPanel.mock.calls.find(([, options]) => options.provider === 'dopermind')[1].snapshot).toBeNull();
+    expect(state.supplierWorker).toHaveBeenCalledTimes(1);
+    expect(state.scheduler).toHaveBeenCalledWith(client);
+    expect(JSON.stringify(warn.mock.calls)).not.toContain('private provider response');
+  });
   it('starts catalog publication despite a stalled optional cleanup and keeps commerce running while publication waits', async () => {
     const client = await buildClient();
     const ready = state.handlers.get('clientReady')(client);

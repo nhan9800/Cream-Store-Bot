@@ -1,9 +1,11 @@
 import { db } from '../database/db.js';
 import { STORE_ONE_GUILD_ID } from '../utils/locale.js';
 import { supplierSalesConfigured } from './supplierAutobuyCatalogService.js';
+import { SUPPLIER_PROVIDERS } from '../utils/supplierProvider.js';
 
 /** Release only provider-confirmed terminal invoices, never a guessed local TTL. */
-export function createSupplierInvoiceReconciler({ database = db, enabled = supplierSalesConfigured, now = Date.now,
+export function createSupplierInvoiceReconciler({ database = db,
+  enabled = () => SUPPLIER_PROVIDERS.some(provider => supplierSalesConfigured(process.env, undefined, provider)), now = Date.now,
   sync = async args => (await import('./paymentService.js')).syncPaymentStatusFromPayOS(args),
 } = {}) {
   let initialized = false, flight = null;

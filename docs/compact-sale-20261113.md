@@ -70,3 +70,11 @@ integration updates the canonical catalog and fixes `selection` plus
 current prices; it does not subtract the proposed discount again on restart.
 New edits expire after 23:30 Asia/Saigon on 14 November 2026 (16:30 UTC). An already-completed journal still
 returns its existing links read-only after the deadline.
+
+The protected production preview selected IDs `178,114,153,154,173,156`:
+Netflix Slot, Nitro Trial 3 months, CapCut 1 month, CapCut 7 days, Nitro Login
+Mail Bao Sống 2 months and GearUP 3 months. The reviewed release freezes that
+selection and its projected hash. The canonical Nitro Trial price is reduced
+from 65,000 to 64,000 VND, and Nitro Mail Bao Sống from 140,000 to 136,000 VND;
+the other four prices stay as reviewed. Restart seeding preserves those prices
+without applying another discount.
