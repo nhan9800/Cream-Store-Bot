@@ -33,6 +33,7 @@ const MESSAGES = Object.freeze({
   INVALID_CONFIGURATION: 'Supplier client configuration is invalid.',
   NOT_CONFIGURED: 'Supplier API credentials are not configured.',
   INVALID_REQUEST: 'Supplier request parameters are invalid.',
+  SUBMISSION_BLOCKED: 'Supplier submission was blocked by a local guard.',
   TIMEOUT: 'Supplier request exceeded its deadline.',
   NETWORK_ERROR: 'Supplier request could not be completed.',
   REDIRECT_REJECTED: 'Supplier redirects are not allowed.',
@@ -224,7 +225,7 @@ export function createCdkVietnamClient({
   };
   const identity = operation => createHash('sha256').update(credential(operation)).digest('hex');
   const cache = new Map();
-  async function request(operation, path, { method = 'GET', body = null, requestId = null } = {}) {
+  async function request(operation, path, { method = 'GET', body = null, requestId = null, beforeSubmit } = {}) {
     let attempted = false; let response; let timer;
     const fail = (code, status = null, extra = {}) => new CdkVietnamError(code, {
       operation, status, outcome: attempted && method === 'POST' ? 'UNKNOWN' : 'NOT_SUBMITTED', ...extra,
@@ -232,8 +233,19 @@ export function createCdkVietnamClient({
     const key = credential(operation); const url = new URL(path, CDK_VIETNAM_ORIGIN);
     if (url.origin !== CDK_VIETNAM_ORIGIN || url.protocol !== 'https:') throw fail('INVALID_REQUEST');
     const controller = new AbortController();
+    const deadlineAt = Date.now() + timeoutMs;
     const deadline = new Promise((_, reject) => { timer = setTimeout(() => { controller.abort(); reject(fail('TIMEOUT')); }, timeoutMs); });
     const run = async () => {
+      if (controller.signal.aborted) throw fail('TIMEOUT');
+      if (method === 'POST' && beforeSubmit !== undefined) {
+        let allowed;
+        try { allowed = beforeSubmit(); } catch { throw fail('SUBMISSION_BLOCKED'); }
+        if (allowed !== true) {
+          if (allowed && (typeof allowed === 'object' || typeof allowed === 'function')) void Promise.resolve().then(() => allowed).catch(() => {});
+          throw fail('SUBMISSION_BLOCKED');
+        }
+      }
+      if (controller.signal.aborted || Date.now() >= deadlineAt) { controller.abort(); throw fail('TIMEOUT'); }
       attempted = true;
       response = await fetchImpl(url.href, { method, redirect: 'error', signal: controller.signal,
         headers: { Accept: 'application/json', Authorization: `Bearer ${key}`,
@@ -292,14 +304,15 @@ export function createCdkVietnamClient({
     const response = await request('getBalance', '/v1/balance');
     return balanceFrom(response.body, code => new CdkVietnamError(code, { operation: 'getBalance' }), now);
   }
-  async function createOrder({ productKey, quantity, requestId, maxUnitCostVnd } = {}) {
+  async function createOrder({ productKey, quantity, requestId, maxUnitCostVnd, beforeSubmit } = {}) {
     const productId = productIdFromKey(productKey, 'createOrder');
     if (!integer(quantity, 1) || quantity > MAX_QUANTITY || typeof requestId !== 'string' || !REQUEST_ID.test(requestId)
-      || !integer(maxUnitCostVnd, 1) || BigInt(maxUnitCostVnd) * BigInt(quantity) > 1_000_000_000_000n) {
+      || !integer(maxUnitCostVnd, 1) || BigInt(maxUnitCostVnd) * BigInt(quantity) > 1_000_000_000_000n
+      || (beforeSubmit !== undefined && typeof beforeSubmit !== 'function')) {
       throw new CdkVietnamError('INVALID_REQUEST', { operation: 'createOrder' });
     }
     const response = await request('createOrder', '/v1/orders', {
-      method: 'POST', requestId, body: { product_id: productId, quantity, max_total: maxUnitCostVnd * quantity },
+      method: 'POST', requestId, body: { product_id: productId, quantity, max_total: maxUnitCostVnd * quantity }, beforeSubmit,
     });
     return orderFrom(response.body, (code, status, extra) => new CdkVietnamError(code, { operation: 'createOrder', status, ...extra }),
       { productId, productKey, quantity, requestId, maxUnitCostVnd }, now);

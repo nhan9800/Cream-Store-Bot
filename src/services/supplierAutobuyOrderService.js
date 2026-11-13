@@ -296,6 +296,12 @@ export function createSupplierAutobuyOrderService({
   async function validateSupplierOrderForPayment({ guildId, customerId, orderCode, provider } = {}) {
     context(guildId, customerId, false, provider);
     const { order, intent } = owned(guildId, customerId, orderCode, provider);
+    const assertPaymentAgreement = (currentOrder, currentIntent) => {
+      if (currentOrder.total_amount !== currentIntent.sale_amount || currentOrder.quantity !== currentIntent.quantity
+        || currentIntent.product_key !== intent.product_key || currentIntent.provider !== intent.provider
+        || currentIntent.sale_amount !== intent.sale_amount || currentIntent.quantity !== intent.quantity) fail('ORDER_CHANGED');
+    };
+    assertPaymentAgreement(order, intent);
     if (order.payment_status === 'PAID') return safeOrder(order, intent);
     context(guildId, customerId, true, intent.provider);
     if (order.status !== 'PENDING_PAYMENT' || order.payment_status !== 'UNPAID') fail('ORDER_NOT_PAYABLE');
@@ -309,6 +315,7 @@ export function createSupplierAutobuyOrderService({
     const source = providerFactory(intent.provider);
     const products = await source.getStock({ productKey: intent.product_key });
     const product = Array.isArray(products) && products.find(item => item.productKey === intent.product_key);
+    if (product?.locked === true) fail('PRODUCT_UNAVAILABLE');
     if (!product || product.name !== quote.productName || !integer(product.priceVnd, 1)
       || product.priceVnd !== quote.unitCostVnd || product.priceVnd > intent.max_unit_cost) fail('QUOTE_CHANGED');
     const hasMethods = Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='supplier_autobuy_payment_methods'").get());
@@ -328,7 +335,15 @@ export function createSupplierAutobuyOrderService({
     // Customer payment is allowed before the shop funds its source wallet.
     // Only the paid purchase worker checks source balance immediately before
     // POST, retaining the paid order until the owner supplies enough funds.
-    return safeOrder(order, intent);
+    // Staff may edit an unpaid order while supplier reads are pending. Never
+    // invoice/debit the edited snapshot against a different immutable intent.
+    const latest = owned(guildId, customerId, orderCode, intent.provider);
+    assertPaymentAgreement(latest.order, latest.intent);
+    if (latest.order.payment_status !== 'PAID') {
+      context(guildId, customerId, true, latest.intent.provider);
+      if (latest.order.status !== 'PENDING_PAYMENT' || latest.order.payment_status !== 'UNPAID') fail('ORDER_NOT_PAYABLE');
+    }
+    return safeOrder(latest.order, latest.intent);
   }
   async function runFulfillment(client, code, { allowReconcile = false } = {}) {
     init(); const initial = intentByCode(code);
@@ -367,11 +382,43 @@ export function createSupplierAutobuyOrderService({
     }).immediate();
     if (!claimed) return { handled: true, delivered: false, status: 'BUSY' };
     const pending = (status, error, minutes = 2) => {
-      db.prepare(`UPDATE supplier_autobuy_intents SET status=?,last_error=?,retry_at=?,lease_token=NULL,lease_until=NULL,updated_at=?
+      const changed = db.prepare(`UPDATE supplier_autobuy_intents SET status=?,last_error=?,retry_at=?,lease_token=NULL,lease_until=NULL,updated_at=?
         WHERE order_code=? AND lease_token=?`).run(status, error, nextRetry(minutes), timestamp(), code, lease);
-      return { handled: true, delivered: false, status };
+      return { handled: true, delivered: false, status: changed.changes === 1 ? status : 'LEASE_LOST' };
     };
     let submissionStarted = false;
+    let submissionVeto = null;
+    const submissionFence = incrementAttempt => db.transaction(() => {
+      const current = intentByCode(code), order = orderByCode(code);
+      const at = timestamp();
+      if (!current || current.lease_token !== lease || current.status !== 'SUBMITTING'
+        || !Number.isFinite(Date.parse(current.lease_until)) || Date.parse(current.lease_until) <= Date.parse(at)) {
+        return { handled: true, delivered: false, status: 'LEASE_LOST' };
+      }
+      const immutable = ['provider', 'guild_id', 'customer_id', 'quote_id', 'product_key', 'quantity',
+        'sale_amount', 'max_unit_cost', 'request_id', 'request_json', 'request_hash', 'supplier_order_code'];
+      if (current.encrypted_payload || immutable.some(field => current[field] !== initial[field])) return pending('REVIEW', 'REQUEST_INTEGRITY_FAILED');
+      try { assertSource(current, initial.provider); }
+      catch { return pending('REVIEW', 'REQUEST_INTEGRITY_FAILED'); }
+      if (!active(current.provider)) return pending(reconcile ? initial.status : 'PENDING', 'AUTOBUY_DISABLED');
+      if (!paid(order, current)) return pending('BLOCKED', 'ORDER_NOT_DELIVERABLE');
+      if (order.status !== 'PROCESSING') return pending('REVIEW', 'MANUAL_COMPLETION_UNVERIFIED');
+      if (current.attempts !== initial.attempts || current.attempts >= MAX_ATTEMPTS) return pending('REVIEW', 'REQUEST_INTEGRITY_FAILED');
+      let request;
+      try { request = JSON.parse(current.request_json); }
+      catch { return pending('REVIEW', 'REQUEST_INTEGRITY_FAILED'); }
+      if (createHash('sha256').update(current.request_json).digest('hex') !== current.request_hash
+        || request.product_key !== current.product_key || request.quantity !== current.quantity
+        || request.request_id !== current.request_id) return pending('REVIEW', 'REQUEST_INTEGRITY_FAILED');
+      if (incrementAttempt) {
+        const updated = db.prepare(`UPDATE supplier_autobuy_intents SET attempts=attempts+1,updated_at=?
+          WHERE order_code=? AND lease_token=? AND lease_until>? AND status='SUBMITTING'
+          AND attempts=? AND request_id=? AND request_hash=? AND encrypted_payload IS NULL AND supplier_order_code IS NULL`)
+          .run(at, code, lease, at, initial.attempts, initial.request_id, initial.request_hash);
+        if (updated.changes !== 1) return { handled: true, delivered: false, status: 'LEASE_LOST' };
+      }
+      return null;
+    }).immediate();
     try {
       if (!purchaseExists) {
         // Check encryption before any financial side effect.
@@ -406,6 +453,7 @@ export function createSupplierAutobuyOrderService({
           // same-ID replay can therefore be the first actual purchase; retain the
           // cost ceiling even when this delays an older receipt's reconciliation.
           if (!product) return pending(reconcile ? 'REVIEW' : 'WAITING_STOCK', 'PRODUCT_UNAVAILABLE', 5);
+          if (product.locked === true) return pending('REVIEW', 'PRODUCT_LOCKED');
           if (product.priceVnd > initial.max_unit_cost || !integer(product.priceVnd, 1)) return pending('REVIEW', 'PRICE_CHANGED');
           if (!reconcile) {
             if (!product.unlimited && product.stock < initial.quantity) return pending('WAITING_STOCK', 'INSUFFICIENT_STOCK', 5);
@@ -414,14 +462,20 @@ export function createSupplierAutobuyOrderService({
               return pending('WAITING_SUPPLIER_FUNDS', 'INSUFFICIENT_SUPPLIER_BALANCE', 5);
             }
           }
-          if (!paid(orderByCode(code), intentByCode(code))) return pending('BLOCKED', 'ORDER_NOT_DELIVERABLE');
-          if (createHash('sha256').update(initial.request_json).digest('hex') !== initial.request_hash) return pending('REVIEW', 'REQUEST_INTEGRITY_FAILED');
-          const request = JSON.parse(initial.request_json);
-          if (request.product_key !== initial.product_key || request.quantity !== initial.quantity || request.request_id !== initial.request_id) return pending('REVIEW', 'REQUEST_INTEGRITY_FAILED');
-          db.prepare('UPDATE supplier_autobuy_intents SET attempts=attempts+1,updated_at=? WHERE order_code=? AND lease_token=?').run(timestamp(), code, lease);
-          submissionStarted = true;
+          const blocked = submissionFence(false);
+          if (blocked) return blocked;
           const receipt = await provider.createOrder({ productKey: initial.product_key, quantity: initial.quantity,
-            requestId: initial.request_id, maxUnitCostVnd: initial.max_unit_cost });
+            requestId: initial.request_id, maxUnitCostVnd: initial.max_unit_cost,
+            // Clients invoke this synchronously after their rate wait, directly
+            // before POST. No await can separate the fence from admission.
+            beforeSubmit: () => {
+              if (submissionStarted) return false;
+              submissionVeto = submissionFence(true);
+              if (submissionVeto) return false;
+              submissionStarted = true;
+              return true;
+            } });
+          const missingGuard = !submissionStarted;
           if (receipt.requestId !== initial.request_id || receipt.productKey !== initial.product_key || receipt.quantity !== initial.quantity
             || !Array.isArray(receipt.items) || receipt.items.length !== initial.quantity || !integer(receipt.unitPriceVnd, 1)
             || !integer(receipt.totalAmountVnd, 1) || BigInt(receipt.unitPriceVnd) * BigInt(initial.quantity) !== BigInt(receipt.totalAmountVnd)
@@ -429,11 +483,14 @@ export function createSupplierAutobuyOrderService({
           const encrypted = encrypt(JSON.stringify({ items: receipt.items, providerOrderCode: receipt.orderCode, createdAt: receipt.createdAt }));
           if (!encrypted?.startsWith('enc:v1:')) fail('ENCRYPTION_UNAVAILABLE');
           const overCost = receipt.unitPriceVnd > initial.max_unit_cost;
+          const reviewError = overCost ? 'PRICE_LIMIT_EXCEEDED' : missingGuard ? 'SUBMISSION_GUARD_MISSING' : null;
           const stored = db.prepare(`UPDATE supplier_autobuy_intents SET encrypted_payload=?,supplier_order_code=?,charged_unit_cost=?,charged_total_cost=?,
             status=?,last_error=?,updated_at=? WHERE order_code=? AND lease_token=?`).run(encrypted, receipt.orderCode,
-            receipt.unitPriceVnd, receipt.totalAmountVnd, overCost ? 'REVIEW' : 'DELIVERING', overCost ? 'PRICE_LIMIT_EXCEEDED' : null, timestamp(), code, lease);
+            receipt.unitPriceVnd, receipt.totalAmountVnd, reviewError ? 'REVIEW' : 'DELIVERING', reviewError, timestamp(), code, lease);
           if (stored.changes !== 1) fail('LEASE_LOST');
-          if (overCost) return pending('REVIEW', 'PRICE_LIMIT_EXCEEDED');
+          // A broken adapter may have charged despite ignoring the guard.
+          // Preserve its valid receipt before quarantining; never re-buy it.
+          if (reviewError) return pending('REVIEW', reviewError);
         }
       }
       const intent = intentByCode(code); const order = orderByCode(code);
@@ -449,6 +506,7 @@ export function createSupplierAutobuyOrderService({
       if (!snowflake(delivery?.messageId) || !snowflake(delivery?.channelId)) fail('DELIVERY_RECEIPT_MISSING');
       return completeDelivery(code, delivery, 'DM', lease);
     } catch (error) {
+      if (submissionVeto) return submissionVeto;
       const current = intentByCode(code);
       if (current?.encrypted_payload) return pending(current.status === 'REVIEW' ? 'REVIEW' : 'DELIVERY_PENDING', current.status === 'REVIEW' ? 'PRICE_LIMIT_EXCEEDED' : 'DELIVERY_RETRY');
       if (error instanceof SupplierAutobuyOrderError) return pending('REVIEW', ['ENCRYPTION_UNAVAILABLE', 'REQUEST_INTEGRITY_FAILED'].includes(error.code) ? error.code : 'LOCAL_REVIEW_REQUIRED');

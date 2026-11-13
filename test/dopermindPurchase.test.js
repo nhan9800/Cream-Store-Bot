@@ -12,6 +12,58 @@ function setup(data = { success: true, data: receipt() }, options = {}) {
 }
 afterEach(() => vi.useRealTimers());
 describe('Dopermind durable purchase transport', () => {
+  it('runs a synchronous submission guard once immediately before the unchanged documented POST', async () => {
+    const { client, fetchImpl } = setup(), beforeSubmit = vi.fn(() => true);
+    await client.createOrder({ ...request, beforeSubmit });
+    expect(beforeSubmit).toHaveBeenCalledExactlyOnceWith();
+    expect(beforeSubmit.mock.invocationCallOrder[0]).toBeLessThan(fetchImpl.mock.invocationCallOrder[0]);
+    const options = fetchImpl.mock.calls[0][1];
+    expect(options).not.toHaveProperty('beforeSubmit');
+    expect(JSON.parse(options.body)).toEqual({ product_key: request.productKey, quantity: request.quantity, request_id: request.requestId });
+  });
+  it.each([
+    ['false', () => false], ['undefined', () => undefined], ['truthy', () => 1],
+    ['throw', () => { throw new Error('private-guard-secret'); }],
+    ['promise', () => Promise.resolve(true)], ['rejected promise', () => Promise.reject(new Error('private-guard-secret'))],
+    ['hostile promise', () => {
+      const promise = Promise.reject(new Error('private-guard-secret'));
+      Object.defineProperty(promise, 'catch', { get() { throw new Error('private-guard-secret'); } });
+      return promise;
+    }],
+  ])('sanitizes a %s guard veto before transmission, including rejected async fences', async (_name, implementation) => {
+    const { client, fetchImpl } = setup(), beforeSubmit = vi.fn(implementation);
+    let failure;
+    try { await client.createOrder({ ...request, beforeSubmit }); } catch (caught) { failure = caught; }
+    expect(failure).toMatchObject({ code: 'SUBMISSION_BLOCKED', operation: 'createOrder', outcome: 'NOT_SUBMITTED', providerCode: null });
+    expect(String(failure)).not.toContain('private-guard-secret'); expect(JSON.stringify(failure)).not.toContain('private-guard-secret');
+    expect(beforeSubmit).toHaveBeenCalledOnce(); expect(fetchImpl).not.toHaveBeenCalled();
+    await Promise.resolve();
+  });
+  it.each([null, true, 'unsafe', {}])('rejects an invalid supplied guard type before reserving a rate slot %j', beforeSubmit => {
+    const { client, fetchImpl } = setup();
+    expect(() => client.createOrder({ ...request, beforeSubmit })).toThrow(expect.objectContaining({ code: 'INVALID_REQUEST', outcome: 'NOT_SUBMITTED' }));
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+  it('rechecks a pause after the internal purchase-rate wait instead of posting stale approval', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-11-14T04:00:00Z'));
+    const { fetchImpl } = setup();
+    const client = createDopermindClient({ apiKey: 'synthetic-wire-fence-delay', fetchImpl, enforceRateLimits: true, timeoutMs: 10000 });
+    await client.createOrder(request);
+    let enabled = true; const beforeSubmit = vi.fn(() => enabled);
+    const pending = client.createOrder({ ...request, beforeSubmit });
+    const rejected = expect(pending).rejects.toMatchObject({ code: 'SUBMISSION_BLOCKED', outcome: 'NOT_SUBMITTED' });
+    await vi.advanceTimersByTimeAsync(5099);
+    expect(beforeSubmit).not.toHaveBeenCalled(); expect(fetchImpl).toHaveBeenCalledOnce();
+    enabled = false; await vi.advanceTimersByTimeAsync(1); await rejected;
+    expect(beforeSubmit).toHaveBeenCalledOnce(); expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+  it('does not POST when a synchronous guard exhausts the deadline before the timer can fire', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-11-14T05:00:00Z'));
+    const { client, fetchImpl } = setup(undefined, { client: { timeoutMs: 100 } });
+    const beforeSubmit = vi.fn(() => { vi.setSystemTime(Date.now() + 101); return true; });
+    await expect(client.createOrder({ ...request, beforeSubmit })).rejects.toMatchObject({ code: 'TIMEOUT', outcome: 'NOT_SUBMITTED' });
+    expect(beforeSubmit).toHaveBeenCalledOnce(); expect(fetchImpl).not.toHaveBeenCalled();
+  });
   it('sends exactly the documented payload with caller request ID, no unsupported price parameter', async () => {
     const { client, fetchImpl } = setup();
     const result = await client.createOrder(request);

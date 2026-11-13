@@ -8,6 +8,7 @@ const MESSAGES = Object.freeze({
   INVALID_CONFIGURATION: 'Supplier client configuration is invalid.',
   NOT_CONFIGURED: 'Supplier API credentials are not configured.',
   INVALID_REQUEST: 'Supplier request parameters are invalid.',
+  SUBMISSION_BLOCKED: 'Supplier submission was blocked by a local guard.',
   TIMEOUT: 'Supplier request exceeded its deadline.',
   NETWORK_ERROR: 'Supplier request could not be completed.',
   REDIRECT_REJECTED: 'Supplier redirects are not allowed.',
@@ -202,7 +203,7 @@ export function createDopermindClient({
     return value;
   }
 
-  async function request(operation, path, normalize, purchase = null) {
+  async function request(operation, path, normalize, purchase = null, beforeSubmit = undefined) {
     let attempted = false;
     const fail = (code, status = null, extra = {}) => new DopermindError(code, {
       operation, status, outcome: purchase && attempted ? 'UNKNOWN' : 'NOT_SUBMITTED', ...extra,
@@ -213,12 +214,26 @@ export function createDopermindClient({
     const controller = new AbortController();
     let response;
     let timer;
+    const deadlineAt = Date.now() + timeoutMs;
     const deadline = new Promise((_, reject) => {
       timer = setTimeout(() => { controller.abort(); reject(fail('TIMEOUT')); }, timeoutMs);
     });
     const run = async () => {
       if (enforceRateLimits) await rateSlot(key, operation, controller, timeoutMs, fail);
       if (controller.signal.aborted) throw fail('TIMEOUT');
+      if (purchase && beforeSubmit !== undefined) {
+        let allowed;
+        try { allowed = beforeSubmit(); } catch { throw fail('SUBMISSION_BLOCKED'); }
+        if (allowed !== true) {
+          // A promise is an invalid asynchronous fence. Consume its rejection
+          // without waiting, serializing it or exposing its error to callers.
+          if (allowed && (typeof allowed === 'object' || typeof allowed === 'function')) void Promise.resolve().then(() => allowed).catch(() => {});
+          throw fail('SUBMISSION_BLOCKED');
+        }
+      }
+      // A synchronous local fence may block timer delivery (e.g. SQLite busy).
+      // Check elapsed wall time before any request is marked as transmitted.
+      if (controller.signal.aborted || Date.now() >= deadlineAt) { controller.abort(); throw fail('TIMEOUT'); }
       attempted = true;
       response = await fetchImpl(url.href, {
         method: purchase ? 'POST' : 'GET', redirect: 'error', signal: controller.signal,
@@ -264,17 +279,18 @@ export function createDopermindClient({
       const path = filter === undefined ? '/v1/stock' : `/v1/stock?${new URLSearchParams({ product_key: filter })}`;
       return cachedRead('getStock', path, (envelope, fail) => productsFrom(envelope, fail, filter), filter);
     },
-    createOrder: ({ productKey: key, quantity, requestId, maxUnitCostVnd } = {}) => {
+    createOrder: ({ productKey: key, quantity, requestId, maxUnitCostVnd, beforeSubmit } = {}) => {
       productKey(key, 'createOrder');
       if (!integer(quantity, 1) || quantity > 1000 || typeof requestId !== 'string'
-        || !/^[A-Za-z0-9._:-]{8,96}$/.test(requestId) || !integer(maxUnitCostVnd, 1)) {
+        || !/^[A-Za-z0-9._:-]{8,96}$/.test(requestId) || !integer(maxUnitCostVnd, 1)
+        || (beforeSubmit !== undefined && typeof beforeSubmit !== 'function')) {
         throw new DopermindError('INVALID_REQUEST', { operation: 'createOrder' });
       }
       const purchase = { productKey: key, quantity, requestId, maxUnitCostVnd };
       const execute = async () => {
         const state = enforceRateLimits ? cacheState(identity('createOrder')) : null;
         if (state) { state.generation++; state.balance = null; state.stock = null; }
-        const receipt = await request('createOrder', '/v1/orders', (envelope, fail) => purchaseFrom(envelope, fail, purchase), purchase);
+        const receipt = await request('createOrder', '/v1/orders', (envelope, fail) => purchaseFrom(envelope, fail, purchase), purchase, beforeSubmit);
         if (state && receipt.idempotent === false && Math.abs(Date.now() - Date.parse(receipt.createdAt)) <= 30000) {
           state.balance = { at: Date.now(), value: Object.freeze({ balanceVnd: receipt.balanceAfterVnd, currency: 'VND', updatedAt: receipt.createdAt }) };
         }

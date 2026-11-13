@@ -22,6 +22,48 @@ const request = { productKey: 'cdkvietnam:6', quantity: 1, requestId: 'cenar-tes
 afterEach(() => { vi.useRealTimers(); vi.unstubAllEnvs(); });
 
 describe('CDK Việt Nam fixed-origin transport', () => {
+  it('runs an optional synchronous fence once before POST without changing the body or idempotency header', async () => {
+    const { client, fetchImpl } = setup({ replayed: false, order: order() }, { status: 201 });
+    const beforeSubmit = vi.fn(() => true);
+    await client.createOrder({ ...request, beforeSubmit });
+    expect(beforeSubmit).toHaveBeenCalledExactlyOnceWith();
+    expect(beforeSubmit.mock.invocationCallOrder[0]).toBeLessThan(fetchImpl.mock.invocationCallOrder[0]);
+    const options = fetchImpl.mock.calls[0][1];
+    expect(options).not.toHaveProperty('beforeSubmit');
+    expect(JSON.parse(options.body)).toEqual({ product_id: 6, quantity: 1, max_total: 525000 });
+    expect(options.headers['Idempotency-Key']).toBe(request.requestId);
+  });
+  it.each([
+    ['false', () => false], ['undefined', () => undefined], ['truthy', () => 1],
+    ['throw', () => { throw new Error('private-guard-secret'); }],
+    ['promise', () => Promise.resolve(true)], ['rejected promise', () => Promise.reject(new Error('private-guard-secret'))],
+    ['hostile promise', () => {
+      const promise = Promise.reject(new Error('private-guard-secret'));
+      Object.defineProperty(promise, 'catch', { get() { throw new Error('private-guard-secret'); } });
+      return promise;
+    }],
+  ])('blocks a %s fence with a sanitized definitely-unsubmitted result', async (_name, implementation) => {
+    const { client, fetchImpl } = setup({ replayed: false, order: order() }, { status: 201 });
+    const beforeSubmit = vi.fn(implementation);
+    let failure;
+    try { await client.createOrder({ ...request, beforeSubmit }); } catch (caught) { failure = caught; }
+    expect(failure).toMatchObject({ code: 'SUBMISSION_BLOCKED', operation: 'createOrder', outcome: 'NOT_SUBMITTED', providerCode: null });
+    expect(String(failure)).not.toContain('private-guard-secret'); expect(JSON.stringify(failure)).not.toContain('private-guard-secret');
+    expect(beforeSubmit).toHaveBeenCalledOnce(); expect(fetchImpl).not.toHaveBeenCalled();
+    await Promise.resolve();
+  });
+  it.each([null, true, 'unsafe', {}])('rejects an invalid supplied guard before a network request %j', async beforeSubmit => {
+    const { client, fetchImpl } = setup({});
+    await expect(client.createOrder({ ...request, beforeSubmit })).rejects.toMatchObject({ code: 'INVALID_REQUEST', outcome: 'NOT_SUBMITTED' });
+    expect(fetchImpl).not.toHaveBeenCalled();
+  });
+  it('enforces elapsed deadline after a synchronous fence even before an abort timer is delivered', async () => {
+    vi.useFakeTimers(); vi.setSystemTime(new Date('2026-11-14T05:00:00Z'));
+    const { client, fetchImpl } = setup({}, { client: { timeoutMs: 100 } });
+    const beforeSubmit = vi.fn(() => { vi.setSystemTime(Date.now() + 101); return true; });
+    await expect(client.createOrder({ ...request, beforeSubmit })).rejects.toMatchObject({ code: 'TIMEOUT', outcome: 'NOT_SUBMITTED' });
+    expect(beforeSubmit).toHaveBeenCalledOnce(); expect(fetchImpl).not.toHaveBeenCalled();
+  });
   it('does no work on construction and exposes read, purchase and order lookup methods', () => {
     const { client, fetchImpl } = setup({ products: [] });
     expect(Object.keys(client).sort()).toEqual(['createOrder', 'getBalance', 'getOrder', 'getStock']);

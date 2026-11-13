@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import { createHash } from 'node:crypto';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createSupplierAutobuyOrderService } from '../src/services/supplierAutobuyOrderService.js';
-import { DopermindError } from '../src/services/dopermindClient.js';
+import { createDopermindClient, DopermindError } from '../src/services/dopermindClient.js';
 import { CdkVietnamError } from '../src/services/cdkVietnamClient.js';
 import { STORE_ONE_GUILD_ID } from '../src/utils/locale.js';
 
@@ -13,6 +13,12 @@ const LOG = '444444444444444444';
 const MESSAGE = '555555555555555555';
 const PRODUCT = 'desc_test-product';
 const open = [];
+function wireProvider(provider) {
+  return { ...provider, createOrder: async request => {
+    if (request.beforeSubmit && request.beforeSubmit() !== true) throw new DopermindError('SUBMISSION_BLOCKED', { outcome: 'NOT_SUBMITTED' });
+    return provider.createOrder(request);
+  } };
+}
 function setup(options = {}) {
   const database = options.database || new Database(':memory:');
   if (!options.database) {
@@ -58,7 +64,7 @@ function setup(options = {}) {
   const settings = { db: database, getQuote, createOrder, markOrderCompleted, saveDelivery: vi.fn(),
     encrypt: value => `enc:v1:${Buffer.from(value).toString('base64')}`,
     decrypt: value => Buffer.from(value.slice(7), 'base64').toString('utf8'),
-    providerFactory: () => provider, enabled: () => enabled, customerBlocked: () => blocked,
+    providerFactory: () => wireProvider(provider), enabled: () => enabled, customerBlocked: () => blocked,
     sendDelivery, notifyCompletion, reconcileInvoices, now: () => time, ...options.settings };
   const service = createSupplierAutobuyOrderService(settings); service.init();
   const context = { guildId: STORE_ONE_GUILD_ID, customerId: CUSTOMER };
@@ -78,7 +84,7 @@ describe('durable provider isolation', () => {
   const CDK = 'cdkvietnam:1';
   function sources(options = {}) {
     let t;
-    const factory = vi.fn(provider => provider === 'cdkvietnam' ? cdk : t.provider);
+    const factory = vi.fn(provider => wireProvider(provider === 'cdkvietnam' ? cdk : t.provider));
     const cdk = { getStock: vi.fn(async () => [{ productKey: CDK, name: 'Subscription 1 tháng', priceVnd: 42000, stock: 20 }]),
       getBalance: vi.fn(async () => ({ currency: 'VND', balanceVnd: 1000000 })),
       createOrder: vi.fn(async request => ({ requestId: request.requestId, productKey: request.productKey, quantity: request.quantity,
@@ -155,7 +161,7 @@ describe('durable provider isolation', () => {
     }
     // Simulates changing the shop default between process restarts. Routing
     // remains entirely determined by saved product identities.
-    const factory = vi.fn(provider => provider === 'cdkvietnam' ? t.cdk : t.provider);
+    const factory = vi.fn(provider => wireProvider(provider === 'cdkvietnam' ? t.cdk : t.provider));
     const restart = createSupplierAutobuyOrderService({ ...t.settings, providerFactory: factory }); restart.init();
     for (const original of before) {
       const saved = t.intent(original.order_code);
@@ -330,7 +336,46 @@ describe('durable supplier checkout and ownership', () => {
   });
 });
 
+describe('immutable supplier payment agreement', () => {
+  it('rejects an observed fresh source lock before invoice or wallet admission', async () => {
+    const t = setup(); const o = await t.create();
+    t.provider.getStock.mockResolvedValue([{ productKey: PRODUCT, name: 'Subscription 1 tháng', priceVnd: 42000,
+      stock: 20, unlimited: false, locked: true }]);
+    await expect(t.service.validateSupplierOrderForPayment({ ...t.context, orderCode: o.order_code }))
+      .rejects.toMatchObject({ code: 'PRODUCT_UNAVAILABLE' });
+    expect(t.provider.getBalance).not.toHaveBeenCalled(); expect(t.provider.createOrder).not.toHaveBeenCalled();
+    expect(t.database.prepare('SELECT payment_status,amount_paid FROM orders WHERE order_code=?').get(o.order_code))
+      .toEqual({ payment_status: 'UNPAID', amount_paid: 0 });
+    expect(t.database.prepare('SELECT COUNT(*) AS total FROM wallet_transactions').get().total).toBe(0);
+  });
+  it.each(['before', 'quote', 'stock'].flatMap(stage => ['total_amount', 'quantity'].map(field => ({ stage, field }))))
+    ('rejects an edited $field $stage preflight instead of invoicing against another immutable intent', async ({ stage, field }) => {
+      const t = setup(); const o = await t.create();
+      const edit = () => t.database.prepare(`UPDATE orders SET ${field}=${field}+1 WHERE order_code=?`).run(o.order_code);
+      t.getQuote.mockClear();
+      if (stage === 'before') edit();
+      if (stage === 'quote') t.getQuote.mockImplementationOnce(async (key, quantity) => { edit(); return t.quote(key, quantity); });
+      if (stage === 'stock') t.provider.getStock.mockImplementationOnce(async () => {
+        edit(); return [{ productKey: PRODUCT, name: 'Subscription 1 tháng', priceVnd: 42000, stock: 20, unlimited: false }];
+      });
+      await expect(t.service.validateSupplierOrderForPayment({ ...t.context, orderCode: o.order_code }))
+        .rejects.toMatchObject({ code: 'ORDER_CHANGED' });
+      if (stage === 'before') { expect(t.getQuote).not.toHaveBeenCalled(); expect(t.provider.getStock).not.toHaveBeenCalled(); }
+      expect(t.provider.createOrder).not.toHaveBeenCalled();
+      expect(t.intent(o.order_code)).toMatchObject({ sale_amount: o.total_amount, quantity: o.quantity, attempts: 0 });
+    });
+});
+
 describe('paid-only supplier fulfillment and recovery', () => {
+  it('quarantines an observed fresh source lock before source funds checks or a POST', async () => {
+    const t = setup(); const o = await t.create(); t.pay(o.order_code);
+    t.provider.getStock.mockResolvedValue([{ productKey: PRODUCT, name: 'Subscription 1 tháng', priceVnd: 42000,
+      stock: 20, unlimited: false, locked: true }]);
+    expect((await t.service.fulfillSupplierOrder({}, o.order_code)).status).toBe('REVIEW');
+    expect(t.intent(o.order_code)).toMatchObject({ status: 'REVIEW', last_error: 'PRODUCT_LOCKED', attempts: 0 });
+    expect(t.provider.getBalance).not.toHaveBeenCalled(); expect(t.provider.createOrder).not.toHaveBeenCalled();
+    expect(t.sendDelivery).not.toHaveBeenCalled();
+  });
   it('keeps a paid unfunded order waiting beyond24h without buying, attempts, or cancellation', async () => {
     const t = setup(); const o = await t.create(); t.pay(o.order_code);
     t.provider.getBalance.mockResolvedValue({currency:'VND',balanceVnd:0});
@@ -419,7 +464,7 @@ describe('paid-only supplier fulfillment and recovery', () => {
     expect((await restarted.fulfillSupplierOrder({}, o.order_code)).status).toBe('WAITING_RECONCILIATION');
     await restarted.processPendingSupplierOrders({}, 3);
     expect(t.provider.createOrder).toHaveBeenCalledTimes(2);
-    expect(t.provider.createOrder.mock.calls[1][0]).toEqual(request);
+    expect({ ...t.provider.createOrder.mock.calls[1][0], beforeSubmit: undefined }).toEqual({ ...request, beforeSubmit: undefined });
     expect(t.provider.getBalance).toHaveBeenCalledTimes(1);
     expect(t.intent(o.order_code).status).toBe('DELIVERED');
   });
@@ -449,6 +494,111 @@ describe('paid-only supplier fulfillment and recovery', () => {
     expect((await otherProcess.fulfillSupplierOrder({}, o.order_code)).status).toBe('BUSY');
     release([{ productKey: PRODUCT, priceVnd: 42000, stock: 2, unlimited: false }]);
     await first; expect(t.provider.createOrder).toHaveBeenCalledTimes(1);
+  });
+  it.each(['getStock', 'getBalance'].flatMap(stage => [
+    { stage, change: 'pause', expected: 'PENDING' },
+    { stage, change: 'manual-completion', expected: 'REVIEW' },
+    { stage, change: 'lease-replaced', expected: 'LEASE_LOST' },
+    { stage, change: 'lease-expired', expected: 'LEASE_LOST' },
+  ]))('revalidates $change after awaiting $stage and before any source POST', async ({ stage, change, expected }) => {
+    const t = setup(); const o = await t.create(); t.pay(o.order_code);
+    const requestId = t.intent(o.order_code).request_id;
+    let release;
+    t.provider[stage].mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+    const work = t.service.fulfillSupplierOrder({}, o.order_code);
+    for (let step = 0; !release && step < 10; step++) await Promise.resolve();
+    expect(release).toBeTypeOf('function');
+    if (change === 'pause') t.setEnabled(false);
+    if (change === 'manual-completion') t.database.prepare("UPDATE orders SET status='COMPLETED' WHERE order_code=?").run(o.order_code);
+    if (change === 'lease-replaced') t.database.prepare("UPDATE supplier_autobuy_intents SET lease_token='newer-worker' WHERE order_code=?").run(o.order_code);
+    if (change === 'lease-expired') t.advance(120001);
+    release(stage === 'getStock' ? [{ productKey: PRODUCT, name: 'Subscription 1 tháng', priceVnd: 42000, stock: 20, unlimited: false }]
+      : { currency: 'VND', balanceVnd: 1000000 });
+    expect((await work).status).toBe(expected);
+    expect(t.provider.createOrder).not.toHaveBeenCalled(); expect(t.sendDelivery).not.toHaveBeenCalled();
+    expect(t.intent(o.order_code)).toMatchObject({ request_id: requestId, attempts: 0 });
+    if (change === 'manual-completion') expect(t.intent(o.order_code).last_error).toBe('MANUAL_COMPLETION_UNVERIFIED');
+    if (change === 'lease-replaced') expect(t.intent(o.order_code).lease_token).toBe('newer-worker');
+  });
+  it('rejects a rewritten persisted request identity even if its new JSON/hash agree', async () => {
+    const t = setup(); const o = await t.create(); t.pay(o.order_code);
+    t.provider.getBalance.mockImplementationOnce(async () => {
+      const current = t.intent(o.order_code), requestId = current.request_id + '-changed';
+      const request = JSON.stringify({ product_key: current.product_key, quantity: current.quantity, request_id: requestId });
+      t.database.prepare('UPDATE supplier_autobuy_intents SET request_id=?,request_json=?,request_hash=? WHERE order_code=?')
+        .run(requestId, request, createHash('sha256').update(request).digest('hex'), o.order_code);
+      return { currency: 'VND', balanceVnd: 1000000 };
+    });
+    expect((await t.service.fulfillSupplierOrder({}, o.order_code)).status).toBe('REVIEW');
+    expect(t.provider.createOrder).not.toHaveBeenCalled(); expect(t.intent(o.order_code).attempts).toBe(0);
+  });
+  it('requires the conditional attempt update to claim exactly one row before a source POST', async () => {
+    const t = setup(); const o = await t.create(); t.pay(o.order_code);
+    t.database.exec(`CREATE TRIGGER suppress_attempt BEFORE UPDATE OF attempts ON supplier_autobuy_intents
+      WHEN NEW.attempts > OLD.attempts BEGIN SELECT RAISE(IGNORE); END;`);
+    expect((await t.service.fulfillSupplierOrder({}, o.order_code)).status).toBe('LEASE_LOST');
+    expect(t.provider.createOrder).not.toHaveBeenCalled(); expect(t.intent(o.order_code).attempts).toBe(0);
+  });
+  it.each([
+    { change: 'pause', expected: 'PENDING' }, { change: 'manual-completion', expected: 'REVIEW' },
+    { change: 'lease-replaced', expected: 'LEASE_LOST' }, { change: 'lease-expired', expected: 'LEASE_LOST' },
+  ])('revalidates $change at the actual Dopermind wire boundary after its 5100ms rate wait', async ({ change, expected }) => {
+    vi.useFakeTimers(); const started = Date.parse('2026-11-14T05:00:00Z'); vi.setSystemTime(started);
+    const t = setup({ time: started }); const o = await t.create(); t.pay(o.order_code);
+    const requestId = t.intent(o.order_code).request_id;
+    const fetchImpl = vi.fn(async (_url, options) => {
+      const request = JSON.parse(options.body);
+      return new Response(JSON.stringify({ success: true, data: { request_id: request.request_id,
+        product_key: request.product_key, quantity: request.quantity, order_code: 'API_SYNTHETIC_WIRE',
+        unit_price: 42000, total_amount: 42000 * request.quantity, balance_after: 100000,
+        created_at: new Date(Date.now()).toISOString(), idempotent: false, items: ['synthetic-private-item'] } }),
+      { headers: { 'content-type': 'application/json' } });
+    });
+    const transport = createDopermindClient({ apiKey: `synthetic-engine-wire-${change}`, fetchImpl, enforceRateLimits: true, timeoutMs: 10000 });
+    await transport.createOrder({ productKey: PRODUCT, quantity: 1, requestId: 'warm-wire-fence', maxUnitCostVnd: 42000 });
+    const engine = createSupplierAutobuyOrderService({ ...t.settings,
+      providerFactory: () => ({ ...t.provider, createOrder: transport.createOrder }) });
+    const work = engine.fulfillSupplierOrder({}, o.order_code);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(fetchImpl).toHaveBeenCalledOnce(); expect(t.intent(o.order_code).attempts).toBe(0);
+    if (change === 'pause') t.setEnabled(false);
+    if (change === 'manual-completion') t.database.prepare("UPDATE orders SET status='COMPLETED' WHERE order_code=?").run(o.order_code);
+    if (change === 'lease-replaced') t.database.prepare("UPDATE supplier_autobuy_intents SET lease_token='newer-wire-worker' WHERE order_code=?").run(o.order_code);
+    if (change === 'lease-expired') t.advance(120001);
+    await vi.advanceTimersByTimeAsync(5100);
+    expect((await work).status).toBe(expected);
+    expect(fetchImpl).toHaveBeenCalledOnce(); expect(t.sendDelivery).not.toHaveBeenCalled();
+    expect(t.intent(o.order_code)).toMatchObject({ request_id: requestId, attempts: 0 });
+    if (change === 'lease-replaced') expect(t.intent(o.order_code).lease_token).toBe('newer-wire-worker');
+  });
+  it('retains UNKNOWN reconciliation and its request identity when paused before replay, then resumes safely', async () => {
+    const t = setup(); const o = await t.create(); t.pay(o.order_code);
+    t.provider.createOrder.mockRejectedValueOnce(new DopermindError('TIMEOUT', { outcome: 'UNKNOWN' }));
+    expect((await t.service.fulfillSupplierOrder({}, o.order_code)).status).toBe('UNKNOWN');
+    const requestId = t.intent(o.order_code).request_id; t.advance(120001);
+    t.provider.getStock.mockImplementationOnce(async () => {
+      t.setEnabled(false); return [{ productKey: PRODUCT, name: 'Subscription 1 tháng', priceVnd: 42000, stock: 20, unlimited: false }];
+    });
+    expect((await t.service.fulfillSupplierOrder({}, o.order_code, { allowReconcile: true })).status).toBe('UNKNOWN');
+    expect(t.intent(o.order_code)).toMatchObject({ status: 'UNKNOWN', request_id: requestId, attempts: 1, lease_token: null });
+    expect(t.provider.createOrder).toHaveBeenCalledOnce();
+    t.setEnabled(true); t.advance(120001); await t.service.processPendingSupplierOrders({}, 1);
+    expect(t.intent(o.order_code)).toMatchObject({ status: 'DELIVERED', request_id: requestId, attempts: 2 });
+    expect(t.provider.createOrder.mock.calls.map(([request]) => request.requestId)).toEqual([requestId, requestId]);
+    expect(t.sendDelivery).toHaveBeenCalledOnce();
+  });
+  it('retains a valid charged receipt for review if an adapter ignored its required submission hook', async () => {
+    const t = setup(); const o = await t.create(); t.pay(o.order_code);
+    const requestId = t.intent(o.order_code).request_id;
+    const noncompliant = createSupplierAutobuyOrderService({ ...t.settings, providerFactory: () => t.provider });
+    expect((await noncompliant.fulfillSupplierOrder({}, o.order_code)).status).toBe('REVIEW');
+    expect(t.intent(o.order_code)).toMatchObject({ status: 'REVIEW', last_error: 'SUBMISSION_GUARD_MISSING',
+      request_id: requestId, attempts: 0, charged_unit_cost: 42000, charged_total_cost: 42000, supplier_order_code: 'API_TEST_1' });
+    expect(t.intent(o.order_code).encrypted_payload).toMatch(/^enc:v1:/);
+    expect(JSON.stringify(t.intent(o.order_code))).not.toContain('private-password');
+    expect(t.sendDelivery).not.toHaveBeenCalled();
+    await noncompliant.fulfillSupplierOrder({}, o.order_code); await noncompliant.processPendingSupplierOrders({}, 3);
+    expect(t.provider.createOrder).toHaveBeenCalledOnce(); expect(t.sendDelivery).not.toHaveBeenCalled();
   });
   it('does not expose, deliver, or mark complete a malformed uncertain receipt', async () => {
     const t = setup(); const o = await t.create(); t.pay(o.order_code);
