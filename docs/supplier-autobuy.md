@@ -1,6 +1,6 @@
 # Supplier AutoBuy — Dopermind / CDK Việt Nam
 
-This describes the implementation and owner's updated policies as of 2026-11-14. It does not establish that a revision is deployed, the production flag is enabled, or a real paid purchase has been tested. Verify the release record, exact live commit, health and Discord panel separately. Read-only connection success is distinct from purchase/delivery evidence.
+This describes the implementation and owner's updated policies as of 2026-11-15. It does not establish that a revision is deployed, the production flag is enabled, or a real paid purchase has been tested. Verify the release record, exact live commit, health and Discord panel separately. Read-only connection success is distinct from purchase/delivery evidence.
 
 ### CDK storefront repair · 2026-11-13
 
@@ -33,6 +33,13 @@ No source costs, balances, goods, credentials or free-form provider explanations
 are exposed. Operator review can read a separate cached metadata snapshot for
 unreviewed names, delivery mode and descriptions; it is not a public-health
 field and performs no extra provider request.
+
+The [2026-11-15 nine-product review](supplier-autobuy-expansion-20261115.md)
+adds six narrowly described policies and holds three incomplete bundle/Edu
+identities. All 103 prior policies and 43 approved quote fingerprints remain
+unchanged. The completed temporary console projection is disabled; cached
+operator pricing recommendations expose only suggested fixed parameters,
+never raw source costs, and do not enable products themselves.
 
 One shared durable worker uses the immutable `provider` saved on each quote and
 purchase intent. Product keys, persisted request IDs, request JSON/hash, invoices

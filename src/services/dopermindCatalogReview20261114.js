@@ -5,7 +5,7 @@ import { STORE_ONE_GUILD_ID } from '../utils/locale.js';
 // This temporary operator projection uses only the already-cached source read.
 export const DOPERMIND_REVIEW = Object.freeze({
   revision: 'DOPERMIND-CATALOG-REVIEW-20261115-1',
-  enabled: true,
+  enabled: false,
   authorizedUntil: '2026-11-14T20:00:00.000Z',
   onlyUnreviewed: true,
 });

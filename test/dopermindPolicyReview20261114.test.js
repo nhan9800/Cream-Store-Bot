@@ -11,6 +11,8 @@ const policy = JSON.parse(readFileSync(new URL('../src/data/supplierAutobuyPrici
 // from the current policy: pending orders can outlive a quote's display TTL.
 const previous = JSON.parse(readFileSync(new URL('./fixtures/dopermind-approved-20261110.json', import.meta.url), 'utf8'));
 const audit = JSON.parse(readFileSync(new URL('./fixtures/dopermind-excluded-metadata-20261114.json', import.meta.url), 'utf8'));
+const historicalKeys = new Set([...previous.products, ...audit.products].map(row => row.productKey));
+const historicalProducts = policy.products.filter(row => historicalKeys.has(row.productKey));
 const document = readFileSync(new URL('../docs/supplier-autobuy-expansion-20261114.md', import.meta.url), 'utf8');
 const nowMs = Date.parse(policy.checkedAt) + 60_000;
 const added = [
@@ -32,10 +34,10 @@ const source = (row, priceVnd = 10000) => ({ productKey: row.productKey, name: r
 
 describe('Dopermind excluded-product review on 2026-11-14', () => {
   it('keeps an explicit decision for all 103 source identities and documents all seventy exclusions plus two new rows', () => {
-    expect(policy.products).toHaveLength(103);
-    expect(new Set(policy.products.map(row => row.productKey)).size).toBe(103);
-    expect(policy.products.filter(row => row.enabled)).toHaveLength(43);
-    const reviewed = policy.products.filter(row => !row.enabled || added.some(([key]) => row.productKey === key));
+    expect(historicalProducts).toHaveLength(103);
+    expect(new Set(historicalProducts.map(row => row.productKey)).size).toBe(103);
+    expect(historicalProducts.filter(row => row.enabled)).toHaveLength(43);
+    const reviewed = historicalProducts.filter(row => !row.enabled || added.some(([key]) => row.productKey === key));
     expect(reviewed).toHaveLength(72);
     for (const row of reviewed) expect(document).toContain(row.productKey);
     expect(audit.products).toHaveLength(72);
@@ -63,7 +65,7 @@ describe('Dopermind excluded-product review on 2026-11-14', () => {
     try {
       expect(previous.products).toHaveLength(31);
       expect(policy.version).toBe(previous.version);
-      expect(policy.reviewRevision).toBe('dopermind-2026-11-14-expansion-v2');
+      expect(policy.sourceReview.revision).toBe(audit.revision);
       await oldCatalog.getOffers(); await newCatalog.getOffers();
       for (const oldRow of previous.products) {
         expect(entry(oldRow.productKey)).toEqual(oldRow);

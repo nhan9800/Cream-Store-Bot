@@ -1,8 +1,9 @@
 import { describe, expect, it, vi } from 'vitest';
 vi.mock('../src/services/supplierAutobuyCatalogService.js', () => ({ getSupplierCatalogReviewSnapshot: vi.fn() }));
-import { runDopermindCatalogReview } from '../src/services/dopermindCatalogReview20261114.js';
+import { DOPERMIND_REVIEW, runDopermindCatalogReview } from '../src/services/dopermindCatalogReview20261114.js';
 const guildId = '1282637033340403754';
 const fixture = () => ({ guildId, envFile: '.env', now: () => Date.parse('2026-11-13T18:00:00Z'), log: vi.fn(),
+  release: { ...DOPERMIND_REVIEW, enabled: true },
   readSnapshot: vi.fn(() => ({ status: 'READY', products: [
     { productKey: 'new-product', name: 'Clear product', nameEn: 'Product', type: 'ACCOUNT', stock: 3,
       reviewReason: 'NOT_REVIEWED', apiKey: 'secret-key', unitCostVnd: 123456, balanceVnd: 998877,
@@ -10,6 +11,11 @@ const fixture = () => ({ guildId, envFile: '.env', now: () => Date.parse('2026-1
     { productKey: 'known-product', name: 'Existing offer', reviewReason: 'SELLABLE' },
   ] })) });
 describe('temporary protected Dopermind review', () => {
+  it('keeps the completed operator projection disabled without reading the source snapshot', () => {
+    const options = fixture(); delete options.release;
+    expect(runDopermindCatalogReview({}, options)).toEqual({ status: 'DISABLED' });
+    expect(options.readSnapshot).not.toHaveBeenCalled(); expect(options.log).not.toHaveBeenCalled();
+  });
   it('emits only excluded cached metadata once and never costs, credentials or receipts', () => {
     const options = fixture(), client = {};
     expect(runDopermindCatalogReview(client, options)).toEqual({ status: 'DONE', sourceCount: 2, excludedCount: 1 });
