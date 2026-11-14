@@ -46,6 +46,7 @@ import { runCompactSaleRelease } from './services/compactSaleReleaseService.js';
 import { installDiscordRateLimitHealth } from './services/discordRateLimitHealthService.js';
 import { runDopermindCatalogReview } from './services/dopermindCatalogReview20261114.js';
 import { runNitroPriceUpdate } from './services/nitroPriceUpdateService.js';
+import { startVinhDanhMaintenance } from './services/vinhDanhService.js';
 
 export async function buildClient() {
   initDatabase();
@@ -167,6 +168,11 @@ export async function buildClient() {
     // Restore the owned application icon set independently of slow optional
     // setup. Partial uploads/Discord failures retry; commerce stays available.
     const iconSetup=startCoreEmojiMaintenance(readyClient,{guildId:config.guildId,afterSync:refreshBotInterfaces});
+    // Calendar rollover must not wait for payment reconciliation, backups or
+    // optional interface refreshes. The timer waits for usable custom icons.
+    startVinhDanhMaintenance(readyClient, {
+      isReady: () => getCoreEmojiPackStatus(readyClient).status === 'ready',
+    });
     if (separateSupplierSources) void iconSetup.then(() => runNitroPriceUpdate(readyClient))
       .catch(() => console.warn('[NITRO-PRICE-UPDATE] UPDATE_PENDING'));
     void iconSetup.then(() => runShopRelaunchRelease(readyClient))

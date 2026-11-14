@@ -84,6 +84,7 @@ import { getSupplierTicketOrderNoticeHealth } from './supplierAutobuyTicketNotic
 import { getSupplierAutobuyDeliveryHealth } from './supplierAutobuyDeliveryService.js';
 import { getSupplierPaymentNoticeHealth } from './supplierAutobuyPaymentNoticeService.js';
 import { getNitroPriceUpdateHealth } from './nitroPriceUpdateService.js';
+import { getVinhDanhHealth } from './vinhDanhService.js';
 import { getCoreEmojiPackStatus } from './coreEmojiPackService.js';
 import { getShopRelaunchReleaseHealth } from './shopRelaunchReleaseService.js';
 import { getCompactSaleReleaseHealth } from './compactSaleReleaseService.js';
@@ -525,6 +526,7 @@ export function registerBotApiRoutes(app) {
             supplierAutobuyDelivery: getSupplierAutobuyDeliveryHealth(),
             supplierAutobuyPaymentNotices: getSupplierPaymentNoticeHealth(),
             nitroPriceUpdate: getNitroPriceUpdateHealth(),
+            leaderboard: getVinhDanhHealth(req.app.locals.discordClient),
             supplierAutobuySources: supplierAutobuyRuntime.getAllHealth?.(),
             supplierAutobuyCatalogs: { cdkvietnam: getSupplierCatalogHealth('cdkvietnam'), dopermind: getSupplierCatalogHealth('dopermind') },
             supplierAutobuyPanels: getSupplierAutobuyPanelsHealth(),

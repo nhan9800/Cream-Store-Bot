@@ -27,6 +27,7 @@ function localMidnightUtc(year, month, day) {
  * Monthly periods are calendar months (not a rolling 30-day window).
  */
 export function getLeaderboardPeriodBounds(period = 'monthly', now = new Date()) {
+  period = ({ month: 'monthly', week: 'weekly', all_time: 'all', alltime: 'all' })[period] || period;
   const local = zonedParts(now);
 
   if (period === 'monthly') {
@@ -49,13 +50,13 @@ export function getLeaderboardPeriodBounds(period = 'monthly', now = new Date())
  * Return paid customer totals for one guild and one period.
  * `paid_at` is authoritative; legacy rows without it fall back to created_at.
  */
-export function getLeaderboardRows(guildId, period = 'monthly', now = new Date(), limit = 50) {
+export function getLeaderboardRows(guildId, period = 'monthly', now = new Date(), limit = 50, database = db) {
   const safeLimit = Math.min(50, Math.max(1, Number.parseInt(limit, 10) || 10));
   const bounds = getLeaderboardPeriodBounds(period, now);
   const predicates = [
     'guild_id = ?',
     "payment_status = 'PAID'",
-    "status <> 'CANCELLED'",
+    "status NOT IN ('CANCELLED', 'REFUNDED')",
     'amount_paid > 0',
   ];
   const params = [guildId];
@@ -69,7 +70,7 @@ export function getLeaderboardRows(guildId, period = 'monthly', now = new Date()
     params.push(bounds.end);
   }
 
-  const rows = db.prepare(`
+  const rows = database.prepare(`
     SELECT customer_id,
            COUNT(*) AS orders,
            COALESCE(SUM(amount_paid), 0) AS total_spent,

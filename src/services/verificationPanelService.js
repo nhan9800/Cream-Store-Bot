@@ -133,6 +133,7 @@ export function buildVerificationPromptV2({ guildId, username, loginUrl, hasRole
     `> ${E('recovery_backup')} ${recoveryActive ? 'Recovery consent has been recorded.' : 'Required recovery consent has not been recorded.'}`,
     recoveryActive ? `> ${E('status_info')} Stored consent cannot confirm whether you later revoked access in Discord.` : null,
     !complete ? `> ${E('icon_lock')} Continue with Discord using the account you want to verify. Only a validated callback can grant the role.` : null,
+    !complete ? `> If Discord says this application is restricted or pending review, contact the shop. The application owner needs Discord to review it before authorization can continue.` : null,
     complete ? `-# ${E('icon_key')} Update consent only if you revoked the app in Discord.` : null,
     `-# ${E('icon_sparkle')} Open one consent page and finish it. Repeated clicks do not remove a Discord restriction.`,
   ] : [
@@ -142,6 +143,7 @@ export function buildVerificationPromptV2({ guildId, username, loginUrl, hasRole
     `> ${E('recovery_backup')} ${recoveryActive ? 'Đồng ý OAuth recovery đã được ghi nhận.' : 'Chưa ghi nhận đầy đủ đồng ý OAuth recovery.'}`,
     recoveryActive ? `> ${E('status_info')} Dữ liệu đã lưu không xác nhận được bạn đã thu hồi quyền trong Discord hay chưa.` : null,
     !complete ? `> ${E('icon_lock')} Tiếp tục với Discord bằng tài khoản cần xác minh. Vai trò chỉ được cấp sau khi callback được xác nhận thành công.` : null,
+    !complete ? `> Nếu Discord báo ứng dụng bị hạn chế hoặc đang chờ xem xét, hãy báo shop. Chủ ứng dụng cần gửi Discord xét duyệt để tiếp tục ủy quyền.` : null,
     complete ? `-# ${E('icon_key')} Chỉ cập nhật ủy quyền nếu bạn đã thu hồi ứng dụng trong Discord.` : null,
     `-# ${E('icon_sparkle')} Chỉ mở một trang ủy quyền và hoàn tất. Bấm liên tục không gỡ được hạn chế từ Discord.`,
   ];

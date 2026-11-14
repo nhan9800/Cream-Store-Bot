@@ -23,6 +23,7 @@ const state = vi.hoisted(() => ({
   supplierPaymentRepair: vi.fn(),
   supplierPaymentMaintenance: vi.fn(),
   discordRateLimitHealth: vi.fn(),
+  leaderboardMaintenance: vi.fn(),
   supplierRuntimes: new Map(),
 }));
 
@@ -56,6 +57,7 @@ vi.mock('../src/services/compactSaleReleaseService.js', () => ({ runCompactSaleR
 vi.mock('../src/services/discordRateLimitHealthService.js', () => ({ installDiscordRateLimitHealth: state.discordRateLimitHealth }));
 vi.mock('../src/services/dopermindCatalogReview20261114.js', () => ({ runDopermindCatalogReview: vi.fn() }));
 vi.mock('../src/services/nitroPriceUpdateService.js', () => ({ runNitroPriceUpdate: vi.fn() }));
+vi.mock('../src/services/vinhDanhService.js', () => ({ startVinhDanhMaintenance: state.leaderboardMaintenance }));
 vi.mock('../src/services/supplierAutobuyPanelService.js', () => ({ ensureSupplierAutobuyChannel: state.supplierPanel }));
 vi.mock('../src/services/supplierAutobuyTicketNoticeService.js', () => ({
   repairSupplierTicketOrderNotices: state.supplierTicketRepair,
@@ -136,6 +138,25 @@ afterEach(() => {
 });
 
 describe('independent price-board publication at startup', () => {
+  it('starts monthly board maintenance only after owning HTTP and observes later icon readiness without waiting for optional setup', async () => {
+    let openHttp;
+    state.webhook.mockImplementation(() => new Promise(resolve => { openHttp = resolve; }));
+    state.icons.mockImplementation(() => new Promise(() => {}));
+    state.iconStatus.mockReturnValue({ status: 'in_progress' });
+    state.supplierStart.mockImplementation(() => new Promise(() => {}));
+    const client = await buildClient();
+    void state.handlers.get('clientReady')(client);
+    expect(state.leaderboardMaintenance).not.toHaveBeenCalled();
+    openHttp();
+    await vi.waitFor(() => expect(state.leaderboardMaintenance).toHaveBeenCalledTimes(1));
+    const [target, options] = state.leaderboardMaintenance.mock.calls[0];
+    expect(target).toBe(client);
+    expect(options.isReady()).toBe(false);
+    state.iconStatus.mockReturnValue({ status: 'ready' });
+    expect(options.isReady()).toBe(true);
+    expect(state.publish).not.toHaveBeenCalled();
+  });
+
   it('starts both requested storefronts independently while sharing one durable worker', async () => {
     state.guildId = '1282637033340403754';
     vi.stubEnv('ENV_FILE', '.env');
@@ -283,6 +304,7 @@ describe('independent price-board publication at startup', () => {
     expect(state.destroy).toHaveBeenCalledTimes(1);
     expect(state.publish).not.toHaveBeenCalled();
     expect(state.scheduler).not.toHaveBeenCalled();
+    expect(state.leaderboardMaintenance).not.toHaveBeenCalled();
     expect(state.icons).not.toHaveBeenCalled();
     expect(state.supplierStart).not.toHaveBeenCalled();
     expect(state.supplierPanel).not.toHaveBeenCalled();

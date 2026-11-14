@@ -26,6 +26,7 @@ if (process.env.IS_CHILD_BOT === 'true') {
   const { startBot } = await import('./bootstrap.js');
   const { startWebhookServer, stopWebhookServer } = await import('./services/webhookServer.js');
   const { initDatabase } = await import('./database/db.js');
+  const { stopVinhDanhMaintenance } = await import('./services/vinhDanhService.js');
   let activeClient = null;
   let childStopping = false;
 
@@ -42,6 +43,7 @@ if (process.env.IS_CHILD_BOT === 'true') {
     forceExit.unref();
 
     try {
+      stopVinhDanhMaintenance(activeClient);
       activeClient?.destroy();
       await stopWebhookServer();
     } catch (error) {

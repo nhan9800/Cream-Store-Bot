@@ -1,5 +1,10 @@
 # Verification recovery — 2026-10-19
 
+The [2026-11-15 application review diagnosis](discord-application-review-20261115.md)
+records the current website/bot application IDs, callback map and an owner
+review-request draft. Studio and Store 1 share application `1382729296724099132`;
+local HTTP health does not detect or clear Discord's authorization restriction.
+
 ## OAuth request controls — 2026-11-14
 
 The HTTP login and callback paths now have bounded local request budgets. A
