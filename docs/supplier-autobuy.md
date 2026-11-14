@@ -194,6 +194,34 @@ The same retention predicate also guards feedback-triggered closure on shared OR
 
 ## Durable purchase and delivery
 
+Supplier PayOS webhooks and owned status reads return after the validated bank
+receipt is durably committed. Supplier fulfillment, customer-role synchronization
+and optional payment notices start independently; a slow Discord request or
+supplier queue does not delay that paid response. The returned amount is the
+recorded amount received. Invoice identity and insufficient-payment guards still
+run before the commit. Legacy fulfillment keeps its existing behavior.
+
+`supplier_autobuy_payment_notices` owns only the two private payment-confirmation
+messages, not goods or completion notifications. It claims one attempt before
+transport and records positive ticket and DM message IDs separately. A partial,
+failed or interrupted attempt stays `UNKNOWN`; a changed paid owner, supplier
+request, amount or ticket binding goes to `REVIEW`. Neither state is blindly
+resent. The sender checks the linked open private ticket and current paid
+identity after asynchronous preparation. Its display uses sanitized source
+product text, distinct custom emoji and the persisted payment timestamp.
+
+An independent bounded maintenance timer starts after Store1 HTTP ownership and
+Discord readiness, even while new purchases are paused. It repairs `PENDING`
+notices without PayOS/source requests. A persisted payment-event ID boundary
+also permits repair of a new full PayOS receipt whose optional notice enqueue
+failed after the bank receipt committed. Historical confirmed or ambiguous
+notices are not assumed unsent. If no trustworthy boundary was persisted before
+that receipt, recovery holds conservatively. Paid supplier orders already owned
+by this journal do not consume the general PayOS lookup limit; unpaid invoices
+and legacy orders keep their reconciliation path. `supplierAutobuyPaymentNotices`
+health reports cached aggregate journal states only and performs no DB/network
+work when read. These counts do not represent all paid orders or delivery.
+
 Before POST, persist the store/customer/local order/product/quantity, cost ceiling, terms, stable `cenar-<UUID>` request ID, exact serialized request and SHA-256 hash. Immediate SQLite claims, two-minute leases, serialized per-process work and coalesced calls prevent concurrent submission. The worker scans due paid intents in bounded batches approximately once a minute, using durable retry times.
 
 When a balance read confirms insufficient supplier funds before submission, the engine stores `WAITING_SUPPLIER_FUNDS` with a future retry time, clears its lease and makes no purchase POST. This waiting check does not increment submission attempts or replace the request ID. It survives restart and can repeat until the owner funds the source; the next due pass still enforces paid/not-cancelled/not-refunded eligibility, stock and the original cost ceiling. Waiting uses the persisted retry schedule, not an immediate polling loop. Paid waiting orders are protected from the 24-hour **unpaid** ticket cleanup and from feedback closure while processing. Once goods are stored, DM/retrieval retries use those goods without checking out or charging again.

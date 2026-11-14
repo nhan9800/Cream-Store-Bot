@@ -82,6 +82,7 @@ import { getSupplierCatalogHealth } from './supplierAutobuyCatalogService.js';
 import { getSupplierAutobuyOrderHealth } from './supplierAutobuyOrderService.js';
 import { getSupplierTicketOrderNoticeHealth } from './supplierAutobuyTicketNoticeService.js';
 import { getSupplierAutobuyDeliveryHealth } from './supplierAutobuyDeliveryService.js';
+import { getSupplierPaymentNoticeHealth } from './supplierAutobuyPaymentNoticeService.js';
 import { getCoreEmojiPackStatus } from './coreEmojiPackService.js';
 import { getShopRelaunchReleaseHealth } from './shopRelaunchReleaseService.js';
 import { getCompactSaleReleaseHealth } from './compactSaleReleaseService.js';
@@ -521,6 +522,7 @@ export function registerBotApiRoutes(app) {
             supplierAutobuyOrders: getSupplierAutobuyOrderHealth(),
             supplierAutobuyTicketNotices: getSupplierTicketOrderNoticeHealth(),
             supplierAutobuyDelivery: getSupplierAutobuyDeliveryHealth(),
+            supplierAutobuyPaymentNotices: getSupplierPaymentNoticeHealth(),
             supplierAutobuySources: supplierAutobuyRuntime.getAllHealth?.(),
             supplierAutobuyCatalogs: { cdkvietnam: getSupplierCatalogHealth('cdkvietnam'), dopermind: getSupplierCatalogHealth('dopermind') },
             supplierAutobuyPanels: getSupplierAutobuyPanelsHealth(),

@@ -27,6 +27,7 @@ import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { buildLegacyFeatureCard } from '../utils/featureCard.js';
 import { deliverPaidOrder } from './autoDeliveryService.js';
 import { db } from '../database/db.js';
+import { startSupplierPaymentEffects } from './supplierAutobuyPaymentNoticeService.js';
 
 const PAYOS_API_BASE = 'https://api-merchant.payos.vn';
 const PAYMENT_CONFIRMATION_ACTIONS = [
@@ -618,6 +619,14 @@ export async function finalizePaidOrder(client, order, paymentData, transactionI
     assertPayOSLookupIdentity(fresh, invoiceGuard.info);
     return recordPayment();
   }).immediate() : recordPayment();
+  if (payment.updated.fulfillment_mode === 'SUPPLIER') {
+    // The bank receipt is already durable. Supplier work, Discord roles and
+    // optional receipts must not keep a webhook/status request waiting behind
+    // the supplier queue. Every background effect revalidates this snapshot.
+    try { startSupplierPaymentEffects({ client, order: payment.updated, freshReceipt: !payment.duplicate }); }
+    catch { /* The paid order and existing durable workers remain authoritative. */ }
+    return { updated: payment.updated, duplicate: payment.duplicate, repairedNotification: false };
+  }
   // Role recovery is independent of delivery/DM logs and duplicate webhooks.
   await syncCustomerRolesNow(client, payment.updated.guild_id, payment.updated.customer_id).catch((error) => {
     console.error('[CUSTOMER-ROLES] Payment role sync deferred:', error.code || error.name);
@@ -819,7 +828,7 @@ export async function syncPaymentStatusFromPayOS({ client, orderCode = null, pay
       transaction?.description || order.paid_transaction_content || order.payment_code || order.order_code,
       'PAYOS', { order, info },
     );
-    return { order: result.updated, state: 'PAID', synced: true, repairedNotification: needsNotificationRepair };
+    return { order: result.updated, state: 'PAID', synced: true, repairedNotification: needsNotificationRepair && result.repairedNotification === true };
   }
 
   if (['CANCELLED', 'EXPIRED'].includes(state) && order.status === 'PENDING_PAYMENT') {
@@ -865,6 +874,13 @@ export async function reconcileRecentPayOSPayments(client, { limit = 20, lookbac
   const cutoff = new Date(Date.now() - Math.max(1, Number(lookbackHours) || 24) * 60 * 60 * 1000).toISOString();
   const actionPlaceholders = PAYMENT_CONFIRMATION_ACTIONS.map(() => '?').join(',');
   let supplierInvoiceFilter = '';
+  let supplierNoticeFilter = '';
+  try {
+    const table = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='supplier_autobuy_payment_notices'").get();
+    if (table && db.prepare('PRAGMA table_info(supplier_autobuy_payment_notices)').all().some(column => column.name === 'order_code')) {
+      supplierNoticeFilter = "AND NOT (o.fulfillment_mode='SUPPLIER' AND EXISTS (SELECT 1 FROM supplier_autobuy_payment_notices n WHERE n.order_code=o.order_code))";
+    }
+  } catch { /* A missing optional notice journal preserves reconciliation. */ }
   try {
     const methods = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='supplier_autobuy_payment_methods'").get();
     const columns = methods ? db.prepare('PRAGMA table_info(supplier_autobuy_payment_methods)').all() : [];
@@ -886,6 +902,7 @@ export async function reconcileRecentPayOSPayments(client, { limit = 20, lookbac
         (o.payment_status != 'PAID' AND o.status = 'PENDING_PAYMENT' ${supplierInvoiceFilter})
         OR (
           o.payment_status = 'PAID'
+          ${supplierNoticeFilter}
           AND NOT EXISTS (
             SELECT 1 FROM staff_logs l
             WHERE l.related_order_code = o.order_code

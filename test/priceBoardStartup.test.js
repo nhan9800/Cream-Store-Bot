@@ -20,6 +20,8 @@ const state = vi.hoisted(() => ({
   supplierWorker: vi.fn(),
   supplierTicketRepair: vi.fn(),
   supplierTicketMaintenance: vi.fn(),
+  supplierPaymentRepair: vi.fn(),
+  supplierPaymentMaintenance: vi.fn(),
   discordRateLimitHealth: vi.fn(),
   supplierRuntimes: new Map(),
 }));
@@ -57,6 +59,10 @@ vi.mock('../src/services/supplierAutobuyPanelService.js', () => ({ ensureSupplie
 vi.mock('../src/services/supplierAutobuyTicketNoticeService.js', () => ({
   repairSupplierTicketOrderNotices: state.supplierTicketRepair,
   startSupplierTicketNoticeMaintenance: state.supplierTicketMaintenance,
+}));
+vi.mock('../src/services/supplierAutobuyPaymentNoticeService.js', () => ({
+  repairSupplierPaymentNotices: state.supplierPaymentRepair,
+  startSupplierPaymentNoticeMaintenance: state.supplierPaymentMaintenance,
 }));
 vi.mock('../src/events/interactionCreate.js', () => ({ getClientOptions: () => ({}), loadCommands: async () => new Map(), registerInteractionHandler: vi.fn() }));
 vi.mock('../src/services/schedulerService.js', () => ({ startScheduler: state.scheduler }));
@@ -154,6 +160,25 @@ describe('independent price-board publication at startup', () => {
     expect(state.supplierTicketMaintenance).toHaveBeenCalledExactlyOnceWith(client, {
       guildId: '1282637033340403754', envFile: '.env', limit: 25,
     });
+    expect(state.supplierPaymentMaintenance).toHaveBeenCalledExactlyOnceWith(client, { limit: 3 });
+    expect(state.supplierPaymentRepair).toHaveBeenCalledExactlyOnceWith(client, { limit: 3 });
+    expect(state.webhook.mock.invocationCallOrder[0]).toBeLessThan(state.supplierPaymentMaintenance.mock.invocationCallOrder[0]);
+    expect(state.scheduler).toHaveBeenCalledWith(client);
+  });
+  it('prepares paid notice recovery while both source probes and icons are stalled with new sales paused', async () => {
+    state.guildId = '1282637033340403754';
+    vi.stubEnv('ENV_FILE', '.env');
+    state.icons.mockImplementation(() => new Promise(() => {}));
+    for (const provider of ['cdkvietnam', 'dopermind']) {
+      state.supplierRuntimes.set(provider, { start: vi.fn(() => new Promise(() => {})) });
+    }
+    const client = await buildClient();
+    void state.handlers.get('clientReady')(client);
+    await vi.waitFor(() => expect(state.supplierPaymentMaintenance).toHaveBeenCalledExactlyOnceWith(client, { limit: 3 }));
+    expect(state.supplierPaymentRepair).toHaveBeenCalledExactlyOnceWith(client, { limit: 3 });
+    expect(state.supplierPaymentMaintenance.mock.invocationCallOrder[0])
+      .toBeLessThan(state.supplierRuntimes.get('cdkvietnam').start.mock.invocationCallOrder[0]);
+    expect(state.supplierWorker).not.toHaveBeenCalled();
     expect(state.scheduler).toHaveBeenCalledWith(client);
   });
   it('keeps the connected source and commerce available when the other provider probe fails', async () => {
@@ -185,6 +210,8 @@ describe('independent price-board publication at startup', () => {
     expect(state.otp).toHaveBeenCalledWith(client);
     expect(state.supplierTicketRepair).not.toHaveBeenCalled();
     expect(state.supplierTicketMaintenance).not.toHaveBeenCalled();
+    expect(state.supplierPaymentMaintenance).not.toHaveBeenCalled();
+    expect(state.supplierPaymentRepair).not.toHaveBeenCalled();
     expect(state.cleanup).toHaveBeenCalledTimes(1);
     expect(state.icons).toHaveBeenCalledWith(client, {
       guildId: '1070676180103086132', afterSync: state.refreshInterfaces,
@@ -246,6 +273,8 @@ describe('independent price-board publication at startup', () => {
 
   it('does not publish from a duplicate process that fails to acquire the HTTP port', async () => {
     vi.useFakeTimers();
+    state.guildId = '1282637033340403754';
+    vi.stubEnv('ENV_FILE', '.env');
     state.webhook.mockRejectedValue(Object.assign(new Error('port collision'), { code: 'EADDRINUSE' }));
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const client = await buildClient();
@@ -256,6 +285,8 @@ describe('independent price-board publication at startup', () => {
     expect(state.icons).not.toHaveBeenCalled();
     expect(state.supplierStart).not.toHaveBeenCalled();
     expect(state.supplierPanel).not.toHaveBeenCalled();
+    expect(state.supplierPaymentMaintenance).not.toHaveBeenCalled();
+    expect(state.supplierPaymentRepair).not.toHaveBeenCalled();
   });
 
   it('keeps commerce running while the hosting supplier probe is pending', async () => {

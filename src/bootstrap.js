@@ -40,6 +40,7 @@ import { getSupplierOffers, supplierSalesConfigured } from './services/supplierA
 import { startSupplierAutobuyWorker } from './services/supplierAutobuyOrderService.js';
 import { ensureSupplierAutobuyChannel } from './services/supplierAutobuyPanelService.js';
 import { repairSupplierTicketOrderNotices, startSupplierTicketNoticeMaintenance } from './services/supplierAutobuyTicketNoticeService.js';
+import { repairSupplierPaymentNotices, startSupplierPaymentNoticeMaintenance } from './services/supplierAutobuyPaymentNoticeService.js';
 import { runShopRelaunchRelease } from './services/shopRelaunchReleaseService.js';
 import { runCompactSaleRelease } from './services/compactSaleReleaseService.js';
 import { installDiscordRateLimitHealth } from './services/discordRateLimitHealthService.js';
@@ -115,6 +116,12 @@ export async function buildClient() {
     // runtime restricts credentials to Store 1 and never submits a purchase.
     // Supplier downtime must not block commerce or Discord startup.
     const separateSupplierSources = config.guildId === STORE_ONE_GUILD_ID && process.env.ENV_FILE === '.env';
+    if (separateSupplierSources) {
+      // Independent of supplier probes, funds, purchase flags and fulfillment
+      // latency. Local paid-notice repair never polls PayOS or buys a product.
+      try { startSupplierPaymentNoticeMaintenance(readyClient, { limit: 3 }); repairSupplierPaymentNotices(readyClient, { limit: 3 }); }
+      catch { console.warn('[SUPPLIER-PAYMENT-NOTICE] MAINTENANCE_PENDING'); }
+    }
     const activeSupplierProvider = process.env.SUPPLIER_AUTOBUY_PROVIDER || 'daiphuc';
     const supplierProviders = separateSupplierSources ? ['cdkvietnam', 'dopermind'] : [activeSupplierProvider];
     const supplierSnapshots = new Map();
