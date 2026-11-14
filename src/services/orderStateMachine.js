@@ -152,8 +152,21 @@ export function transitionOrder(db, orderCode, newStatusRaw, actor = 'system', r
 
   // If status actually changes, update order & log history
   if (normOld !== normNew) {
-    db.prepare('UPDATE orders SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE UPPER(order_code) = ?')
-      .run(normNew, codeUpper);
+    if (normNew === ORDER_STATUSES.COMPLETED) {
+      // A new administrative completion is an event now, not authority to
+      // reconstruct an old date or confirm payment/delivery. Preserve the
+      // original completion evidence when returning from warranty work.
+      const completedAt = new Date().toISOString();
+      const saved = db.prepare(`UPDATE orders SET status = ?, status_changed_at = ?,
+        completed_at = COALESCE(completed_at, ?),
+        completed_by_id = COALESCE(completed_by_id, ?), updated_at = ?
+        WHERE UPPER(order_code) = ? AND status = ?`)
+        .run(normNew, completedAt, completedAt, String(actor || 'system'), completedAt, codeUpper, order.status);
+      if (saved.changes !== 1) throw new Error('Order status changed before completion; reload the order.');
+    } else {
+      db.prepare('UPDATE orders SET status = ?, updated_at = CURRENT_TIMESTAMP WHERE UPPER(order_code) = ?')
+        .run(normNew, codeUpper);
+    }
 
     recordStatusHistory(db, {
       orderCode: codeUpper,

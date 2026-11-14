@@ -20,8 +20,8 @@ export function auditOrderIntegrityPage(database, { afterId = 0, snapshotId = nu
       HAVING COUNT(*)>1`).all(upper).map(row => row.code));
     const orders = database.prepare(`SELECT o.id,o.order_code,o.guild_id,o.customer_id,o.quantity,
       o.total_amount,o.amount_paid,o.payment_provider,o.payment_status,o.status,
-      o.created_at,o.paid_at,o.delivered_at,o.completed_at,o.expiry_at,
-      t.id AS existing_ticket,t.guild_id AS ticket_guild,t.customer_id AS ticket_customer
+      o.created_at,o.paid_at,o.delivered_at,o.completed_at,o.expiry_at,o.ticket_channel_id,
+      t.id AS existing_ticket,t.guild_id AS ticket_guild,t.customer_id AS ticket_customer,t.channel_id AS ticket_channel
       FROM orders o LEFT JOIN tickets t ON t.id=o.ticket_id
       WHERE o.id>? AND o.id<=? ORDER BY o.id LIMIT ?`).all(afterId, upper, limit);
     const subscription = database.prepare(`SELECT id,guild_id,status,purchase_date,expiry_at,
@@ -37,6 +37,8 @@ export function auditOrderIntegrityPage(database, { afterId = 0, snapshotId = nu
     const debits = database.prepare(`SELECT COUNT(*) AS count,COALESCE(SUM(amount),0) AS amount
       FROM wallet_transactions WHERE guild_id=? AND customer_id=? AND related_code=?
       AND type IN ('PAYMENT','PAY_ORDER')`);
+    const ticketCandidates = database.prepare(`SELECT id FROM tickets
+      WHERE guild_id=? AND customer_id=? AND channel_id=? ORDER BY id LIMIT 2`);
     const findings = [];
     const counts = {};
     const statuses = {};
@@ -77,7 +79,8 @@ export function auditOrderIntegrityPage(database, { afterId = 0, snapshotId = nu
         const issues = [];
         const add = value => { issues.push(value); flag(value); };
         const guild = kind === 'spotify' ? row.family_guild : row.guild_id;
-        if (!guild || (order.guild_id !== 'WEB' && guild !== order.guild_id)) add('LINKED_SERVICE_GUILD_MISMATCH');
+        const allowedGuilds = kind === 'subscription' ? [order.guild_id, 'WEB'] : [order.guild_id];
+        if (!guild || (order.guild_id !== 'WEB' && !allowedGuilds.includes(guild))) add('LINKED_SERVICE_GUILD_MISMATCH');
         if (row.status === 'ACTIVE' && terminal(order.status)) add('ACTIVE_SERVICE_ON_TERMINAL_ORDER');
         if (row.status === 'ACTIVE' && !['PAID', 'FREE'].includes(order.payment_status)) add('ACTIVE_SERVICE_WITHOUT_PAYMENT_CLEARANCE');
         if (kind === 'subscription') {
@@ -110,9 +113,16 @@ export function auditOrderIntegrityPage(database, { afterId = 0, snapshotId = nu
       }
       if (flags.size) {
         for (const value of flags) counts[value] = (counts[value] || 0) + 1;
+        const hasTicketIssue = [...flags].some(value => value.startsWith('TICKET_'));
+        const virtualTicketChannel = !order.ticket_channel_id || order.ticket_channel_id === 'WEB';
+        const candidates = hasTicketIssue && !virtualTicketChannel
+          ? ticketCandidates.all(order.guild_id, order.customer_id, order.ticket_channel_id) : [];
         findings.push({ id: order.id, orderCode: order.order_code, status: order.status,
           paymentStatus: order.payment_status, totalAmount: order.total_amount, recordedPaidAmount: order.amount_paid,
-          flags: [...flags], linkedRecords: records });
+          flags: [...flags], linkedRecords: records,
+          ...(hasTicketIssue ? { ticketEvidence: { virtualTicketChannel,
+            channelMatchesReference: order.ticket_channel_id === order.ticket_channel,
+            exactCandidateCount: candidates.length, uniqueCandidateId: candidates.length === 1 ? candidates[0].id : null } } : {}) });
       }
     }
     const lastId = orders.at(-1)?.id ?? afterId;

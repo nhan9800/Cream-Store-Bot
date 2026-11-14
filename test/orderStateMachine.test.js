@@ -1,9 +1,12 @@
-import { describe, it, expect } from 'vitest';
+import Database from 'better-sqlite3';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
 import {
   ORDER_STATUSES,
   VALID_TRANSITIONS,
   normalizeStatus,
   canTransition,
+  getOrderTimeline,
+  transitionOrderStatus,
 } from '../src/services/orderStateMachine.js';
 
 describe('Order State Machine', () => {
@@ -48,5 +51,62 @@ describe('Order State Machine', () => {
       expect(canTransition(ORDER_STATUSES.PAID, ORDER_STATUSES.PAID)).toBe(true);
       expect(canTransition(ORDER_STATUSES.COMPLETED, ORDER_STATUSES.COMPLETED)).toBe(true);
     });
+  });
+});
+
+describe('admin completion metadata on actual status transitions', () => {
+  let database;
+  const stamp = '2026-11-15T08:30:00.000Z';
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date(stamp));
+    database = new Database(':memory:');
+    database.exec(`CREATE TABLE orders (
+      order_code TEXT PRIMARY KEY,status TEXT,payment_status TEXT,total_amount INTEGER,amount_paid INTEGER,
+      completed_at TEXT,completed_by_id TEXT,status_changed_at TEXT,updated_at TEXT,
+      delivered_at TEXT,expiry_at TEXT,feedback_requested_at TEXT,feedback_due_at TEXT
+    );
+    INSERT INTO orders(order_code,status,payment_status,total_amount,amount_paid,updated_at)
+      VALUES('CN_123456','PROCESSING','PAID',88000,88000,'2026-11-01T00:00:00.000Z')`);
+  });
+  afterEach(() => { database.close(); vi.useRealTimers(); });
+  const complete = () => transitionOrderStatus('CN_123456', 'COMPLETED', {
+    dbInstance: database, changedBy: 'synthetic-admin', reason: 'Admin dashboard manual update',
+  });
+  it('stamps canonical completion metadata without changing payment, delivery, feedback or expiry', () => {
+    const result = complete();
+    expect(result).toMatchObject({ success: true, changed: true, order: {
+      status: 'COMPLETED', completed_at: stamp, completed_by_id: 'synthetic-admin',
+      status_changed_at: stamp, updated_at: stamp, payment_status: 'PAID', total_amount: 88000, amount_paid: 88000,
+      delivered_at: null, expiry_at: null, feedback_requested_at: null, feedback_due_at: null,
+    } });
+    expect(getOrderTimeline(database, 'CN_123456')).toMatchObject([{
+      old_status: 'PROCESSING', new_status: 'COMPLETED', actor: 'synthetic-admin', reason: 'Admin dashboard manual update',
+    }]);
+  });
+  it('preserves first completion evidence when completing warranty work', () => {
+    database.prepare("UPDATE orders SET status='WARRANTY_OPEN',completed_at=?,completed_by_id=?").run('2026-10-01T08:00:00.000Z', 'original-staff');
+    expect(complete()).toMatchObject({ success: true, changed: true, order: {
+      completed_at: '2026-10-01T08:00:00.000Z', completed_by_id: 'original-staff', status_changed_at: stamp,
+    } });
+  });
+  it('does not reconstruct missing historical completion evidence on a same-status replay', () => {
+    database.prepare("UPDATE orders SET status='COMPLETED'").run();
+    expect(complete()).toMatchObject({ success: true, changed: false, order: { completed_at: null, completed_by_id: null } });
+    expect(getOrderTimeline(database, 'CN_123456')).toHaveLength(0);
+  });
+  it('does not reset timestamps or add duplicate history on repeated completion', () => {
+    complete();
+    vi.setSystemTime(new Date('2026-11-15T09:30:00.000Z'));
+    expect(complete()).toMatchObject({ success: true, changed: false, order: { completed_at: stamp, status_changed_at: stamp } });
+    expect(getOrderTimeline(database, 'CN_123456')).toHaveLength(1);
+  });
+  it('does not stamp completion fields for other state transitions or rejected terminal transitions', () => {
+    expect(transitionOrderStatus('CN_123456', 'WAITING_STAFF', { dbInstance: database })).toMatchObject({
+      success: true, order: { completed_at: null, completed_by_id: null },
+    });
+    database.prepare("UPDATE orders SET status='CANCELLED'").run();
+    expect(complete().success).toBe(false);
+    expect(database.prepare('SELECT completed_at,completed_by_id FROM orders').get()).toEqual({ completed_at: null, completed_by_id: null });
   });
 });

@@ -7,10 +7,10 @@ function fixture() {
   const db = new Database(':memory:');
   databases.push(db);
   db.exec(`CREATE TABLE orders(id INTEGER PRIMARY KEY,order_code TEXT,guild_id TEXT,customer_id TEXT,
-    ticket_id INTEGER,quantity INTEGER,total_amount INTEGER,amount_paid INTEGER,payment_provider TEXT,
+    ticket_id INTEGER,ticket_channel_id TEXT,quantity INTEGER,total_amount INTEGER,amount_paid INTEGER,payment_provider TEXT,
     payment_status TEXT,status TEXT,created_at TEXT,paid_at TEXT,delivered_at TEXT,completed_at TEXT,expiry_at TEXT,
     credential_password TEXT);
-    CREATE TABLE tickets(id INTEGER PRIMARY KEY,guild_id TEXT,customer_id TEXT);
+    CREATE TABLE tickets(id INTEGER PRIMARY KEY,guild_id TEXT,customer_id TEXT,channel_id TEXT);
     CREATE TABLE subscription_accounts(id INTEGER PRIMARY KEY,related_order_code TEXT,guild_id TEXT,status TEXT,
     purchase_date TEXT,expiry_at TEXT,total_duration_months INTEGER,renewal_cycle_months INTEGER,times_renewed INTEGER,
     renewal_mode TEXT,next_renewal_at TEXT,gmail_password TEXT);
@@ -23,9 +23,9 @@ function fixture() {
     joined_at TEXT,member_expiry_at TEXT,family_id INTEGER);
     CREATE TABLE wallet_transactions(guild_id TEXT,customer_id TEXT,related_code TEXT,type TEXT,amount INTEGER);`);
   const add = (id, overrides = {}) => {
-    db.prepare('INSERT OR IGNORE INTO tickets VALUES(?,?,?)').run(id, 'store', 'private-customer');
+    db.prepare('INSERT OR IGNORE INTO tickets VALUES(?,?,?,?)').run(id, 'store', 'private-customer', `private-channel-${id}`);
     const row = { id, order_code: `CN_TEST${id}`, guild_id: 'store', customer_id: 'private-customer',
-      ticket_id: id, quantity: 1, total_amount: 100000, amount_paid: 100000, payment_provider: 'PAYOS',
+      ticket_id: id, ticket_channel_id: `private-channel-${id}`, quantity: 1, total_amount: 100000, amount_paid: 100000, payment_provider: 'PAYOS',
       payment_status: 'PAID', status: 'PROCESSING', created_at: '2026-11-01 00:00:00',
       paid_at: '2026-11-01T00:00:00Z', delivered_at: null, completed_at: null, expiry_at: null,
       credential_password: 'never-return-this-secret', ...overrides };
@@ -94,7 +94,7 @@ describe('read-only, complete order integrity audit', () => {
   it('accepts the one-time zero cycle and valid Spotify/schema fields', () => {
     const { db, add } = fixture(); add(1);
     db.prepare('INSERT INTO subscription_accounts VALUES(?,?,?,?,?,?,?,?,?,?,?,?)')
-      .run(1, 'CN_TEST1', 'store', 'ACTIVE', '2026-11-01', '2027-11-01', 12, 0, 0, 'one_time', null, 'never-return-password');
+      .run(1, 'CN_TEST1', 'WEB', 'ACTIVE', '2026-11-01', '2027-11-01', 12, 0, 0, 'one_time', null, 'never-return-password');
     db.prepare('INSERT INTO spotify_families VALUES(?,?)').run(1, 'store');
     db.prepare('INSERT INTO spotify_family_members VALUES(?,?,?,?,?,?)')
       .run(1, 'CN_TEST1', 'ACTIVE', '2026-11-01', '2027-11-01', 1);
@@ -112,5 +112,12 @@ describe('read-only, complete order integrity audit', () => {
     const { db, add } = fixture(); add(1); add(2, { order_code: ' cn_test1 ' });
     expect(auditOrderIntegrityPage(db).findings.map(row => row.flags))
       .toEqual([['NORMALIZED_ORDER_CODE_DUPLICATE'], ['NORMALIZED_ORDER_CODE_DUPLICATE']]);
+  });
+  it('reports exact ticket candidates without revealing channel/customer identities', () => {
+    const { db, add } = fixture(); add(1, { ticket_id: 99 });
+    const result = auditOrderIntegrityPage(db);
+    expect(result.findings[0].ticketEvidence).toEqual({ virtualTicketChannel: false,
+      channelMatchesReference: false, exactCandidateCount: 1, uniqueCandidateId: 1 });
+    expect(JSON.stringify(result)).not.toMatch(/private-channel|private-customer/);
   });
 });
