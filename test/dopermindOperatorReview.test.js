@@ -37,4 +37,33 @@ describe('temporary protected Dopermind review', () => {
     const logged = JSON.stringify(options.log.mock.calls);
     expect(logged).toContain('new-product'); expect(logged).not.toMatch(/held-policy|held-price|known-product/);
   });
+  it('whitelists complete safe recommendation parameters without projecting arbitrary supplier financial fields', () => {
+    const options = fixture(), snapshot = options.readSnapshot();
+    Object.assign(snapshot.products[0], { recommendedMarkupVnd: 30000, recommendedReserveVnd: 5000,
+      rawCost: 123456, suggestedSale: 166666, netProfitVnd: 23456 });
+    options.readSnapshot.mockReturnValue(snapshot);
+    runDopermindCatalogReview({}, options);
+    const row = JSON.parse(options.log.mock.calls[1][1]);
+    expect(row).toMatchObject({ recommendedMarkupVnd: 30000, recommendedReserveVnd: 5000 });
+    expect(JSON.stringify(row)).not.toMatch(/rawCost|suggestedSale|netProfit|123456|166666|23456|secret-key|private-goods/);
+  });
+  it.each([{ recommendedMarkupVnd: '30000', recommendedReserveVnd: 5000 },
+    { recommendedMarkupVnd: 30000, recommendedReserveVnd: -1 },
+    { recommendedMarkupVnd: Infinity, recommendedReserveVnd: 5000 },
+    { recommendedMarkupVnd: 30000, recommendedReserveVnd: Number.MAX_SAFE_INTEGER + 1 },
+  ])('does not log incomplete or invalid pricing recommendations %j', recommendation => {
+    const options = fixture(), snapshot = options.readSnapshot(); Object.assign(snapshot.products[0], recommendation);
+    options.readSnapshot.mockReturnValue(snapshot); runDopermindCatalogReview({}, options);
+    const row = JSON.parse(options.log.mock.calls[1][1]);
+    expect(row).not.toHaveProperty('recommendedMarkupVnd'); expect(row).not.toHaveProperty('recommendedReserveVnd');
+  });
+  it('never attaches recommendation fields to an earlier held decision even in a legacy excluded-product projection', () => {
+    const options = fixture(), snapshot = options.readSnapshot();
+    snapshot.products.push({ productKey: 'held-policy', name: 'Prior held product', reviewReason: 'POLICY_EXCLUDED',
+      recommendedMarkupVnd: 30000, recommendedReserveVnd: 5000 });
+    options.release = { enabled: true, authorizedUntil: '2026-11-14T20:00:00Z', onlyUnreviewed: false };
+    options.readSnapshot.mockReturnValue(snapshot); runDopermindCatalogReview({}, options);
+    const row = options.log.mock.calls.map(([, value]) => JSON.parse(value)).find(value => value.productKey === 'held-policy');
+    expect(row).toBeDefined(); expect(row).not.toHaveProperty('recommendedMarkupVnd'); expect(row).not.toHaveProperty('recommendedReserveVnd');
+  });
 });

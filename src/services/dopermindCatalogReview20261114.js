@@ -11,6 +11,10 @@ export const DOPERMIND_REVIEW = Object.freeze({
 });
 const reviewed = new WeakSet();
 const safeText = value => typeof value === 'string' ? value.slice(0, 1200) : null;
+const pricingRecommendation = product => product.reviewReason === 'NOT_REVIEWED'
+  && Number.isSafeInteger(product.recommendedMarkupVnd) && product.recommendedMarkupVnd > 0
+  && Number.isSafeInteger(product.recommendedReserveVnd) && product.recommendedReserveVnd > 0
+  ? { recommendedMarkupVnd: product.recommendedMarkupVnd, recommendedReserveVnd: product.recommendedReserveVnd } : {};
 
 export function runDopermindCatalogReview(client, { guildId, envFile, now = Date.now,
   release = DOPERMIND_REVIEW, readSnapshot = getSupplierCatalogReviewSnapshot,
@@ -34,6 +38,7 @@ export function runDopermindCatalogReview(client, { guildId, envFile, now = Date
     stock: Number.isSafeInteger(product.stock) ? product.stock : null,
     unlimited: product.unlimited === true, locked: product.locked === true,
     reviewReason: safeText(product.reviewReason),
+    ...pricingRecommendation(product),
   }));
   log('[DOPERMIND-REVIEW]', JSON.stringify({ revision: release.revision, status: 'DONE', excludedCount: products.length }));
   return { status: 'DONE', sourceCount: snapshot.products.length, excludedCount: products.length };

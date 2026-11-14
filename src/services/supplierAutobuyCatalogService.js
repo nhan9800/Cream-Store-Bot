@@ -19,6 +19,16 @@ const integer = (n, min = 0) => Number.isSafeInteger(n) && n >= min;
 const dateMs = value => typeof value === 'string' ? Date.parse(value) : NaN;
 const validText = (s, max = 1000) => typeof s === 'string' && s.trim() && s.length <= max && !/[\u0000-\u001f\u007f]/.test(s);
 
+// Operator review hints only. Approved SKU parameters and quote terms stay fixed.
+function recommendUnreviewedPricing(cost) {
+  if (!integer(cost, 1)) return {};
+  const tier = cost <= 50000 ? [20000, 3000] : cost <= 150000 ? [30000, 5000]
+    : cost <= 300000 ? [50000, 10000] : cost <= 600000 ? [100000, 15000]
+      : cost <= 1000000 ? [150000, 25000] : [250000,
+        Number(((BigInt(cost) + 39999n) / 40000n) * 1000n)];
+  return { recommendedMarkupVnd: tier[0], recommendedReserveVnd: Math.max(cost > 1000000 ? 50000 : 0, tier[1]) };
+}
+
 export function supplierSalesConfigured(env = process.env, guildId = config.guildId, provider = configuredSupplierProvider(env)) {
   if (guildId !== STORE_ONE_GUILD_ID || env.ENV_FILE !== '.env' || env.SUPPLIER_AUTOBUY_ENABLED !== 'true') return false;
   if (provider === 'dopermind') return typeof env.DOPERMIND_API_KEY === 'string' && Boolean(env.DOPERMIND_API_KEY.trim());
@@ -247,17 +257,21 @@ export function createSupplierAutobuyCatalog({
     reviewRevision: typeof policy.reviewRevision === 'string' ? policy.reviewRevision : null,
     ...coverage, blockedReasons: Object.freeze({ ...coverage.blockedReasons }) }); }
   // Operator-only cached source metadata. Never include this in public health.
-  // It does not refresh the supplier, read credentials, expose costs or mutate DB.
+  // Suggestions do not approve products, expose raw costs or mutate pricing.
+  // This read does not refresh the supplier, read credentials or mutate DB.
   function getReviewSnapshot() {
-    return { status, pricingVersion: policy.version, products: reviewedRows.map(({ product, price }) => ({
+    return { status, pricingVersion: policy.version, products: reviewedRows.map(({ product, price }) => {
+      const reviewReason = price.ok ? (product.unlimited || product.stock > 0 ? 'SELLABLE' : 'OUT_OF_STOCK')
+        : safeReasons.has(price.reason) ? price.reason : 'POLICY_EXCLUDED';
+      return {
       productKey: product.productKey, name: product.name, delivery: product.delivery || null,
       nameEn: typeof product.nameEn === 'string' ? product.nameEn : null,
       type: typeof product.type === 'string' ? product.type : null,
       locked: product.locked === true, description: product.description || null,
       stock: product.stock, unlimited: product.unlimited === true,
-      reviewReason: price.ok ? (product.unlimited || product.stock > 0 ? 'SELLABLE' : 'OUT_OF_STOCK')
-        : safeReasons.has(price.reason) ? price.reason : 'POLICY_EXCLUDED',
-    })) };
+      reviewReason,
+      ...(reviewReason === 'NOT_REVIEWED' ? recommendUnreviewedPricing(product.priceVnd) : {}),
+    }; }) };
   }
   return Object.freeze({ getOffers, getQuote, setPriceOverride, getHealth, getReviewSnapshot });
 }
