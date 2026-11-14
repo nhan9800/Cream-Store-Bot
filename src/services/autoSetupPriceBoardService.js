@@ -57,7 +57,7 @@ const OFFICIAL_SPOTIFY_PRODUCT_KEYS = new Set([
 export const PRICE_GROUPS = [
   {
     key: 'nitro', titleSlot: 'brand_nitro', title: 'Discord Nitro', accent: 0x5865F2,
-    note: 'Nitro Boost Login 1 và 2 tháng; chính chủ 12 tháng; Trial 3 tháng 65k cho tài khoản trên 1 tháng chưa từng dùng Nitro.',
+    note: 'Nitro Login 1–2 tháng; chính chủ 12 tháng; gói 12 tháng gia hạn tự động mỗi 2 tháng. Trial 3 tháng dành cho tài khoản đủ điều kiện.',
     match: (p) => p.service_type === 'GAME' && /nitro/i.test(p.name),
   },
   {
@@ -372,7 +372,8 @@ export function buildPriceGroupPayload(guildId, group, products) {
         ] : warrantyPolicy ? [
           `> ${E('warranty_shield')} **${international ? 'Warranty' : 'Bảo hành'}:** ${international ? translateProductWarranty(warrantyPolicy) : warrantyPolicy}`,
         ] : []),
-        ...([GEMINI_PRO_CDK_KEY, 'gemini-pro-antigravity-24-months', 'claude-pro-1-month'].includes(product.product_key) ? [
+        ...([GEMINI_PRO_CDK_KEY, 'gemini-pro-antigravity-24-months', 'claude-pro-1-month',
+          'discord-nitro-boost-12-months-auto-renew-2-months'].includes(product.product_key) ? [
           `> ${E('status_info')} **${international ? 'Terms' : 'Điều kiện'}:** ${international ? translateProductDescription(product.description) : product.description}`,
         ] : []),
       ].join('\n'))

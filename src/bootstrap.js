@@ -45,6 +45,7 @@ import { runShopRelaunchRelease } from './services/shopRelaunchReleaseService.js
 import { runCompactSaleRelease } from './services/compactSaleReleaseService.js';
 import { installDiscordRateLimitHealth } from './services/discordRateLimitHealthService.js';
 import { runDopermindCatalogReview } from './services/dopermindCatalogReview20261114.js';
+import { runNitroPriceUpdate } from './services/nitroPriceUpdateService.js';
 
 export async function buildClient() {
   initDatabase();
@@ -166,6 +167,8 @@ export async function buildClient() {
     // Restore the owned application icon set independently of slow optional
     // setup. Partial uploads/Discord failures retry; commerce stays available.
     const iconSetup=startCoreEmojiMaintenance(readyClient,{guildId:config.guildId,afterSync:refreshBotInterfaces});
+    if (separateSupplierSources) void iconSetup.then(() => runNitroPriceUpdate(readyClient))
+      .catch(() => console.warn('[NITRO-PRICE-UPDATE] UPDATE_PENDING'));
     void iconSetup.then(() => runShopRelaunchRelease(readyClient))
       .catch(() => console.warn('[SHOP-RELAUNCH] RELEASE_FAILED'));
     void iconSetup.then(() => runCompactSaleRelease(readyClient))

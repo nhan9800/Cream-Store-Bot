@@ -1817,6 +1817,7 @@ export const DEFAULT_PRODUCT_CATALOG = [
     { product_key: 'discord-nitro-boost-2-months-login-keep-mail-7-days', name: 'Discord Nitro Boost 2 Tháng (Login · Giữ Mail 7 Ngày)', aliases: ['Discord Nitro Boost 2 Tháng (Login)'], description: 'Gói login Nitro Boost 2 tháng. Khách hàng cần giữ mail tối thiểu 7 ngày, đăng nhập sớm và kiểm tra mail trong 10-30 phút sau khi nhận.', price: 115000, ctv_price: 95000, duration_months: 2, service_type: 'GAME', emoji: 'brand_nitro', original_price: 0 },
     { product_key: 'discord-nitro-boost-2-months-login-mail-guaranteed', name: 'Discord Nitro Boost 2 Tháng (Login · Mail Bao Sống)', description: 'Gói login Nitro Boost 2 tháng kèm mail bao sống. Đăng nhập sớm và kiểm tra mail trong 10-30 phút sau khi nhận; xác minh số điện thoại nếu hệ thống yêu cầu.', price: 136000, ctv_price: 95000, duration_months: 2, service_type: 'GAME', emoji: 'brand_nitro', original_price: 140000 },
     { product_key: 'discord-nitro-boost-1-nam-login', name: 'Discord Nitro Boost 12 Tháng (Login · Chính Chủ)', aliases: ['Discord Nitro Boost 1 Năm (Login)'], description: 'Kích hoạt trọn 12 tháng trong một lần trên tài khoản Discord chính chủ, không gia hạn tự động. Có hàng liền; dòng ổn định được shop tiếp tục duy trì. Mở ticket riêng để xác nhận cách kích hoạt.', price: 850000, ctv_price: 795000, duration_months: 12, service_type: 'GAME', emoji: 'brand_nitro', original_price: 0, activation_method: 'OWN_ACCOUNT' },
+    { product_key: 'discord-nitro-boost-12-months-auto-renew-2-months', name: 'Discord Nitro Boost 12 Tháng (Gia Hạn Tự Động 2 Tháng/Lần)', description: 'Giá 650.000đ cho toàn bộ 12 tháng Nitro Boost, gồm 6 kỳ, mỗi kỳ 2 tháng và gia hạn tự động theo kỳ. Mở ticket riêng để xác nhận tài khoản và cách kích hoạt.', price: 650000, duration_months: 12, service_type: 'GAME', emoji: 'brand_nitro', original_price: 0, activation_method: 'OWN_ACCOUNT' },
 
     { product_key: 'discord-nitro-boost-trial-3-months-first-offer', name: 'Discord Nitro Boost Trial 3 Tháng (Ưu Đãi Lần Đầu)', description: 'Nitro Boost Trial 3 tháng giá 64.000đ. Chỉ dành cho tài khoản được tạo trên 1 tháng và chưa từng sử dụng Nitro. Mở ticket để shop kiểm tra điều kiện tài khoản trước khi kích hoạt.', price: 64000, duration_months: 3, service_type: 'GAME', emoji: 'brand_nitro', original_price: 65000, activation_method: 'OWN_ACCOUNT' },
 
@@ -2150,6 +2151,7 @@ export function seedProductCatalog(dbInstance) {
             'discord-nitro-boost-2-months-login-keep-mail-7-days',
             'discord-nitro-boost-2-months-login-mail-guaranteed',
             'discord-nitro-boost-1-nam-login',
+            'discord-nitro-boost-12-months-auto-renew-2-months',
             'discord-nitro-boost-trial-3-months-first-offer'
           )
         )

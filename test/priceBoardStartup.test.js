@@ -55,6 +55,7 @@ vi.mock('../src/services/shopRelaunchReleaseService.js', () => ({ runShopRelaunc
 vi.mock('../src/services/compactSaleReleaseService.js', () => ({ runCompactSaleRelease: vi.fn() }));
 vi.mock('../src/services/discordRateLimitHealthService.js', () => ({ installDiscordRateLimitHealth: state.discordRateLimitHealth }));
 vi.mock('../src/services/dopermindCatalogReview20261114.js', () => ({ runDopermindCatalogReview: vi.fn() }));
+vi.mock('../src/services/nitroPriceUpdateService.js', () => ({ runNitroPriceUpdate: vi.fn() }));
 vi.mock('../src/services/supplierAutobuyPanelService.js', () => ({ ensureSupplierAutobuyChannel: state.supplierPanel }));
 vi.mock('../src/services/supplierAutobuyTicketNoticeService.js', () => ({
   repairSupplierTicketOrderNotices: state.supplierTicketRepair,

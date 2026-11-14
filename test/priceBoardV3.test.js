@@ -244,6 +244,23 @@ describe('Cenar price board V3', () => {
     expect(announcement).not.toContain('12 tháng liên tục');
   });
 
+  it('offers the 650k annual Nitro package with its two-month cycle and full annual duration', () => {
+    const products = getActiveProducts(GUILD_ID);
+    const renewal = products.find(product => product.product_key === 'discord-nitro-boost-12-months-auto-renew-2-months');
+    expect(renewal).toMatchObject({ price: 650000, duration_months: 12, is_active: 1 });
+    const nitro = buildPriceBoardPayloads(GUILD_ID, {}, products)
+      .find(payload => collectTextContent(payload).includes(renewal.name));
+    const block = nitro.components[0].toJSON().components.find(component => component.type === 10 && component.content.includes(renewal.name));
+    expect(block.content).toContain('650.000');
+    expect(block.content).toContain('**Thời hạn:** `12 tháng`');
+    expect(block.content).toContain('Gia Hạn Tự Động 2 Tháng/Lần');
+    expect(block.content).toContain(renewal.description);
+    const selector = nitro.components.map(component => component.toJSON())
+      .find(component => component.type === 1 && component.components[0]?.custom_id === 'product:select').components[0];
+    expect(selector.options).toContainEqual(expect.objectContaining({ value: String(renewal.id) }));
+    expect(products.find(product => product.product_key === 'discord-nitro-boost-1-nam-login').price).toBe(850000);
+  });
+
   it('publishes only the stable 75k Netflix Slot and retires the 35k product', () => {
     const netflixSlot = DEFAULT_PRODUCT_CATALOG.find((product) => (
       product.product_key === 'netflix-extra-1-month-renewable'
