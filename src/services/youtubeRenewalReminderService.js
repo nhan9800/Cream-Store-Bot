@@ -69,16 +69,18 @@ function adminTargets(guild, settings) {
 }
 
 function actionRow(membership, E) {
+  const dueMs = new Date(membership.nextSourcePaymentAt).getTime();
+  const dueVersion = Number.isSafeInteger(dueMs) && dueMs > 0 ? dueMs : 0;
   const show = withButtonEmoji(
     new ButtonBuilder().setCustomId(`ytrenew:show:${membership.id}`).setLabel('Xem Gmail & Nguồn').setStyle(ButtonStyle.Primary),
     E.component('icon_key'),
   );
   const paid = withButtonEmoji(
     new ButtonBuilder()
-      .setCustomId(`ytrenew:paid:${membership.id}`)
+      .setCustomId(`ytrenew:paid:${membership.id}:${membership.paidCycles}:${dueVersion}:${membership.renewalVersion || 'legacy'}`)
       .setLabel('Đã Thanh Toán 1 Kỳ')
       .setStyle(ButtonStyle.Success)
-      .setDisabled(membership.remainingCycles <= 0),
+      .setDisabled(membership.remainingCycles <= 0 || dueVersion === 0 || !membership.renewalVersion),
     E.component('status_check'),
   );
   const snooze = withButtonEmoji(
@@ -191,7 +193,7 @@ export async function runYoutubeRenewalReminders(client) {
 
 export async function handleYoutubeRenewalButton(interaction) {
   if (!interaction.isButton() || !interaction.customId.startsWith('ytrenew:')) return false;
-  const [, action, rawId] = interaction.customId.split(':');
+  const [, action, rawId, rawRevision, rawDueMs, rawVersion] = interaction.customId.split(':');
   const id = Number(rawId);
   const settings = getGuildConfig(interaction.guildId);
   const member = interaction.member?.roles?.cache
@@ -229,7 +231,26 @@ export async function handleYoutubeRenewalButton(interaction) {
   }
 
   if (action === 'paid') {
-    const updated = markYoutubeCyclePaid(id, { actorId: interaction.user.id, note: 'Xác nhận nhanh từ nút Discord.' });
+    const expectedRevision = Number(rawRevision);
+    const expectedDueMs = Number(rawDueMs);
+    if (!/^\d+$/.test(rawRevision || '') || !/^\d+$/.test(rawDueMs || '')
+      || !Number.isSafeInteger(expectedRevision) || !Number.isSafeInteger(expectedDueMs) || expectedDueMs <= 0
+      || !/^[a-f0-9]{12}$/.test(rawVersion || '') || rawVersion !== existing.renewalVersion
+      || expectedRevision !== existing.paidCycles
+      || expectedDueMs !== new Date(existing.nextSourcePaymentAt).getTime()) {
+      await interaction.reply({ content: 'Panel YouTube này đã cũ hoặc kỳ này đã được xử lý. Mở YouTube Center hoặc /youtube-renewal view để lấy hồ sơ mới; hệ thống không cộng thêm kỳ.', flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    let updated;
+    try {
+      updated = markYoutubeCyclePaid(id, { actorId: interaction.user.id, note: 'Xác nhận nhanh từ nút Discord.',
+        expectedPaidCycles: expectedRevision, expectedNextPaymentAt: existing.nextSourcePaymentAt,
+        expectedRenewalVersion: rawVersion });
+    } catch (error) {
+      if (error?.code !== 'YOUTUBE_RENEWAL_CONFLICT') throw error;
+      await interaction.reply({ content: 'Kỳ YouTube vừa được xử lý hoặc thay đổi. Vui lòng mở hồ sơ mới; hệ thống không cộng trùng kỳ.', flags: MessageFlags.Ephemeral });
+      return true;
+    }
     const next = updated.nextSourcePaymentAt
       ? `Kỳ tiếp theo: <t:${unix(updated.nextSourcePaymentAt)}:F> · <t:${unix(updated.nextSourcePaymentAt)}:R>`
       : `Đã thanh toán đủ **${updated.totalCycles}/${updated.totalCycles} kỳ** cho nguồn.`;

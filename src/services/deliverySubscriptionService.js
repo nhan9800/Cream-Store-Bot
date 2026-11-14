@@ -98,6 +98,8 @@ export function backfillRecentDeliverySubscriptions({ lookbackDays = 3650 } = {}
     LEFT JOIN subscription_accounts
       ON subscription_accounts.related_order_code = orders.order_code
     WHERE orders.delivered_at IS NOT NULL
+      AND orders.status NOT IN ('CANCELLED', 'REFUNDED', 'FAILED')
+      AND orders.payment_status IN ('PAID', 'FREE')
       AND orders.credential_email IS NOT NULL
       AND orders.credential_password IS NOT NULL
       AND datetime(orders.delivered_at) >= datetime('now', ?)

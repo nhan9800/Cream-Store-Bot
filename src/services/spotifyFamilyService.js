@@ -1,4 +1,5 @@
 import { db, nowIso } from '../database/db.js';
+import { createHash } from 'node:crypto';
 import { decrypt, encrypt } from '../utils/crypto.js';
 import { normalizeLinkedOrderCode, resolveOrderLink } from './orderLinkService.js';
 import {
@@ -12,6 +13,21 @@ import {
 
 const FAMILY_STATUSES = new Set(['ACTIVE', 'PAUSED', 'EXPIRED']);
 const MEMBER_STATUSES = new Set(['ACTIVE', 'LEFT', 'EXPIRED']);
+
+export class SpotifyRenewalConflictError extends Error {
+  constructor() {
+    super('Kỳ gia hạn Spotify đã thay đổi hoặc được xử lý. Vui lòng tải lại hồ sơ.');
+    this.code = 'SPOTIFY_RENEWAL_CONFLICT';
+  }
+}
+
+function renewalVersion(row) {
+  return createHash('sha256').update(JSON.stringify([
+    row.id, row.guild_id, row.name, row.login_email, row.login_password,
+    row.payment_card_label, row.payment_card_number, row.renewal_cost,
+    row.cycle_started_at, row.next_renewal_at, row.times_renewed, row.status,
+  ])).digest('hex').slice(0, 12);
+}
 
 function clean(value, maxLength = 500) {
   const normalized = String(value ?? '').trim();
@@ -89,6 +105,7 @@ function serializeFamily(row, activeMemberCount = null, { includeSecrets = true,
     nextRenewalAt: row.next_renewal_at,
     reminderDaysBefore: Number(row.reminder_days_before || 7),
     timesRenewed: Number(row.times_renewed || 0),
+    renewalVersion: renewalVersion(row),
     status: row.status,
     note: row.note,
     reminderStage: row.reminder_stage,
@@ -252,19 +269,32 @@ export function deleteSpotifyFamily(id) {
   return db.prepare('DELETE FROM spotify_families WHERE id = ?').run(Number(id)).changes > 0;
 }
 
-export function markSpotifyFamilyRenewed(id) {
+export function markSpotifyFamilyRenewed(id, { expectedTimesRenewed = null, expectedNextRenewalAt = null, expectedRenewalVersion = null } = {}) {
   const existing = familyRow(id);
   if (!existing) return null;
+  if (expectedRenewalVersion !== null && expectedRenewalVersion !== renewalVersion(existing)) throw new SpotifyRenewalConflictError();
+  if (expectedTimesRenewed !== null && (!Number.isInteger(Number(expectedTimesRenewed))
+    || Number(expectedTimesRenewed) !== Number(existing.times_renewed))) throw new SpotifyRenewalConflictError();
+  if (expectedNextRenewalAt !== null && (!Number.isFinite(new Date(expectedNextRenewalAt).getTime())
+    || new Date(expectedNextRenewalAt).getTime() !== new Date(existing.next_renewal_at).getTime())) {
+    throw new SpotifyRenewalConflictError();
+  }
   const newCycleStart = existing.next_renewal_at;
   const newNextRenewal = addCalendarMonths(existing.next_renewal_at, 1);
-  db.prepare(`
-    UPDATE spotify_families
-    SET cycle_started_at = ?, next_renewal_at = ?, times_renewed = times_renewed + 1,
-        status = 'ACTIVE', reminder_stage = NULL, reminder_sent_at = NULL,
-        reminder_for_renewal_at = NULL, reminder_message_id = NULL,
-        reminder_channel_id = NULL, snoozed_until = NULL, updated_at = ?
-    WHERE id = ?
-  `).run(newCycleStart, newNextRenewal, nowIso(), existing.id);
+  db.transaction(() => {
+    const current = familyRow(id);
+    if (!current || renewalVersion(current) !== renewalVersion(existing)) throw new SpotifyRenewalConflictError();
+    const saved = db.prepare(`
+      UPDATE spotify_families
+      SET cycle_started_at = ?, next_renewal_at = ?, times_renewed = times_renewed + 1,
+          status = 'ACTIVE', reminder_stage = NULL, reminder_sent_at = NULL,
+          reminder_for_renewal_at = NULL, reminder_message_id = NULL,
+          reminder_channel_id = NULL, snoozed_until = NULL, updated_at = ?
+      WHERE id = ? AND times_renewed = ? AND next_renewal_at = ? AND status = ?
+    `).run(newCycleStart, newNextRenewal, nowIso(), existing.id,
+      existing.times_renewed, existing.next_renewal_at, existing.status);
+    if (saved.changes !== 1) throw new SpotifyRenewalConflictError();
+  }).immediate();
   return getSpotifyFamily(existing.id);
 }
 

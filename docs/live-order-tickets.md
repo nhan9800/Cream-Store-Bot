@@ -11,3 +11,24 @@ Authenticated order details include an explicit public progress projection: actu
 Website order/progress/chat refresh after completed requests every4 seconds while visible. Refresh occurs on return to the tab or network restoration; at most one request per resource is active, with12-second timeout. This is polling, not instantaneous push. Transient errors retain a labelled last snapshot;401/403/404 clear private data. Changing order cancels/ignores the old request. Chat does not force-scroll while reading history; archived transcripts stay read-only.
 
 Tests: `npm test -- test/orderLiveProgress.test.js test/paymentFulfillmentReliability.test.js test/deliverySubscription.test.js tests/web-api-authorization.test.js`. Website E2E: `e2e/live-order-ticket.spec.ts` and existing Admin mobile transcript/scroll coverage. This release does not add arbitrary file fulfillment or supplier purchases.
+
+## Manual delivery consistency
+
+`/giaohang` rechecks ownership and payment/status after opening the customer's DM.
+Credentials are built in memory; a rejected send does not set `delivered_at` or
+publish credentials on the website. After Discord confirms a message, SQLite
+records the receipt and completes only the unchanged order snapshot. Cancellation,
+refund, reassignment or a competing edit holds completion and subscription creation
+for staff review. Positive Discord receipt IDs and the original contract snapshot
+are committed to the private `manual_delivery_receipts` journal, without credentials.
+On conflict, the current order's credentials, delivery timestamp and receipt remain
+untouched. Completion also rejects cancelled/refunded/failed orders at
+the service boundary; the existing explicit admin unpaid-completion override remains.
+
+Discord and SQLite cannot commit atomically. An accepted DM cannot be recalled by
+a concurrent cancellation; an uncertain remote send must be checked by staff
+before manually sending again. This path does not automatically resend. Subscription
+backfill skips terminal and unpaid orders and does not alter existing subscriptions.
+
+Regression: `test/giaohangDeliveryRace.test.js` uses only synthetic SQLite orders and
+mocked Discord I/O, including cancellation/refund during the remote calls.

@@ -603,6 +603,23 @@ export function registerBotApiRoutes(app) {
         }
     });
 
+    // Existing service-key middleware protects this operator-only projection.
+    // Scans are paged and never contact providers, decrypt credentials or repair data.
+    app.get('/api/bot/order-integrity-audit', async (req, res) => {
+        const number = (name, fallback) => req.query[name] === undefined ? fallback
+            : /^\d{1,16}$/.test(String(req.query[name])) ? Number(req.query[name]) : NaN;
+        try {
+            const { auditOrderIntegrityPage } = await import('./orderIntegrityAuditService.js');
+            const data = auditOrderIntegrityPage(db, { afterId: number('after_id', 0),
+                snapshotId: number('snapshot_id', null), limit: number('limit', 250) });
+            res.set('Cache-Control', 'private, no-store');
+            return res.json({ ok: true, data });
+        } catch (error) {
+            return res.status(error?.message === 'INVALID_AUDIT_PAGE' ? 400 : 503)
+                .json({ ok: false, error: error?.message === 'INVALID_AUDIT_PAGE' ? 'INVALID_AUDIT_PAGE' : 'AUDIT_UNAVAILABLE' });
+        }
+    });
+
     // ── PRIVATE TRANSCRIPT ARCHIVE ──────────────────────────────
     // This endpoint is server-to-server. The browser only holds the random
     // capability token; BOT_API_KEY remains inside the website runtime.

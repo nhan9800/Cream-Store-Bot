@@ -45,7 +45,7 @@ function saveCompletionMessageStmt(){return db.prepare(`UPDATE orders SET comple
 function attachPaymentMessageStmt(){return db.prepare('UPDATE orders SET payment_message_id=?, updated_at=? WHERE order_code=?');}
 function savePaymentLinkStmt(){return db.prepare('UPDATE orders SET payment_link_id=?, payment_checkout_url=?, payment_qr_code=?, payment_qr_url=?, payment_qr_text=?, payment_expired_at=?, updated_at=? WHERE order_code=?');}
 function resetPaymentLinkStmt(){return db.prepare('UPDATE orders SET payment_link_id=NULL, payment_checkout_url=NULL, payment_qr_code=NULL, payment_qr_url=NULL, payment_qr_text=NULL, payment_expired_at=NULL, payment_message_id=NULL, payos_order_code=?, updated_at=? WHERE order_code=?');}
-function completeOrderStmt(){return db.prepare(`UPDATE orders SET status='COMPLETED', status_changed_at=?, completed_by_id=?, completed_at=?, feedback_requested_at=?, feedback_due_at=?, updated_at=? WHERE order_code=?`);}
+function completeOrderStmt(){return db.prepare(`UPDATE orders SET status='COMPLETED', status_changed_at=?, completed_by_id=?, completed_at=?, feedback_requested_at=?, feedback_due_at=?, updated_at=? WHERE order_code=? AND status=? AND payment_status=? AND customer_id=? AND guild_id=? AND total_amount=? AND updated_at=? AND status NOT IN ('CANCELLED','REFUNDED','FAILED') AND payment_status NOT IN ('CANCELLED','REFUNDED')`);}
 function cancelOrderStmt(){return db.prepare(`UPDATE orders SET status='CANCELLED', status_changed_at=?, payment_status = CASE WHEN payment_status IN ('PAID','FREE') THEN payment_status ELSE 'CANCELLED' END, payment_cancel_reason=COALESCE(?, payment_cancel_reason), updated_at=? WHERE order_code=?`);}
 function saveDeliveryStmt(){return db.prepare(`UPDATE orders SET delivered_by_id=?, delivered_at=?, credential_email=?, credential_password=?, credential_profile=?, credential_pin=?, delivery_login_url=?, claim_notes=?, delivery_dm_channel_id=?, delivery_dm_message_id=?, updated_at=? WHERE order_code=?`);}
 function markFeedbackSubmittedStmt(){return db.prepare(`UPDATE orders SET feedback_submitted_at=?, updated_at=? WHERE order_code=?`);}
@@ -207,10 +207,18 @@ export function resetPaymentLinkForRegen(orderCode){const order=getOrderByCode(o
 export function setOrderExpiry(orderCode, expiryAt){ setOrderExpiryStmt().run(expiryAt, nowIso(), orderCode); return getOrderByCode(orderCode); }
 export function ensureOrderExpiry(orderCode, baseDate = new Date()) { const order = getOrderByCode(orderCode); if (!order) return null; if (order.expiry_at) return order; const expiryDate = addOrderDuration(baseDate, order, config.defaultOrderDurationMonths); if (!expiryDate) return order; return setOrderExpiry(orderCode, expiryDate.toISOString()); }
 
-export function markOrderCompleted(orderCode, completedById, timeoutHours = config.feedbackTimeoutHours) {
+export function markOrderCompleted(orderCode, completedById, timeoutHours = config.feedbackTimeoutHours, expectedOrder = null) {
   const order = getOrderByCode(orderCode); if (!order) return null;
+  if (['CANCELLED', 'REFUNDED', 'FAILED'].includes(order.status) || ['CANCELLED', 'REFUNDED'].includes(order.payment_status)) {
+    throw Object.assign(new Error('Đơn đã dừng xử lý nên không thể hoàn thành.'), { code: 'ORDER_NOT_COMPLETABLE' });
+  }
+  const expected = expectedOrder || order;
   const completedAt = nowIso(); const dueAt = addHours(new Date(completedAt), timeoutHours).toISOString();
-  completeOrderStmt().run(completedAt, completedById, completedAt, completedAt, dueAt, completedAt, orderCode);
+  const completed = completeOrderStmt().run(completedAt, completedById, completedAt, completedAt, dueAt, completedAt, orderCode,
+    expected.status, expected.payment_status, expected.customer_id, expected.guild_id, expected.total_amount, expected.updated_at);
+  if (completed.changes !== 1) {
+    throw Object.assign(new Error('Đơn vừa thay đổi. Vui lòng kiểm tra lại trước khi hoàn thành.'), { code: 'ORDER_COMPLETION_CONFLICT' });
+  }
   clearClaimStmt().run(completedAt, orderCode);
   ensureOrderExpiry(orderCode, new Date(completedAt));
   const updated = getOrderByCode(orderCode);

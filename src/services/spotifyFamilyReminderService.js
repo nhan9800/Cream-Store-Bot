@@ -64,12 +64,15 @@ function adminTargets(guild, settings) {
 }
 
 function actionRow(family, E) {
+  const dueMs = new Date(family.nextRenewalAt).getTime();
+  const dueVersion = Number.isSafeInteger(dueMs) && dueMs > 0 ? dueMs : 0;
   const reveal = withButtonEmoji(
     new ButtonBuilder().setCustomId(`spotifyfam:show:${family.id}`).setLabel('Xem Thông Tin').setStyle(ButtonStyle.Primary),
     E.component('icon_key'),
   );
   const renew = withButtonEmoji(
-    new ButtonBuilder().setCustomId(`spotifyfam:renew:${family.id}`).setLabel('Đã Gia Hạn 1 Tháng').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId(`spotifyfam:renew:${family.id}:${Number(family.timesRenewed || 0)}:${dueVersion}:${family.renewalVersion || 'legacy'}`)
+      .setLabel('Đã Gia Hạn 1 Tháng').setStyle(ButtonStyle.Success).setDisabled(dueVersion === 0 || !family.renewalVersion),
     E.component('status_check'),
   );
   const snooze = withButtonEmoji(
@@ -179,7 +182,7 @@ export async function runSpotifyFamilyReminders(client) {
 
 export async function handleSpotifyFamilyButton(interaction) {
   if (!interaction.isButton() || !interaction.customId.startsWith('spotifyfam:')) return false;
-  const [, action, rawId] = interaction.customId.split(':');
+  const [, action, rawId, rawRevision, rawDueMs, rawVersion] = interaction.customId.split(':');
   const id = Number(rawId);
   const settings = getGuildConfig(interaction.guildId);
   const member = interaction.member?.roles?.cache
@@ -216,7 +219,25 @@ export async function handleSpotifyFamilyButton(interaction) {
   }
 
   if (action === 'renew') {
-    const renewed = markSpotifyFamilyRenewed(id);
+    const expectedRevision = Number(rawRevision);
+    const expectedDueMs = Number(rawDueMs);
+    if (!/^\d+$/.test(rawRevision || '') || !/^\d+$/.test(rawDueMs || '')
+      || !Number.isSafeInteger(expectedRevision) || !Number.isSafeInteger(expectedDueMs) || expectedDueMs <= 0
+      || !/^[a-f0-9]{12}$/.test(rawVersion || '') || rawVersion !== existing.renewalVersion
+      || expectedRevision !== existing.timesRenewed
+      || expectedDueMs !== new Date(existing.nextRenewalAt).getTime()) {
+      await interaction.reply({ content: 'Panel Spotify này đã cũ hoặc kỳ này đã được xử lý. Mở Family Center hoặc /spotify-family view để lấy hồ sơ mới; hệ thống không cộng thêm tháng.', flags: MessageFlags.Ephemeral });
+      return true;
+    }
+    let renewed;
+    try {
+      renewed = markSpotifyFamilyRenewed(id, { expectedTimesRenewed: expectedRevision, expectedNextRenewalAt: existing.nextRenewalAt,
+        expectedRenewalVersion: rawVersion });
+    } catch (error) {
+      if (error?.code !== 'SPOTIFY_RENEWAL_CONFLICT') throw error;
+      await interaction.reply({ content: 'Kỳ Spotify vừa được xử lý hoặc thay đổi. Vui lòng mở hồ sơ mới; hệ thống không cộng trùng tháng.', flags: MessageFlags.Ephemeral });
+      return true;
+    }
     await interaction.update(resultPanel(
       renewed,
       'ĐÃ XÁC NHẬN GIA HẠN SPOTIFY FAMILY',

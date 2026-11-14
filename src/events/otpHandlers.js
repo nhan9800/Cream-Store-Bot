@@ -141,9 +141,11 @@ export async function handleOtpInteraction(interaction) {
       // Trừ tiền trước
       addWalletBalance(interaction.guildId, interaction.user.id, -service.price, 'PAYMENT', `Thuê OTP ${service.name}`);
 
-      // Request OTP
+      // Only a failed assignment may refund. Discord replies/logs after the
+      // persisted session must never enter the refundable operation.
+      let otpData;
       try {
-        const otpData = await requestOtp(serviceId, null, 'vn');
+        otpData = await requestOtp(serviceId, null, 'vn');
         
         // Lưu vào DB
         const stmt = db.prepare(`
@@ -151,58 +153,7 @@ export async function handleOtpInteraction(interaction) {
           VALUES (?, ?, ?, ?, ?, ?, ?, 'PENDING')
         `);
         stmt.run(interaction.guildId, interaction.user.id, service.id, service.name, service.price, otpData.request_id, otpData.phone_number);
-
-        // Một số điện thoại đã được cấp đồng nghĩa khách đã sử dụng dịch vụ Cenar.
-        // Cấp Patron ngay; dữ liệu website đọc cùng nguồn activity nên được đồng bộ tức thì.
-        await applyCustomerRoles(interaction.guild, interaction.user.id).catch((error) => {
-          console.error('[PATRON] Không thể đồng bộ role sau khi thuê OTP:', error.message);
-        });
-
-        const container = otpNotice(E, {
-          title: 'ĐÃ CẤP SỐ THUÊ OTP',
-          summary: 'Số đã sẵn sàng. Hãy dùng ngay trên dịch vụ đã chọn và không chia sẻ cho người khác.',
-          status: 'success',
-          lines: [
-            `${E('panel_order')} **Dịch vụ** — ${service.name}`,
-            `${E('icon_id')} **Số điện thoại** — \`${otpData.phone_number}\``,
-            `${E('icon_price')} **Đã thanh toán** — ${service.price.toLocaleString('vi-VN')}đ`,
-            `${E('status_loading')} **Trạng thái** — đang chờ tin nhắn OTP`,
-            `${E('customer_patron')} **Cenar Patron** — đã đồng bộ với hồ sơ website`,
-          ],
-        });
-
-        const btnGetCode = new ButtonBuilder()
-          .setCustomId(`otp:get_code:${otpData.request_id}`)
-          .setLabel('Lấy Mã OTP')
-          .setStyle(ButtonStyle.Success);
-        
-        const btnEmoji = E.component('payment_success');
-        if (btnEmoji) btnGetCode.setEmoji(btnEmoji);
-
-        const row = new ActionRowBuilder().addComponents(btnGetCode);
-
-        await interaction.editReply({
-          components: [container, row],
-          flags: MessageFlags.IsComponentsV2
-        });
-
-        await emitAutomationLog(interaction.client, {
-          guildId: interaction.guildId,
-          customerId: interaction.user.id,
-          action: 'OTP_NUMBER_ASSIGNED',
-          title: 'ĐÃ CẤP SỐ THUÊ OTP',
-          summary: 'ViOTP đã cấp số; phiên đang chờ tin nhắn xác minh.',
-          reference: otpData.request_id,
-          status: 'warning',
-          fields: [
-            { label: 'Dịch vụ', value: service.name, emoji: 'panel_order' },
-            { label: 'Số thuê', value: `\`${maskPhone(otpData.phone_number)}\``, emoji: 'icon_id' },
-            { label: 'Giá', value: `${service.price.toLocaleString('vi-VN')}đ`, emoji: 'icon_price' },
-          ],
-        });
-
       } catch (err) {
-        // Hoàn tiền nếu request lỗi
         addWalletBalance(interaction.guildId, interaction.user.id, service.price, 'REFUND', `Hoàn tiền lỗi thuê OTP ${service.name}`);
         await interaction.editReply(otpReply(E, {
           title: 'CHƯA CẤP ĐƯỢC SỐ',
@@ -222,7 +173,58 @@ export async function handleOtpInteraction(interaction) {
           status: 'danger',
           fields: [{ label: 'Đã hoàn ví', value: `${service.price.toLocaleString('vi-VN')}đ`, emoji: 'payment_refund' }],
         });
+        return;
       }
+
+      // Một số điện thoại đã được cấp đồng nghĩa khách đã sử dụng dịch vụ Cenar.
+      // Cấp Patron ngay; dữ liệu website đọc cùng nguồn activity nên được đồng bộ tức thì.
+      await applyCustomerRoles(interaction.guild, interaction.user.id).catch((error) => {
+        console.error('[PATRON] Không thể đồng bộ role sau khi thuê OTP:', error.message);
+      });
+
+      const container = otpNotice(E, {
+        title: 'ĐÃ CẤP SỐ THUÊ OTP',
+        summary: 'Số đã sẵn sàng. Hãy dùng ngay trên dịch vụ đã chọn và không chia sẻ cho người khác.',
+        status: 'success',
+        lines: [
+          `${E('panel_order')} **Dịch vụ** — ${service.name}`,
+          `${E('icon_id')} **Số điện thoại** — \`${otpData.phone_number}\``,
+          `${E('icon_price')} **Đã thanh toán** — ${service.price.toLocaleString('vi-VN')}đ`,
+          `${E('status_loading')} **Trạng thái** — đang chờ tin nhắn OTP`,
+          `${E('customer_patron')} **Cenar Patron** — đã đồng bộ với hồ sơ website`,
+        ],
+      });
+
+      const btnGetCode = new ButtonBuilder()
+        .setCustomId(`otp:get_code:${otpData.request_id}`)
+        .setLabel('Lấy Mã OTP')
+        .setStyle(ButtonStyle.Success);
+
+      const btnEmoji = E.component('payment_success');
+      if (btnEmoji) btnGetCode.setEmoji(btnEmoji);
+
+      const row = new ActionRowBuilder().addComponents(btnGetCode);
+
+      await interaction.editReply({
+        components: [container, row],
+        flags: MessageFlags.IsComponentsV2
+      });
+
+      await emitAutomationLog(interaction.client, {
+        guildId: interaction.guildId,
+        customerId: interaction.user.id,
+        action: 'OTP_NUMBER_ASSIGNED',
+        title: 'ĐÃ CẤP SỐ THUÊ OTP',
+        summary: 'ViOTP đã cấp số; phiên đang chờ tin nhắn xác minh.',
+        reference: otpData.request_id,
+        status: 'warning',
+        fields: [
+          { label: 'Dịch vụ', value: service.name, emoji: 'panel_order' },
+          { label: 'Số thuê', value: `\`${maskPhone(otpData.phone_number)}\``, emoji: 'icon_id' },
+          { label: 'Giá', value: `${service.price.toLocaleString('vi-VN')}đ`, emoji: 'icon_price' },
+        ],
+      });
+
       return;
     }
 

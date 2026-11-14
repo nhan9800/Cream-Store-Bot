@@ -20,6 +20,7 @@ describe('Spotify Family Discord panel', () => {
       daysRemaining: 3,
       overdueDays: 0,
       nextRenewalAt: '2026-08-23T12:00:00.000Z',
+      renewalVersion: '012345abcdef',
       note: 'Kiểm tra số dư.',
       members: [
         { spotifyUsername: 'profile.one', status: 'ACTIVE' },
@@ -36,7 +37,7 @@ describe('Spotify Family Discord panel', () => {
     expect(serialized).not.toContain('4111111111111234');
     expect(json[1].components.map((button) => button.custom_id || button.url)).toEqual([
       'spotifyfam:show:9',
-      'spotifyfam:renew:9',
+      `spotifyfam:renew:9:0:${Date.parse('2026-08-23T12:00:00.000Z')}:012345abcdef`,
       'spotifyfam:snooze:9',
       'https://cenarstore.xyz/admin/spotify-families',
     ]);

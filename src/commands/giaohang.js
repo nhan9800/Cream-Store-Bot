@@ -1,6 +1,8 @@
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { PermissionFlagsBits, SlashCommandBuilder } from 'discord.js';
 import { config } from '../config.js';
+import { db } from '../database/db.js';
+import { encrypt } from '../utils/crypto.js';
 import { getGuildConfig } from '../services/guildConfigService.js';
 import { getOrderByCode, markOrderCompleted, saveDelivery } from '../services/orderService.js';
 import { sendCompletedTicketFlow, updateOrderLogMessage } from '../services/notificationService.js';
@@ -20,6 +22,18 @@ import {
   detectDeliverySubscriptionService,
   syncDeliverySubscription,
 } from '../services/deliverySubscriptionService.js';
+
+const DELIVERY_SNAPSHOT_FIELDS = ['status', 'payment_status', 'product_id', 'product_name', 'service_type',
+  'total_amount', 'quantity', 'duration_months', 'duration_days', 'updated_at'];
+const DELIVERED_RECEIPT_FIELDS = [...DELIVERY_SNAPSHOT_FIELDS.filter(key => key !== 'updated_at'),
+  'guild_id', 'customer_id', 'ticket_channel_id', 'credential_email', 'credential_password',
+  'credential_profile', 'credential_pin', 'delivery_login_url', 'claim_notes',
+  'delivered_at', 'delivery_dm_channel_id', 'delivery_dm_message_id'];
+function matchesDeliveredReceipt(current, expected) {
+  return current && !['CANCELLED', 'REFUNDED', 'FAILED'].includes(current.status)
+    && !['CANCELLED', 'REFUNDED'].includes(current.payment_status)
+    && DELIVERED_RECEIPT_FIELDS.every(key => current[key] === expected[key]);
+}
 
 export const data = new SlashCommandBuilder()
   .setName('giaohang')
@@ -88,7 +102,6 @@ export async function execute(interaction) {
     return;
   }
 
-  const completedDuringDelivery = order.status !== 'COMPLETED';
   if (['CANCELLED', 'REFUNDED', 'FAILED'].includes(order.status)) {
     await interaction.editReply({ content: `${E('status_warn')} Đơn đã dừng xử lý nên không thể giao hàng.`, ephemeral: true });
     return;
@@ -111,9 +124,29 @@ export async function execute(interaction) {
   }
 
   const shouldShowClaimButton = Boolean(credentialEmail && credentialPassword) && !sendDirect;
+  // DM setup is remote I/O: payment, ownership or cancellation may have changed.
+  const preparedOrder = getOrderByCode(order.order_code);
+  if (!preparedOrder || preparedOrder.guild_id !== order.guild_id || preparedOrder.customer_id !== order.customer_id
+    || preparedOrder.ticket_channel_id !== order.ticket_channel_id
+    || DELIVERY_SNAPSHOT_FIELDS.some(key => preparedOrder[key] !== order[key])
+    || ['CANCELLED', 'REFUNDED', 'FAILED'].includes(preparedOrder.status)
+    || ['CANCELLED', 'REFUNDED'].includes(preparedOrder.payment_status)
+    || (preparedOrder.status !== 'COMPLETED' && preparedOrder.total_amount > 0 && !['PAID', 'FREE'].includes(preparedOrder.payment_status))) {
+    await interaction.editReply({ content: `${E('status_warn')} Đơn vừa đổi trạng thái hoặc chủ sở hữu nên bot đã dừng giao hàng. Vui lòng kiểm tra lại.`, ephemeral: true });
+    return;
+  }
+  order = preparedOrder;
+  const completedDuringDelivery = order.status !== 'COMPLETED';
   let dmMessage = null;
   const persist = (messageId = null) => saveDelivery(order.order_code, interaction.user.id, credentialEmail, credentialPassword, credentialProfile, credentialPin, deliveryLoginUrl, claimNotes, dmChannel.id, messageId);
-  let storedOrder = persist(null);
+  // Build the DM in memory. A rejected send must not record a delivery or expose
+  // the credentials on the website before the customer has received anything.
+  let storedOrder = { ...order,
+    credential_email: credentialEmail != null ? encrypt(credentialEmail) : null,
+    credential_password: credentialPassword != null ? encrypt(credentialPassword) : null,
+    credential_profile: credentialProfile != null ? encrypt(credentialProfile) : null,
+    credential_pin: credentialPin != null ? encrypt(credentialPin) : null,
+    delivery_login_url: deliveryLoginUrl, claim_notes: claimNotes };
 
   if (Boolean(credentialEmail && credentialPassword) && sendDirect) {
     dmMessage = await dmChannel.send({ embeds: buildDeliveryCredentialEmbeds(storedOrder), components: buildDeliveryLoginComponents(storedOrder) }).catch(() => null);
@@ -121,7 +154,6 @@ export async function execute(interaction) {
       await interaction.editReply({ content: `${E('status_warn')} Không gửi được DM giao hàng cho khách hàng.`, ephemeral: true });
       return;
     }
-    storedOrder = persist(dmMessage.id);
   } else {
     const { container, flags } = buildDeliveryNoticeV2(storedOrder);
     dmMessage = await dmChannel.send({
@@ -132,15 +164,48 @@ export async function execute(interaction) {
       await interaction.editReply({ content: `${E('status_warn')} Không gửi được DM cho khách hàng.`, ephemeral: true });
       return;
     }
-    storedOrder = persist(dmMessage.id);
   }
 
-  if (order.status !== 'COMPLETED') {
-    if (order.total_amount > 0 && !['PAID', 'FREE'].includes(order.payment_status)) {
-      await interaction.editReply({ content: `${E('status_warn')} Đơn chưa thanh toán xong nên bot chưa thể tự đồng bộ sang hoàn thành khi giao hàng.`, ephemeral: true });
-      return;
-    }
-    order = markOrderCompleted(order.order_code, interaction.user.id, config.feedbackTimeoutHours) ?? order;
+  // Commit metadata-only positive evidence before any completion guard. The
+  // private journal never contains credentials or changes the current contract.
+  let finalized;
+  try {
+    db.exec(`CREATE TABLE IF NOT EXISTS manual_delivery_receipts (
+      dm_channel_id TEXT NOT NULL, dm_message_id TEXT NOT NULL, order_code TEXT NOT NULL,
+      guild_id TEXT NOT NULL, customer_id TEXT NOT NULL, staff_id TEXT NOT NULL,
+      contract_snapshot TEXT NOT NULL, received_at TEXT NOT NULL, outcome TEXT NOT NULL,
+      PRIMARY KEY(dm_channel_id,dm_message_id))`);
+    const snapshot = Object.fromEntries([...DELIVERY_SNAPSHOT_FIELDS, 'ticket_channel_id'].map(key => [key, order[key]]));
+    db.prepare(`INSERT OR IGNORE INTO manual_delivery_receipts
+      (dm_channel_id,dm_message_id,order_code,guild_id,customer_id,staff_id,contract_snapshot,received_at,outcome)
+      VALUES(?,?,?,?,?,?,?,?,'CONFIRMED')`).run(dmChannel.id, dmMessage.id, order.order_code, order.guild_id,
+      order.customer_id, interaction.user.id, JSON.stringify(snapshot), new Date().toISOString());
+    // Discord and SQLite cannot commit atomically. Apply delivery only to the
+    // unchanged snapshot; conflict evidence remains in the private journal.
+    finalized = db.transaction(() => {
+      const fresh = getOrderByCode(order.order_code);
+      const changed = !fresh || fresh.guild_id !== order.guild_id || fresh.customer_id !== order.customer_id
+        || fresh.ticket_channel_id !== order.ticket_channel_id
+        || DELIVERY_SNAPSHOT_FIELDS.some(key => fresh[key] !== order[key]);
+      db.prepare('UPDATE manual_delivery_receipts SET outcome=? WHERE dm_channel_id=? AND dm_message_id=?')
+        .run(changed ? 'REVIEW' : 'APPLIED', dmChannel.id, dmMessage.id);
+      if (changed) return { changed: true };
+      const saved = persist(dmMessage.id);
+      return { changed: false, storedOrder: saved, order: completedDuringDelivery
+        ? markOrderCompleted(order.order_code, interaction.user.id, config.feedbackTimeoutHours, saved)
+        : saved };
+    }).immediate();
+  } catch {
+    await interaction.editReply({ content: `${E('status_warn')} DM đã gửi nhưng lưu xác nhận giao hàng chưa thành công. Quản trị cần đối soát trước khi giao lại. Mã DM: ${dmMessage.id}.`, ephemeral: true });
+    return;
+  }
+  if (finalized.changed) {
+    await interaction.editReply({ content: `${E('status_warn')} DM đã gửi nhưng đơn vừa thay đổi. Bot giữ nguyên trạng thái đơn và dừng hoàn thành/gia hạn; quản trị cần đối soát trước khi giao lại. Mã DM: ${dmMessage.id}.`, ephemeral: true });
+    return;
+  }
+  storedOrder = finalized.storedOrder;
+  order = finalized.order;
+  if (completedDuringDelivery) {
     await updateOrderLogMessage(interaction.guild, order);
 
     // Áp dụng role khách hàng và gửi log công khai (lịch sử mua hàng)
@@ -155,7 +220,13 @@ export async function execute(interaction) {
     await emitStaffLog(interaction.client, { guildId: interaction.guildId, actorId: interaction.user.id, targetId: order.customer_id, action: 'ORDER_COMPLETE_AUTO', detail: 'Tự đồng bộ hoàn thành trong /giaohang', relatedOrderCode: order.order_code });
   }
 
-  storedOrder = getOrderByCode(order.order_code) || storedOrder;
+  // Notification calls above can race with reassignment or credential edits.
+  // Never rebuild the original customer's DM from a different delivery row.
+  storedOrder = getOrderByCode(order.order_code);
+  if (!matchesDeliveredReceipt(storedOrder, order)) {
+    await interaction.editReply({ content: `${E('status_warn')} DM đã gửi nhưng thông tin đơn/giao hàng vừa thay đổi. Bot dừng sửa DM, đồng bộ gia hạn/Hub và thông báo hoàn thành; quản trị cần đối soát. Mã DM: ${dmMessage.id}.`, ephemeral: true });
+    return;
+  }
   // Completion starts the service duration; refresh the same receipt with that expiry.
   if (completedDuringDelivery && storedOrder.expiry_at && dmMessage?.edit) {
     const payload = Boolean(credentialEmail && credentialPassword) && sendDirect
@@ -166,22 +237,38 @@ export async function execute(interaction) {
       })();
     await dmMessage.edit(payload).catch(() => null);
   }
+  if (!matchesDeliveredReceipt(getOrderByCode(order.order_code), order)) {
+    await interaction.editReply({ content: `${E('status_warn')} DM đã gửi nhưng thông tin đơn/giao hàng vừa thay đổi. Bot dừng đồng bộ gia hạn/Hub và thông báo hoàn thành; quản trị cần đối soát. Mã DM: ${dmMessage.id}.`, ephemeral: true });
+    return;
+  }
 
   let subscriptionRecord = null;
   let subscriptionSyncError = null;
+  let subscriptionGuardFailed = false;
   if (trackedSubscriptionService) {
     try {
-      subscriptionRecord = syncDeliverySubscription({
-        order: storedOrder,
-        gmailEmail: credentialEmail,
-        gmailPassword: credentialPassword,
-        profile: credentialProfile,
-        customerDiscordName: customer.tag || customer.username,
-      });
+      subscriptionRecord = db.transaction(() => {
+        const current = getOrderByCode(order.order_code);
+        if (!matchesDeliveredReceipt(current, order) || !['PAID', 'FREE'].includes(current.payment_status)) {
+          subscriptionGuardFailed = true;
+          return null;
+        }
+        return syncDeliverySubscription({
+          order: current,
+          gmailEmail: credentialEmail,
+          gmailPassword: credentialPassword,
+          profile: credentialProfile,
+          customerDiscordName: customer.tag || customer.username,
+        });
+      }).immediate();
     } catch (error) {
       subscriptionSyncError = error;
       console.error(`[SUBSCRIPTION-SYNC] ${order.order_code}: ${error.message}`);
     }
+  }
+  if (subscriptionGuardFailed) {
+    await interaction.editReply({ content: `${E('status_warn')} DM đã gửi nhưng đơn vừa dừng xử lý hoặc thay đổi. Bot dừng đồng bộ gia hạn/Hub và thông báo hoàn thành; quản trị cần đối soát. Mã DM: ${dmMessage.id}.`, ephemeral: true });
+    return;
   }
 
   const hub = getCenarHub();

@@ -1,4 +1,5 @@
 import { db, nowIso } from '../database/db.js';
+import { createHash } from 'node:crypto';
 import { decrypt, encrypt } from '../utils/crypto.js';
 import { normalizeLinkedOrderCode, resolveOrderLink } from './orderLinkService.js';
 import {
@@ -13,6 +14,25 @@ import {
 const SOURCE_STATUSES = new Set(['ACTIVE', 'PAUSED']);
 const MEMBERSHIP_STATUSES = new Set(['ACTIVE', 'PAUSED', 'COMPLETED', 'CANCELLED']);
 const PLAN_TYPES = new Set(['STABLE_FAMILY', 'ROTATING_FAMILY']);
+
+export class YoutubeRenewalConflictError extends Error {
+  constructor() {
+    super('Kỳ thanh toán YouTube đã thay đổi hoặc được xử lý. Vui lòng tải lại hồ sơ.');
+    this.code = 'YOUTUBE_RENEWAL_CONFLICT';
+  }
+}
+
+// Opaque obligation marker. Stored ciphertext stays encrypted; reminder
+// bookkeeping is excluded so publishing a reminder does not invalidate it.
+function renewalVersion(row) {
+  return createHash('sha256').update(JSON.stringify([
+    row.id, row.guild_id, row.source_id, row.customer_gmail, row.customer_discord_id,
+    row.related_order_code, row.plan_type, row.total_months, row.cycle_months,
+    row.paid_cycles, row.source_cost_per_cycle, row.started_at, row.next_source_payment_at,
+    row.customer_expiry_at, row.status, row.source_name, row.source_contact,
+    row.source_payment_method, row.source_payment_account, row.source_status,
+  ])).digest('hex').slice(0, 12);
+}
 
 function clean(value, maxLength = 500) {
   const normalized = String(value ?? '').replace(/\s+/g, ' ').trim();
@@ -119,6 +139,7 @@ function serializeMembership(row, { includeSecrets = true, now = new Date() } = 
     totalMonths: Number(row.total_months || 1),
     cycleMonths: Number(row.cycle_months || 1),
     paidCycles: Number(row.paid_cycles || 0),
+    renewalVersion: renewalVersion(row),
     salePrice: Number(row.sale_price || 0),
     sourceCostPerCycle: Number(row.source_cost_per_cycle || 0),
     startedAt: row.started_at,
@@ -429,13 +450,17 @@ export function updateYoutubeMembership(id, data) {
   const totalCycles = Math.ceil(totalMonths / cycleMonths);
   const paidCycles = integer(data.paidCycles ?? existing.paid_cycles, existing.paid_cycles, 0, totalCycles);
   const startedAt = isoDate(data.startedAt ?? existing.started_at, 'Ngày bắt đầu');
+  const startChanged = new Date(startedAt).getTime() !== new Date(existing.started_at).getTime();
+  const durationChanged = totalMonths !== Number(existing.total_months);
   const customerExpiryAt = isoDate(
-    data.customerExpiryAt ?? existing.customer_expiry_at ?? addYoutubeCalendarMonths(startedAt, totalMonths),
+    data.customerExpiryAt ?? (startChanged || durationChanged
+      ? addYoutubeCalendarMonths(startedAt, totalMonths)
+      : existing.customer_expiry_at ?? addYoutubeCalendarMonths(startedAt, totalMonths)),
     'Ngày hết hạn khách hàng',
   );
   if (new Date(customerExpiryAt) <= new Date(startedAt)) throw new Error('Ngày hết hạn phải sau ngày bắt đầu.');
   const scheduleChanged = paidCycles !== Number(existing.paid_cycles)
-    || totalMonths !== Number(existing.total_months)
+    || startChanged || durationChanged
     || cycleMonths !== Number(existing.cycle_months);
   const nextSourcePaymentAt = paidCycles >= totalCycles
     ? null
@@ -485,6 +510,8 @@ export function updateYoutubeMembership(id, data) {
     );
     if (paidCycles !== Number(existing.paid_cycles)) {
       const delta = paidCycles - Number(existing.paid_cycles);
+      const coveredMonthsDelta = Math.min(totalMonths, paidCycles * cycleMonths)
+        - calculateYoutubeMembership(existing).paidMonths;
       db.prepare(`
         INSERT INTO youtube_renewal_events (
           membership_id, source_id, event_type, cycle_number, cycles_added,
@@ -496,7 +523,7 @@ export function updateYoutubeMembership(id, data) {
         source.id,
         paidCycles,
         delta,
-        delta * cycleMonths,
+        coveredMonthsDelta,
         ts,
         clean(data.currentFamilyLabel ?? existing.current_family_label, 160),
         existing.next_source_payment_at,
@@ -518,6 +545,15 @@ export function deleteYoutubeMembership(id) {
 export function markYoutubeCyclePaid(id, data = {}) {
   const existing = membershipRow(id);
   if (!existing) return null;
+  if (data.expectedRenewalVersion != null && data.expectedRenewalVersion !== renewalVersion(existing)) {
+    throw new YoutubeRenewalConflictError();
+  }
+  if (data.expectedPaidCycles != null && (!Number.isInteger(Number(data.expectedPaidCycles))
+    || Number(data.expectedPaidCycles) !== Number(existing.paid_cycles))) throw new YoutubeRenewalConflictError();
+  if (data.expectedNextPaymentAt != null && (!Number.isFinite(new Date(data.expectedNextPaymentAt).getTime())
+    || new Date(data.expectedNextPaymentAt).getTime() !== new Date(existing.next_source_payment_at).getTime())) {
+    throw new YoutubeRenewalConflictError();
+  }
   const progress = calculateYoutubeMembership(existing);
   if (progress.remainingCycles <= 0) throw new Error('Hồ sơ này đã thanh toán đủ toàn bộ số tháng đã bán.');
   if (!['ACTIVE', 'PAUSED'].includes(existing.status)) throw new Error('Hồ sơ đã kết thúc, không thể ghi thêm kỳ thanh toán.');
@@ -536,14 +572,19 @@ export function markYoutubeCyclePaid(id, data = {}) {
   const familyLabel = clean(data.familyLabel ?? existing.current_family_label, 160);
   const ts = nowIso();
   const transaction = db.transaction(() => {
-    db.prepare(`
+    const current = membershipRow(id);
+    if (!current || renewalVersion(current) !== renewalVersion(existing)) throw new YoutubeRenewalConflictError();
+    const saved = db.prepare(`
       UPDATE youtube_memberships
       SET paid_cycles = ?, next_source_payment_at = ?, current_family_label = ?,
           status = 'ACTIVE', reminder_stage = NULL, reminder_sent_at = NULL,
           reminder_for_payment_at = NULL, reminder_message_id = NULL,
           reminder_channel_id = NULL, snoozed_until = NULL, updated_at = ?
-      WHERE id = ?
-    `).run(newPaidCycles, nextPaymentAt, familyLabel, ts, existing.id);
+      WHERE id = ? AND paid_cycles = ? AND COALESCE(next_source_payment_at, '') = ?
+        AND status IN ('ACTIVE', 'PAUSED')
+    `).run(newPaidCycles, nextPaymentAt, familyLabel, ts, existing.id,
+      existing.paid_cycles, String(existing.next_source_payment_at || ''));
+    if (saved.changes !== 1) throw new YoutubeRenewalConflictError();
     db.prepare(`
       INSERT INTO youtube_renewal_events (
         membership_id, source_id, event_type, cycle_number, cycles_added,
@@ -567,7 +608,7 @@ export function markYoutubeCyclePaid(id, data = {}) {
       ts,
     );
   });
-  transaction();
+  transaction.immediate();
   return getYoutubeMembership(existing.id);
 }
 
