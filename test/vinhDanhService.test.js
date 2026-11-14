@@ -181,8 +181,9 @@ describe('monthly Discord leaderboard maintenance', () => {
     expect(f.channel.send).toHaveBeenCalledTimes(1);
     expect(f.archive().message_id).toBeTruthy();
   });
-  it('reuses the existing second-store live message across months without creating channels', async () => {
+  it.each(['bang-vinh-danh', '🏆・hall-of-fame'])('reuses the existing second-store live message across months in %s without creating channels', async name => {
     const f = fixture({ guildId: '1070676180103086132' });
+    f.channel.name = name;
     f.db.prepare('INSERT INTO system_settings VALUES(?,?)').run('live_vinh_danh_msg_id_2026_10_1070676180103086132', f.starter.id);
     expect((await f.service.run(f.client)).status).toBe('READY');
     expect(f.starter.edit).toHaveBeenCalledTimes(1);

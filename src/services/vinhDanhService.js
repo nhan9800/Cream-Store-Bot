@@ -66,8 +66,12 @@ export async function findLeaderboardChannel(guild, client) {
       || channel.ownerId !== client.user.id) throw failure('LEADERBOARD_TARGET_MISMATCH');
     return channel;
   }
-  const channel = guild.channels.cache.find(item => item.type === ChannelType.GuildText
-    && item.guildId === guild.id && item.name.includes('vinh-danh'));
+  const channel = guild.channels.cache.find(item => {
+    const name = String(item.name || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '');
+    return item.type === ChannelType.GuildText && item.guildId === guild.id
+      && ['bang-vinh-danh', 'vinh-danh', 'hall-of-fame'].includes(name);
+  });
   if (!channel) throw failure('LEADERBOARD_TARGET_MISSING');
   return channel;
 }
