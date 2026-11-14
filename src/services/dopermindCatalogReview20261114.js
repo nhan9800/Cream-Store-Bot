@@ -4,9 +4,10 @@ import { STORE_ONE_GUILD_ID } from '../utils/locale.js';
 // Owner requested a review of the excluded products and newly added identities.
 // This temporary operator projection uses only the already-cached source read.
 export const DOPERMIND_REVIEW = Object.freeze({
-  revision: 'DOPERMIND-CATALOG-REVIEW-20261114-1',
+  revision: 'DOPERMIND-CATALOG-REVIEW-20261115-1',
   enabled: true,
-  authorizedUntil: '2026-11-14T16:30:00.000Z',
+  authorizedUntil: '2026-11-14T20:00:00.000Z',
+  onlyUnreviewed: true,
 });
 const reviewed = new WeakSet();
 const safeText = value => typeof value === 'string' ? value.slice(0, 1200) : null;
@@ -22,7 +23,8 @@ export function runDopermindCatalogReview(client, { guildId, envFile, now = Date
   const snapshot = readSnapshot('dopermind');
   if (snapshot?.status !== 'READY' || !Array.isArray(snapshot.products)) return { status: 'NOT_READY' };
   reviewed.add(client);
-  const products = snapshot.products.filter(product => !['SELLABLE', 'OUT_OF_STOCK'].includes(product.reviewReason));
+  const products = snapshot.products.filter(product => release.onlyUnreviewed === true
+    ? product.reviewReason === 'NOT_REVIEWED' : !['SELLABLE', 'OUT_OF_STOCK'].includes(product.reviewReason));
   log('[DOPERMIND-REVIEW]', JSON.stringify({ revision: release.revision, sourceCount: snapshot.products.length,
     excludedCount: products.length, status: 'BEGIN' }));
   for (const product of products) log('[DOPERMIND-REVIEW]', JSON.stringify({

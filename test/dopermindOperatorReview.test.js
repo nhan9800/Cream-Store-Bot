@@ -27,4 +27,14 @@ describe('temporary protected Dopermind review', () => {
     expect(runDopermindCatalogReview({}, options).status).toBe('DISABLED');
     expect(options.readSnapshot).not.toHaveBeenCalled(); expect(options.log).not.toHaveBeenCalled();
   });
+  it('limits the current review to new identities and leaves prior policy/price decisions out of the operator log', () => {
+    const options = fixture();
+    const snapshot = options.readSnapshot();
+    snapshot.products.push({ productKey: 'held-policy', name: 'Prior held product', reviewReason: 'POLICY_EXCLUDED' },
+      { productKey: 'held-price', name: 'Prior price guard', reviewReason: 'NO_PROFITABLE_PRICE' });
+    options.readSnapshot.mockReturnValue(snapshot);
+    expect(runDopermindCatalogReview({}, options)).toMatchObject({ status: 'DONE', sourceCount: 4, excludedCount: 1 });
+    const logged = JSON.stringify(options.log.mock.calls);
+    expect(logged).toContain('new-product'); expect(logged).not.toMatch(/held-policy|held-price|known-product/);
+  });
 });
