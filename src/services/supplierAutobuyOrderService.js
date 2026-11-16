@@ -242,7 +242,18 @@ export function createSupplierAutobuyOrderService({
   function getSupplierDeliveryForCustomer({ guildId, customerId, orderCode, provider } = {}) {
     const { order, intent } = owned(guildId, customerId, orderCode, provider);
     if (!paid(order, intent) || !['PURCHASED', 'DELIVERY_PENDING', 'DELIVERING', 'DELIVERED'].includes(intent.status)) fail('DELIVERY_UNAVAILABLE');
-    return { provider: intent.provider, orderCode, productName: intent.product_name, items: decoded(intent) };
+    return { provider: intent.provider, orderCode, ...deliveryGuideMetadata(intent), items: decoded(intent) };
+  }
+  function deliveryGuideMetadata(intent) {
+    let accountForm = '';
+    try {
+      const row = db.prepare('SELECT quote_json FROM supplier_autobuy_quotes WHERE quote_id=? AND order_code=? AND guild_id=? AND customer_id=?')
+        .get(intent.quote_id, intent.order_code, intent.guild_id, intent.customer_id);
+      const saved = row && JSON.parse(row.quote_json);
+      if (saved?.productKey === intent.product_key && saved.quantity === intent.quantity && typeof saved.accountForm === 'string') accountForm = saved.accountForm;
+    } catch { /* Missing legacy guide metadata must not replace or lose goods. */ }
+    return { productKey: intent.product_key, productName: intent.product_name,
+      termLabel: intent.term_text, warrantyLabel: intent.warranty_text, accountForm };
   }
   function completeDelivery(orderCode, receipt, kind, lease = null) {
     return db.transaction(() => {
@@ -489,7 +500,7 @@ export function createSupplierAutobuyOrderService({
       const identityFields = ['provider', 'guild_id', 'customer_id', 'quote_id', 'product_key', 'quantity', 'sale_amount',
         'max_unit_cost', 'request_id', 'request_json', 'request_hash', 'supplier_order_code', 'encrypted_payload'];
       const sameDelivery = current => current && identityFields.every(field => current[field] === intent[field]);
-      const delivery = await deliveryService.deliver({ client, order, intent, lease, items, sendDelivery, freshPurchase: !purchaseExists,
+      const delivery = await deliveryService.deliver({ client, order, intent, lease, items, guide: deliveryGuideMetadata(intent), sendDelivery, freshPurchase: !purchaseExists,
         beforeSend: () => {
           const current = intentByCode(code), ownedOrder = orderByCode(code);
           return sameDelivery(current) && current.status === 'DELIVERING' && current.lease_token === lease

@@ -369,8 +369,7 @@ export function createSupplierAutobuyInteractionHandler(dependencies = {}) {
         } else if (action === 'delivery') {
           const delivery = await deps.getDelivery({ ...context, orderCode: args[0] });
           files = [deliveryAttachment(delivery, args[0])];
-          payload = presentation.buildSupplierNoticeView({ title: 'Hàng đã mua của bạn',
-            text: 'Mã đơn ' + args[0] + '. Nội dung giao hàng nằm trong file đính kèm riêng tư. Bạn có thể nhận lại bằng nút Nhận hàng trên thẻ đơn.',
+          payload = presentation.buildSupplierDeliveryView({ delivery, orderCode: args[0],
             customerId: context.customerId, ticketContext: scope.kind === 'ticket' });
         } else if (action === 'pricemodal') {
           if (!await deps.canManage(interaction)) throw new Error('FORBIDDEN');
@@ -407,7 +406,10 @@ export function createSupplierAutobuyInteractionHandler(dependencies = {}) {
           try {
             // Both readers use current local persisted state. Loading finishes
             // before effects; no await may split the final publication fence.
-            currentFiles = [deliveryAttachment(readDeliveryPublication(), args[0])];
+            const currentDelivery = readDeliveryPublication();
+            currentFiles = [deliveryAttachment(currentDelivery, args[0])];
+            currentPayload = presentation.buildSupplierDeliveryView({ delivery: currentDelivery, orderCode: args[0],
+              customerId: owner, ticketContext: scope.kind === 'ticket' });
           } catch (error) {
             currentPayload = presentation.buildSupplierNoticeView({ title: 'Không thể hiển thị hàng', text: errorText(error),
               customerId: owner, warning: true, ticketContext: scope.kind === 'ticket' });

@@ -690,6 +690,35 @@ describe('paid-only supplier fulfillment and recovery', () => {
     expect(t.sendDelivery).toHaveBeenCalledTimes(1);
     expect(t.intent(o.order_code).status).toBe('DELIVERED');
   });
+  it.each(['REFUNDED', 'CANCELLED'])('preserves the purchased CDK receipt but blocks delivery when payment becomes %s during polling', async status => {
+    const t = setup(); const o = await t.create(); t.pay(o.order_code);
+    const providerOrderCode = 'ord_0123456789abcdef0123456789abcdef';
+    t.provider.createOrder.mockRejectedValueOnce(new CdkVietnamError('DELIVERY_PENDING', {
+      operation: 'createOrder', status: 202, outcome: 'UNKNOWN', providerCode: 'DELIVERY_REVIEW', providerOrderCode,
+    }));
+    expect((await t.service.fulfillSupplierOrder({}, o.order_code)).status).toBe('RECONCILING');
+    t.provider.getOrder = vi.fn(async () => {
+      t.database.prepare('UPDATE orders SET payment_status=?,status=? WHERE order_code=?').run(status, status, o.order_code);
+      return { orderCode: providerOrderCode, productId: 6, productName: 'Subscription 1 tháng', quantity: 1,
+        unitPriceVnd: 42000, totalAmountVnd: 42000, status: 'delivered', items: ['synthetic-purchased-cdk'] };
+    });
+    t.advance(3 * 60000 + 1);
+    expect((await t.service.processPendingSupplierOrders({}, 3)).processed).toBe(1);
+    const saved = t.intent(o.order_code);
+    expect(saved).toMatchObject({ status: 'BLOCKED', supplier_order_code: providerOrderCode,
+      charged_unit_cost: 42000, charged_total_cost: 42000, last_error: 'ORDER_NOT_DELIVERABLE' });
+    expect(JSON.parse(t.settings.decrypt(saved.encrypted_payload))).toMatchObject({
+      providerOrderCode, items: ['synthetic-purchased-cdk'],
+    });
+    expect(t.sendDelivery).not.toHaveBeenCalled();
+    expect(t.markOrderCompleted).not.toHaveBeenCalled();
+    expect(t.notifyCompletion).not.toHaveBeenCalled();
+    expect(() => t.service.getSupplierDeliveryForCustomer({ ...t.context, orderCode: o.order_code })).toThrow();
+    t.advance(24 * 60 * 60000);
+    expect(await t.service.processPendingSupplierOrders({}, 3)).toEqual({ processed: 0 });
+    expect(t.provider.getOrder).toHaveBeenCalledOnce();
+    expect(t.provider.createOrder).toHaveBeenCalledOnce();
+  });
   it('blocks a higher fresh cost before purchase and stores an unexpected higher-charge receipt for review', async () => {
     const t = setup(); const o = await t.create(); t.pay(o.order_code); t.setCost(45000);
     expect((await t.service.fulfillSupplierOrder({}, o.order_code)).status).toBe('REVIEW'); expect(t.provider.createOrder).not.toHaveBeenCalled();

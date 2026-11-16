@@ -16,6 +16,7 @@ vi.mock('../src/services/supplierAutobuyPanelService.js', () => ({
   buildSupplierPaymentView: options => state.render.payment(options),
   isSupplierPaymentViewExpired: () => false,
   buildSupplierNoticeView: options => state.render.notice(options),
+  buildSupplierDeliveryView: options => state.render.notice(options),
 }));
 
 import { config } from '../src/config.js';

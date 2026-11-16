@@ -40,7 +40,7 @@ function fixture(databasePath = ':memory:') {
   const settings = { db: database, now: () => time, enabled: () => true, getQuote: async (productKey, quantity) => ({ productKey, quantity,
     productName: 'Synthetic subscription', unitPriceVnd: 72000, totalPriceVnd: 72000, unitCostVnd: 42000, maxUnitCostVnd: 42000,
     durationMonths: 1, termsFingerprint: createHash('sha256').update('synthetic').digest('hex'),
-    createdAt: new Date(time).toISOString(), expiresAt: new Date(time + 60000).toISOString(), termText: '1 month', warrantyText: 'Synthetic terms' }),
+    createdAt: new Date(time).toISOString(), expiresAt: new Date(time + 60000).toISOString(), termText: '1 month', warrantyText: 'Synthetic terms', accountForm: 'Cấp tài khoản nguồn' }),
     createOrder, markOrderCompleted: code => { database.prepare("UPDATE orders SET status='COMPLETED' WHERE order_code=?").run(code); return readOrder(code); },
     encrypt: value => `enc:v1:${Buffer.from(value).toString('base64')}`, decrypt: value => Buffer.from(value.slice(7), 'base64').toString(),
     providerFactory: () => provider, notifyCompletion: async () => {}, reconcileInvoices: async () => {} };
@@ -69,6 +69,43 @@ test('does not send private goods after cancellation while Discord user fetch wa
     t.database.prepare("UPDATE orders SET status='CANCELLED' WHERE order_code=?").run(order.order_code);
     t.fetchWait.resolve(); await pending;
     assert.equal(t.send.mock.calls.length, 0, 'Cancellation before Discord send must prevent credentials from being sent');
+  } finally { t.database.close(); }
+});
+
+test('adds a private usage guide to new deliveries while retaining exact goods bytes and saved order terms', async () => {
+  const t = fixture();
+  try {
+    const order = await t.paid(); t.fetchWait.resolve();
+    expect(await t.service.fulfillSupplierOrder(t.client, order.order_code)).toMatchObject({ delivered: true });
+    const payload = t.send.mock.calls[0][0];
+    expect(payload.content).toContain('BẮT ĐẦU SỬ DỤNG');
+    expect(payload.content).toContain('Synthetic terms'); expect(payload.content).toContain('1 month');
+    expect(payload.content).not.toContain('synthetic-private-goods'); expect(payload.content.length).toBeLessThan(2000);
+    expect(payload.files).toHaveLength(1);
+    expect(payload.files[0].attachment.toString()).toBe(`Đơn hàng: ${order.order_code}\n\n1. synthetic-private-goods`);
+    const retrieved = t.service.getSupplierDeliveryForCustomer({ guildId: GUILD, customerId: CUSTOMER, orderCode: order.order_code });
+    expect(retrieved).toMatchObject({ productName: 'Synthetic subscription', termLabel: '1 month', warrantyLabel: 'Synthetic terms',
+      accountForm: 'Cấp tài khoản nguồn', items: ['synthetic-private-goods'] });
+    expect(payload.content).toContain('Đăng nhập bằng thông tin nguồn bàn giao');
+  } finally { t.database.close(); }
+});
+
+test('reuses immutable pre-guide journal content and file identity when retrying after deployment', async () => {
+  const t = fixture();
+  try {
+    const send = vi.fn().mockRejectedValueOnce(Object.assign(new Error('DM closed'), { status: 403, code: 50007 }))
+      .mockResolvedValue({ id: MESSAGE });
+    t.client.users.fetch = vi.fn(async () => ({ id: CUSTOMER, createDM: async () => ({ id: CHANNEL, send }) }));
+    const order = await t.paid();
+    await t.service.fulfillSupplierOrder(t.client, order.order_code);
+    const first = send.mock.calls[0][0], oldText = `AutoBuy ${order.order_code} — sản phẩm của bạn được đính kèm trong tệp riêng tư.`;
+    t.database.prepare('UPDATE supplier_autobuy_delivery_attempts SET content=?').run(oldText);
+    t.advance(120001);
+    expect(await t.restart().fulfillSupplierOrder(t.client, order.order_code)).toMatchObject({ delivered: true });
+    const retry = send.mock.calls[1][0];
+    expect(retry.content).toBe(oldText); expect(retry.nonce).toBe(first.nonce);
+    expect(retry.files[0].name).toBe(first.files[0].name); expect(retry.files[0].attachment).toEqual(first.files[0].attachment);
+    expect(t.provider.createOrder).toHaveBeenCalledOnce();
   } finally { t.database.close(); }
 });
 
@@ -329,7 +366,8 @@ async function legacyFixture() {
   const original = send.mock.calls[0][0], intent = t.intent();
   t.database.prepare('DELETE FROM supplier_autobuy_delivery_attempts').run(); t.advance(120001);
   const nonce = createHash('sha256').update(`supplier-delivery:${intent.request_id}`).digest('hex').slice(0, 24);
-  const message = { id: MESSAGE, channelId: CHANNEL, author: { id: t.client.user.id }, nonce, content: original.content,
+  const message = { id: MESSAGE, channelId: CHANNEL, author: { id: t.client.user.id }, nonce,
+    content: `AutoBuy ${order.order_code} — sản phẩm của bạn được đính kèm trong tệp riêng tư.`,
     createdTimestamp: Date.parse(intent.created_at) + 1000,
     attachments: new Map([['one', { name: `${order.order_code}-autobuy.txt`, size: original.files[0].attachment.length }]]) };
   channel.messages = { fetch: vi.fn(async () => new Map([[MESSAGE, message]])) };
