@@ -201,6 +201,24 @@ The same retention predicate also guards feedback-triggered closure on shared OR
 
 ## Durable purchase and delivery
 
+### Private usage guide · 2026-11-16
+
+New automatic DMs include a compact Markdown guide with distinct verified
+custom emoji: saved product, duration, warranty and account form, preparation,
+result checks and private support/retrieval directions. The guide uses the
+immutable order/quote metadata, never the current catalog or provider goods.
+CDK/Claude preparation references the already accepted source conditions;
+it does not invent a redemption URL, activation procedure or extra warranty.
+The owned **Nhận hàng riêng** card shows the same guidance with native section
+separators, rebuilding it from the final synchronous owned/paid read before
+publication. Credentials remain exclusively in its private attachment.
+
+Raw file bytes, the one-file contract, hash, filename and nonce are unchanged.
+An existing DM attempt retains its exact journaled message text for retries and
+uncertain-send discovery. Older encrypted goods without a journal retain the
+original legacy content for conservative history matching. Adding a guide does
+not replay historical sends, repurchase goods or authorize a public delivery.
+
 Supplier PayOS webhooks and owned status reads return after the validated bank
 receipt is durably committed. Supplier fulfillment, customer-role synchronization
 and optional payment notices start independently; a slow Discord request or

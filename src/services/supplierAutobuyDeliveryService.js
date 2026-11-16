@@ -1,4 +1,6 @@
 import { createHash } from 'node:crypto';
+import { createUniqueCustomEmojiResolver } from '../utils/uniqueCustomEmoji.js';
+import { buildSupplierDeliveryGuide } from './supplierAutobuyDeliveryGuide.js';
 
 const snowflake = value => typeof value === 'string' && /^\d{17,20}$/.test(value);
 const noMentions = Object.freeze({ parse: [], users: [], roles: [], repliedUser: false });
@@ -105,14 +107,20 @@ export function createSupplierDeliveryService({ db, now = Date.now, id } = {}) {
     if (!complete || matches.length !== 1) return null;
     return { channelId: expectedChannel, messageId: matches[0].id };
   }
-  async function deliver({ client, order, intent, lease, freshPurchase, beforeSend, complete, sendDelivery = sendSupplierDeliveryDm, items }) {
+  async function deliver({ client, order, intent, lease, freshPurchase, beforeSend, complete, sendDelivery = sendSupplierDeliveryDm, items, guide = {} }) {
     init();
     const bytes = Buffer.from(`Đơn hàng: ${order.order_code}\n\n${items.map((item, index) => `${index + 1}. ${item}`).join('\n\n')}`, 'utf8');
     const payloadHash = hash(bytes), nonce = hash(`supplier-delivery:${intent.provider}:${intent.request_id}`).slice(0, 24);
     const fileName = `${order.order_code}-autobuy-${nonce}-${payloadHash.slice(0, 12)}.txt`;
     const legacyNonce = hash(`supplier-delivery:${intent.request_id}`).slice(0, 24), legacyFileName = `${order.order_code}-autobuy.txt`;
     const legacyAfter = Number.isFinite(Date.parse(intent.created_at)) && Date.parse(intent.created_at) <= now() ? intent.created_at : null;
-    const content = `AutoBuy ${order.order_code} — sản phẩm của bạn được đính kèm trong tệp riêng tư.`;
+    // Existing journal text is immutable evidence for uncertain-send discovery.
+    // New guides never alter goods bytes, payload hashes, nonces or old retries.
+    const content = latest(order.order_code)?.content ?? (freshPurchase ? buildSupplierDeliveryGuide({ ...guide,
+      orderCode: order.order_code, productKey: intent.product_key, productName: intent.product_name,
+      termLabel: intent.term_text, warrantyLabel: intent.warranty_text },
+    createUniqueCustomEmojiResolver(intent.guild_id, { seed: `supplier-delivery:${intent.request_id}` }))
+      : `AutoBuy ${order.order_code} — sản phẩm của bạn được đính kèm trong tệp riêng tư.`);
     const same = row => row && row.request_id === intent.request_id && row.provider === intent.provider && row.guild_id === intent.guild_id
       && row.customer_id === intent.customer_id && row.product_key === intent.product_key && row.payload_hash === payloadHash;
     let attempt, closed = false;

@@ -379,6 +379,8 @@ describe('supplier autobuy customer commerce interactions', () => {
     expect(deps.getDelivery).toHaveBeenLastCalledWith({ ...context, orderCode: 'CN_123456' });
     const payload = interaction.editReply.mock.calls[0][0];
     expect(JSON.stringify(payload.components)).not.toMatch(/secret-account|secret-password/);
+    expect(JSON.stringify(payload.components)).toContain('BẮT ĐẦU SỬ DỤNG');
+    expect(JSON.stringify(payload.components)).toContain('Nhận mã chưa đồng nghĩa đã kích hoạt thành công');
     expect(payload.files).toHaveLength(1);
     expect(payload.files[0].attachment.toString()).toBe('secret-account|secret-password');
     expect(deps.acknowledgeDelivery).toHaveBeenCalledExactlyOnceWith({ ...context, orderCode: 'CN_123456', messageId: '1569999999999999998', channelId });

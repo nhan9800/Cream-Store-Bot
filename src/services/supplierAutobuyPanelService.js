@@ -11,6 +11,7 @@ import { STORE_ONE_GUILD_ID } from '../utils/locale.js';
 import { isSupplierAutobuyProductKey } from '../utils/supplierAutobuyIdentifiers.js';
 import { stripPresentationEmoji, withUniqueCustomEmoji } from '../utils/uniqueCustomEmoji.js';
 import { isSupplierCategoryKey, supplierCategoryKey } from '../utils/supplierAutobuyCategory.js';
+import { supplierDeliveryGuideSections } from './supplierAutobuyDeliveryGuide.js';
 
 const CATEGORY_ID = '1514606994256957600';
 const CHANNEL_NAME = '🛒・autobuy';
@@ -389,6 +390,18 @@ export function buildSupplierNoticeView({ title = 'Thông tin autobuy', text, cu
   const E = createEmojiResolver(STORE_ONE_GUILD_ID);
   return privatePayload([containerWithTitle(`## ${E(warning ? 'status_warn' : 'status_check')} ${markdown(title, 100)}`, markdown(text, 1200), warning ? 0xDDAA55 : 0x41B899),
     ...(ticketContext === true ? ticketNavigation(order) : [nav(customerId)])]);
+}
+
+export function buildSupplierDeliveryView({ delivery, orderCode, customerId, ticketContext = false } = {}) {
+  requireOwner(customerId);
+  const E = createEmojiResolver(STORE_ONE_GUILD_ID);
+  const guide = supplierDeliveryGuideSections({ ...delivery, orderCode }, E);
+  const container = containerWithTitle(`## ${guide.title}`, guide.summary);
+  for (const text of [guide.steps, guide.support]) {
+    container.addSeparatorComponents(new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small));
+    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(text));
+  }
+  return privatePayload([container, ...(ticketContext ? ticketNavigation(delivery) : [nav(customerId)])]);
 }
 
 const settingPrefix = provider => provider === 'dopermind' ? `${PREFIX}dopermind:` : PREFIX;
