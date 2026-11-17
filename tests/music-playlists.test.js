@@ -31,7 +31,7 @@ function harness({ current = null, queued = [], paused = false, buffering = fals
   const queue = {
     guild, currentTrack: current, channel: existing ? voiceChannel : null,
     get size() { return pending.length; },
-    tracks: { toArray: () => [...pending] },
+    tracks: { toArray: () => [...pending], clear: () => pending.splice(0) },
     setMaxSize: vi.fn(),
     tasksQueue: { acquire: vi.fn(() => ({ getTask: async () => {} })), release: vi.fn() },
     connect: vi.fn(async (channel) => { queue.channel = channel; }),

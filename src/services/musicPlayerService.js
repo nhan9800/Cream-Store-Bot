@@ -844,7 +844,8 @@ export async function enqueueYoutubeSource({
           // Discord Player reports extraction rejection through events and
           // resolves play(). Prefer the classified, public-safe cause already
           // recorded there; raw extractor errors may contain signed URLs.
-          throw new Error(getMusicRecovery(queue).message
+          const recovery = getMusicRecovery(queue);
+          throw new Error((recovery.blocked && recovery.message)
             || 'Nguồn âm thanh YouTube kết thúc trước khi phát. Vui lòng thử lại hoặc kiểm tra giới hạn YouTube trên hosting.');
         }
       }
