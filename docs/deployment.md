@@ -20,3 +20,16 @@ Chỉ dùng SFTP/panel cho bootstrap hoặc recovery. Sau một recovery thủ c
 `bot-production` và cả hai health endpoint trước khi bàn giao.
 
 Không đưa `.env`, `.env.store2`, `data/`, backup hoặc mật khẩu SFTP vào GitHub artifact.
+
+## Dependency audit mitigation · discord-voip
+
+`discord-voip@7.2.0` upstream khai báo `tsup` và `typescript` trong `dependencies` dù
+chúng chỉ được dùng để build package; kéo theo `tinyglobby`/`picomatch` vào production
+dependency audit. Cenar giữ nguyên các file `dist` runtime và dùng bản vendor tại
+`vendor/discord-voip-7.2.0-cenar.1/`, chuyển hai công cụ build sang `devDependencies`.
+
+Không sửa `node_modules` thủ công. Khi thay vendor package, phải cập nhật
+`package.json`/`package-lock.json`, chạy `npm ci`, `npm audit --omit=dev --audit-level=high`,
+`npm run check:deps`, các suite music/Discord và full CI. Không hạ mức audit hoặc thêm
+allowlist cho `GHSA-fc5q-39xc-vjpf` khi chưa có bằng chứng package runtime còn cần glob
+parser đó.
