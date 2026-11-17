@@ -16,6 +16,10 @@ kiểm tra integrity cả hai database, kiểm tra `.env`/`.env.store2`, cài de
 restart launcher. Revision lỗi sẽ bị đánh dấu và rollback về source trước. Vì vậy deploy thường ngày không cần
 GitHub Environment chứa SFTP credential hoặc thao tác upload/restart thủ công.
 
+Supervisor cài dependency trong một stage cô lập trước khi thay `node_modules`. Khi source có dependency dạng
+`file:` (hiện tại là `vendor/discord-voip-7.2.0-cenar.1` để loại `tsup` khỏi production graph), supervisor phải
+copy thư mục `vendor/` vào stage trước `npm ci`; nếu thiếu, staging sẽ lỗi và tự rollback dù CI đã xanh.
+
 Chỉ dùng SFTP/panel cho bootstrap hoặc recovery. Sau một recovery thủ công, kiểm tra lại workflow, SHA của
 `bot-production` và cả hai health endpoint trước khi bàn giao.
 
