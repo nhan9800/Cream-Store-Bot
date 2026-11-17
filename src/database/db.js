@@ -488,6 +488,20 @@ export function initDatabase() {
       PRIMARY KEY (guild_id, user_id)
     );
 
+    CREATE TABLE IF NOT EXISTS order_pressure_enforcement (
+      guild_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      window_started_at TEXT NOT NULL,
+      flagged_count INTEGER NOT NULL DEFAULT 0,
+      deleted_count INTEGER NOT NULL DEFAULT 0,
+      last_fingerprint TEXT,
+      last_message_at TEXT,
+      last_warning_at TEXT,
+      policy_version INTEGER NOT NULL DEFAULT 1,
+      updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      PRIMARY KEY (guild_id, user_id)
+    );
+
     CREATE TABLE IF NOT EXISTS ai_knowledge (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       guild_id TEXT NOT NULL,
@@ -841,6 +855,8 @@ export function initDatabase() {
       ON scam_image_fingerprints (verdict, last_seen_at);
     CREATE INDEX IF NOT EXISTS idx_owner_ping_enforcement
       ON owner_ping_enforcement (guild_id, last_mention_at);
+    CREATE INDEX IF NOT EXISTS idx_order_pressure_enforcement
+      ON order_pressure_enforcement (guild_id, updated_at);
     CREATE INDEX IF NOT EXISTS idx_invite_campaign_entries_due
       ON invite_campaign_entries (event_key, status, qualifies_at);
     CREATE INDEX IF NOT EXISTS idx_invite_campaign_entries_inviter
