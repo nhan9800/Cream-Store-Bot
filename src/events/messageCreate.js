@@ -36,6 +36,7 @@ import {
 import { emitAutomationLog } from '../services/automationLogService.js';
 import { handleGiveawayProofMessage } from '../services/giveawayProofService.js';
 import { buildLegacyFeatureCard } from '../utils/featureCard.js';
+import { classifyOrderPressure, registerOrderPressure } from '../services/orderPressureGuardService.js';
 
 export function buildGmailNitroGuidePayload(guildId, attachment) {
   const E = createEmojiResolver(guildId);
@@ -230,6 +231,76 @@ async function enforceProtectedOwnerPing(message, E, isStaff) {
   return true;
 }
 
+function orderPressureReasonLabel(reasons = []) {
+  const labels = {
+    'delay-language': 'ngôn ngữ hối đơn/chậm đơn',
+    'pressure-language': 'lặp lời thúc giục',
+    'mention-pressure': 'tag hoặc mention dồn dập',
+  };
+  return reasons.map((reason) => labels[reason] || reason).join(', ');
+}
+
+async function enforceOrderPressure(message, E, isStaff) {
+  if (isStaff || !message.member || !message.guildId) return false;
+
+  const detection = classifyOrderPressure(message);
+  if (!detection.shouldTrack || !detection.fingerprint) return false;
+
+  const result = registerOrderPressure(
+    message.guildId,
+    message.author.id,
+    detection.fingerprint,
+  );
+  if (!result.shouldDelete) return false;
+
+  const deleted = await message.delete()
+    .then(() => true)
+    .catch((error) => {
+      console.warn('[ORDER-PRESSURE-GUARD] Không thể xóa tin nhắn:', error.message);
+      return false;
+    });
+
+  logAbuseEvent(
+    message.guildId,
+    message.author.id,
+    deleted ? 'ORDER_PRESSURE_DELETE' : 'ORDER_PRESSURE_DELETE_FAILED',
+    `channel=${message.channel?.id || 'unknown'} message=${message.id || 'unknown'} count=${result.flaggedCount} reasons=${detection.reasons.join(',')}`,
+  );
+
+  if (result.shouldWarn) {
+    const warning = new ContainerBuilder().setAccentColor(accentFor('warning'))
+      .addTextDisplayComponents(new TextDisplayBuilder().setContent([
+        `## ${E('cenar_cooldown')} NHẮC NHỞ GIỤC ĐƠN / TAG SPAM`,
+        `${E('status_warn')} Tin nhắn thúc giục hoặc tag liên tục đã được ${deleted ? 'xóa' : 'ghi nhận để xử lý'} nhằm giữ kênh hỗ trợ dễ theo dõi.`,
+        `${E('order_processing')} Đơn hàng vẫn được xử lý theo hàng đợi và nguồn hàng; vui lòng theo dõi ticket hoặc chờ cập nhật từ staff.`,
+        `${E('status_info')} Một câu hỏi đơn lẻ vẫn được giữ lại. Chỉ các tin lặp lại trong thời gian ngắn mới bị áp dụng bộ lọc này.`,
+        `-# ${E('icon_clock')} Cửa sổ chống spam 30 phút · Nhắc lại tối đa mỗi 15 phút`,
+      ].join('\n')));
+    const notice = await message.channel.send({
+      components: [warning],
+      flags: MessageFlags.IsComponentsV2,
+      allowedMentions: { parse: [] },
+    }).catch(() => null);
+    if (notice) setTimeout(() => notice.delete().catch(() => null), 15_000);
+
+    await emitAutomationLog(message.client, {
+      guildId: message.guildId,
+      customerId: message.author.id,
+      action: deleted ? 'ORDER_PRESSURE_DELETE' : 'ORDER_PRESSURE_DELETE_FAILED',
+      title: deleted ? 'ĐÃ XÓA TIN GIỤC ĐƠN / TAG SPAM' : 'PHÁT HIỆN GIỤC ĐƠN / TAG SPAM',
+      summary: `Lần vi phạm trong cửa sổ: ${result.flaggedCount} · ${orderPressureReasonLabel(detection.reasons)}.`,
+      reference: message.id,
+      status: deleted ? 'warning' : 'danger',
+      fields: [
+        { label: 'Kênh', value: `#${message.channel?.name || message.channel?.id || 'unknown'}`, emoji: 'cenar_staff' },
+        { label: 'Số lần đã xóa', value: String(result.deletedCount), emoji: 'status_cross' },
+      ],
+    });
+  }
+
+  return true;
+}
+
 export async function execute(message) {
   // Bỏ qua tin nhắn của bot
   if (message.author.bot) return;
@@ -292,6 +363,11 @@ export async function execute(message) {
       return;
     }
   }
+
+  // Quét mọi kênh mà bot nhận được message. Tin giục đơn đơn lẻ được giữ làm
+  // bằng chứng; chỉ tin lặp lại/tag spam trong cửa sổ ngắn mới bị xóa.
+  if (await enforceOrderPressure(message, E, isStaff)) return;
+
   // ═══════════════════════════════════════════════
   // AUTO SEND GMAIL SAFETY GUIDE FOR NITRO 2M
   // ═══════════════════════════════════════════════
