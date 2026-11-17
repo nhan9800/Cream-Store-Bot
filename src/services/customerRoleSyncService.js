@@ -4,6 +4,10 @@ import { config } from '../config.js';
 import { BUYER_TIERS } from '../config/membershipProgram.js';
 
 const inFlight = new Map();
+// Bootstrap performs one larger reconciliation while the scheduler starts its
+// own minute loop. Keep one run per guild so those paths cannot overlap and
+// issue duplicate member/role requests during startup or a manual retry.
+const pendingRuns = new Map();
 const snowflake = (value) => /^\d{15,22}$/.test(String(value || ''));
 const RECONCILE_AFTER_MS = 24 * 60 * 60_000;
 let lastBackfill = null;
@@ -138,15 +142,26 @@ export async function syncCustomerRolesNow(client, guildId, customerId, { notify
 }
 
 export async function processPendingCustomerRoles(client, { guildId = config.guildId, limit = 25 } = {}) {
-  const jobs = db.prepare(`SELECT guild_id, customer_id FROM customer_role_sync_jobs
-    WHERE guild_id = ? AND status = 'PENDING' AND retry_at <= ? ORDER BY retry_at, customer_id LIMIT ?`)
-    .all(guildId, nowIso(), Math.min(100, Math.max(1, Number(limit) || 25)));
-  const report = { scanned: jobs.length, synced: 0, pending: 0 };
-  for (const job of jobs) {
-    const result = await syncCustomerRolesNow(client, job.guild_id, job.customer_id, { notify: false });
-    if (result.synced) report.synced++;
-    else report.pending++;
-  }
-  lastRun = { ...report, at: nowIso() };
-  return report;
+  const key = String(guildId);
+  const existing = pendingRuns.get(key);
+  if (existing) return existing;
+
+  const run = (async () => {
+    const jobs = db.prepare(`SELECT guild_id, customer_id FROM customer_role_sync_jobs
+      WHERE guild_id = ? AND status = 'PENDING' AND retry_at <= ? ORDER BY retry_at, customer_id LIMIT ?`)
+      .all(guildId, nowIso(), Math.min(100, Math.max(1, Number(limit) || 25)));
+    const report = { scanned: jobs.length, synced: 0, pending: 0 };
+    for (const job of jobs) {
+      const result = await syncCustomerRolesNow(client, job.guild_id, job.customer_id, { notify: false });
+      if (result.synced) report.synced++;
+      else report.pending++;
+    }
+    lastRun = { ...report, at: nowIso() };
+    return report;
+  })();
+
+  pendingRuns.set(key, run);
+  return run.finally(() => {
+    if (pendingRuns.get(key) === run) pendingRuns.delete(key);
+  });
 }
