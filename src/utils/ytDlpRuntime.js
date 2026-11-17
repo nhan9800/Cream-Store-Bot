@@ -56,6 +56,7 @@ export async function bindVerifiedBinary({
   // Stage beside the target, then rename the directory entry. The old target
   // may be hardlinked to a retained cache; never write through that inode.
   const stagedPath = path.join(parent, `.${name}.${randomUUID()}.tmp`);
+  let activationError;
   try {
     try {
       await operations.link(sourcePath, stagedPath);
@@ -67,12 +68,19 @@ export async function bindVerifiedBinary({
     await operations.rename(stagedPath, targetPath);
     return targetPath;
   } catch (error) {
+    activationError = error;
+    throw error;
+  } finally {
+    // POSIX rename is a successful no-op when a concurrent binder already
+    // installed a hardlink to the same inode. Remove our own stage then too.
     try {
       await operations.unlink(stagedPath);
     } catch (cleanupError) {
-      if (cleanupError.code !== 'ENOENT') error.cleanupError = cleanupError;
+      if (cleanupError.code !== 'ENOENT') {
+        if (activationError) activationError.cleanupError = cleanupError;
+        else throw cleanupError;
+      }
     }
-    throw error;
   }
 }
 

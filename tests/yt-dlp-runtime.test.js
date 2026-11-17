@@ -197,4 +197,22 @@ describe('verified yt-dlp extractor binding', () => {
     expect(await fs.readFile(options.oldCache, 'utf8')).toBe('old verified runtime');
     expect(await fs.readdir(options.targetDirectory)).toEqual([options.asset]);
   });
+
+  it('cleans its stage when rename succeeds without removing a same-inode hardlink', async () => {
+    const options = await bindingFixture();
+    await bindVerifiedBinary({
+      ...options,
+      operations: {
+        rename: async (stage, target) => {
+          // A competing binder installs the same verified inode first.
+          // POSIX rename(stage, target) can now succeed without removing stage.
+          await fs.unlink(target);
+          await fs.link(options.sourcePath, target);
+        },
+      },
+    });
+    expect(await fs.readFile(options.targetPath, 'utf8')).toBe('verified fixture binary');
+    expect(await fs.readFile(options.oldCache, 'utf8')).toBe('old verified runtime');
+    expect(await fs.readdir(options.targetDirectory)).toEqual([options.asset]);
+  });
 });
