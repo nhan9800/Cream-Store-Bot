@@ -50,7 +50,7 @@ describe('optional yt-dlp runtime recovery', () => {
     const file = await prepareVerifiedBinary(options);
     expect(await fs.readFile(file, 'utf8')).toBe('verified fixture binary');
     expect(options.runVersion).toHaveBeenCalledWith(expect.any(String), ['--ignore-config', '--version'],
-      expect.objectContaining({ timeout: 10_000, windowsHide: true }));
+      expect.objectContaining({ timeout: 60_000, windowsHide: true }));
     expect(options.fetchImpl.mock.calls[0][1].signal).toBeInstanceOf(AbortSignal);
     expect(await prepareVerifiedBinary(options)).toBe(file);
     expect(options.fetchImpl).toHaveBeenCalledTimes(1);
