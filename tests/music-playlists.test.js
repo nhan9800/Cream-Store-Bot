@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { QueryType } from 'discord-player';
 import { buildMusicAddedMessage, enqueueYoutubeSource, normalizeYoutubeUrl } from '../src/services/musicPlayerService.js';
+import { noteMusicPlaybackFailure } from '../src/services/musicPlaybackRecovery.js';
 
 vi.mock('../src/database/db.js', () => ({ db: {} }));
 const mixLoader = vi.hoisted(() => ({ load: vi.fn() }));
@@ -259,6 +260,28 @@ describe('Cenar Music complete playlist batches', () => {
     expect(h.pending).toHaveLength(0);
     const failed = harness({ existing: false, search: vi.fn(async () => makeResult([makeTrack('ended')], false)), onPlay: ({ pending }) => { pending.shift(); } });
     await expect(failed.play({ url: 'https://youtu.be/ended' })).rejects.toThrow(/kết thúc trước khi phát/);
+  });
+
+  it.each([
+    ["Sign in to confirm you're not a bot", /YouTube đang từ chối nguồn âm thanh trên hosting/],
+    ['HTTP Error 403: Forbidden', /YouTube đang từ chối nguồn âm thanh trên hosting/],
+    ['Discord DAVE/MLS chưa sẵn sàng', /Kết nối âm thanh Discord chưa sẵn sàng/],
+  ])('preserves the public-safe startup diagnosis when play resolves after an event failure: %s', async (cause, expected) => {
+    const h = harness({
+      existing: false,
+      search: vi.fn(async () => makeResult([makeTrack('failed')], false)),
+      onPlay: ({ queue, pending }) => {
+        const failed = pending.shift();
+        // Mirrors the library's event path: it reports the source rejection
+        // synchronously, then resolves play() rather than throwing it.
+        noteMusicPlaybackFailure(queue, failed, new Error(`${cause}; https://example.invalid/private?token=secret`));
+      },
+    });
+    let caught;
+    try { await h.play({ url: 'https://youtu.be/failed' }); } catch (error) { caught = error; }
+    expect(caught?.message).toMatch(expected);
+    expect(caught.message).not.toMatch(/example\.invalid|token|secret|Sign in/);
+    expect(h.queue.tasksQueue.release).toHaveBeenCalledTimes(1);
   });
 
   it('shows the complete count and escaped playlist name in the Discord confirmation', () => {

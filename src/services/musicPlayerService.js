@@ -841,7 +841,11 @@ export async function enqueueYoutubeSource({
         // can still be extracting. The batch is accepted while it remains in
         // the queue; an error here would encourage adding the batch twice.
         if (!activeSelected && !(playlist && pendingSelected)) {
-          throw new Error('Nguồn âm thanh YouTube kết thúc trước khi phát. Vui lòng thử lại hoặc kiểm tra giới hạn YouTube trên hosting.');
+          // Discord Player reports extraction rejection through events and
+          // resolves play(). Prefer the classified, public-safe cause already
+          // recorded there; raw extractor errors may contain signed URLs.
+          throw new Error(getMusicRecovery(queue).message
+            || 'Nguồn âm thanh YouTube kết thúc trước khi phát. Vui lòng thử lại hoặc kiểm tra giới hạn YouTube trên hosting.');
         }
       }
       return {
