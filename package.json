@@ -57,6 +57,7 @@
     "@tesseract.js-data/eng": "1.0.0",
     "better-sqlite3": "12.11.1",
     "discord-player": "^7.2.0",
+    "discord-voip": "file:vendor/discord-voip-7.2.0-cenar.1",
     "discord-player-youtubedlp": "1.2.2",
     "discord.js": "14.27.0",
     "dotenv": "16.6.1",

@@ -146,6 +146,28 @@ describe('paid website purchaser role synchronization', () => {
     expect(member.send).not.toHaveBeenCalled();
   });
 
+  it('coalesces overlapping background scans so startup and scheduler do not duplicate Discord reads', async () => {
+    paidOrder();
+    backfillCustomerRoleSync();
+    const { client, guild, member } = mockDiscord();
+    let releaseFetch;
+    const fetchGate = new Promise((resolve) => { releaseFetch = resolve; });
+    guild.members.fetch.mockImplementation(async () => {
+      await fetchGate;
+      return member;
+    });
+
+    const first = processPendingCustomerRoles(client, { limit: 1 });
+    const second = processPendingCustomerRoles(client, { limit: 1 });
+    try {
+      await vi.waitFor(() => expect(guild.members.fetch).toHaveBeenCalledTimes(1), { timeout: 1000 });
+    } finally {
+      releaseFetch();
+    }
+    await expect(first).resolves.toMatchObject({ scanned: 1, synced: 1, pending: 0 });
+    await expect(second).resolves.toMatchObject({ scanned: 1, synced: 1, pending: 0 });
+  });
+
   it('uses Store 1 canonical fallback but never applies Store 1 IDs to another guild', () => {
     const { guild } = mockDiscord();
     const canonicalId = '1282637103045279820';

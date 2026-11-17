@@ -14,6 +14,12 @@ const CENAR_PROGRAM_ROLE_IDS = new Set([
   '1522844530242748446', // CTV
 ]);
 
+// Keep the first reconciliation pass small. Each customer can require one
+// member fetch plus several role mutations, and Discord.js will respect route
+// buckets but a large startup batch still creates avoidable pressure. The
+// scheduler drains the remaining durable jobs in bounded batches.
+const STARTUP_ROLE_SYNC_LIMIT = 25;
+
 function colorHex(value) {
   const number = Number(value) || 0;
   return number ? `#${number.toString(16).padStart(6, '0')}` : null;
@@ -217,6 +223,6 @@ export async function applyCustomerRoles(guild, customerId, { retryOnFailure = t
 
 export async function syncCustomerActivityRoles(client) {
   const backfill = backfillCustomerRoleSync();
-  const result = await processPendingCustomerRoles(client, { limit: 100 });
+  const result = await processPendingCustomerRoles(client, { limit: STARTUP_ROLE_SYNC_LIMIT });
   return { scanned: backfill.scanned, queued: backfill.queued, synced: result.synced, skipped: result.pending };
 }
