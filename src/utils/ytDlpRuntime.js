@@ -92,7 +92,11 @@ export async function prepareVerifiedBinary({
   const destination = path.join(cacheDir, asset);
   const checkVersion = async (file) => {
     const { stdout } = await runVersion(file, ['--ignore-config', '--version'], {
-      timeout: 10_000, maxBuffer: 16_384, windowsHide: true,
+      // The official Linux standalone expands its bundled Python runtime.
+      // Cold shared-host disk IO can exceed 10s, especially with both stores
+      // starting together. This initialization budget is separate from the
+      // bounded music-source/first-frame deadlines.
+      timeout: 60_000, maxBuffer: 16_384, windowsHide: true,
     });
     if (stdout.trim() !== version) throw new Error('yt-dlp runtime version check failed');
   };
@@ -161,6 +165,12 @@ export function ensureYtDlpRuntime() {
       sha256,
     });
     return binaryPath;
-  })().finally(() => { preparing = null; });
+  })().catch((error) => {
+    // Retry a failed initialization, but keep a verified runtime for this
+    // process lifetime. Source lookup must not unpack a second --version
+    // process on every song and consume its independent startup budget.
+    preparing = null;
+    throw error;
+  });
   return preparing;
 }
