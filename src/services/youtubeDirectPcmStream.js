@@ -201,6 +201,13 @@ export function createResilientYoutubePcmStream(videoUrl, {
   const failed = (error) => {
     if (closed) return;
     cleanupActive();
+    const message = cleanError(error?.message || error);
+    // Explicit verification and throttling require the provider to accept
+    // the request. Trying other clients or extractors repeats the rejection.
+    if (/confirm[^\n]*not a bot|captcha|\b429\b|too many requests/i.test(message)) {
+      close(new Error(message));
+      return;
+    }
     // A prefetched signed URL may be revoked before use. Retry the normal
     // fresh resolver without spending either normal client attempt.
     if (!started && preparedAttempt) {
@@ -212,7 +219,7 @@ export function createResilientYoutubePcmStream(videoUrl, {
     if (!started && fallback) {
       if (attempt < MAX_START_ATTEMPTS) void start();
       else startFallback();
-    } else close(new Error(cleanError(error?.message || error)));
+    } else close(new Error(message));
   };
   const start = async () => {
     if (closed) return;

@@ -4,6 +4,7 @@ import {
   buildSmoothVolumeRamp,
   isDaveVoiceReady,
   normalizeYoutubeUrl,
+  playYoutube,
   setSmoothMusicVolume,
   waitForDaveVoiceReady,
 } from '../src/services/musicPlayerService.js';
@@ -102,21 +103,40 @@ describe('Cenar Music DAVE voice handshake guard', () => {
 
   it('does not play before the initial MLS transition is committed', () => {
     expect(isDaveVoiceReady(queueWith('ready', {
+      protocolVersion: 1,
       lastTransitionId: undefined,
       reinitializing: false,
+      session: { ready: true },
     }))).toBe(false);
     expect(isDaveVoiceReady(queueWith('ready', {
+      protocolVersion: 1,
       lastTransitionId: 0,
       reinitializing: false,
+      session: { ready: false },
+    }))).toBe(false);
+    expect(isDaveVoiceReady(queueWith('ready', {
+      protocolVersion: 1,
+      lastTransitionId: 0,
+      reinitializing: false,
+      session: { ready: true },
     }))).toBe(true);
   });
 
   it('allows ready non-DAVE connections and established DAVE sessions', async () => {
     expect(isDaveVoiceReady(queueWith('ready', null))).toBe(true);
     await expect(waitForDaveVoiceReady(queueWith('ready', {
+      protocolVersion: 1,
       lastTransitionId: 0,
       reinitializing: false,
+      session: { ready: true },
     }), { timeoutMs: 20, pollMs: 1 })).resolves.toBeGreaterThanOrEqual(0);
+  });
+
+  it('recognizes Discord negotiated v0 and waits for any pending upgrade', () => {
+    const dave = { protocolVersion: 0, reinitializing: false, pendingTransitions: new Map() };
+    expect(isDaveVoiceReady(queueWith('ready', dave))).toBe(true);
+    dave.pendingTransitions.set(1, 1);
+    expect(isDaveVoiceReady(queueWith('ready', dave))).toBe(false);
   });
 
   it('rejects a voice connection that closes during negotiation', async () => {
@@ -125,4 +145,16 @@ describe('Cenar Music DAVE voice handshake guard', () => {
       pollMs: 1,
     })).rejects.toThrow(/đã đóng/);
   });
+});
+
+it('rejects a bot-only voice channel before starting the music engine', async () => {
+  const guild = { id: 'test', members: { me: {} } };
+  const voiceChannel = {
+    guildId: guild.id,
+    isVoiceBased: () => true,
+    permissionsFor: () => ({ has: () => true }),
+    members: [{ user: { bot: true } }],
+  };
+  await expect(playYoutube({ guild, voiceChannel, url: 'https://youtu.be/example' }))
+    .rejects.toThrow(/vào phòng thoại đã chọn/);
 });

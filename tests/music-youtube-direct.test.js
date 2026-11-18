@@ -85,6 +85,20 @@ afterEach(async () => {
 });
 
 describe('direct YouTube PCM fallback', () => {
+  it.each(['Sign in to confirm you’re not a bot', 'HTTP Error 429: Too Many Requests'])(
+    'stops alternate source attempts after provider rejection: %s',
+    async (message) => {
+      const output = createOutput();
+      const failure = once(output, 'error');
+      await flush();
+      children[0].stderr.write(message);
+      children[0].emit('close', 1);
+      expect((await failure)[0].message).toContain(message);
+      expect(mocks.spawn).toHaveBeenCalledTimes(1);
+      expect(mocks.fallback).not.toHaveBeenCalled();
+    },
+  );
+
   it('resolves a fresh audio-only URL with bounded YouTube options', () => {
     const args = buildYtDlpDirectArgs('https://www.youtube.com/watch?v=abc', {
       proxyUri: 'http://proxy.invalid:8080',
