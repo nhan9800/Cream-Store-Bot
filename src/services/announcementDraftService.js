@@ -12,7 +12,7 @@ const NO_MENTIONS = { parse: [], users: [], roles: [], repliedUser: false };
 
 function pruneDrafts() {
   for (const [id, draft] of drafts) {
-    if (!draft.publishing && draft.expiresAt <= Date.now()) drafts.delete(id);
+    if (!draft.publishing && !draft.updating && draft.expiresAt <= Date.now()) drafts.delete(id);
   }
 }
 
@@ -28,7 +28,7 @@ export function createAnnouncementDraft(interaction, image = null) {
     id: interaction.id, guildId: interaction.guildId, channelId: interaction.channelId,
     ownerId: interaction.user.id, image: normalizeAnnouncementImage(image),
     content: '', roles: [], tagEveryone: false, tagHere: false, revision: 0,
-    expiresAt: Date.now() + TTL, publishing: false, result: null, cancelled: false,
+    expiresAt: Date.now() + TTL, publishing: false, updating: false, result: null, cancelled: false,
   };
   drafts.set(draft.id, draft);
   return draft;
@@ -54,13 +54,13 @@ export function buildAnnouncementPreview(draft, notice = '') {
     .addFields({ name: 'Các role sẽ tag', value: tags.join(', ') || 'Không có' })
     .setFooter({ text: 'Chọn role rồi bấm Đăng thông báo. Bản nháp hết hạn sau 15 phút.' });
   if (draft.image) embed.setImage(draft.image.url).addFields({ name: 'Ảnh đính kèm', value: draft.image.name });
-  const select = new RoleSelectMenuBuilder().setCustomId(`announcement:roleselect:${draft.id}`)
+  const select = new RoleSelectMenuBuilder().setCustomId(`announcement:roleselect:${draft.id}:${draft.revision}`)
     .setPlaceholder('Chọn hoặc tìm role muốn tag').setMinValues(0).setMaxValues(10).setDisabled(disabled);
   if (draft.roles.length) select.setDefaultRoles(...draft.roles);
   const buttonSlots = { toggle_everyone: 'icon_group', toggle_here: 'icon_location',
     confirm: 'icon_announce', edit: 'icon_edit', cancel: 'status_cross' };
   const button = (action, label, style) => withButtonEmoji(
-    new ButtonBuilder().setCustomId(`announcement:${action}:${draft.id}`)
+    new ButtonBuilder().setCustomId(`announcement:${action}:${draft.id}:${draft.revision}`)
       .setLabel(label).setStyle(style).setDisabled(disabled), E.component(buttonSlots[action]));
   return {
     content: notice, embeds: [embed], allowedMentions: NO_MENTIONS,
@@ -79,6 +79,30 @@ export function buildAnnouncementPreview(draft, notice = '') {
 async function privateNotice(interaction, content) {
   const payload = { content, flags: MessageFlags.Ephemeral, allowedMentions: NO_MENTIONS };
   return interaction.deferred || interaction.replied ? interaction.followUp(payload) : interaction.reply(payload);
+}
+
+async function updateDraftPreview(interaction, draft, changes = null, notice = '') {
+  // Commit the wording and mentions only once Discord accepts the preview.
+  // Revisioned controls also prevent an ambiguous response from publishing a
+  // different version than the one shown in the client.
+  const next = changes ? { ...draft, ...changes, revision: draft.revision + 1 } : draft;
+  draft.updating = true;
+  try {
+    const preview = next.cancelled
+      ? { content: 'Đã hủy đăng thông báo.', embeds: [], components: [], allowedMentions: NO_MENTIONS }
+      : buildAnnouncementPreview(next, notice);
+    if (interaction.isModalSubmit() && !interaction.isFromMessage()) {
+      await interaction.reply({ ...preview, flags: MessageFlags.Ephemeral });
+    } else {
+      await interaction.update(preview);
+    }
+    if (changes) Object.assign(draft, changes, { revision: next.revision });
+  } catch (error) {
+    console.error('[ANNOUNCEMENT_DRAFT]', { phase: 'preview', code: error?.code || error?.status || 'REQUEST_FAILED' });
+    await privateNotice(interaction, 'Chưa cập nhật được bản xem trước. Vui lòng thử lại.').catch(() => null);
+  } finally {
+    draft.updating = false;
+  }
 }
 
 function successPayload(draft) {
@@ -119,8 +143,21 @@ export async function handleAnnouncementDraftInteraction(interaction) {
     await privateNotice(interaction, 'Thông báo đang được đăng. Vui lòng chờ kết quả tại bản nháp.');
     return true;
   }
+  if (draft.updating) {
+    await privateNotice(interaction, 'Bản xem trước đang cập nhật. Vui lòng thử lại sau giây lát.');
+    return true;
+  }
   if (draft.uncertainAt && action !== 'confirm') {
     await privateNotice(interaction, 'Kết quả gửi đang chờ xác minh. Kiểm tra kênh trước khi sửa hoặc tạo thông báo khác.');
+    return true;
+  }
+  if (String(draft.revision) !== revision) {
+    if (interaction.isModalSubmit()) {
+      await privateNotice(interaction, 'Nội dung đã được sửa ở cửa sổ khác. Hãy mở Sửa nội dung từ bản nháp mới nhất.');
+    } else {
+      await updateDraftPreview(interaction, draft, null,
+        'Đã làm mới bản xem trước. Vui lòng kiểm tra nội dung và các role trước khi thao tác lại.');
+    }
     return true;
   }
   if (action === 'edit' && interaction.isButton()) {
@@ -128,21 +165,12 @@ export async function handleAnnouncementDraftInteraction(interaction) {
     return true;
   }
   if (action === 'modal' && interaction.isModalSubmit()) {
-    if (String(draft.revision) !== revision) {
-      await privateNotice(interaction, 'Nội dung đã được sửa ở cửa sổ khác. Hãy mở Sửa nội dung từ bản nháp mới nhất.');
-      return true;
-    }
     const content = interaction.fields.getTextInputValue('announcement_content').trim();
     if (!content || content.length > 3000) {
       await privateNotice(interaction, 'Nội dung cần có từ 1 đến 3.000 ký tự.');
       return true;
     }
-    const fromMessage = interaction.isFromMessage();
-    if (fromMessage) await interaction.deferUpdate();
-    else await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-    draft.content = content;
-    draft.revision++;
-    await interaction.editReply(buildAnnouncementPreview(draft));
+    await updateDraftPreview(interaction, draft, { content });
     return true;
   }
   if (action === 'confirm' && interaction.isButton()) {
@@ -152,15 +180,17 @@ export async function handleAnnouncementDraftInteraction(interaction) {
     }
     // Reserve synchronously, but release even when the initial ACK fails.
     draft.publishing = true;
+    let phase = 'ack';
     try {
       await interaction.deferUpdate();
+      phase = 'publish';
       if (draft.uncertainAt && Date.now() - draft.uncertainAt >= 90_000) {
         await interaction.editReply(buildAnnouncementPreview(draft,
           'Discord chưa xác nhận lần gửi trước. Kiểm tra kênh trước khi tạo thông báo mới để tránh đăng trùng.'));
         return true;
       }
       if (!draft.content) throw new Error('EMPTY_DRAFT');
-      await interaction.editReply(buildAnnouncementPreview(draft, 'Đang đăng thông báo…')).catch(() => null);
+      // Publication cannot depend on a second webhook request succeeding.
       const snapshot = { ...draft, roles: [...draft.roles] };
       const attemptAt = Date.now();
       try {
@@ -178,9 +208,10 @@ export async function handleAnnouncementDraftInteraction(interaction) {
         }
         throw error;
       }
+      phase = 'receipt';
       await interaction.editReply(successPayload(draft));
     } catch (error) {
-      console.error('[ANNOUNCEMENT_DRAFT]', { phase: draft.result ? 'receipt' : 'publish',
+      console.error('[ANNOUNCEMENT_DRAFT]', { phase,
         code: error?.code || error?.status || 'REQUEST_FAILED' });
       if (interaction.deferred || interaction.replied) {
         const payload = draft.result ? successPayload(draft) : buildAnnouncementPreview({ ...draft, publishing: false },
@@ -191,22 +222,19 @@ export async function handleAnnouncementDraftInteraction(interaction) {
     return true;
   }
   if (action === 'cancel' && interaction.isButton()) {
-    await interaction.deferUpdate();
-    draft.cancelled = true;
-    await interaction.editReply({ content: 'Đã hủy đăng thông báo.', embeds: [], components: [], allowedMentions: NO_MENTIONS });
+    await updateDraftPreview(interaction, draft, { cancelled: true });
     return true;
   }
   if (action === 'roleselect' && interaction.isRoleSelectMenu()) {
-    draft.roles = [...new Set(interaction.values)].filter(value => /^\d{17,20}$/.test(value)).slice(0, 10);
+    const roles = [...new Set(interaction.values)].filter(value => /^\d{17,20}$/.test(value)).slice(0, 10);
+    await updateDraftPreview(interaction, draft, { roles });
   } else if (['toggle_everyone', 'toggle_here'].includes(action) && interaction.isButton()) {
     if (!interaction.memberPermissions.has(PermissionFlagsBits.MentionEveryone)) {
       await privateNotice(interaction, 'Bạn cần quyền Nhắc Đến Mọi Người để bật @everyone hoặc @here.');
       return true;
     }
     const key = action === 'toggle_everyone' ? 'tagEveryone' : 'tagHere';
-    draft[key] = !draft[key];
+    await updateDraftPreview(interaction, draft, { [key]: !draft[key] });
   } else { await privateNotice(interaction, 'Thao tác thông báo không hợp lệ.'); return true; }
-  await interaction.deferUpdate();
-  await interaction.editReply(buildAnnouncementPreview(draft));
   return true;
 }

@@ -54,7 +54,7 @@ describe('custom artwork in announcement presentation', () => {
   });
 
   it('decorates five preview controls with distinct live custom art and never pings from the preview', () => {
-    const result = buildAnnouncementPreview({ id: 'draft', guildId, content: 'Thông báo mới',
+    const result = buildAnnouncementPreview({ id: 'draft', revision: 0, guildId, content: 'Thông báo mới',
       roles: ['1550000000000000001'], tagEveryone: true, tagHere: true });
     const buttons = result.components.flatMap(row => row.toJSON().components).filter(component => component.type === 2);
     expect(buttons).toHaveLength(5);
@@ -91,7 +91,7 @@ describe('custom artwork in announcement presentation', () => {
         isButton: () => true, isModalSubmit: () => false, isRoleSelectMenu: () => false,
         isFromMessage: () => true, fields: { getTextInputValue: () => 'Lịch hỗ trợ mới' },
         reply: vi.fn(async () => {}), followUp: vi.fn(async () => {}),
-        editReply: vi.fn(async () => {}), showModal: vi.fn(async () => {}),
+        editReply: vi.fn(async () => {}), update: vi.fn(async () => {}), showModal: vi.fn(async () => {}),
         deferUpdate: vi.fn(async () => { value.deferred = true; }) };
       return value;
     };
@@ -100,13 +100,13 @@ describe('custom artwork in announcement presentation', () => {
     modal.isModalSubmit = () => true;
     modal.isButton = () => false;
     await handleAnnouncementDraftInteraction(modal);
-    const confirm = interaction(`announcement:confirm:${draft.id}`);
+    const confirm = interaction(`announcement:confirm:${draft.id}:${draft.revision}`);
     await handleAnnouncementDraftInteraction(confirm);
     expect(confirm.editReply.mock.calls.at(-1)[0].content).toContain('Bộ emoji thông báo đang đồng bộ');
     expect(draft.uncertainAt).toBeUndefined();
     expect(draft.publishing).toBe(false);
     expect(send).not.toHaveBeenCalled();
-    const edit = interaction(`announcement:edit:${draft.id}`);
+    const edit = interaction(`announcement:edit:${draft.id}:${draft.revision}`);
     await handleAnnouncementDraftInteraction(edit);
     expect(edit.showModal).toHaveBeenCalledOnce();
   });
