@@ -58,7 +58,7 @@ describe('authenticated YouTube PCM pipe', () => {
     const [, ffmpegArgs] = spawnProcess.mock.calls[1];
     expect(ytArgs).toEqual(expect.arrayContaining([
       '--ignore-config', '--no-playlist', '--print', 'before_dl:CENAR_YT_INFO:%(.{duration,is_live})j',
-      '--no-simulate', '--logtostderr', '--cookies', '/private/runtime/session.txt', '-o', '-', '--', videoUrl,
+      '--no-simulate', '--cookies', '/private/runtime/session.txt', '-o', '-', '--', videoUrl,
     ]));
     expect(prepareCookies).toHaveBeenCalledExactlyOnceWith('/private/yt-session.txt');
     expect(ytArgs).not.toContain('/private/yt-session.txt');

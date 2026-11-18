@@ -32,7 +32,7 @@ function youtubeArgs(videoUrl, cookiesFile, proxyUri) {
     '--retries', '1', '--extractor-retries', '1', '--fragment-retries', '1',
     '--no-part', '--no-keep-fragments',
     // In stdout-download mode yt-dlp directs its text output to stderr.
-    '--print', `before_dl:${INFO_MARKER}%(.{duration,is_live})j`, '--no-simulate', '--logtostderr',
+    '--print', `before_dl:${INFO_MARKER}%(.{duration,is_live})j`, '--no-simulate',
     ...(cookiesFile ? ['--cookies', cookiesFile] : []),
     ...(proxyUri ? ['--proxy', proxyUri] : []),
     '-f', 'bestaudio[acodec!=none]/bestaudio/best', '-o', '-', '--', videoUrl,
