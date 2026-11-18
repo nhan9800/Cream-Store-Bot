@@ -159,12 +159,29 @@ describe('Cenar Music Discord attachment queue', () => {
     }, addedCount: 1, playlist: null });
 
     const playing = h.queue.currentTrack;
+    h.queue.dispatcher.audioResource.playbackDuration = 12_020;
     h.player.events.emit(GuildQueueEvent.PlayerFinish, h.queue, playing);
     expect(mocks.historyWrite).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO music_play_history'),
       h.guild.id, playing.id, result.track.url, attachment.name, 'Discord · MP3', null, 0, requester.id);
     expect(mocks.historyWrite).toHaveBeenCalledWith(expect.stringContaining('AND track_id = ?'),
-      'COMPLETED', null, h.guild.id, playing.id);
+      'COMPLETED', null, 12_020, h.guild.id, playing.id);
     expect(JSON.stringify([result, playing.raw, playing.metadata, mocks.historyWrite.mock.calls])).not.toContain(marker);
+  });
+
+  it.each([
+    ['different track', { id: 'different-track' }, 12_020],
+    ['infinite counter', undefined, Infinity],
+    ['missing counter', undefined, undefined],
+  ])('does not store the counter from %s', async (_label, metadata, playbackDuration) => {
+    const h = makeQueue({ existing: false });
+    await h.add(file('sample.ogg'));
+    const track = h.queue.currentTrack;
+    Object.assign(h.queue.dispatcher.audioResource, { metadata: metadata ?? track, playbackDuration });
+
+    h.player.events.emit(GuildQueueEvent.PlayerFinish, h.queue, track);
+
+    expect(mocks.historyWrite).toHaveBeenCalledWith(expect.stringContaining('AND track_id = ?'),
+      'COMPLETED', null, null, h.guild.id, track.id);
   });
 
   it('appends a file behind an active track without preloading either source', async () => {
