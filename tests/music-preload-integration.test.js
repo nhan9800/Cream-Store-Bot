@@ -173,7 +173,7 @@ describe('music next-track preparation integration', () => {
 
   it('resolves audio while DAVE negotiates but does not hand PCM to playback before encryption is ready', async () => {
     const { queue, pending } = harness();
-    const dave = { lastTransitionId: undefined, reinitializing: false };
+    const dave = { protocolVersion: 1, lastTransitionId: undefined, reinitializing: false, session: { ready: false } };
     queue.dispatcher.voiceConnection.state.networking.state.dave = dave;
     let returned = false;
     const opening = createStream(queue, pending[0]).then(value => { returned = true; return value; });
@@ -186,6 +186,9 @@ describe('music next-track preparation integration', () => {
     expect(sources[0].destroyed).toBe(false);
     dave.lastTransitionId = 0;
     await vi.advanceTimersByTimeAsync(50);
+    expect(returned).toBe(false);
+    dave.session.ready = true;
+    await vi.advanceTimersByTimeAsync(50);
     const resource = await opening;
     expect(returned).toBe(true);
     expect(resource.stream.readableLength).toBe(MUSIC_FRAME_BYTES);
@@ -195,7 +198,7 @@ describe('music next-track preparation integration', () => {
   it.each([false, true])('cancels a pending source on QueueDelete (first PCM already received: %s)', async (hasPcm) => {
     const { queue, pending, events } = harness();
     events.emit(GuildQueueEvent.PlayerStart, queue, queue.currentTrack);
-    const dave = { lastTransitionId: undefined, reinitializing: false };
+    const dave = { protocolVersion: 1, lastTransitionId: undefined, reinitializing: false, session: { ready: false } };
     queue.dispatcher.voiceConnection.state.networking.state.dave = dave;
     const opening = createStream(queue, pending[0]);
     const result = opening.then(value => ({ value }), error => ({ error }));
@@ -206,6 +209,7 @@ describe('music next-track preparation integration', () => {
     expect(sources[0].destroyed).toBe(true);
     // A late DAVE commit must not resurrect a cancelled, already-buffered track.
     dave.lastTransitionId = 0;
+    dave.session.ready = true;
     await vi.advanceTimersByTimeAsync(50);
     expect((await result).error).toBeInstanceOf(Error);
     expect(mocks.createSource).toHaveBeenCalledTimes(1);

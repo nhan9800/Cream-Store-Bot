@@ -188,11 +188,12 @@ function resolveDaveState(queue) {
 export function isDaveVoiceReady(queue) {
   const { voiceStatus, dave } = resolveDaveState(queue);
   if (voiceStatus !== 'ready') return false;
-  // Stage channels and voice servers that negotiate protocol v0 can be ready
-  // without a DAVE session. When DAVE exists, wait for the initial MLS
-  // commit/welcome to set lastTransitionId (0 is a valid transition id).
+  // discord-voip may create a wrapper even for server-negotiated v0, which
+  // has no MLS session or initial commit. Wait if an upgrade is pending.
   if (!dave) return true;
-  return Number.isInteger(dave.lastTransitionId) && !dave.reinitializing;
+  if (dave.reinitializing) return false;
+  if (dave.protocolVersion === 0) return dave.pendingTransitions?.size === 0;
+  return Number.isInteger(dave.lastTransitionId) && dave.session?.ready === true;
 }
 
 export async function waitForDaveVoiceReady(queue, {
@@ -210,7 +211,15 @@ export async function waitForDaveVoiceReady(queue, {
     if (isDaveVoiceReady(queue)) return Date.now() - startedAt;
     await new Promise((resolve) => setTimeout(resolve, pollMs));
   }
-  throw new Error(`Discord DAVE/MLS chưa sẵn sàng sau ${Math.round(DAVE_HANDSHAKE_TIMEOUT_MS / 1000)} giây; đã chặn phát sớm để tránh mất bài.`);
+  const { voiceStatus, dave } = resolveDaveState(queue);
+  console.warn('[MUSIC] Discord voice handshake timed out', {
+    voiceStatus,
+    protocolVersion: dave?.protocolVersion ?? null,
+    encryptionReady: dave?.session?.ready === true,
+    committed: Number.isInteger(dave?.lastTransitionId),
+    reinitializing: dave?.reinitializing === true,
+  });
+  throw new Error(`Discord DAVE/MLS chưa sẵn sàng sau ${timeoutMs / 1000} giây; đã chặn phát sớm để tránh mất bài.`);
 }
 
 export async function waitForMusicPcmReadable(stream, timeoutMs = MUSIC_SOURCE_TIMEOUT_MS) {
@@ -769,6 +778,13 @@ function hasActiveMusic(queue) {
   ))));
 }
 
+function requireMusicListener(channel) {
+  const members = channel.members;
+  if (members && !members.some((member) => !member.user.bot)) {
+    throw new Error('Hãy vào phòng thoại đã chọn rồi phát nhạc hoặc thử lại.');
+  }
+}
+
 // Search independently so a slow playlist does not block unrelated metadata
 // reads; serialize capacity checks and the complete batch insertion per guild.
 export async function enqueueYoutubeSource({
@@ -780,6 +796,7 @@ export async function enqueueYoutubeSource({
   const normalizedUrl = normalizeYoutubeUrl(url);
   const { tracks, playlist } = await loadYoutubeSource(player, normalizedUrl, requestedBy, sourceTimeoutMs);
   return withQueueMutation(guild.id, async () => {
+    requireMusicListener(voiceChannel);
     const settings = getSettings();
     const existing = player.nodes.get(guild.id);
     if (getMusicRecovery(existing).blocked) {
@@ -876,6 +893,7 @@ export async function playYoutube({ guild, voiceChannel, url, requestedBy = null
   if (!permissions?.has([PermissionFlagsBits.ViewChannel, PermissionFlagsBits.Connect, PermissionFlagsBits.Speak])) {
     throw new Error(`Bot thiếu quyền Xem kênh, Kết nối hoặc Nói trong #${voiceChannel.name}.`);
   }
+  requireMusicListener(voiceChannel);
   const player = await initializeMusicPlayer(guild.client);
   const result = await enqueueYoutubeSource({ player, guild, voiceChannel, url, requestedBy, requestedByLabel, textChannelId });
   schedulePanelRefresh(guild.id);
@@ -902,9 +920,11 @@ export async function controlMusic(guildId, action, value = null) {
   const recovery = getMusicRecovery(queue);
   if (recovery.blocked && ['toggle', 'resume'].includes(String(action || '').toLowerCase())) {
     return withQueueMutation(guildId, async () => {
+      if (!getMusicRecovery(queue).blocked) return getMusicState(guildId);
+      const channel = getMusicRecoveryChannel(queue);
+      if (!channel) throw new Error('Phòng thoại không còn khả dụng. Hãy dừng phiên rồi thêm bài lại.');
+      requireMusicListener(channel);
       if (!queue.dispatcher?.voiceConnection) {
-        const channel = getMusicRecoveryChannel(queue);
-        if (!channel) throw new Error('Phòng thoại không còn khả dụng. Hãy dừng phiên rồi thêm bài lại.');
         await queue.connect(channel, {
           daveEncryption: true, timeout: 20_000,
           audioPlayer: createAudioPlayer({ behaviors: { maxMissedFrames: 25 } }),
