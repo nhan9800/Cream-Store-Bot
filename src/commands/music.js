@@ -13,7 +13,6 @@ import {
 import {
   buildMusicPanelPayload,
   buildMusicAddedMessage,
-  playMusicAttachment,
   playMusicCommons,
   playYoutube,
   registerMusicPanelMessage,
@@ -26,22 +25,18 @@ const NO_MENTIONS = { parse: [] };
 
 export const data = new SlashCommandBuilder()
   .setName('music')
-  .setDescription('Mở Cenar Music để tìm bài theo tên hoặc phát nhạc trong phòng thoại')
+  .setDescription('Phát nhạc từ link YouTube hoặc tìm bản thu theo tên')
+  .addStringOption((option) => option
+    .setName('link')
+    .setDescription('Link YouTube (video, playlist, Mix) hoặc bản thu Wikimedia Commons')
+    .setRequired(false)
+    .setMaxLength(500))
   .addStringOption((option) => option
     .setName('ten')
     .setDescription('Tìm bản thu có giấy phép mở theo tên bài hoặc nghệ sĩ')
     .setRequired(false)
     .setMinLength(2)
-    .setMaxLength(SEARCH_TEXT_LENGTH))
-  .addStringOption((option) => option
-    .setName('link')
-    .setDescription('Link bản thu Wikimedia Commons hoặc link YouTube (video, playlist, Mix)')
-    .setRequired(false)
-    .setMaxLength(500))
-  .addAttachmentOption((option) => option
-    .setName('file')
-    .setDescription('Tệp âm thanh MP3 hoặc OGG, tối đa 8 MiB')
-    .setRequired(false));
+    .setMaxLength(SEARCH_TEXT_LENGTH));
 
 function requireSameVoiceChannel(interaction, voiceChannel) {
   const current = interaction.member?.voice?.channel;
@@ -113,15 +108,14 @@ async function playMusicSearch(interaction, query, request) {
 export async function execute(interaction) {
   const query = interaction.options.getString('ten');
   const link = interaction.options.getString('link');
-  const attachment = interaction.options.getAttachment('file');
   if (query !== null) await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   else await interaction.deferReply();
   try {
-    if ([query, link, attachment].filter(Boolean).length > 1) {
-      throw new Error('Chỉ nhập một trong ba tùy chọn `ten`, `link` hoặc `file`.');
+    if (query !== null && link) {
+      throw new Error('Chọn một tùy chọn `link` hoặc `ten`.');
     }
     let added = null;
-    if (query !== null || link || attachment) {
+    if (query !== null || link) {
       const voiceChannel = interaction.member?.voice?.channel;
       if (!voiceChannel) throw new Error('Bạn cần vào một phòng thoại trước khi phát nhạc.');
       const request = {
@@ -135,9 +129,7 @@ export async function execute(interaction) {
         await playMusicSearch(interaction, query.trim(), request);
         return;
       }
-      if (attachment) {
-        added = await playMusicAttachment({ ...request, attachment });
-      } else if (isMusicCommonsLink(link)) {
+      if (isMusicCommonsLink(link)) {
         const source = await resolveMusicCommons(link);
         const currentChannel = requireSameVoiceChannel(interaction, voiceChannel);
         added = await playMusicCommons({ ...request, voiceChannel: currentChannel, source });

@@ -29,8 +29,14 @@ function failureMessage(error, track) {
     return { systemic: true, message: 'Kết nối âm thanh Discord chưa sẵn sàng. Hãy kiểm tra quyền Kết nối/Nói và thử lại.' };
   }
   // A missing or damaged direct audio file does not prevent the next track playing.
-  if (['discord-file', 'commons'].includes(track.metadata?.cenarSource)) return null;
-  if (/403|429|sign in|confirm.*bot|captcha|too many requests/i.test(text)) {
+  if (track.metadata?.cenarSource === 'commons') return null;
+  if (/confirm[^\n]*not a bot|captcha/i.test(text)) {
+    return { systemic: true, message: 'Bot đã nhận link. YouTube yêu cầu xác minh từ VibeHost trước khi cấp luồng âm thanh.' };
+  }
+  if (/\b429\b|too many requests/i.test(text)) {
+    return { systemic: true, message: 'YouTube đang giới hạn yêu cầu từ VibeHost. Hãy thử lại sau.' };
+  }
+  if (/\b403\b|sign in/i.test(text)) {
     return { systemic: true, message: 'YouTube đang từ chối nguồn âm thanh trên hosting. Cần kiểm tra kết nối nguồn phát trước khi thử lại.' };
   }
   return { systemic: false, message: 'Không nhận được âm thanh ổn định từ YouTube. Hàng đợi đã được giữ lại; nhấn Thử phát lại sau khi kiểm tra nguồn phát.' };
