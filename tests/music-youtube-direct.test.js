@@ -7,12 +7,14 @@ const mocks = {
   spawn: vi.fn(),
   runtime: vi.fn(),
   fallback: vi.fn(),
+  piped: vi.fn(),
 };
 
 import {
   buildFfmpegDirectArgs,
   buildYtDlpDirectArgs,
   createResilientYoutubePcmStream,
+  getYoutubePcmDetails,
   YOUTUBE_DIRECT_STARTUP_TIMEOUT_MS,
 } from '../src/services/youtubeDirectPcmStream.js';
 
@@ -34,13 +36,14 @@ function createOutput(options) {
     spawnProcess: mocks.spawn,
     resolveRuntime: mocks.runtime,
     createFallback: mocks.fallback,
+    createPiped: mocks.piped,
     ...options,
   });
   outputs.push(output);
   return output;
 }
-function resolveUrl(child) {
-  child.stdout.end('https://googlevideo.invalid/audio\n');
+function resolveUrl(child, duration = 183) {
+  child.stdout.end(JSON.stringify({ url: 'https://googlevideo.invalid/audio', duration, is_live: false }));
   child.emit('close', 0);
 }
 async function startFfmpeg(options) {
@@ -58,6 +61,7 @@ async function readAll(stream) {
 
 beforeEach(() => {
   vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  vi.stubEnv('YOUTUBE_COOKIES_FILE', '');
   children.length = 0;
   outputs.length = 0;
   fallbackStreams.length = 0;
@@ -72,6 +76,11 @@ beforeEach(() => {
     fallbackStreams.push(stream);
     return stream;
   });
+  mocks.piped.mockReset().mockImplementation(() => {
+    const stream = new PassThrough();
+    fallbackStreams.push(stream);
+    return stream;
+  });
 });
 
 afterEach(async () => {
@@ -82,9 +91,48 @@ afterEach(async () => {
     child.stderr.destroy();
   }
   vi.useRealTimers();
+  vi.unstubAllEnvs();
 });
 
 describe('direct YouTube PCM fallback', () => {
+  it('starts authenticated PCM first and retains duration from the same request', async () => {
+    vi.stubEnv('YOUTUBE_COOKIES_FILE', '/protected/cookies.txt');
+    const output = createOutput();
+    expect(mocks.piped).toHaveBeenCalledOnce();
+    expect(mocks.spawn).not.toHaveBeenCalled();
+    const [, options] = mocks.piped.mock.calls[0];
+    expect(options.cookiesFile).toBe('/protected/cookies.txt');
+    options.onDuration(174.5);
+    fallbackStreams[0].end(Buffer.from([3, 9, 10, 4]));
+    expect(await readAll(output)).toEqual(Buffer.from([3, 9, 10, 4]));
+    expect(getYoutubePcmDetails(output)).toEqual({ route: 'authenticated-pipe', durationSeconds: 174.5 });
+    expect(mocks.fallback).not.toHaveBeenCalled();
+  });
+
+  it('stops after explicit verification in the authenticated pipe', async () => {
+    vi.stubEnv('YOUTUBE_COOKIES_FILE', '/protected/cookies.txt');
+    const output = createOutput();
+    const failure = once(output, 'error');
+    fallbackStreams[0].destroy(new Error('Sign in to confirm you’re not a bot'));
+    expect((await failure)[0].message).toMatch(/confirm.*not a bot/);
+    expect(mocks.spawn).not.toHaveBeenCalled();
+    expect(mocks.fallback).not.toHaveBeenCalled();
+  });
+
+  it('keeps the direct fallback sequential after a pre-audio authenticated error', async () => {
+    vi.stubEnv('YOUTUBE_COOKIES_FILE', '/protected/cookies.txt');
+    const output = createOutput();
+    fallbackStreams[0].destroy(new Error('Input stream stopped'));
+    await flush();
+    resolveUrl(children[0]);
+    await flush();
+    children[1].stdout.end(Buffer.from([4, 9, 8, 7]));
+    children[1].emit('close', 0);
+    expect(await readAll(output)).toEqual(Buffer.from([4, 9, 8, 7]));
+    expect(getYoutubePcmDetails(output)).toEqual({ route: 'direct', durationSeconds: 183 });
+    expect(mocks.fallback).not.toHaveBeenCalled();
+  });
+
   it.each(['Sign in to confirm you’re not a bot', 'HTTP Error 429: Too Many Requests'])(
     'stops alternate source attempts after provider rejection: %s',
     async (message) => {
@@ -106,7 +154,7 @@ describe('direct YouTube PCM fallback', () => {
     });
     expect(args).toEqual(expect.arrayContaining([
       '--no-playlist', '--js-runtimes', 'node', '--force-ipv4',
-      '-f', 'bestaudio[acodec!=none]/bestaudio/best', '-g',
+      '-f', 'bestaudio[acodec!=none]/bestaudio/best', '--print', '%(.{url,duration,is_live})j',
       '--proxy', 'http://proxy.invalid:8080', '--cookies', '/protected/cookies.txt',
     ]));
     expect(args).not.toContain('--yes-playlist');
