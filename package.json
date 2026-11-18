@@ -71,7 +71,7 @@
   },
   "devDependencies": {
     "@discord-player/equalizer": "7.2.0",
-    "vitest": "^4.1.11"
+    "vitest": "^5.1.0"
   },
   "allowScripts": {
     "@google/genai": true,
