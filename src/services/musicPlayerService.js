@@ -24,7 +24,8 @@ import { configureCleanMusicDispatcher, createFrameAlignedMusicPcm, createMusicO
 import { loadYoutubeMix, normalizeYoutubeMixUrl } from './youtubeMixSource.js';
 import { createResilientYoutubePcmStream, YOUTUBE_DIRECT_STARTUP_TIMEOUT_MS } from './youtubeDirectPcmStream.js';
 import { createMusicStreamPreloader } from './musicStreamPreloader.js';
-import { createMusicAttachmentPcmStream, normalizeMusicAttachment } from './musicAttachmentStream.js';
+import { createMusicAttachmentPcmStream, createMusicCommonsPcmStream, normalizeMusicAttachment } from './musicAttachmentStream.js';
+import { isMusicCommonsLink, normalizeMusicCommonsStream, resolveMusicCommons } from './musicCommonsCatalog.js';
 import { attachMusicSoundEffects, getMusicSoundState, updateMusicSound } from './musicSoundService.js';
 import {
   clearMusicRecovery, getMusicRecovery, getMusicRecoveryChannel, ignoreMusicPlaybackFinish,
@@ -62,8 +63,8 @@ const queueMutations = new Map();
 const extractingTracks = new WeakMap();
 const audioProfiles = new WeakMap();
 const pendingSources = new WeakMap();
-// Signed attachment URLs belong only to the active queue's in-memory tracks.
-const attachmentTracks = new WeakMap();
+// Direct media bytes stream from their provider. Only public page links go into history.
+const fileTracks = new WeakMap();
 // One real, paused source absorbs YouTube resolution/retries before the skip.
 // 256 KiB per stream side is ~1.37 seconds of 48 kHz stereo PCM, not a file cache.
 const sourcePreloader = createMusicStreamPreloader(url =>
@@ -84,7 +85,7 @@ function prepareNextMusicSource(queue) {
   // Dynamic shuffle picks its track at dispatch time; never guess or change
   // its ordering merely to prefetch. The ordinary next item remains exact.
   const next = queue.tracks?.at?.(0);
-  sourcePreloader.prepare(queue, attachmentTracks.has(next) ? null : next);
+  sourcePreloader.prepare(queue, fileTracks.has(next) ? null : next);
 }
 
 let musicPlayer = null;
@@ -394,18 +395,20 @@ async function loadYoutubeSource(player, url, requestedBy, timeoutMs) {
 function serializeTrack(track, index = 0) {
   if (!track) return null;
   const metadata = track.metadata && typeof track.metadata === 'object' ? track.metadata : {};
+  const file = fileTracks.get(track);
   return {
     index,
     id: String(track.id || ''),
-    source: attachmentTracks.has(track) ? 'discord-file' : 'youtube',
+    source: file?.kind || 'youtube',
     title: String(track.title || 'Không rõ tiêu đề'),
     author: String(track.author || 'YouTube'),
     url: String(track.url || ''),
     thumbnail: String(track.thumbnail || ''),
-    duration: attachmentTracks.has(track) ? '—' : String(track.duration || formatDuration(track.durationMS)),
+    duration: file ? '—' : String(track.duration || formatDuration(track.durationMS)),
     durationMs: Number(track.durationMS || 0),
     requestedBy: track.requestedBy?.username || metadata.requestedByLabel || 'Dashboard',
     requestedById: track.requestedBy?.id || metadata.requestedById || null,
+    ...(file?.kind === 'commons' ? { license: file.media.license, licenseUrl: file.media.licenseUrl } : {}),
   };
 }
 
@@ -471,9 +474,9 @@ export function getMusicState(guildId) {
     progress: {
       currentMs: Number(timestamp?.current?.value || 0),
       totalMs: Number(timestamp?.total?.value || queue?.currentTrack?.durationMS || 0),
-      percent: attachmentTracks.has(queue?.currentTrack) ? 0 : clamp(timestamp?.progress || 0, 0, 100),
+      percent: fileTracks.has(queue?.currentTrack) ? 0 : clamp(timestamp?.progress || 0, 0, 100),
       currentLabel: timestamp?.current?.label || '0:00',
-      totalLabel: attachmentTracks.has(queue?.currentTrack)
+      totalLabel: fileTracks.has(queue?.currentTrack)
         ? '—' : timestamp?.total?.label || queue?.currentTrack?.duration || '0:00',
     },
     queue: (recovery.blocked ? recovery.tracks : queue?.tracks.toArray() || [])
@@ -516,10 +519,10 @@ function saveTrackStart(queue, track) {
 }
 
 function closeTrackHistory(queue, track, status, error = null, resource = queue.dispatcher?.audioResource) {
-  const isAttachment = attachmentTracks.has(track);
+  const isFileTrack = fileTracks.has(track);
   // Discord counts the audio frames actually consumed. Its clock excludes
-  // paused time and works without probing or saving the uploaded file.
-  const elapsed = isAttachment && resource?.metadata?.id === track.id ? resource.playbackDuration : null;
+  // paused time and works without probing or saving the source file.
+  const elapsed = isFileTrack && resource?.metadata?.id === track.id ? resource.playbackDuration : null;
   const durationMs = Number.isSafeInteger(elapsed) && elapsed > 0 ? elapsed : null;
   db.prepare(`
     UPDATE music_play_history
@@ -527,11 +530,11 @@ function closeTrackHistory(queue, track, status, error = null, resource = queue.
         duration_ms = COALESCE(?, duration_ms)
     WHERE id = (
       SELECT id FROM music_play_history
-      WHERE guild_id = ? AND ${isAttachment ? 'track_id' : 'track_url'} = ? AND status = 'PLAYING'
+      WHERE guild_id = ? AND ${isFileTrack ? 'track_id' : 'track_url'} = ? AND status = 'PLAYING'
       ORDER BY id DESC LIMIT 1
     )
   `).run(status, error ? String(error).slice(0, 1000) : null, durationMs, queue.guild.id,
-    String((isAttachment ? track.id : track?.url) || ''));
+    String((isFileTrack ? track.id : track?.url) || ''));
 }
 
 function schedulePanelRefresh(guildId) {
@@ -555,10 +558,10 @@ export function wirePlayerEvents(player) {
   });
   player.events.on(GuildQueueEvent.PlayerStart, (queue, track) => {
     noteMusicPlaybackStart(queue, track);
-    const attachment = attachmentTracks.get(track);
-    if (attachment) {
-      attachment.started = true;
-      console.log(`[MUSIC] Discord file playing · format=${attachment.source.format} · track=${track.id}`);
+    const file = fileTracks.get(track);
+    if (file) {
+      file.started = true;
+      console.log(`[MUSIC] ${file.label} playing · format=${file.media.format} · track=${track.id}`);
     }
     if (extractingTracks.get(queue)?.id === track?.id) extractingTracks.delete(queue);
     saveTrackStart(queue, track);
@@ -569,8 +572,9 @@ export function wirePlayerEvents(player) {
   });
   player.events.on(GuildQueueEvent.PlayerFinish, (queue, track) => {
     const resource = queue.dispatcher?.audioResource;
-    if (attachmentTracks.has(track) && resource?.metadata?.id === track.id) {
-      console.log(`[MUSIC] Discord file ended · track=${track.id} · playbackMs=${resource.playbackDuration}`);
+    const file = fileTracks.get(track);
+    if (file && resource?.metadata?.id === track.id) {
+      console.log(`[MUSIC] ${file.label} ended · track=${track.id} · playbackMs=${resource.playbackDuration}`);
     }
     const endedEarly = noteMusicPlaybackFinish(queue, track);
     if (getMusicRecovery(queue).blocked) sourcePreloader.cancel(queue);
@@ -586,7 +590,8 @@ export function wirePlayerEvents(player) {
     }
     if (extractingTracks.get(queue)?.id === track?.id) extractingTracks.delete(queue);
     closeTrackHistory(queue, track, 'SKIPPED');
-    const label = attachmentTracks.has(track) ? `Discord file ${track.id}` : track?.title || track?.url || 'unknown';
+    const file = fileTracks.get(track);
+    const label = file ? `${file.label} ${track.id}` : track?.title || track?.url || 'unknown';
     console.warn(
       `[MUSIC] Track skipped in ${queue.guild.name}: ${label} · ${reason || 'unknown'}`,
       description || '',
@@ -699,7 +704,7 @@ export async function initializeMusicPlayer(client) {
       initializedAt = new Date().toISOString();
       console.log(`[MUSIC] Cenar Music ready · Discord files enabled · DAVE=v${daveProtocolVersion} · FFmpeg=${ffmpegPath}`);
       void initializeYoutubeExtractor(instance).catch((error) => {
-        console.warn('[MUSIC] YouTube runtime unavailable; Discord file playback is ready:', error?.code || error?.name || 'unknown');
+        console.warn('[MUSIC] YouTube runtime unavailable; direct audio playback is ready:', error?.code || error?.name || 'unknown');
       });
       return instance;
     } catch (error) {
@@ -739,12 +744,12 @@ export function musicQueueOptions(settings, textChannelId, requestedByLabel) {
       metadata: { textChannelId, requestedByLabel },
       onBeforeCreateStream: async (track, _queryType, queue) => {
         extractingTracks.set(queue, track);
-        const attachment = attachmentTracks.get(track);
+        const file = fileTracks.get(track);
         // Resolve a fresh direct YouTube audio URL first. This avoids relying
         // on the extractor's long-lived stream process and lets FFmpeg
         // reconnect HTTP fragments. MUSIC_YOUTUBE_STREAM_MODE=extractor keeps
         // the legacy extractor path for a bounded rollback switch.
-        if (!attachment && String(process.env.MUSIC_YOUTUBE_STREAM_MODE || 'direct').toLowerCase() === 'extractor') return null;
+        if (!file && String(process.env.MUSIC_YOUTUBE_STREAM_MODE || 'direct').toLowerCase() === 'extractor') return null;
         // A queue without a live dispatcher is a metadata/unit-test harness;
         // let Discord Player's normal extractor path handle that case.
         if (!queue?.dispatcher?.voiceConnection) return null;
@@ -753,15 +758,15 @@ export function musicQueueOptions(settings, textChannelId, requestedByLabel) {
         // demuxable shape as the extractor so Discord Player honours
         // skipFFmpeg and does not run a second FFmpeg pass over PCM.
         const startedAt = Date.now();
-        const preparedSource = attachment ? null : sourcePreloader.take(queue, track);
+        const preparedSource = file ? null : sourcePreloader.take(queue, track);
         const preparedStream = preparedSource?.stream;
         const usePrepared = preparedStream && !preparedStream.destroyed && !preparedStream.readableEnded;
         if (!usePrepared) preparedSource?.cancel();
         const buffered = Boolean(usePrepared && preparedStream.readableLength > 0);
-        const startupTimeoutMs = attachment ? MUSIC_SOURCE_TIMEOUT_MS : YOUTUBE_DIRECT_STARTUP_TIMEOUT_MS + 1_000;
+        const startupTimeoutMs = file ? MUSIC_SOURCE_TIMEOUT_MS : YOUTUBE_DIRECT_STARTUP_TIMEOUT_MS + 1_000;
         let aligned;
         try {
-          const source = attachment ? createMusicAttachmentPcmStream(attachment.source)
+          const source = file ? file.createPcmStream(file.media)
             : usePrepared ? preparedStream : createResilientYoutubePcmStream(track.url);
           aligned = createFrameAlignedMusicPcm(source, { startupTimeoutMs });
           const startup = new AbortController();
@@ -771,15 +776,15 @@ export function musicQueueOptions(settings, textChannelId, requestedByLabel) {
           // backpressured and is never handed to Player before DAVE is ready.
           const [waitedMs] = await Promise.all([
             waitForDaveVoiceReady(queue, { signal: startup.signal }),
-            waitForMusicPcmReadable(aligned, startupTimeoutMs, attachment ? 'Tệp âm thanh' : 'YouTube'),
+            waitForMusicPcmReadable(aligned, startupTimeoutMs, file?.label || 'YouTube'),
           ]);
           if (aligned.destroyed || aligned.readableEnded) throw new Error('Đã hủy khởi động nguồn nhạc.');
-          const sourceLabel = attachment ? `Discord ${attachment.source.format} ${track.id}` : track?.title || 'track';
+          const sourceLabel = file ? `${file.label} ${file.media.format} ${track.id}` : track?.title || 'track';
           console.log(`[MUSIC] Source ready in ${Date.now() - startedAt}ms; prepared=${Boolean(usePrepared)}; buffered=${buffered}; DAVE=${waitedMs}ms; ${sourceLabel}`);
           return { $fmt: 'raw', stream: aligned };
         } catch (error) {
           aligned?.destroy();
-          if (attachment) attachment.startError = error;
+          if (file) file.startError = error;
           throw error;
         } finally {
           if (aligned && pendingSources.get(queue) === aligned) pendingSources.delete(queue);
@@ -858,7 +863,7 @@ async function enqueueMusicTracks({
   player, guild, voiceChannel, tracks, playlist = null, requestedBy,
   requestedByLabel, textChannelId, getSettings = () => readSettings(guild.id), stabilizationMs = 1_200,
 }) {
-  const attachment = attachmentTracks.get(tracks[0]);
+  const file = fileTracks.get(tracks[0]);
   return withQueueMutation(guild.id, async () => {
     requireMusicListener(voiceChannel);
     const settings = getSettings();
@@ -921,14 +926,14 @@ async function enqueueMusicTracks({
         // If a playlist's first unavailable video was skipped, its next item
         // can still be extracting. The batch is accepted while it remains in
         // the queue; an error here would encourage adding the batch twice.
-        if (!activeSelected && !attachment?.started && !(playlist && pendingSelected)) {
+        if (!activeSelected && !file?.started && !(playlist && pendingSelected)) {
           // Discord Player reports extraction rejection through events and
           // resolves play(). Prefer the classified, public-safe cause already
           // recorded there; raw extractor errors may contain signed URLs.
           const recovery = getMusicRecovery(queue);
           throw new Error((recovery.blocked && recovery.message)
-            || attachment?.startError?.message
-            || (attachment && 'Không mở được âm thanh của tệp. Hãy tải lại một tệp MP3 hoặc OGG hợp lệ.')
+            || file?.startError?.message
+            || (file && `Không phát được nguồn ${file.label}. Hãy chọn bản khác hoặc thử lại.`)
             || 'Nguồn âm thanh YouTube kết thúc trước khi phát. Vui lòng thử lại hoặc kiểm tra giới hạn YouTube trên hosting.');
         }
       }
@@ -955,7 +960,7 @@ export async function playYoutube({ guild, voiceChannel, url, requestedBy = null
   const normalizedUrl = normalizeYoutubeUrl(url);
   const player = await initializeMusicPlayer(guild.client);
   await initializeYoutubeExtractor(player).catch(() => {
-    throw new Error('Nguồn YouTube chưa sẵn sàng. Hãy thử lại sau hoặc dùng /music file.');
+    throw new Error('Nguồn YouTube chưa sẵn sàng. Hãy thử `/music ten` để tìm bản thu từ Wikimedia Commons.');
   });
   const result = await enqueueYoutubeSource({ player, guild, voiceChannel, url: normalizedUrl, requestedBy, requestedByLabel, textChannelId });
   schedulePanelRefresh(guild.id);
@@ -969,16 +974,45 @@ export async function enqueueMusicAttachment({
   const source = normalizeMusicAttachment(attachment);
   // Link to the channel that received the command, never to the signed CDN file.
   const channelId = textChannelId || voiceChannel.id;
+  return enqueueFileTrack({
+    player, guild, voiceChannel, requestedBy, textChannelId, getSettings, stabilizationMs,
+    title: source.name, author: `Discord · ${source.format.toUpperCase()}`,
+    pageUrl: `https://discord.com/channels/${guild.id}/${channelId}`,
+    file: { kind: 'discord-file', label: 'Discord file', media: source, createPcmStream: createMusicAttachmentPcmStream },
+  });
+}
+
+export async function enqueueMusicCommons({
+  player, guild, voiceChannel, source, requestedBy = null, textChannelId = null,
+  getSettings, stabilizationMs,
+}) {
+  const media = normalizeMusicCommonsStream(source);
+  if (!isMusicCommonsLink(source.pageUrl)) throw new Error('Liên kết bản thu Wikimedia Commons không hợp lệ.');
+  return enqueueFileTrack({
+    player, guild, voiceChannel, requestedBy, textChannelId, getSettings, stabilizationMs,
+    title: source.title, author: source.artist || 'Wikimedia Commons', pageUrl: source.pageUrl,
+    file: {
+      kind: 'commons', label: 'Wikimedia Commons',
+      media: { ...media, license: source.license, licenseUrl: source.licenseUrl },
+      createPcmStream: createMusicCommonsPcmStream,
+    },
+  });
+}
+
+async function enqueueFileTrack({
+  player, guild, voiceChannel, requestedBy, textChannelId, getSettings, stabilizationMs,
+  title, author, pageUrl, file,
+}) {
   const track = new Track(player, {
-    title: source.name,
-    author: `Discord · ${source.format.toUpperCase()}`,
-    url: `https://discord.com/channels/${guild.id}/${channelId}`,
+    title,
+    author,
+    url: pageUrl,
     duration: '0:00',
     source: 'arbitrary',
     requestedBy,
-    metadata: { cenarSource: 'discord-file' },
+    metadata: { cenarSource: file.kind },
   });
-  attachmentTracks.set(track, { source, started: false, startError: null });
+  fileTracks.set(track, { ...file, started: false, startError: null });
   const item = await enqueueMusicTracks({
     player, guild, voiceChannel, tracks: [track], requestedBy,
     requestedByLabel: 'Discord', textChannelId, getSettings, stabilizationMs,
@@ -994,13 +1028,26 @@ export async function playMusicAttachment({ guild, voiceChannel, attachment, req
   return { ...result, state: getMusicState(guild.id) };
 }
 
+export async function playMusicCommons({ guild, voiceChannel, source, requestedBy = null, textChannelId = null }) {
+  requireMusicVoice(guild, voiceChannel);
+  const player = await initializeMusicPlayer(guild.client);
+  const result = await enqueueMusicCommons({ player, guild, voiceChannel, source, requestedBy, textChannelId });
+  schedulePanelRefresh(guild.id);
+  return { ...result, state: getMusicState(guild.id) };
+}
+
+function formatCommonsCredit(track) {
+  const credit = track.licenseUrl ? `[${plain(track.license)}](<${track.licenseUrl}>)` : plain(track.license);
+  return `${plain(track.author)} · [Wikimedia Commons](<${track.url}>) · ${credit}`;
+}
+
 export function buildMusicAddedMessage(result) {
   if (result.playlist?.mix) {
     return `Đã thêm **${result.addedCount} bài** từ Mix/Radio **${plain(result.playlist.title)}** vào hàng đợi theo thứ tự. Mỗi lượt lấy tối đa **${result.playlist.limit} bài** tại thời điểm thêm. Bài đang phát được giữ nguyên.`;
   }
-  return result.playlist
-    ? `Đã thêm **${result.addedCount} bài** từ playlist **${plain(result.playlist.title)}** vào hàng đợi theo thứ tự. Bài đang phát được giữ nguyên.`
-    : `Đã thêm **${plain(result.track.title)}** vào Cenar Music.`;
+  if (result.playlist) return `Đã thêm **${result.addedCount} bài** từ playlist **${plain(result.playlist.title)}** vào hàng đợi theo thứ tự. Bài đang phát được giữ nguyên.`;
+  const notice = `Đã thêm **${plain(result.track.title)}** vào Cenar Music.`;
+  return result.track.source === 'commons' ? `${notice} ${formatCommonsCredit(result.track)}` : notice;
 }
 
 export async function controlMusic(guildId, action, value = null) {
@@ -1114,23 +1161,23 @@ export function buildMusicPanelPayload(guildId, { notice = null } = {}) {
   const queueLines = state.queue.slice(0, 8).map((track) => (
     `**${track.index}.** ${trackTitle(track)} · ${track.duration} · *${plain(track.requestedBy)}*`
   ));
-  if (!queueLines.length) queueLines.push('_Hàng đợi đang trống. Thêm link YouTube hoặc dùng `/music file`._');
+  if (!queueLines.length) queueLines.push('_Hàng đợi đang trống. Tìm bài với `/music ten` hoặc bấm Thêm từ link._');
 
   const container = new ContainerBuilder().setAccentColor(accentFor(current ? 'success' : 'primary'));
   const textGroups = [[
     `## ${E('music_wave')} CENAR MUSIC · CONTROL DECK`,
-    `> ${E('cenar_verified')} YouTube và tệp Discord · 48 kHz Stereo · bitrate theo phòng thoại`,
+    `> ${E('cenar_verified')} Tìm bản thu với \`/music ten\` · 48 kHz Stereo`,
     notice ? `> ${notice}` : '',
     state.recovery.blocked ? `> **Đã giữ lại ${state.recovery.retainedTracks} bài.** ${state.recovery.message}` : '',
   ], [
     current
       ? `### ${E('music_now')} ${trackTitle(current)}`
       : `### ${E('music_now')} Chưa có bài hát đang phát`,
-    current ? `**Nguồn:** ${plain(current.author)} · **Yêu cầu:** ${plain(current.requestedBy)}` : '',
+    current ? `**Nguồn:** ${current.source === 'commons' ? formatCommonsCredit(current) : plain(current.author)} · **Yêu cầu:** ${plain(current.requestedBy)}` : '',
     current
-      ? current.source === 'discord-file' ? `Đã phát \`${state.progress.currentLabel}\``
+      ? current.duration === '—' ? `Đã phát \`${state.progress.currentLabel}\``
         : `\`${state.progress.currentLabel}\` ${queueProgress(state.progress.percent, E('music_play'))} \`${state.progress.totalLabel}\``
-      : 'Vào phòng thoại rồi thêm link YouTube hoặc đính kèm MP3/OGG với `/music file`.',
+      : 'Vào phòng thoại, gõ `/music ten` rồi chọn bản thu để phát.',
   ], [
     `**Trạng thái:** ${state.recovery.blocked ? 'Chờ thử phát lại' : state.paused ? 'Tạm dừng' : state.playing ? 'Đang phát' : state.buffering ? 'Đang tải âm thanh' : 'Sẵn sàng'} · **Âm lượng:** ${state.volume}% · **${repeatLabel}** · **Shuffle:** ${state.shuffle ? 'Bật' : 'Tắt'}`,
     `**Âm thanh:** ${plain(soundName)} · ${state.sound.live ? 'Áp dụng live' : 'Sẵn sàng cho bài tiếp theo'}`,
@@ -1140,7 +1187,7 @@ export function buildMusicPanelPayload(guildId, { notice = null } = {}) {
     ...queueLines,
     state.queue.length > 8 ? `-# Và ${state.queue.length - 8} bài khác trên Dashboard.` : '',
   ], [
-    `-# YouTube Mix tối đa 50 bài · Tệp MP3/OGG tối đa 8 MiB và 20 phút phát · tự rời phòng sau 3 phút không có người nghe`,
+    `-# Tìm bài trong kho mở Wikimedia Commons · MP3/OGG tối đa 8 MiB và 20 phút · tự rời phòng sau 3 phút không có người nghe`,
   ]];
   // Keep the existing total text budget across independently readable sections.
   let remainingText = 4000;
@@ -1154,7 +1201,7 @@ export function buildMusicPanelPayload(guildId, { notice = null } = {}) {
   addSeparator(container, { divider: false, size: 'large' });
 
   const add = setButtonEmoji(
-    new ButtonBuilder().setCustomId('music:add').setLabel('Thêm bài / playlist / Mix').setStyle(ButtonStyle.Success),
+    new ButtonBuilder().setCustomId('music:add').setLabel('Thêm từ link').setStyle(ButtonStyle.Success),
     E.component('music_add'),
   );
   const toggle = setButtonEmoji(
@@ -1255,11 +1302,11 @@ export async function handleMusicInteraction(interaction) {
       await interaction.reply({ content: 'Bạn cần vào một phòng thoại trước khi thêm nhạc.', ephemeral: true });
       return true;
     }
-    const modal = new ModalBuilder().setCustomId('music:add:modal').setTitle('Thêm bài, playlist hoặc Mix');
+    const modal = new ModalBuilder().setCustomId('music:add:modal').setTitle('Thêm nhạc từ link');
     const input = new TextInputBuilder()
       .setCustomId('youtube_url')
-      .setLabel('Link video, playlist hoặc Mix/Radio YouTube')
-      .setPlaceholder('https://www.youtube.com/playlist?list=...')
+      .setLabel('Link Wikimedia Commons hoặc YouTube')
+      .setPlaceholder('https://commons.wikimedia.org/wiki/File:FurElise.ogg')
       .setStyle(TextInputStyle.Short)
       .setRequired(true)
       .setMaxLength(500);
@@ -1273,14 +1320,24 @@ export async function handleMusicInteraction(interaction) {
     try {
       const voiceChannel = memberVoiceChannel(interaction);
       if (!voiceChannel) throw new Error('Bạn cần ở trong phòng thoại để thêm nhạc.');
-      const result = await playYoutube({
+      const url = interaction.fields.getTextInputValue('youtube_url');
+      const request = {
         guild: interaction.guild,
         voiceChannel,
-        url: interaction.fields.getTextInputValue('youtube_url'),
         requestedBy: interaction.user,
         textChannelId: interaction.channelId,
-      });
-      await interaction.editReply(buildMusicAddedMessage(result));
+      };
+      let result;
+      if (isMusicCommonsLink(url)) {
+        const source = await resolveMusicCommons(url);
+        if (memberVoiceChannel(interaction)?.id !== voiceChannel.id) {
+          throw new Error('Bạn đã rời hoặc đổi phòng thoại. Hãy thêm lại bản thu trong phòng mới.');
+        }
+        result = await playMusicCommons({ ...request, source });
+      } else {
+        result = await playYoutube({ ...request, url });
+      }
+      await interaction.editReply({ content: buildMusicAddedMessage(result), allowedMentions: { parse: [] } });
     } catch (error) {
       await interaction.editReply(`Không thể thêm bài: ${error.message}`);
     }

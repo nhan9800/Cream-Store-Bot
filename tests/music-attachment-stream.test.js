@@ -7,8 +7,10 @@ import {
   MUSIC_ATTACHMENT_MAX_BYTES,
   MUSIC_ATTACHMENT_STARTUP_TIMEOUT_MS,
   createMusicAttachmentPcmStream,
+  createMusicCommonsPcmStream,
   normalizeMusicAttachment,
 } from '../src/services/musicAttachmentStream.js';
+import { MUSIC_COMMONS_USER_AGENT } from '../src/services/musicCommonsCatalog.js';
 
 const scopeId = '1282637033340403754';
 const attachmentId = '1250000000000000001';
@@ -22,6 +24,15 @@ function makeAttachment({ format = 'mp3', size = 3, pathPrefix = 'ephemeral-atta
     size,
     contentType: format === 'mp3' ? 'audio/mpeg' : 'audio/ogg',
     url: `https://cdn.discordapp.com/${pathPrefix}/${scopeId}/${attachmentId}/${encodeURIComponent(name)}?${signedQuery}`,
+  };
+}
+
+function makeCommonsSource(size = 3) {
+  return {
+    url: 'https://upload.wikimedia.org/wikipedia/commons/7/7b/FurElise.ogg',
+    name: 'FurElise.ogg',
+    format: 'ogg',
+    size,
   };
 }
 
@@ -148,7 +159,7 @@ describe('Discord music attachment streaming', () => {
     const fetchAttachment = vi.fn(() => new Promise(() => {}));
     const opts = { fetchAttachment };
     const one = createMusicAttachmentPcmStream(makeAttachment(), opts);
-    const two = createMusicAttachmentPcmStream(makeAttachment(), opts);
+    const two = createMusicCommonsPcmStream(makeCommonsSource(), opts);
     expect(() => createMusicAttachmentPcmStream(makeAttachment(), opts)).toThrow(/các phòng khác/);
     const waiting = [once(one, 'error'), once(two, 'error')];
     await vi.advanceTimersByTimeAsync(MUSIC_ATTACHMENT_STARTUP_TIMEOUT_MS);
@@ -157,5 +168,45 @@ describe('Discord music attachment streaming', () => {
     const closed = new Promise((resolve) => next.once('close', resolve));
     next.destroy();
     await closed;
+  });
+});
+
+describe('Wikimedia Commons music streaming', () => {
+  it('decodes audio through the shared pipe and sends an identified request', async () => {
+    const sample = spawnSync(ffmpegPath, [
+      '-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=0.25',
+      '-c:a', 'libvorbis', '-f', 'ogg', 'pipe:1',
+    ], { windowsHide: true });
+    expect(sample.status).toBe(0);
+    const source = makeCommonsSource(sample.stdout.length);
+    const fetchAttachment = vi.fn(async () => new Response(sample.stdout, {
+      headers: { 'content-type': 'application/ogg', 'content-length': String(source.size) },
+    }));
+    const stream = createMusicCommonsPcmStream(source, { fetchAttachment });
+    const chunks = [];
+    for await (const chunk of stream) chunks.push(chunk);
+    const pcm = Buffer.concat(chunks);
+    expect(pcm.length).toBeGreaterThan(40_000);
+    expect(pcm.length % 4).toBe(0);
+    expect(pcm.some((byte) => byte !== 0)).toBe(true);
+    expect(fetchAttachment).toHaveBeenCalledWith(source.url, expect.objectContaining({
+      redirect: 'error',
+      credentials: 'omit',
+      headers: { 'Accept-Encoding': 'identity', 'User-Agent': MUSIC_COMMONS_USER_AGENT },
+    }));
+  });
+
+  it('rejects redirects and denies foreign sources before making a request', async () => {
+    const fetchAttachment = vi.fn(async () => Response.redirect('https://invalid.test/file.ogg', 302));
+    const spawnFfmpeg = vi.fn();
+    const options = { fetchAttachment, spawnFfmpeg };
+    const source = makeCommonsSource();
+    expect(() => createMusicCommonsPcmStream({ ...source, url: 'https://invalid.test/file.ogg' }, options)).toThrow();
+    expect(fetchAttachment).not.toHaveBeenCalled();
+    const output = createMusicCommonsPcmStream(source, options);
+    const [error] = await once(output, 'error');
+    expect(error.message).toContain('Wikimedia Commons');
+    expect(error.message).not.toContain('invalid.test');
+    expect(spawnFfmpeg).not.toHaveBeenCalled();
   });
 });
