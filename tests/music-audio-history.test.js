@@ -31,11 +31,13 @@ describe('music source error history', () => {
       events.emit(GuildQueueEvent.Error, queue, Object.assign(new Error('upstream audio failed'), { resource: { metadata: track } }));
       events.emit(GuildQueueEvent.PlayerFinish, queue, track);
       expect(db.prepare('SELECT status, error_message FROM music_play_history').get()).toEqual({ status: 'ERROR', error_message: 'upstream audio failed' });
-      const next = { ...track, id: 'next', url: 'https://youtube.com/watch?v=next' };
+      const next = { ...track, id: 'next', url: 'https://youtube.com/watch?v=next', durationMS: 180_000 };
       queue.currentTrack = next;
+      queue.dispatcher = { audioResource: { metadata: next, playbackDuration: 12_020 } };
       events.emit(GuildQueueEvent.PlayerStart, queue, next);
       events.emit(GuildQueueEvent.PlayerFinish, queue, next);
-      expect(db.prepare('SELECT status FROM music_play_history WHERE track_id = ?').get('next').status).toBe('COMPLETED');
+      expect(db.prepare('SELECT status, duration_ms FROM music_play_history WHERE track_id = ?').get('next'))
+        .toEqual({ status: 'COMPLETED', duration_ms: 180_000 });
     } finally {
       vi.runAllTimers();
       vi.useRealTimers();

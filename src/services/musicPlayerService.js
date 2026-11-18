@@ -515,17 +515,22 @@ function saveTrackStart(queue, track) {
   );
 }
 
-function closeTrackHistory(queue, track, status, error = null) {
+function closeTrackHistory(queue, track, status, error = null, resource = queue.dispatcher?.audioResource) {
   const isAttachment = attachmentTracks.has(track);
+  // Discord counts the audio frames actually consumed. Its clock excludes
+  // paused time and works without probing or saving the uploaded file.
+  const elapsed = isAttachment && resource?.metadata?.id === track.id ? resource.playbackDuration : null;
+  const durationMs = Number.isSafeInteger(elapsed) && elapsed > 0 ? elapsed : null;
   db.prepare(`
     UPDATE music_play_history
-    SET status = ?, finished_at = CURRENT_TIMESTAMP, error_message = ?
+    SET status = ?, finished_at = CURRENT_TIMESTAMP, error_message = ?,
+        duration_ms = COALESCE(?, duration_ms)
     WHERE id = (
       SELECT id FROM music_play_history
       WHERE guild_id = ? AND ${isAttachment ? 'track_id' : 'track_url'} = ? AND status = 'PLAYING'
       ORDER BY id DESC LIMIT 1
     )
-  `).run(status, error ? String(error).slice(0, 1000) : null, queue.guild.id,
+  `).run(status, error ? String(error).slice(0, 1000) : null, durationMs, queue.guild.id,
     String((isAttachment ? track.id : track?.url) || ''));
 }
 
@@ -624,7 +629,7 @@ export function wirePlayerEvents(player) {
     // Preserve ERROR history instead of turning a failed stream into COMPLETED.
     if (error?.code !== 'ERR_STREAM_PREMATURE_CLOSE') {
       const failedTrack = error?.resource?.metadata || queue.currentTrack;
-      if (failedTrack?.url) closeTrackHistory(queue, failedTrack, 'ERROR', error?.message);
+      if (failedTrack?.url) closeTrackHistory(queue, failedTrack, 'ERROR', error?.message, error?.resource);
     }
     console.error(`[MUSIC] Queue error in ${queue.guild.name}:`, error);
     schedulePanelRefresh(queue.guild.id);
