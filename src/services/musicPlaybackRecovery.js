@@ -23,11 +23,13 @@ function playedMilliseconds(queue, track) {
   return Number(resource.playbackDuration || 0);
 }
 
-function failureMessage(error) {
+function failureMessage(error, track) {
   const text = String(error?.message || error || '');
   if (/DAVE|MLS|voice|phòng thoại|mã hoá/i.test(text)) {
     return { systemic: true, message: 'Kết nối âm thanh Discord chưa sẵn sàng. Hãy kiểm tra quyền Kết nối/Nói và thử lại.' };
   }
+  // A damaged or expired Discord file does not prevent the next track playing.
+  if (track.metadata?.cenarSource === 'discord-file') return null;
   if (/403|429|sign in|confirm.*bot|captcha|too many requests/i.test(text)) {
     return { systemic: true, message: 'YouTube đang từ chối nguồn âm thanh trên hosting. Cần kiểm tra kết nối nguồn phát trước khi thử lại.' };
   }
@@ -51,13 +53,14 @@ export function noteMusicPlaybackFailure(queue, track, error) {
   if (error?.code === 'ERR_STREAM_PREMATURE_CLOSE' && state.started !== key) return false;
   // One extraction failure emits BOTH PlayerSkip and PlayerError.
   if (state.observed.has(key)) return false;
+  const failure = failureMessage(error, track);
+  if (!failure) return false;
   if (playedMilliseconds(queue, track) >= STABLE_PLAYBACK_MS) {
     state.failed = [];
     state.observed.clear();
   }
   state.observed.add(key);
   state.failed.push(track);
-  const failure = failureMessage(error);
   state.message = failure.message;
   if (!failure.systemic && state.failed.length < 2) return false;
   if (!queue.tracks?.toArray || !queue.tracks?.clear) return false;
