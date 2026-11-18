@@ -48,9 +48,8 @@ describe('Discord music attachment validation', () => {
     });
   });
 
-  it('rejects oversized files, invalid content types and a mismatched attachment ID', () => {
+  it('rejects oversized files, unsupported extensions and a mismatched attachment ID', () => {
     expect(() => normalizeMusicAttachment(makeAttachment({ size: MUSIC_ATTACHMENT_MAX_BYTES + 1 }))).toThrow(/8 MB/);
-    expect(() => normalizeMusicAttachment({ ...makeAttachment(), contentType: 'text/html' })).toThrow(/MP3 hoặc OGG/);
     expect(() => normalizeMusicAttachment({ ...makeAttachment(), id: scopeId })).toThrow(/tải tệp trực tiếp/);
     expect(() => normalizeMusicAttachment({ ...makeAttachment(), name: 'x.wav' })).toThrow(/MP3 hoặc OGG/);
   });
@@ -74,9 +73,9 @@ describe('Discord music attachment validation', () => {
 
 describe('Discord music attachment streaming', () => {
   it.each([
-    ['mp3', 'libmp3lame'],
-    ['ogg', 'libopus'],
-  ])('decodes a generated %s into audible stereo PCM through the real pipe', async (format, encoder) => {
+    ['mp3', 'libmp3lame', 'audio/x-mpeg'],
+    ['ogg', 'libopus', 'application/ogg'],
+  ])('decodes a generated %s into audible stereo PCM through the real pipe', async (format, encoder, cdnMime) => {
     const sample = spawnSync(ffmpegPath, [
       '-v', 'error', '-f', 'lavfi', '-i', 'sine=frequency=440:duration=0.25',
       '-c:a', encoder, '-f', format, 'pipe:1',
@@ -85,9 +84,9 @@ describe('Discord music attachment streaming', () => {
     const payload = sample.stdout;
     const attachment = makeAttachment({ format, size: payload.length });
     const fetchAttachment = vi.fn(async () => new Response(payload, {
-      headers: { 'content-type': attachment.contentType, 'content-length': String(payload.length) },
+      headers: { 'content-type': cdnMime, 'content-length': String(payload.length) },
     }));
-    const stream = createMusicAttachmentPcmStream(normalizeMusicAttachment(attachment), { fetchAttachment });
+    const stream = createMusicAttachmentPcmStream({ ...attachment, contentType: '' }, { fetchAttachment });
     const chunks = [];
     for await (const chunk of stream) chunks.push(chunk);
     const pcm = Buffer.concat(chunks);
@@ -114,11 +113,12 @@ describe('Discord music attachment streaming', () => {
     expect(child.kill).toHaveBeenCalledWith('SIGKILL');
   });
 
-  it('rejects changed size headers and expired attachment links without decoding', async () => {
+  it('rejects non-audio responses, changed sizes and expired links before decoding', async () => {
     const spawnFfmpeg = vi.fn();
     for (const response of [
       new Response(null, { status: 403 }),
       new Response(Uint8Array.of(1, 2, 3), { headers: { 'content-length': '4' } }),
+      new Response('<em>expired</em>', { headers: { 'content-type': 'text/html' } }),
     ]) {
       const output = createMusicAttachmentPcmStream(makeAttachment(), {
         fetchAttachment: vi.fn(async () => response),
