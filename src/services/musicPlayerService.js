@@ -22,7 +22,7 @@ import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { accentFor, addSeparator } from '../utils/uiKit.js';
 import { configureCleanMusicDispatcher, createFrameAlignedMusicPcm, createMusicOpusStream } from './musicAudioPipeline.js';
 import { loadYoutubeMix, normalizeYoutubeMixUrl } from './youtubeMixSource.js';
-import { createResilientYoutubePcmStream, YOUTUBE_DIRECT_STARTUP_TIMEOUT_MS } from './youtubeDirectPcmStream.js';
+import { createResilientYoutubePcmStream, getYoutubePcmDetails, YOUTUBE_DIRECT_STARTUP_TIMEOUT_MS } from './youtubeDirectPcmStream.js';
 import { createMusicStreamPreloader } from './musicStreamPreloader.js';
 import { createMusicCommonsPcmStream } from './musicCommonsStream.js';
 import { isMusicCommonsLink, normalizeMusicCommonsStream, resolveMusicCommons } from './musicCommonsCatalog.js';
@@ -405,6 +405,8 @@ function serializeTrack(track, index = 0) {
   if (!track) return null;
   const metadata = track.metadata && typeof track.metadata === 'object' ? track.metadata : {};
   const commons = commonsTracks.get(track);
+  const durationMs = Number(track.durationMS);
+  const hasDuration = !commons && Number.isFinite(durationMs) && durationMs > 0;
   return {
     index,
     id: String(track.id || ''),
@@ -413,8 +415,8 @@ function serializeTrack(track, index = 0) {
     author: String(track.author || 'YouTube'),
     url: String(track.url || ''),
     thumbnail: String(track.thumbnail || ''),
-    duration: commons ? '—' : String(track.duration || formatDuration(track.durationMS)),
-    durationMs: Number(track.durationMS || 0),
+    duration: hasDuration ? String(track.duration || formatDuration(durationMs)) : '—',
+    durationMs: hasDuration ? durationMs : 0,
     requestedBy: track.requestedBy?.username || metadata.requestedByLabel || 'Dashboard',
     requestedById: track.requestedBy?.id || metadata.requestedById || null,
     ...(commons ? { license: commons.license, licenseUrl: commons.licenseUrl } : {}),
@@ -454,6 +456,8 @@ export function getMusicState(guildId) {
   const queue = musicPlayer?.nodes.get(String(guildId));
   const recovery = getMusicRecovery(queue);
   const timestamp = queue?.node.getTimestamp() || null;
+  const current = serializeTrack(queue?.currentTrack);
+  const hasDuration = current?.durationMs > 0;
   const channel = queue?.channel || null;
   const members = channel?.members
     ? [...channel.members.values()].filter((member) => !member.user.bot)
@@ -479,14 +483,13 @@ export function getMusicState(guildId) {
     ping: Number(queue?.ping || 0),
     voiceChannel: channel ? { id: channel.id, name: channel.name } : null,
     listeners: members.map((member) => ({ id: member.id, name: member.displayName })),
-    current: serializeTrack(queue?.currentTrack),
+    current,
     progress: {
       currentMs: Number(timestamp?.current?.value || 0),
-      totalMs: Number(timestamp?.total?.value || queue?.currentTrack?.durationMS || 0),
-      percent: commonsTracks.has(queue?.currentTrack) ? 0 : clamp(timestamp?.progress || 0, 0, 100),
+      totalMs: hasDuration ? Number(timestamp?.total?.value || current.durationMs) : 0,
+      percent: hasDuration ? clamp(timestamp?.progress || 0, 0, 100) : 0,
       currentLabel: timestamp?.current?.label || '0:00',
-      totalLabel: commonsTracks.has(queue?.currentTrack)
-        ? '—' : timestamp?.total?.label || queue?.currentTrack?.duration || '0:00',
+      totalLabel: hasDuration ? timestamp?.total?.label || current.duration : current?.duration || '0:00',
     },
     queue: (recovery.blocked ? recovery.tracks : queue?.tracks.toArray() || [])
       .map((track, index) => serializeTrack(track, index + 1)),
@@ -786,8 +789,17 @@ export function musicQueueOptions(settings, textChannelId, requestedByLabel) {
             waitForMusicPcmReadable(aligned, startupTimeoutMs, commons ? 'Wikimedia Commons' : 'YouTube'),
           ]);
           if (aligned.destroyed || aligned.readableEnded) throw new Error('Đã hủy khởi động nguồn nhạc.');
+          const youtube = commons ? null : getYoutubePcmDetails(source);
+          const seconds = youtube?.durationSeconds;
+          const durationMs = Math.round(seconds * 1000);
+          // The actual audio source can supply the duration when metadata-only
+          // lookup cannot. PlayerStart and its history insert read this track.
+          if (!track.live && Number.isFinite(seconds) && Number.isSafeInteger(durationMs) && durationMs > 0) {
+            track.duration = formatDuration(Math.max(1_000, durationMs));
+          }
           const sourceLabel = commons ? `Wikimedia Commons ${commons.format} ${track.id}` : track?.title || 'track';
-          console.log(`[MUSIC] Source ready in ${Date.now() - startedAt}ms; prepared=${Boolean(usePrepared)}; buffered=${buffered}; DAVE=${waitedMs}ms; ${sourceLabel}`);
+          const route = commons ? 'commons' : youtube?.route || 'youtube';
+          console.log(`[MUSIC] Source ready in ${Date.now() - startedAt}ms; route=${route}; prepared=${Boolean(usePrepared)}; buffered=${buffered}; DAVE=${waitedMs}ms; ${sourceLabel}`);
           return { $fmt: 'raw', stream: aligned };
         } catch (error) {
           aligned?.destroy();

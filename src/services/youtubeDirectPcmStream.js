@@ -3,6 +3,7 @@ import { spawn } from 'node:child_process';
 import ffmpegPath from 'ffmpeg-static';
 import { createPCMStream } from 'discord-player-youtubedlp';
 import { ensureYtDlpRuntime } from '../utils/ytDlpRuntime.js';
+import { createYoutubePipedPcmStream } from './youtubePipedPcmStream.js';
 
 const DIRECT_RESOLVE_TIMEOUT_MS = 15_000;
 const DIRECT_START_TIMEOUT_MS = 20_000;
@@ -11,6 +12,12 @@ const MIN_BUFFERED_BYTES = 64 * 1024;
 const MAX_BUFFERED_BYTES = 4 * 1024 * 1024;
 // Shared by the caller's first-frame wait: retries do not reset this budget.
 export const YOUTUBE_DIRECT_STARTUP_TIMEOUT_MS = 45_000;
+const pcmDetails = new WeakMap();
+
+export function getYoutubePcmDetails(stream) {
+  const details = pcmDetails.get(stream);
+  return { route: details?.route ?? 'direct', durationSeconds: details?.durationSeconds ?? null };
+}
 
 function cleanError(value) {
   return String(value || '')
@@ -25,10 +32,11 @@ export function buildYtDlpDirectArgs(url, {
   playerClient = '',
 } = {}) {
   return [
-    '--quiet', '--no-warnings', '--no-playlist', '--no-cache-dir',
+    '--quiet', '--no-warnings', '--ignore-config', '--no-playlist', '--no-cache-dir',
     '--js-runtimes', 'node', '--force-ipv4',
     ...(playerClient ? ['--extractor-args', `youtube:player_client=${playerClient}`] : []),
-    '-f', 'bestaudio[acodec!=none]/bestaudio/best', '-g', url,
+    '-f', 'bestaudio[acodec!=none]/bestaudio/best',
+    '--print', '%(.{url,duration,is_live})j', url,
     ...(proxyUri ? ['--proxy', proxyUri] : []),
     ...(cookiesFile ? ['--cookies', cookiesFile] : []),
   ];
@@ -80,9 +88,15 @@ function spawnYtDlpDirect(url, options = {}) {
         child.stderr.on('data', (chunk) => { stderr = `${stderr}${chunk.toString('utf8')}`.slice(-2000); });
         child.on('error', (error) => finish(error));
         child.once('close', (code) => {
-          const directUrl = stdout.split(/\r?\n/).map((line) => line.trim()).find((line) => /^https?:\/\//i.test(line));
-          if (code === 0 && directUrl) finish(null, directUrl);
-          else finish(new Error(`YouTube direct resolver thất bại (${code ?? 'unknown'}): ${cleanError(stderr)}`));
+          if (code === 0) {
+            try {
+              const media = JSON.parse(stdout.trim());
+              if (typeof media.url === 'string' && /^https:\/\/\S+$/i.test(media.url)) {
+                return finish(null, { url: media.url, duration: media.is_live ? null : media.duration });
+              }
+            } catch { /* Invalid resolver output is never included in logs. */ }
+          }
+          finish(new Error(`YouTube direct resolver thất bại (${code ?? 'unknown'}): ${cleanError(stderr)}`));
         });
       } catch (error) {
         finish(error);
@@ -102,7 +116,7 @@ function directOptions() {
 }
 
 export function prepareYoutubeAudioUrl(videoUrl, { signal } = {}) {
-  return spawnYtDlpDirect(videoUrl, { ...directOptions(), signal });
+  return spawnYtDlpDirect(videoUrl, { ...directOptions(), signal }).then((media) => media.url);
 }
 
 /**
@@ -115,6 +129,7 @@ export function createResilientYoutubePcmStream(videoUrl, {
   spawnProcess = spawn,
   resolveRuntime = ensureYtDlpRuntime,
   createFallback = createPCMStream,
+  createPiped = createYoutubePipedPcmStream,
   preparedSource = null,
   bufferedBytes = MAX_BUFFERED_BYTES,
 } = {}) {
@@ -125,6 +140,11 @@ export function createResilientYoutubePcmStream(videoUrl, {
   let startupTimer = null;
   let usedPreparedSource = false;
   let preparedAttempt = false;
+  const auth = directOptions();
+  const details = { route: 'direct', durationSeconds: null };
+  const noteDuration = (duration) => {
+    if (typeof duration === 'number' && Number.isFinite(duration) && duration > 0) details.durationSeconds = duration;
+  };
   const lifetime = new AbortController();
   // A warmed next track uses a smaller high-water mark on both transform
   // sides. Pipe backpressure then pauses its decoder without dropping PCM.
@@ -147,6 +167,7 @@ export function createResilientYoutubePcmStream(videoUrl, {
       callback(null, chunk);
     },
   });
+  pcmDetails.set(exposed, details);
   const totalTimer = setTimeout(() => {
     close(new Error('Nguồn YouTube chưa có âm thanh sau 45 giây. Vui lòng thử lại.'));
   }, YOUTUBE_DIRECT_STARTUP_TIMEOUT_MS);
@@ -179,23 +200,26 @@ export function createResilientYoutubePcmStream(videoUrl, {
   exposed.on('close', () => { closed = true; cleanup(); });
   exposed.on('error', () => { closed = true; cleanup(); });
 
-  const startFallback = () => {
+  const pipeSource = (route, createSource) => {
     if (closed) return;
+    details.route = route;
     try {
-      const extractor = createFallback(videoUrl, { agent: directOptions() });
+      const extractor = createSource();
       active = extractor;
       let settled = false;
       const finish = (error) => {
         if (settled || closed || active !== extractor) return;
         settled = true;
-        close(error ? new Error(cleanError(error?.message || error)) : null);
+        if (error && route === 'authenticated-pipe') failed(error);
+        else close(error ? new Error(cleanError(error?.message || error)) : null);
       };
       extractor.on('error', finish);
       extractor.once('end', () => finish(started ? null : new Error('Nguồn YouTube kết thúc mà không có âm thanh.')));
       extractor.once('close', () => finish(new Error('Nguồn YouTube đóng trước khi phát hết âm thanh.')));
       extractor.pipe(exposed, { end: false });
     } catch (error) {
-      close(new Error(cleanError(error?.message || error)));
+      if (route === 'authenticated-pipe') failed(error);
+      else close(new Error(cleanError(error?.message || error)));
     }
   };
   const failed = (error) => {
@@ -217,12 +241,14 @@ export function createResilientYoutubePcmStream(videoUrl, {
       return;
     }
     if (!started && fallback) {
-      if (attempt < MAX_START_ATTEMPTS) void start();
-      else startFallback();
+      const directAttempts = auth.cookiesFile ? 1 : MAX_START_ATTEMPTS;
+      if (attempt < directAttempts) void start();
+      else pipeSource('extractor', () => createFallback(videoUrl, { agent: auth }));
     } else close(new Error(message));
   };
   const start = async () => {
     if (closed) return;
+    details.route = 'direct';
     attempt += 1;
     try {
       let directUrl = null;
@@ -232,15 +258,18 @@ export function createResilientYoutubePcmStream(videoUrl, {
         preparedAttempt = Boolean(directUrl);
       }
       if (closed) return;
-      directUrl ||= await spawnYtDlpDirect(videoUrl, {
-        ...directOptions(),
-        // Keep the normal yt-dlp client first for the best available audio;
-        // retry once with a public client when YouTube rejects that URL.
-        playerClient: attempt > 1 ? 'android,web' : '',
-        signal: lifetime.signal,
-        spawnProcess,
-        resolveRuntime,
-      });
+      if (!directUrl) {
+        const media = await spawnYtDlpDirect(videoUrl, {
+          ...auth,
+          // The unauthenticated path keeps its existing client fallback.
+          playerClient: attempt > 1 ? 'android,web' : '',
+          signal: lifetime.signal,
+          spawnProcess,
+          resolveRuntime,
+        });
+        directUrl = media.url;
+        noteDuration(media.duration);
+      }
       if (closed) return;
       if (!ffmpegPath) throw new Error('Không tìm thấy FFmpeg runtime.');
       const child = spawnProcess(ffmpegPath, buildFfmpegDirectArgs(directUrl), {
@@ -283,6 +312,12 @@ export function createResilientYoutubePcmStream(videoUrl, {
     }
   };
 
-  void start();
+  // With an operator-supplied session, let yt-dlp open the audio itself.
+  // This avoids serial signed-URL attempts before the authenticated pipe.
+  if (auth.cookiesFile && !preparedSource) {
+    pipeSource('authenticated-pipe', () => createPiped(videoUrl, {
+      ...auth, spawnProcess, resolveRuntime, onDuration: noteDuration,
+    }));
+  } else void start();
   return exposed;
 }

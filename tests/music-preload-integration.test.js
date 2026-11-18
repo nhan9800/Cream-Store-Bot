@@ -1,10 +1,11 @@
 import { EventEmitter } from 'node:events';
 import { PassThrough } from 'node:stream';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { GuildQueueEvent } from 'discord-player';
+import { GuildQueueEvent, Track } from 'discord-player';
 
 const mocks = vi.hoisted(() => ({
   createSource: vi.fn(),
+  getPcmDetails: vi.fn(),
   historyWrite: vi.fn(),
 }));
 vi.mock('../src/database/db.js', () => ({
@@ -12,6 +13,7 @@ vi.mock('../src/database/db.js', () => ({
 }));
 vi.mock('../src/services/youtubeDirectPcmStream.js', () => ({
   createResilientYoutubePcmStream: mocks.createSource,
+  getYoutubePcmDetails: mocks.getPcmDetails,
   YOUTUBE_DIRECT_STARTUP_TIMEOUT_MS: 45_000,
 }));
 
@@ -56,6 +58,7 @@ beforeEach(() => {
   sources.length = 0;
   queues.length = 0;
   mocks.historyWrite.mockReset();
+  mocks.getPcmDetails.mockReset().mockReturnValue({ durationSeconds: null, route: 'direct' });
   mocks.createSource.mockReset().mockImplementation(() => {
     const source = new PassThrough();
     sources.push(source);
@@ -155,6 +158,43 @@ describe('music next-track preparation integration', () => {
     const freshResource = await retry;
     freshResource.stream.destroy();
   });
+
+  it('takes the prepared source duration into Discord Player and history before recording playback', async () => {
+    const { queue, pending, events } = harness();
+    const next = new Track({ nodes: { cache: [] } }, { ...pending[0], duration: '0:00', source: 'youtube' });
+    pending[0] = next;
+    events.emit(GuildQueueEvent.PlayerStart, queue, queue.currentTrack);
+    await flush();
+    mocks.getPcmDetails.mockReturnValue({ durationSeconds: 3723, route: 'authenticated-pipe' });
+    sources[0].write(Buffer.alloc(MUSIC_FRAME_BYTES, 40));
+    queue.currentTrack = pending.shift();
+
+    const resource = await createStream(queue, next);
+
+    expect(mocks.getPcmDetails).toHaveBeenCalledOnce();
+    expect(mocks.getPcmDetails).toHaveBeenCalledWith(sources[0]);
+    expect(next.duration).toBe('1:02:03');
+    expect(next.durationMS).toBe(3_723_000);
+    expect(console.log).toHaveBeenCalledWith(expect.stringContaining('route=authenticated-pipe;'));
+    events.emit(GuildQueueEvent.PlayerStart, queue, next);
+    expect(mocks.historyWrite.mock.calls.at(-1)[6]).toBe(3_723_000);
+    resource.stream.destroy();
+  });
+
+  it.each([[null, false], [Infinity, false], [120, true]])(
+    'does not replace a known duration with invalid data or a live source (%s, live=%s)',
+    async (seconds, live) => {
+      const { queue, pending } = harness();
+      const next = { ...pending[0], duration: '3:00', live };
+      mocks.getPcmDetails.mockReturnValue({ durationSeconds: seconds, route: 'direct' });
+      const opening = createStream(queue, next);
+      sources[0].write(Buffer.alloc(MUSIC_FRAME_BYTES, 45));
+      const resource = await opening;
+
+      expect(next.duration).toBe('3:00');
+      resource.stream.destroy();
+    },
+  );
 
   it('falls back to a fresh source if background preparation failed, without dropping the track', async () => {
     const { queue, pending, events } = harness();
