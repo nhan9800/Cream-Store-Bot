@@ -87,12 +87,12 @@ install_dependencies() {
   local stage=""
   stage="$(mktemp -d "${STATE_DIR}/dependencies-XXXXXXXX")" || return 1
   cp package.json package-lock.json "$stage/" || return 1
-  # Keep local file: dependencies available in the isolated install stage.
-  # The production dependency audit intentionally vendors discord-voip, so
-  # omitting this directory makes npm ci fail and triggers an automatic
-  # rollback even though the tested lockfile is valid.
-  if [[ -d vendor ]]; then
-    cp -a vendor "$stage/" || return 1
+  # Install the vendored runtime as a tarball, not a directory link. A linked
+  # lock entry is outside node_modules and fails the strict runtime check;
+  # a packed package remains self-contained when this stage is promoted.
+  if [[ -f vendor/discord-voip-7.2.0-cenar.1.tgz ]]; then
+    mkdir -p "$stage/vendor" || return 1
+    cp vendor/discord-voip-7.2.0-cenar.1.tgz "$stage/vendor/" || return 1
   fi
   # npm ci runs the root postinstall hook from the isolated stage. Keep the
   # compatibility patch available there; the application checkout itself is

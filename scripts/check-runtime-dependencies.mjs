@@ -20,8 +20,12 @@ try {
     const installed = JSON.parse(fs.readFileSync(path.join(root, location, 'package.json'), 'utf8'));
     if (entry.version && installed.version !== entry.version) throw new Error('Dependency version mismatch');
   }
-  for (const name of Object.keys(manifest.dependencies || {})) {
-    fs.accessSync(path.join(root, 'node_modules', name, 'package.json'));
+  for (const [name, specifier] of Object.entries(manifest.dependencies || {})) {
+    const directory = path.join(root, 'node_modules', name);
+    if (specifier.startsWith('file:') && specifier.endsWith('.tgz') && !fs.lstatSync(directory).isDirectory()) {
+      throw new Error('Packed runtime dependency must be installed as a directory');
+    }
+    fs.accessSync(path.join(directory, 'package.json'));
     requireFromRoot.resolve(name);
   }
   for (const name of ['discord.js', '@google/genai', 'express', 'dotenv', 'sharp']) {

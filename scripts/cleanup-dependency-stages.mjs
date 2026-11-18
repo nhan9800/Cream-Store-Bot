@@ -1,11 +1,11 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
 const STAGE_NAME = /^dependencies-[A-Za-z0-9]{8}$/;
-const ALLOWED = new Set(['package.json', 'package-lock.json', 'node_modules', 'previous-node_modules', 'rejected-node_modules', 'scripts']);
+const ALLOWED = new Set(['package.json', 'package-lock.json', 'node_modules', 'previous-node_modules', 'rejected-node_modules', 'scripts', 'vendor']);
 const MIN_AGE = 24 * 60 * 60 * 1000;
 function inside(parent, child) {
   const relative = path.relative(parent, child);
@@ -47,6 +47,21 @@ async function shape(stage) {
     const manifest = JSON.parse(await fs.readFile(path.join(stage, 'package.json'), 'utf8'));
     const lock = JSON.parse(await fs.readFile(path.join(stage, 'package-lock.json'), 'utf8'));
     if (manifest.name !== 'cenar-store-bot' || lock.name !== manifest.name || !manifest.dependencies || !lock.packages) return null;
+    if (names.includes('vendor')) {
+      const directory = path.join(stage, 'vendor');
+      const directoryStat = await fs.lstat(directory);
+      if (!directoryStat.isDirectory() || directoryStat.isSymbolicLink()) return null;
+      const filename = 'discord-voip-7.2.0-cenar.1.tgz';
+      const files = await fs.readdir(directory);
+      if (files.length !== 1 || files[0] !== filename) return null;
+      const file = path.join(directory, filename);
+      const stat = await fs.lstat(file);
+      if (!stat.isFile() || stat.isSymbolicLink() || stat.size > 2 * 1024 * 1024) return null;
+      const specifier = `file:vendor/${filename}`;
+      const entry = lock.packages['node_modules/discord-voip'];
+      if (manifest.dependencies['discord-voip'] !== specifier || entry?.resolved !== specifier
+        || entry?.integrity !== `sha512-${createHash('sha512').update(await fs.readFile(file)).digest('base64')}`) return null;
+    }
     return { rollback: names.includes('previous-node_modules') };
   } catch { return null; }
 }

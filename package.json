@@ -45,7 +45,8 @@
     "verify:backup": "node scripts/verify-backup.js",
     "test": "vitest run --maxWorkers=1 --fileParallelism=false",
     "postinstall": "node -e \"const fs=require('fs');const path=require('path');const entry=require.resolve('@discord-player/extractor');for(const file of [entry,path.join(path.dirname(entry),'index.mjs')]){const source=fs.readFileSync(file,'utf8');const patched=source.replaceAll('fileType.fromFile(','fileType.fileTypeFromFile(');if(patched===source&&!source.includes('fileType.fileTypeFromFile('))throw new Error('Extractor compatibility target missing');if(patched!==source)fs.writeFileSync(file,patched)}\"",
-    "check:deps": "node scripts/check-dependency-security.js"
+    "check:deps": "node scripts/check-dependency-security.js",
+    "check:staged-runtime": "node scripts/check-staged-runtime.mjs"
   },
   "engines": {
     "node": ">=22.12.0"
@@ -57,7 +58,7 @@
     "@tesseract.js-data/eng": "1.0.0",
     "better-sqlite3": "12.11.1",
     "discord-player": "^7.2.0",
-    "discord-voip": "file:vendor/discord-voip-7.2.0-cenar.1",
+    "discord-voip": "file:vendor/discord-voip-7.2.0-cenar.1.tgz",
     "discord-player-youtubedlp": "1.2.2",
     "discord.js": "14.27.0",
     "dotenv": "16.6.1",
@@ -69,6 +70,7 @@
     "tesseract.js": "7.0.0"
   },
   "devDependencies": {
+    "@discord-player/equalizer": "7.2.0",
     "vitest": "^4.1.11"
   },
   "allowScripts": {
