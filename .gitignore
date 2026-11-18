@@ -80,5 +80,6 @@ scripts/*
 !scripts/vibehost-supervisor.sh
 !scripts/check-runtime-dependencies.mjs
 !scripts/check-staged-runtime.mjs
+!scripts/check-agent-harness.mjs
 !scripts/cleanup-dependency-stages.mjs
 !scripts/payment-incident-audit.js
