@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process';
 import { Readable, Transform, pipeline } from 'node:stream';
 import ffmpegPath from 'ffmpeg-static';
+import { MUSIC_COMMONS_USER_AGENT, normalizeMusicCommonsStream } from './musicCommonsCatalog.js';
 
 export const MUSIC_ATTACHMENT_MAX_BYTES = 8 * 1024 * 1024;
 export const MUSIC_ATTACHMENT_STARTUP_TIMEOUT_MS = 15_000;
@@ -8,6 +9,21 @@ const OUTPUT_IDLE_TIMEOUT_MS = 15_000;
 const STREAM_BUFFER_BYTES = 64 * 1024;
 const MAX_DURATION_SECONDS = 20 * 60;
 const MAX_ATTACHMENT_DECODERS = 2;
+const DISCORD_DOWNLOAD = {
+  idle: 'Tệp âm thanh ngừng tải hoặc giải mã. Hãy tải tệp lên lại.',
+  unavailable: 'Không thể tải tệp Discord. Hãy tải tệp lên lại.',
+  badStatus: 'Tệp Discord đã hết hạn hoặc không thể tải. Hãy tải tệp lên lại.',
+  invalid: 'Tệp Discord trả về không khớp với định dạng hoặc dung lượng tệp đính kèm.',
+  incomplete: 'Tệp Discord tải không đầy đủ hoặc vượt dung lượng đã khai báo.',
+};
+const COMMONS_DOWNLOAD = {
+  headers: { 'User-Agent': MUSIC_COMMONS_USER_AGENT },
+  idle: 'Bản thu Wikimedia Commons ngừng tải hoặc giải mã. Hãy thử lại.',
+  unavailable: 'Không thể tải bản thu từ Wikimedia Commons. Hãy thử lại.',
+  badStatus: 'Bản thu Wikimedia Commons hiện không tải được. Hãy chọn bản thu khác hoặc thử lại sau.',
+  invalid: 'Bản thu Wikimedia Commons có định dạng hoặc dung lượng khác thông tin đã công bố.',
+  incomplete: 'Bản thu Wikimedia Commons tải không đầy đủ hoặc vượt dung lượng đã công bố.',
+};
 const CODECS = {
   mp3: 'mp3,mp3float',
   ogg: 'opus,libopus,vorbis,libvorbis,flac,speex,libspeex',
@@ -68,21 +84,21 @@ function decoderArgs(format) {
   ];
 }
 
-function boundedInput(expectedBytes) {
+function boundedInput(expectedBytes, sizeError) {
   let receivedBytes = 0;
   return new Transform({
     highWaterMark: STREAM_BUFFER_BYTES,
     transform(chunk, _encoding, callback) {
       receivedBytes += chunk.length;
       if (receivedBytes > expectedBytes) {
-        callback(new Error('Dung lượng tệp tải về không khớp với tệp Discord.'));
+        callback(new Error(sizeError));
       } else {
         callback(null, chunk);
       }
     },
     flush(callback) {
       if (receivedBytes !== expectedBytes) {
-        callback(new Error('Dung lượng tệp tải về không khớp với tệp Discord.'));
+        callback(new Error(sizeError));
       } else {
         callback();
       }
@@ -90,10 +106,17 @@ function boundedInput(expectedBytes) {
   });
 }
 
-export function createMusicAttachmentPcmStream(source, {
+export function createMusicAttachmentPcmStream(source, options) {
+  return createMusicFilePcmStream(normalizeMusicAttachment(source), DISCORD_DOWNLOAD, options);
+}
+
+export function createMusicCommonsPcmStream(source, options) {
+  return createMusicFilePcmStream(normalizeMusicCommonsStream(source), COMMONS_DOWNLOAD, options);
+}
+
+function createMusicFilePcmStream({ url, format, size }, provider, {
   fetchAttachment = fetch, spawnFfmpeg = spawn,
 } = {}) {
-  const { url, format, size } = normalizeMusicAttachment(source);
   if (!ffmpegPath) throw new Error('Bộ giải mã âm thanh chưa sẵn sàng.');
   if (activeDecoders >= MAX_ATTACHMENT_DECODERS) {
     throw new Error('Bot đang phát tệp ở các phòng khác. Hãy thử lại sau.');
@@ -114,7 +137,7 @@ export function createMusicAttachmentPcmStream(source, {
       // A paused player stops draining the bounded pipe. Wait for the listener
       // instead of interpreting intentional backpressure as a stalled decoder.
       if (child?.stdout.isPaused()) armIdleCheck();
-      else fail('Tệp âm thanh ngừng tải hoặc giải mã. Hãy tải tệp lên lại.');
+      else fail(provider.idle);
     }, OUTPUT_IDLE_TIMEOUT_MS);
     idleTimer.unref();
   };
@@ -158,16 +181,16 @@ export function createMusicAttachmentPcmStream(source, {
         signal: download.signal,
         redirect: 'error',
         credentials: 'omit',
-        headers: { 'Accept-Encoding': 'identity' },
+        headers: { 'Accept-Encoding': 'identity', ...provider.headers },
       });
     } catch {
-      if (!output.destroyed) fail('Không thể tải tệp Discord. Hãy tải tệp lên lại.');
+      if (!output.destroyed) fail(provider.unavailable);
       return;
     }
 
     if (output.destroyed) return;
     if (response.status !== 200 || !response.body) {
-      fail('Tệp Discord đã hết hạn hoặc không thể tải. Hãy tải tệp lên lại.');
+      fail(provider.badStatus);
       return;
     }
     const length = response.headers.get('content-length');
@@ -175,7 +198,7 @@ export function createMusicAttachmentPcmStream(source, {
     if ((length !== null && (!/^\d+$/.test(length) || Number(length) !== size))
       || (encoding && encoding.toLowerCase() !== 'identity')
       || !isAudioResponse(response.headers.get('content-type'))) {
-      fail('Tệp Discord trả về không khớp với định dạng hoặc dung lượng tệp đính kèm.');
+      fail(provider.invalid);
       return;
     }
 
@@ -201,12 +224,12 @@ export function createMusicAttachmentPcmStream(source, {
       });
       child.stdout.pipe(output, { end: false });
       pipeline(Readable.fromWeb(response.body, { highWaterMark: STREAM_BUFFER_BYTES }),
-        boundedInput(size), child.stdin, (error) => {
+        boundedInput(size, provider.incomplete), child.stdin, (error) => {
           if (output.destroyed || !error) return;
           // The decoder may close its input after the playback duration cap.
           // The child exit code and PCM decide whether playback succeeded.
           if (error.code === 'EPIPE' || error.code === 'ERR_STREAM_PREMATURE_CLOSE') return;
-          fail('Tệp Discord tải không đầy đủ hoặc vượt dung lượng đã khai báo.');
+          fail(provider.incomplete);
         });
     } catch {
       fail('Không thể mở bộ giải mã tệp âm thanh.');

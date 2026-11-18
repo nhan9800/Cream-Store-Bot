@@ -28,8 +28,8 @@ function failureMessage(error, track) {
   if (/DAVE|MLS|voice|phòng thoại|mã hoá/i.test(text)) {
     return { systemic: true, message: 'Kết nối âm thanh Discord chưa sẵn sàng. Hãy kiểm tra quyền Kết nối/Nói và thử lại.' };
   }
-  // A damaged or expired Discord file does not prevent the next track playing.
-  if (track.metadata?.cenarSource === 'discord-file') return null;
+  // A missing or damaged direct audio file does not prevent the next track playing.
+  if (['discord-file', 'commons'].includes(track.metadata?.cenarSource)) return null;
   if (/403|429|sign in|confirm.*bot|captcha|too many requests/i.test(text)) {
     return { systemic: true, message: 'YouTube đang từ chối nguồn âm thanh trên hosting. Cần kiểm tra kết nối nguồn phát trước khi thử lại.' };
   }

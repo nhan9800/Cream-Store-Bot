@@ -5,6 +5,7 @@ import { GuildQueueEvent, GuildQueuePlayerNode } from 'discord-player';
 
 const mocks = vi.hoisted(() => ({
   attachmentSource: vi.fn(),
+  commonsSource: vi.fn(),
   youtubeSource: vi.fn(),
   historyWrite: vi.fn(),
 }));
@@ -15,6 +16,7 @@ vi.mock('../src/database/db.js', () => ({
 vi.mock('../src/services/musicAttachmentStream.js', async (importOriginal) => ({
   ...await importOriginal(),
   createMusicAttachmentPcmStream: mocks.attachmentSource,
+  createMusicCommonsPcmStream: mocks.commonsSource,
 }));
 vi.mock('../src/services/youtubeDirectPcmStream.js', () => ({
   createResilientYoutubePcmStream: mocks.youtubeSource,
@@ -22,13 +24,19 @@ vi.mock('../src/services/youtubeDirectPcmStream.js', () => ({
 }));
 
 import { MUSIC_FRAME_BYTES } from '../src/services/musicAudioPipeline.js';
-import { enqueueMusicAttachment, musicQueueOptions, wirePlayerEvents } from '../src/services/musicPlayerService.js';
+import { buildMusicAddedMessage, enqueueMusicAttachment, enqueueMusicCommons, musicQueueOptions, wirePlayerEvents } from '../src/services/musicPlayerService.js';
 import { getMusicRecovery, noteMusicPlaybackFailure } from '../src/services/musicPlaybackRecovery.js';
 
 const requester = { id: '345678901234567890', username: 'Listener' };
 const textChannelId = '234567890123456781';
 const marker = 'private-fixture-signature';
 const frame = Buffer.alloc(MUSIC_FRAME_BYTES, 12);
+const commonsRecording = {
+  url: 'https://upload.wikimedia.org/wikipedia/commons/8/8f/Fur_Elise.ogg',
+  pageUrl: 'https://commons.wikimedia.org/wiki/File:Fur_Elise.ogg',
+  title: 'Für Elise', artist: 'Sebion7125', format: 'ogg', size: 2_892_038,
+  license: 'CC BY-SA 3.0', licenseUrl: 'https://creativecommons.org/licenses/by-sa/3.0/',
+};
 const streams = [];
 let guildId = 123456789012345680n;
 
@@ -114,8 +122,12 @@ function makeQueue({ currentTrack = null, maxQueueSize = 10, existing = true, pe
     player, guild, voiceChannel, attachment, requestedBy: requester, textChannelId,
     getSettings: () => settings, stabilizationMs: 0,
   });
+  const addCommons = (source) => enqueueMusicCommons({
+    player, guild, voiceChannel, source, requestedBy: requester, textChannelId,
+    getSettings: () => settings, stabilizationMs: 0,
+  });
 
-  return { guild, voiceChannel, player, queue, pending, add };
+  return { guild, voiceChannel, player, queue, pending, add, addCommons };
 }
 
 beforeEach(() => {
@@ -126,9 +138,61 @@ beforeEach(() => {
     stream.write(frame);
     return stream;
   });
+  mocks.commonsSource.mockReset().mockImplementation(() => {
+    const stream = makeStream();
+    stream.write(frame);
+    return stream;
+  });
   vi.spyOn(console, 'log').mockImplementation(() => {});
   vi.spyOn(console, 'warn').mockImplementation(() => {});
   vi.spyOn(console, 'error').mockImplementation(() => {});
+});
+
+describe('Cenar Music Wikimedia queue', () => {
+  it('queues a licensed recording and exposes the public page and credits', async () => {
+    const currentTrack = youtubeTrack('current');
+    const h = makeQueue({ currentTrack });
+    const result = await h.addCommons(commonsRecording);
+    expect(h.queue.currentTrack).toBe(currentTrack);
+    expect(h.pending.map((item) => item.id)).toEqual([result.track.id]);
+    expect(result.track).toMatchObject({ source: 'commons', author: 'Sebion7125', url: commonsRecording.pageUrl });
+    expect(buildMusicAddedMessage(result)).toContain(commonsRecording.licenseUrl);
+    expect(buildMusicAddedMessage(result)).toContain(commonsRecording.pageUrl);
+    expect(mocks.youtubeSource).not.toHaveBeenCalled();
+    expect(mocks.commonsSource).not.toHaveBeenCalled();
+  });
+
+  it('starts in extractor-only mode and saves elapsed history against the public page', async () => {
+    vi.stubEnv('MUSIC_YOUTUBE_STREAM_MODE', 'extractor');
+    const h = makeQueue({ existing: false });
+    const result = await h.addCommons(commonsRecording);
+    expect(h.queue.dispatcher.audioResource.stream.read(MUSIC_FRAME_BYTES)).toEqual(frame);
+    expect(mocks.commonsSource).toHaveBeenCalledWith(expect.objectContaining({ url: commonsRecording.url }));
+    expect(mocks.youtubeSource).not.toHaveBeenCalled();
+    expect(h.player.extractors.context.provide).not.toHaveBeenCalled();
+    h.queue.dispatcher.audioResource.playbackDuration = 176_580;
+    h.player.events.emit(GuildQueueEvent.PlayerFinish, h.queue, h.queue.currentTrack);
+    expect(mocks.historyWrite).toHaveBeenCalledWith(expect.stringContaining('AND track_id = ?'),
+      'COMPLETED', null, 176_580, h.guild.id, result.track.id);
+    expect(JSON.stringify([result, mocks.historyWrite.mock.calls])).not.toContain(commonsRecording.url);
+  });
+
+  it('skips a failed recording without parking the next song under a YouTube error', async () => {
+    const h = makeQueue({ currentTrack: youtubeTrack('current') });
+    await h.addCommons(commonsRecording);
+    const next = await h.add(file());
+    h.queue.currentTrack = null;
+    mocks.commonsSource.mockImplementationOnce(() => {
+      const stream = makeStream();
+      queueMicrotask(() => stream.destroy(new Error('Wikimedia Commons: HTTP 429')));
+      return stream;
+    });
+    const playerStarted = once(h.player.events, GuildQueueEvent.PlayerStart);
+    await h.queue.node.play(null);
+    const [, playing] = await playerStarted;
+    expect(playing.id).toBe(next.track.id);
+    expect(getMusicRecovery(h.queue).blocked).toBe(false);
+  });
 });
 
 afterEach(() => {
