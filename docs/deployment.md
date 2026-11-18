@@ -17,8 +17,26 @@ restart launcher. Revision lỗi sẽ bị đánh dấu và rollback về source
 GitHub Environment chứa SFTP credential hoặc thao tác upload/restart thủ công.
 
 Supervisor cài dependency trong một stage cô lập trước khi thay `node_modules`. Khi source có dependency dạng
-`file:` (hiện tại là `vendor/discord-voip-7.2.0-cenar.1` để loại `tsup` khỏi production graph), supervisor phải
+`file:` (gói tarball `discord-voip` trong `vendor/` để loại `tsup` khỏi production graph), supervisor phải
 copy thư mục `vendor/` vào stage trước `npm ci`; nếu thiếu, staging sẽ lỗi và tự rollback dù CI đã xanh.
+
+### VibeHost Startup không được sửa dependency
+
+VibeHost tái tạo wrapper **Startup Command** sau khi lưu, nhưng lưu được **Startup Script**.
+Tắt **Auto Pull on Startup** để supervisor quản lý cập nhật và backup theo thứ tự. Đặt **Startup Script** thành:
+
+```bash
+cd /home/container && git restore --source=HEAD --worktree -- package.json package-lock.json && exec bash scripts/vibehost-supervisor.sh
+```
+
+Wrapper tự quét import ở cả script lẫn test. Trước đây nó thêm `file-type@latest` trực tiếp, xung đột
+với override đã khóa. npm12 hiển thị EUSAGE về lockfile và ghi nguyên nhân thực trong log debug.
+Kiểm tra tương thích nay tra `file-type` qua resolver của extractor. Test khai báo rõ equalizer trong devDependencies.
+Startup Script khôi phục hai manifest từ bản Git đang chạy, sau đó supervisor xác minh và áp dụng revision.
+Giữ `npm ci` và lockfile khi xử lý EUSAGE.
+Khi recovery, phải dừng container, lưu cấu hình cũ, backup/integrity cả hai SQLite, khôi phục **chỉ source
+tracked** về đúng SHA đã qua production gate rồi chạy supervisor. Không reset env/data/backups hoặc marker
+để giả mạo revision đã cài. Kiểm tra cả hai health endpoint khớp SHA trước khi kết luận release live.
 
 Chỉ dùng SFTP/panel cho bootstrap hoặc recovery. Sau một recovery thủ công, kiểm tra lại workflow, SHA của
 `bot-production` và cả hai health endpoint trước khi bàn giao.
@@ -31,6 +49,8 @@ Không đưa `.env`, `.env.store2`, `data/`, backup hoặc mật khẩu SFTP và
 chúng chỉ được dùng để build package; kéo theo `tinyglobby`/`picomatch` vào production
 dependency audit. Cenar giữ nguyên các file `dist` runtime và dùng bản vendor tại
 `vendor/discord-voip-7.2.0-cenar.1/`, chuyển hai công cụ build sang `devDependencies`.
+Dependency production dùng tarball từ source vendor này, với integrity trong lockfile, thay vì symlink thư mục.
+Như vậy `node_modules` vẫn tự đủ sau khi được promote từ stage sang thư mục chạy và phù hợp runtime checker.
 
 Không sửa `node_modules` thủ công. Khi thay vendor package, phải cập nhật
 `package.json`/`package-lock.json`, chạy `npm ci`, `npm audit --omit=dev --audit-level=high`,

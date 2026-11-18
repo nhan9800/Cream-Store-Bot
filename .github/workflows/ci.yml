@@ -37,6 +37,12 @@ jobs:
       - name: Verify dependency compatibility patches
         run: npm run check:deps
 
+      - name: Verify installed runtime dependency graph
+        run: node scripts/check-runtime-dependencies.mjs .
+
+      - name: Verify isolated production install and promotion
+        run: npm run check:staged-runtime
+
       - name: Run Vitest Unit Tests
         run: npm test
         env:

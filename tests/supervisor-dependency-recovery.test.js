@@ -18,6 +18,8 @@ function setup() {
   fs.writeFileSync(path.join(dir, 'package-lock.json'), '{}');
   fs.mkdirSync(path.join(dir, 'scripts'));
   fs.writeFileSync(path.join(dir, 'scripts', 'patch-dependency-compat.js'), '// test fixture');
+  fs.mkdirSync(path.join(dir, 'vendor'));
+  fs.copyFileSync('vendor/discord-voip-7.2.0-cenar.1.tgz', path.join(dir, 'vendor/discord-voip-7.2.0-cenar.1.tgz'));
   fs.writeFileSync(path.join(dir, 'functions.sh'), source);
   return dir;
 }

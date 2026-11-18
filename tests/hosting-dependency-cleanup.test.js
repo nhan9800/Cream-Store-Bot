@@ -1,6 +1,7 @@
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
+import { createHash } from 'node:crypto';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanupDependencyStages } from '../scripts/cleanup-dependency-stages.mjs';
 
@@ -108,6 +109,23 @@ describe('bounded hosting dependency cleanup', () => {
     const report = await apply();
     expect(report.removed).toContain(path.basename(old));
     expect(report.skipped).toBe(0);
+  });
+  it.each([false, true])('recognizes only integrity-verified packed vendor stages (tampered=%s)', async (tampered) => {
+    const old = await stage(1);
+    const filename = 'discord-voip-7.2.0-cenar.1.tgz';
+    const specifier = `file:vendor/${filename}`;
+    const bytes = Buffer.from('bounded vendor fixture');
+    await fs.mkdir(path.join(old, 'vendor'));
+    await fs.writeFile(path.join(old, 'vendor', filename), tampered ? Buffer.from('unexpected content') : bytes);
+    await fs.writeFile(path.join(old, 'package.json'), JSON.stringify({ name: 'cenar-store-bot', dependencies: { 'discord-voip': specifier } }));
+    await fs.writeFile(path.join(old, 'package-lock.json'), JSON.stringify({ name: 'cenar-store-bot', packages: {
+      'node_modules/discord-voip': { resolved: specifier, integrity: `sha512-${createHash('sha512').update(bytes).digest('base64')}` },
+    } }));
+    await fs.utimes(old, (now - 9 * day) / 1000, (now - 9 * day) / 1000);
+    await stage(2); await stage(3);
+    const report = await apply();
+    expect(report.removed.includes(path.basename(old))).toBe(!tampered);
+    expect(report.skipped).toBe(tampered ? 1 : 0);
   });
   it.each(['unexpected', 'oversized', 'linked-script', 'linked-directory'])('preserves unfamiliar stage scripts: %s', async (kind) => {
     const old = await stage(1);

@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createRequire } from 'node:module';
+import { pathToFileURL } from 'node:url';
 
 const require = createRequire(import.meta.url);
 const extractorEntry = require.resolve('@discord-player/extractor');
@@ -8,7 +9,8 @@ const extractorDist = path.dirname(extractorEntry);
 const extractorSource = await readFile(extractorEntry, 'utf8');
 const extractor = require('@discord-player/extractor');
 const discordVoip = require('discord-voip/package.json');
-const fileType = await import('file-type');
+const requireFromExtractor = createRequire(extractorEntry);
+const fileType = await import(pathToFileURL(requireFromExtractor.resolve('file-type')).href);
 
 if (typeof extractor.AttachmentExtractor !== 'function') {
   throw new Error('AttachmentExtractor is not exported by @discord-player/extractor');

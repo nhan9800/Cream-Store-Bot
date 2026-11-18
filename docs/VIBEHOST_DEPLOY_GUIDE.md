@@ -67,14 +67,16 @@ ENV_FILE=.env npm run check:env
 ENV_FILE=.env.store2 npm run check:env
 ```
 
-Trong trang Startup, dùng lệnh khởi động:
+Trong trang Startup, tắt **Auto Pull on Startup** và đặt **Startup Script** thành:
 
 ```bash
-npm run start:vibehost
+cd /home/container && git restore --source=HEAD --worktree -- package.json package-lock.json && exec bash scripts/vibehost-supervisor.sh
 ```
 
 Supervisor sẽ chạy launcher, kiểm tra nhánh `bot-production` mỗi 60 giây và tự restart khi GitHub Actions đã
 promote một commit mới. Launcher phải tải cả Store 1 và Store 2; không tạo hai Startup process độc lập.
+Wrapper VibeHost có thể được tái tạo và tự quét import trước khi gọi Startup Script. Lệnh trên phục hồi
+hai manifest đã khóa từ Git trước khi supervisor chạy. Chi tiết tại [deployment.md](./deployment.md).
 
 ## 5. Kiểm tra sau khi chạy
 
