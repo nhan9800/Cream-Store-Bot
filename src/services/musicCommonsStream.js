@@ -3,27 +3,12 @@ import { Readable, Transform, pipeline } from 'node:stream';
 import ffmpegPath from 'ffmpeg-static';
 import { MUSIC_COMMONS_USER_AGENT, normalizeMusicCommonsStream } from './musicCommonsCatalog.js';
 
-export const MUSIC_ATTACHMENT_MAX_BYTES = 8 * 1024 * 1024;
-export const MUSIC_ATTACHMENT_STARTUP_TIMEOUT_MS = 15_000;
+export const MUSIC_COMMONS_STARTUP_TIMEOUT_MS = 15_000;
 const OUTPUT_IDLE_TIMEOUT_MS = 15_000;
 const STREAM_BUFFER_BYTES = 64 * 1024;
 const MAX_DURATION_SECONDS = 20 * 60;
-const MAX_ATTACHMENT_DECODERS = 2;
-const DISCORD_DOWNLOAD = {
-  idle: 'Tệp âm thanh ngừng tải hoặc giải mã. Hãy tải tệp lên lại.',
-  unavailable: 'Không thể tải tệp Discord. Hãy tải tệp lên lại.',
-  badStatus: 'Tệp Discord đã hết hạn hoặc không thể tải. Hãy tải tệp lên lại.',
-  invalid: 'Tệp Discord trả về không khớp với định dạng hoặc dung lượng tệp đính kèm.',
-  incomplete: 'Tệp Discord tải không đầy đủ hoặc vượt dung lượng đã khai báo.',
-};
-const COMMONS_DOWNLOAD = {
-  headers: { 'User-Agent': MUSIC_COMMONS_USER_AGENT },
-  idle: 'Bản thu Wikimedia Commons ngừng tải hoặc giải mã. Hãy thử lại.',
-  unavailable: 'Không thể tải bản thu từ Wikimedia Commons. Hãy thử lại.',
-  badStatus: 'Bản thu Wikimedia Commons hiện không tải được. Hãy chọn bản thu khác hoặc thử lại sau.',
-  invalid: 'Bản thu Wikimedia Commons có định dạng hoặc dung lượng khác thông tin đã công bố.',
-  incomplete: 'Bản thu Wikimedia Commons tải không đầy đủ hoặc vượt dung lượng đã công bố.',
-};
+const MAX_DECODERS = 2;
+const INCOMPLETE_AUDIO = 'Bản thu Wikimedia Commons tải không đầy đủ hoặc vượt dung lượng đã công bố.';
 const CODECS = {
   mp3: 'mp3,mp3float',
   ogg: 'opus,libopus,vorbis,libvorbis,flac,speex,libspeex',
@@ -35,40 +20,6 @@ function isAudioResponse(contentType) {
   const mime = contentType?.split(';', 1)[0].trim().toLowerCase();
   return !mime || mime.startsWith('audio/')
     || mime === 'application/octet-stream' || mime === 'application/ogg';
-}
-
-export function normalizeMusicAttachment(attachment) {
-  const name = typeof attachment?.name === 'string' ? attachment.name : '';
-  const extension = name.match(/\.(mp3|ogg)$/i)?.[1].toLowerCase();
-  // Client MIME labels are advisory and vary between browsers and platforms.
-  // The CDN path must still match, and FFmpeg validates the actual format.
-  if (!extension || name.length > 255 || /[\/\\\p{C}]/u.test(name)) {
-    throw new Error('Chỉ nhận tệp âm thanh MP3 hoặc OGG.');
-  }
-
-  const { id, size } = attachment;
-  if (!Number.isSafeInteger(size) || size < 1 || size > MUSIC_ATTACHMENT_MAX_BYTES) {
-    throw new Error('Tệp phải có dung lượng từ 1 byte đến 8 MB.');
-  }
-
-  const rawUrl = typeof attachment.url === 'string' ? attachment.url : '';
-  // Check the authority before parsing so explicit default ports, whitespace,
-  // backslashes and credentials can't be normalized away by URL.
-  const path = rawUrl.match(/^https:\/\/cdn\.discordapp\.com\/(?:ephemeral-)?attachments\/[0-9]{17,20}\/([0-9]{17,20})\/([^/?#]+)(?:\?[^#]*)?$/i);
-  if (!path || path[1] !== id || rawUrl.length > 4096 || /[\u0000-\u0020\u007f\\]/.test(rawUrl)) {
-    throw new Error('Hãy tải tệp trực tiếp qua tùy chọn file của Discord.');
-  }
-
-  let filename;
-  try {
-    filename = decodeURIComponent(path[2]);
-  } catch {
-    throw new Error('Tên tệp đính kèm của Discord không hợp lệ.');
-  }
-  if (/[\/\\\p{C}]/u.test(filename) || !filename.toLowerCase().endsWith(`.${extension}`)) {
-    throw new Error('Tên tệp đính kèm của Discord không khớp.');
-  }
-  return { id, name, format: extension, url: rawUrl, size };
 }
 
 function decoderArgs(format) {
@@ -84,21 +35,21 @@ function decoderArgs(format) {
   ];
 }
 
-function boundedInput(expectedBytes, sizeError) {
+function boundedInput(expectedBytes) {
   let receivedBytes = 0;
   return new Transform({
     highWaterMark: STREAM_BUFFER_BYTES,
     transform(chunk, _encoding, callback) {
       receivedBytes += chunk.length;
       if (receivedBytes > expectedBytes) {
-        callback(new Error(sizeError));
+        callback(new Error(INCOMPLETE_AUDIO));
       } else {
         callback(null, chunk);
       }
     },
     flush(callback) {
       if (receivedBytes !== expectedBytes) {
-        callback(new Error(sizeError));
+        callback(new Error(INCOMPLETE_AUDIO));
       } else {
         callback();
       }
@@ -106,20 +57,13 @@ function boundedInput(expectedBytes, sizeError) {
   });
 }
 
-export function createMusicAttachmentPcmStream(source, options) {
-  return createMusicFilePcmStream(normalizeMusicAttachment(source), DISCORD_DOWNLOAD, options);
-}
-
-export function createMusicCommonsPcmStream(source, options) {
-  return createMusicFilePcmStream(normalizeMusicCommonsStream(source), COMMONS_DOWNLOAD, options);
-}
-
-function createMusicFilePcmStream({ url, format, size }, provider, {
-  fetchAttachment = fetch, spawnFfmpeg = spawn,
+export function createMusicCommonsPcmStream(source, {
+  fetchCommons = fetch, spawnFfmpeg = spawn,
 } = {}) {
+  const { url, format, size } = normalizeMusicCommonsStream(source);
   if (!ffmpegPath) throw new Error('Bộ giải mã âm thanh chưa sẵn sàng.');
-  if (activeDecoders >= MAX_ATTACHMENT_DECODERS) {
-    throw new Error('Bot đang phát tệp ở các phòng khác. Hãy thử lại sau.');
+  if (activeDecoders >= MAX_DECODERS) {
+    throw new Error('Bot đang phát bản thu Wikimedia Commons ở các phòng khác. Hãy thử lại sau.');
   }
   activeDecoders += 1;
 
@@ -137,7 +81,7 @@ function createMusicFilePcmStream({ url, format, size }, provider, {
       // A paused player stops draining the bounded pipe. Wait for the listener
       // instead of interpreting intentional backpressure as a stalled decoder.
       if (child?.stdout.isPaused()) armIdleCheck();
-      else fail(provider.idle);
+      else fail('Bản thu Wikimedia Commons ngừng tải hoặc giải mã. Hãy thử lại.');
     }, OUTPUT_IDLE_TIMEOUT_MS);
     idleTimer.unref();
   };
@@ -153,8 +97,8 @@ function createMusicFilePcmStream({ url, format, size }, provider, {
     },
   });
   const startupTimer = setTimeout(() => {
-    fail('Tệp MP3 hoặc OGG chưa có âm thanh sau 15 giây.');
-  }, MUSIC_ATTACHMENT_STARTUP_TIMEOUT_MS);
+    fail('Bản thu Wikimedia Commons chưa có âm thanh sau 15 giây.');
+  }, MUSIC_COMMONS_STARTUP_TIMEOUT_MS);
   startupTimer.unref();
 
   // Errors are also delivered to the consuming pipeline. Guard the short
@@ -171,26 +115,26 @@ function createMusicFilePcmStream({ url, format, size }, provider, {
   const finish = () => {
     if (!outputEnded || !processExited || output.destroyed) return;
     if (started) output.end();
-    else fail('Tệp MP3 hoặc OGG không chứa âm thanh có thể phát.');
+    else fail('Bản thu Wikimedia Commons không chứa âm thanh có thể phát.');
   };
 
   void (async () => {
     let response;
     try {
-      response = await fetchAttachment(url, {
+      response = await fetchCommons(url, {
         signal: download.signal,
         redirect: 'error',
         credentials: 'omit',
-        headers: { 'Accept-Encoding': 'identity', ...provider.headers },
+        headers: { 'Accept-Encoding': 'identity', 'User-Agent': MUSIC_COMMONS_USER_AGENT },
       });
     } catch {
-      if (!output.destroyed) fail(provider.unavailable);
+      if (!output.destroyed) fail('Không thể tải bản thu từ Wikimedia Commons. Hãy thử lại.');
       return;
     }
 
     if (output.destroyed) return;
     if (response.status !== 200 || !response.body) {
-      fail(provider.badStatus);
+      fail('Bản thu Wikimedia Commons hiện không tải được. Hãy chọn bản thu khác hoặc thử lại sau.');
       return;
     }
     const length = response.headers.get('content-length');
@@ -198,7 +142,7 @@ function createMusicFilePcmStream({ url, format, size }, provider, {
     if ((length !== null && (!/^\d+$/.test(length) || Number(length) !== size))
       || (encoding && encoding.toLowerCase() !== 'identity')
       || !isAudioResponse(response.headers.get('content-type'))) {
-      fail(provider.invalid);
+      fail('Bản thu Wikimedia Commons có định dạng hoặc dung lượng khác thông tin đã công bố.');
       return;
     }
 
@@ -216,7 +160,7 @@ function createMusicFilePcmStream({ url, format, size }, provider, {
       child.once('close', (code) => {
         if (output.destroyed) return;
         if (code !== 0) {
-          fail('Không thể giải mã tệp MP3 hoặc OGG. Hãy kiểm tra định dạng tệp.');
+          fail('Không thể giải mã bản thu Wikimedia Commons. Hãy chọn bản thu khác.');
           return;
         }
         processExited = true;
@@ -224,12 +168,12 @@ function createMusicFilePcmStream({ url, format, size }, provider, {
       });
       child.stdout.pipe(output, { end: false });
       pipeline(Readable.fromWeb(response.body, { highWaterMark: STREAM_BUFFER_BYTES }),
-        boundedInput(size, provider.incomplete), child.stdin, (error) => {
+        boundedInput(size), child.stdin, (error) => {
           if (output.destroyed || !error) return;
           // The decoder may close its input after the playback duration cap.
           // The child exit code and PCM decide whether playback succeeded.
           if (error.code === 'EPIPE' || error.code === 'ERR_STREAM_PREMATURE_CLOSE') return;
-          fail(provider.incomplete);
+          fail(INCOMPLETE_AUDIO);
         });
     } catch {
       fail('Không thể mở bộ giải mã tệp âm thanh.');

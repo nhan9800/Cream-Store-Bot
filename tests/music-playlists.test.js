@@ -12,7 +12,7 @@ beforeEach(() => { mixLoader.load.mockReset(); });
 
 const playlistUrl = 'https://www.youtube.com/playlist?list=PLcenar_test';
 const makeTrack = (id, requestedBy = null) => ({
-  id, title: `Track ${id}`, author: 'YouTube', url: `https://www.youtube.com/watch?v=${id}`,
+  id, title: `Track ${id}`, author: 'YouTube', url: `https://www.youtube.com/watch?v=${id.padEnd(11, '_')}`,
   requestedBy, duration: '3:00', durationMS: 180_000,
   metadata: { original: true },
   setMetadata(value) { this.metadata = value; },
@@ -254,17 +254,18 @@ describe('Cenar Music complete playlist batches', () => {
 
   it('keeps single video compatibility and rejects an ended empty single stream', async () => {
     const h = harness({ existing: false, search: vi.fn(async () => makeResult([makeTrack('single'), makeTrack('extra')], false)) });
-    const result = await h.play({ url: 'https://youtu.be/single' });
+    const result = await h.play({ url: 'https://youtu.be/O3Wmtwa2CWg' });
     expect(result).toMatchObject({ track: { id: 'single' }, addedCount: 1, playlist: null });
-    expect(h.player.search).toHaveBeenCalledWith('https://youtu.be/single', expect.objectContaining({ searchEngine: QueryType.YOUTUBE_VIDEO }));
+    expect(h.player.search).toHaveBeenCalledWith('https://www.youtube.com/watch?v=O3Wmtwa2CWg', expect.objectContaining({ searchEngine: QueryType.YOUTUBE_VIDEO }));
     expect(h.pending).toHaveLength(0);
     const failed = harness({ existing: false, search: vi.fn(async () => makeResult([makeTrack('ended')], false)), onPlay: ({ pending }) => { pending.shift(); } });
-    await expect(failed.play({ url: 'https://youtu.be/ended' })).rejects.toThrow(/kết thúc trước khi phát/);
+    await expect(failed.play({ url: 'https://youtu.be/O3Wmtwa2CWg' })).rejects.toThrow(/kết thúc trước khi phát/);
   });
 
   it.each([
-    ["Sign in to confirm you're not a bot", /YouTube đang từ chối nguồn âm thanh trên hosting/],
+    ["Sign in to confirm you're not a bot", /Bot đã nhận link\. YouTube yêu cầu xác minh/],
     ['HTTP Error 403: Forbidden', /YouTube đang từ chối nguồn âm thanh trên hosting/],
+    ['HTTP Error 429: Too Many Requests', /YouTube đang giới hạn yêu cầu/],
     ['Discord DAVE/MLS chưa sẵn sàng', /Kết nối âm thanh Discord chưa sẵn sàng/],
   ])('preserves the public-safe startup diagnosis when play resolves after an event failure: %s', async (cause, expected) => {
     const h = harness({
@@ -278,7 +279,7 @@ describe('Cenar Music complete playlist batches', () => {
       },
     });
     let caught;
-    try { await h.play({ url: 'https://youtu.be/failed' }); } catch (error) { caught = error; }
+    try { await h.play({ url: 'https://youtu.be/O3Wmtwa2CWg' }); } catch (error) { caught = error; }
     expect(caught?.message).toMatch(expected);
     expect(caught.message).not.toMatch(/example\.invalid|token|secret|Sign in/);
     expect(h.queue.tasksQueue.release).toHaveBeenCalledTimes(1);

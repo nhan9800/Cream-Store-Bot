@@ -10,20 +10,27 @@ import {
 } from '../src/services/musicPlayerService.js';
 
 describe('Cenar Music YouTube URL boundary', () => {
-  it('accepts standard, short and music YouTube HTTPS links', () => {
-    expect(normalizeYoutubeUrl('https://www.youtube.com/watch?v=dQw4w9WgXcQ')).toContain('youtube.com/watch');
-    expect(normalizeYoutubeUrl('https://youtu.be/dQw4w9WgXcQ')).toContain('youtu.be/dQw4w9WgXcQ');
-    expect(normalizeYoutubeUrl('https://music.youtube.com/watch?v=dQw4w9WgXcQ')).toContain('music.youtube.com/watch');
+  it.each([
+    'https://www.youtube.com/watch?v=O3Wmtwa2CWg',
+    '<https://youtu.be/O3Wmtwa2CWg?si=share>',
+    'https://music.youtube.com/watch?v=O3Wmtwa2CWg',
+    'https://m.youtube.com/shorts/O3Wmtwa2CWg',
+    'https://www.youtube.com/live/O3Wmtwa2CWg',
+    'https://www.youtube-nocookie.com/embed/O3Wmtwa2CWg',
+  ])('normalizes %s to a watch URL for the extractor', (url) => {
+    expect(normalizeYoutubeUrl(url)).toBe('https://www.youtube.com/watch?v=O3Wmtwa2CWg');
   });
 
   it('rejects search text, non-HTTPS and look-alike domains', () => {
     expect(() => normalizeYoutubeUrl('nhac chill')).toThrow(/link YouTube/i);
     expect(() => normalizeYoutubeUrl('http://youtube.com/watch?v=abc')).toThrow(/HTTPS/i);
     expect(() => normalizeYoutubeUrl('https://youtube.com.evil.example/watch?v=abc')).toThrow(/YouTube/i);
+    expect(() => normalizeYoutubeUrl('https://youtube.com:8443/watch?v=O3Wmtwa2CWg')).toThrow(/HTTPS/i);
+    expect(() => normalizeYoutubeUrl('https://www.youtube.com/@channel')).toThrow(/mã video hợp lệ/);
   });
 
   it('strips fragments and embedded credentials', () => {
-    const normalized = normalizeYoutubeUrl('https://user:pass@youtube.com/watch?v=abc#chapter');
+    const normalized = normalizeYoutubeUrl('https://user:pass@youtube.com/watch?v=O3Wmtwa2CWg#chapter');
     expect(normalized).not.toContain('user');
     expect(normalized).not.toContain('pass');
     expect(normalized).not.toContain('#chapter');

@@ -3,7 +3,6 @@ import { ApplicationCommandOptionType, ComponentType, MessageFlags } from 'disco
 
 const service = vi.hoisted(() => ({
   playYoutube: vi.fn(),
-  playMusicAttachment: vi.fn(),
   playMusicCommons: vi.fn(),
   buildMusicPanelPayload: vi.fn(),
   buildMusicAddedMessage: vi.fn(),
@@ -18,10 +17,10 @@ vi.mock('../src/services/musicPlayerService.js', () => service);
 vi.mock('../src/services/musicCommonsCatalog.js', () => catalog);
 import { data, execute } from '../src/commands/music.js';
 
-function interaction(link = 'https://www.youtube.com/playlist?list=PLtest', attachment = null, query = null) {
+function interaction(link = 'https://www.youtube.com/playlist?list=PLtest', query = null) {
   return {
     id: 'request-id',
-    options: { getString: (name) => name === 'ten' ? query : link, getAttachment: () => attachment },
+    options: { getString: (name) => name === 'ten' ? query : link },
     member: { voice: { channel: { id: 'voice' } } },
     guild: { id: 'guild' }, guildId: 'guild', channelId: 'text',
     user: { id: 'listener' },
@@ -43,13 +42,12 @@ describe('Music command source options and acknowledgment', () => {
     service.buildMusicAddedMessage.mockReturnValue('Đã thêm 3 bài từ playlist.');
   });
 
-  it('registers title search, links and Discord attachments as optional source options', () => {
+  it('registers links and title search as the only optional source options', () => {
     expect(data.toJSON()).toMatchObject({
       name: 'music',
       options: [
-        { name: 'ten', type: ApplicationCommandOptionType.String, required: false, min_length: 2, max_length: 120 },
         { name: 'link', type: ApplicationCommandOptionType.String, required: false },
-        { name: 'file', type: ApplicationCommandOptionType.Attachment, required: false },
+        { name: 'ten', type: ApplicationCommandOptionType.String, required: false, min_length: 2, max_length: 120 },
       ],
     });
   });
@@ -69,45 +67,8 @@ describe('Music command source options and acknowledgment', () => {
     expect(service.registerMusicPanelMessage).toHaveBeenCalledWith('guild', { id: 'panel' });
   });
 
-  it('forwards the resolved Discord attachment and acknowledges the selected track', async () => {
-    const attachment = { id: 'attachment', name: 'demo.ogg' };
-    const result = { track: { title: 'Demo' }, addedCount: 1 };
-    service.playMusicAttachment.mockResolvedValue(result);
-    service.buildMusicAddedMessage.mockReturnValue('Đã thêm **Demo** vào Cenar Music.');
-    const request = interaction(null, attachment);
-
-    await execute(request);
-
-    expect(request.deferReply).toHaveBeenCalledOnce();
-    expect(service.playMusicAttachment).toHaveBeenCalledWith({
-      attachment,
-      guild: request.guild,
-      voiceChannel: request.member.voice.channel,
-      requestedBy: request.user,
-      textChannelId: request.channelId,
-    });
-    expect(service.playYoutube).not.toHaveBeenCalled();
-    expect(service.buildMusicAddedMessage).toHaveBeenCalledWith(result);
-    expect(service.buildMusicPanelPayload).toHaveBeenCalledWith('guild', { notice: 'Đã thêm **Demo** vào Cenar Music.' });
-    expect(request.editReply).toHaveBeenCalledWith({ components: ['panel'] });
-    expect(service.registerMusicPanelMessage).toHaveBeenCalledWith('guild', { id: 'panel' });
-  });
-
-  it('rejects requests that provide both sources before changing playback', async () => {
-    const request = interaction('https://youtu.be/track', { id: 'attachment' });
-
-    await execute(request);
-
-    expect(request.editReply).toHaveBeenCalledWith(expect.objectContaining({
-      content: expect.stringContaining('Chỉ nhập một trong ba tùy chọn'),
-    }));
-    expect(service.playYoutube).not.toHaveBeenCalled();
-    expect(service.playMusicAttachment).not.toHaveBeenCalled();
-    expect(service.registerMusicPanelMessage).not.toHaveBeenCalled();
-  });
-
-  it('requires a voice channel before forwarding a file', async () => {
-    const request = interaction(null, { id: 'attachment' });
+  it('requires a voice channel before forwarding a YouTube link', async () => {
+    const request = interaction('https://youtu.be/O3Wmtwa2CWg');
     request.member.voice.channel = null;
 
     await execute(request);
@@ -115,14 +76,14 @@ describe('Music command source options and acknowledgment', () => {
     expect(request.editReply).toHaveBeenCalledWith(expect.objectContaining({
       content: 'Không thể mở Cenar Music: Bạn cần vào một phòng thoại trước khi phát nhạc.',
     }));
-    expect(service.playMusicAttachment).not.toHaveBeenCalled();
+    expect(service.playYoutube).not.toHaveBeenCalled();
   });
 
   it('opens the panel without inventing an added-playlist success', async () => {
     const request = interaction(null);
     await execute(request);
     expect(service.playYoutube).not.toHaveBeenCalled();
-    expect(service.playMusicAttachment).not.toHaveBeenCalled();
+    expect(service.playMusicCommons).not.toHaveBeenCalled();
     expect(catalog.searchMusicCommons).not.toHaveBeenCalled();
     expect(service.buildMusicAddedMessage).not.toHaveBeenCalled();
     expect(service.buildMusicPanelPayload).toHaveBeenCalledWith('guild', { notice: null });
@@ -155,20 +116,21 @@ describe('Music command source options and acknowledgment', () => {
   });
 
   it('never starts a title search when a second source is present', async () => {
-    const request = interaction(commonsTrack.pageUrl, null, 'Für Elise');
+    const request = interaction(commonsTrack.pageUrl, 'Für Elise');
 
     await execute(request);
 
     expect(request.deferReply).toHaveBeenCalledWith({ flags: MessageFlags.Ephemeral });
     expect(catalog.searchMusicCommons).not.toHaveBeenCalled();
     expect(catalog.resolveMusicCommons).not.toHaveBeenCalled();
+    expect(service.playYoutube).not.toHaveBeenCalled();
     expect(request.editReply).toHaveBeenCalledWith(expect.objectContaining({
-      content: expect.stringContaining('Chỉ nhập một trong ba tùy chọn'),
+      content: expect.stringContaining('Chọn một tùy chọn'),
     }));
   });
 
   it('shows up to five private results, accepts only the requester, and queues the chosen result once', async () => {
-    const request = interaction(null, null, ' Für Elise ');
+    const request = interaction(null, ' Für Elise ');
     const results = Array.from({ length: 6 }, (_, index) => ({ ...commonsTrack, title: `${commonsTrack.title} ${index + 1}` }));
     const result = { track: results[1], addedCount: 1 };
     catalog.searchMusicCommons.mockResolvedValue(results);
@@ -201,7 +163,7 @@ describe('Music command source options and acknowledgment', () => {
   });
 
   it('clears expired search controls without changing the queue', async () => {
-    const request = interaction(null, null, 'Für Elise');
+    const request = interaction(null, 'Für Elise');
     catalog.searchMusicCommons.mockResolvedValue([commonsTrack]);
     request.editReply.mockResolvedValueOnce({ awaitMessageComponent: vi.fn().mockRejectedValue(new Error('time')) });
 
@@ -215,7 +177,7 @@ describe('Music command source options and acknowledgment', () => {
   });
 
   it('rejects a selection after the requester changes voice rooms', async () => {
-    const request = interaction(null, null, 'Für Elise');
+    const request = interaction(null, 'Für Elise');
     catalog.searchMusicCommons.mockResolvedValue([commonsTrack]);
     const selection = { values: ['0'], member: { voice: { channel: { id: 'other' } } }, update: vi.fn() };
     request.editReply.mockResolvedValueOnce({ awaitMessageComponent: vi.fn().mockResolvedValue(selection) });
@@ -230,7 +192,7 @@ describe('Music command source options and acknowledgment', () => {
   });
 
   it('does not create a select menu or alter playback for an empty result', async () => {
-    const request = interaction(null, null, 'Für Elise');
+    const request = interaction(null, 'Für Elise');
     catalog.searchMusicCommons.mockResolvedValue([]);
 
     await execute(request);
