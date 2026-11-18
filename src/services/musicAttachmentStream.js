@@ -8,10 +8,6 @@ const OUTPUT_IDLE_TIMEOUT_MS = 15_000;
 const STREAM_BUFFER_BYTES = 64 * 1024;
 const MAX_DURATION_SECONDS = 20 * 60;
 const MAX_ATTACHMENT_DECODERS = 2;
-const MIME_TYPES = {
-  mp3: ['audio/mpeg', 'audio/mp3', 'audio/x-mp3'],
-  ogg: ['audio/ogg', 'application/ogg', 'audio/opus'],
-};
 const CODECS = {
   mp3: 'mp3,mp3float',
   ogg: 'opus,libopus,vorbis,libvorbis,flac,speex,libspeex',
@@ -19,17 +15,18 @@ const CODECS = {
 
 let activeDecoders = 0;
 
-function supportedMime(contentType, format) {
-  if (contentType == null) return true;
-  const mime = String(contentType).split(';', 1)[0].trim().toLowerCase();
-  return mime === 'application/octet-stream' || MIME_TYPES[format].includes(mime);
+function isAudioResponse(contentType) {
+  const mime = contentType?.split(';', 1)[0].trim().toLowerCase();
+  return !mime || mime.startsWith('audio/')
+    || mime === 'application/octet-stream' || mime === 'application/ogg';
 }
 
 export function normalizeMusicAttachment(attachment) {
   const name = typeof attachment?.name === 'string' ? attachment.name : '';
   const extension = name.match(/\.(mp3|ogg)$/i)?.[1].toLowerCase();
-  if (!extension || name.length > 255 || /[\/\\\p{C}]/u.test(name)
-    || !supportedMime(attachment.contentType, extension)) {
+  // Client MIME labels are advisory and vary between browsers and platforms.
+  // The CDN path must still match, and FFmpeg validates the actual format.
+  if (!extension || name.length > 255 || /[\/\\\p{C}]/u.test(name)) {
     throw new Error('Chỉ nhận tệp âm thanh MP3 hoặc OGG.');
   }
 
@@ -177,7 +174,7 @@ export function createMusicAttachmentPcmStream(source, {
     const encoding = response.headers.get('content-encoding');
     if ((length !== null && (!/^\d+$/.test(length) || Number(length) !== size))
       || (encoding && encoding.toLowerCase() !== 'identity')
-      || !supportedMime(response.headers.get('content-type'), format)) {
+      || !isAudioResponse(response.headers.get('content-type'))) {
       fail('Tệp Discord trả về không khớp với định dạng hoặc dung lượng tệp đính kèm.');
       return;
     }
