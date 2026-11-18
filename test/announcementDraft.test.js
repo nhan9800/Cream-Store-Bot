@@ -21,7 +21,7 @@ function interaction(customId, overrides = {}) {
     isFromMessage: () => true,
     fields: { getTextInputValue: () => 'Lịch hỗ trợ cuối tuần' },
     reply: vi.fn(async () => {}), followUp: vi.fn(async () => {}),
-    editReply: vi.fn(async () => {}), showModal: vi.fn(async () => {}),
+    editReply: vi.fn(async () => {}), update: vi.fn(async () => {}), showModal: vi.fn(async () => {}),
     deferUpdate: vi.fn(async () => { value.deferred = true; }),
     deferReply: vi.fn(async () => { value.deferred = true; }),
     ...overrides,
@@ -34,7 +34,10 @@ async function draftWithContent(attachment = null) {
     { isButton: () => false, isModalSubmit: () => true, isFromMessage: () => false }));
   return draft;
 }
-function confirm(draft, overrides) { return interaction(`announcement:confirm:${draft.id}`, overrides); }
+function control(draft, action, overrides) {
+  return interaction(`announcement:${action}:${draft.id}:${draft.revision}`, overrides);
+}
+function confirm(draft, overrides) { return control(draft, 'confirm', overrides); }
 const published = () => ({ channel: { id: '1514598369597587546' }, message: { id: '123456789012345681' } });
 afterEach(() => { vi.useRealTimers(); vi.clearAllMocks(); publish.mockReset(); });
 
@@ -78,20 +81,37 @@ describe('/thongbao interaction lifecycle', () => {
     expect(draft.result.message.id).toBe('123456789012345681');
   });
 
+  it('publishes immediately after acknowledgment even when the preview webhook is stalled', async () => {
+    const draft = await draftWithContent();
+    let finishReceipt;
+    const receipt = new Promise(resolve => { finishReceipt = resolve; });
+    const press = confirm(draft, { editReply: vi.fn(() => receipt) });
+    publish.mockResolvedValue(published());
+    const running = handleAnnouncementDraftInteraction(press);
+    try {
+      await vi.waitFor(() => expect(press.editReply).toHaveBeenCalledOnce());
+      expect(publish).toHaveBeenCalledOnce();
+      expect(press.editReply.mock.calls[0][0].content).toContain('Đã đăng thông báo');
+    } finally {
+      finishReceipt();
+      await running;
+    }
+  });
+
   it('preserves image and role choices through edits, using the same preview and draft', async () => {
     const draft = await draftWithContent(image);
     const role = '1282638730812854345';
-    await handleAnnouncementDraftInteraction(interaction(`announcement:roleselect:${draft.id}`, {
+    await handleAnnouncementDraftInteraction(control(draft, 'roleselect', {
       isRoleSelectMenu: () => true, isButton: () => false, values: [role],
     }));
-    await handleAnnouncementDraftInteraction(interaction(`announcement:toggle_here:${draft.id}`));
-    const edit = interaction(`announcement:edit:${draft.id}`);
+    await handleAnnouncementDraftInteraction(control(draft, 'toggle_here'));
+    const edit = control(draft, 'edit');
     await handleAnnouncementDraftInteraction(edit);
     const modalId = edit.showModal.mock.calls[0][0].data.custom_id;
     const submit = interaction(modalId, { isModalSubmit: () => true, isButton: () => false,
       fields: { getTextInputValue: () => 'Nội dung đã sửa' } });
     await handleAnnouncementDraftInteraction(submit);
-    expect(submit.deferUpdate).toHaveBeenCalled();
+    expect(submit.update).toHaveBeenCalled();
     expect(submit.deferReply).not.toHaveBeenCalled();
     expect(draft.roles).toEqual([role]);
     expect(draft.tagHere).toBe(true);
@@ -108,12 +128,12 @@ describe('/thongbao interaction lifecycle', () => {
     const failed = confirm(draft);
     await handleAnnouncementDraftInteraction(failed);
     expect(failed.editReply.mock.calls.at(-1)[0].embeds).toHaveLength(1);
-    const select = interaction(`announcement:roleselect:${draft.id}`, {
+    const select = control(draft, 'roleselect', {
       message: { embeds: [], components: [] }, isRoleSelectMenu: () => true,
       values: ['1282638730812854345'],
     });
     await handleAnnouncementDraftInteraction(select);
-    expect(select.editReply.mock.calls[0][0].embeds[0].data.image.url).toBe(image.url);
+    expect(select.update.mock.calls[0][0].embeds[0].data.image.url).toBe(image.url);
     publish.mockResolvedValueOnce(published());
     await handleAnnouncementDraftInteraction(confirm(draft));
     expect(publish).toHaveBeenCalledTimes(2);
@@ -132,12 +152,12 @@ describe('/thongbao interaction lifecycle', () => {
     expect(draft.publishing).toBe(false);
     expect(failed.editReply.mock.calls.at(-1)[0].content).not.toContain('chưa xác nhận');
 
-    const edit = interaction(`announcement:edit:${draft.id}`);
+    const edit = control(draft, 'edit');
     await handleAnnouncementDraftInteraction(edit);
     expect(edit.showModal).toHaveBeenCalledTimes(1);
 
     const role = '1282638730812854345';
-    await handleAnnouncementDraftInteraction(interaction(`announcement:roleselect:${draft.id}`, {
+    await handleAnnouncementDraftInteraction(control(draft, 'roleselect', {
       isRoleSelectMenu: () => true, isButton: () => false, values: [role],
     }));
     expect(draft.roles).toEqual([role]);
@@ -154,7 +174,7 @@ describe('/thongbao interaction lifecycle', () => {
     const draft = await draftWithContent();
     publish.mockImplementation(async options => { options.onSend(); throw new Error('socket closed'); });
     await handleAnnouncementDraftInteraction(confirm(draft));
-    const edit = interaction(`announcement:edit:${draft.id}`);
+    const edit = control(draft, 'edit');
     await handleAnnouncementDraftInteraction(edit);
     expect(edit.showModal).not.toHaveBeenCalled();
     await handleAnnouncementDraftInteraction(confirm(draft));
@@ -184,11 +204,55 @@ describe('/thongbao interaction lifecycle', () => {
 
   it('never mentions members in previews and requires mention permission for mass tags', async () => {
     const draft = await draftWithContent();
-    const press = interaction(`announcement:toggle_everyone:${draft.id}`, {
+    const press = control(draft, 'toggle_everyone', {
       memberPermissions: { has: permission => permission === PermissionFlagsBits.ManageMessages },
     });
     await handleAnnouncementDraftInteraction(press);
     expect(draft.tagEveryone).toBe(false);
     expect(press.reply.mock.calls[0][0].allowedMentions.parse).toEqual([]);
+  });
+
+  it('keeps old recipients after a confirmed rejected Discord update and refreshes ambiguous controls', async () => {
+    const draft = await draftWithContent();
+    const press = control(draft, 'toggle_here', {
+      update: vi.fn(async () => { throw new Error('preview response lost'); }),
+    });
+    await handleAnnouncementDraftInteraction(press);
+    expect(draft.tagHere).toBe(false);
+    expect(draft.updating).toBe(false);
+    const uncommitted = press.update.mock.calls[0][0].components.flatMap(row => row.toJSON().components)
+      .find(component => component.custom_id.includes(':confirm:'));
+    const stale = interaction(uncommitted.custom_id);
+    await handleAnnouncementDraftInteraction(stale);
+    expect(stale.update.mock.calls[0][0].content).toContain('Đã làm mới');
+    expect(publish).not.toHaveBeenCalled();
+  });
+
+  it('blocks confirm while a selection is pending, then requires the preview with the committed recipients', async () => {
+    const draft = await draftWithContent();
+    const role = '1282638730812854345';
+    let acceptUpdate;
+    const updateResponse = new Promise(resolve => { acceptUpdate = resolve; });
+    const select = control(draft, 'roleselect', {
+      isRoleSelectMenu: () => true, isButton: () => false, values: [role],
+      update: vi.fn(() => updateResponse),
+    });
+    const stale = confirm(draft);
+    const busy = confirm(draft);
+    const running = handleAnnouncementDraftInteraction(select);
+    try {
+      await handleAnnouncementDraftInteraction(busy);
+      expect(busy.reply.mock.calls[0][0].content).toContain('đang cập nhật');
+      expect(publish).not.toHaveBeenCalled();
+    } finally {
+      acceptUpdate();
+      await running;
+    }
+    await handleAnnouncementDraftInteraction(stale);
+    expect(stale.update).toHaveBeenCalledOnce();
+    expect(publish).not.toHaveBeenCalled();
+    publish.mockResolvedValue(published());
+    await handleAnnouncementDraftInteraction(confirm(draft));
+    expect(publish).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ roleIds: [role] }));
   });
 });
