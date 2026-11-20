@@ -5,6 +5,7 @@ vi.hoisted(()=>{process.env.ENV_FILE='.env.membership-test-absent';process.env.D
 import { db, initDatabase } from '../src/database/db.js';
 import { MEMBER_ROLES, BUYER_TIERS, membershipPriorityForSpend } from '../src/config/membershipProgram.js';
 import { roleColorsFor } from '../src/config/roleColors.js';
+import { STORE_ROLE_PRESENTATION, storeRoleIconUrl } from '../src/config/storeRolePresentation.js';
 import { buildMembershipBenefitsPayload, refreshMembershipPresentation, rolePresentationPatch } from '../src/services/membershipPresentationService.js';
 import { getCustomerMembershipProgress } from '../src/services/roleService.js';
 
@@ -58,7 +59,17 @@ describe('Cenar Circle preserves paid customer roles',()=>{
   it('only changes appearance and clears enhanced colors when the perk is absent',()=>{
     const patch=rolePresentationPatch({name:'Previous',colors:{primaryColor:1,secondaryColor:2,tertiaryColor:3}},MEMBER_ROLES[0],{enhanced:false,roleIcons:false});
     expect(Object.keys(patch).sort()).toEqual(['colors','name']);
-    expect(patch.colors).toEqual({primaryColor:roleColorsFor(MEMBER_ROLES[0].id).primaryColor,secondaryColor:null,tertiaryColor:null});
+    expect(patch.colors).toEqual({primaryColor:roleColorsFor(MEMBER_ROLES[0].id, { storeOne: true }).primaryColor,secondaryColor:null,tertiaryColor:null});
+  });
+  it('uses distinct local custom images and the new names for each membership role', () => {
+    const iconFiles = MEMBER_ROLES.map(tier => STORE_ROLE_PRESENTATION[tier.id].icon);
+    expect(new Set(iconFiles).size).toBe(MEMBER_ROLES.length);
+    for (const tier of MEMBER_ROLES) {
+      const patch = rolePresentationPatch({ name: 'Previous' }, tier, { enhanced: true, roleIcons: true });
+      expect(patch.name).toBe(STORE_ROLE_PRESENTATION[tier.id].name);
+      expect(patch.icon).toEqual(fs.readFileSync(storeRoleIconUrl(tier.id)));
+      expect(patch.colors.secondaryColor).toMatch(/^#[0-9A-F]{6}$/);
+    }
   });
   it('refreshes all six icons and colors once, preserves hierarchy/access, and reuses one guide',async()=>{
     const s=setup();
