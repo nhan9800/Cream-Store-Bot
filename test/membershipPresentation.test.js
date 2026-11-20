@@ -59,7 +59,7 @@ describe('Cenar Circle preserves paid customer roles',()=>{
   it('only changes appearance and clears enhanced colors when the perk is absent',()=>{
     const patch=rolePresentationPatch({name:'Previous',colors:{primaryColor:1,secondaryColor:2,tertiaryColor:3}},MEMBER_ROLES[0],{enhanced:false,roleIcons:false});
     expect(Object.keys(patch).sort()).toEqual(['colors','name']);
-    expect(patch.colors).toEqual({primaryColor:roleColorsFor(MEMBER_ROLES[0].id).primaryColor,secondaryColor:null,tertiaryColor:null});
+    expect(patch.colors).toEqual({primaryColor:roleColorsFor(MEMBER_ROLES[0].id, { storeOne: true }).primaryColor,secondaryColor:null,tertiaryColor:null});
   });
   it('uses distinct local custom images and the new names for each membership role', () => {
     const iconFiles = MEMBER_ROLES.map(tier => STORE_ROLE_PRESENTATION[tier.id].icon);

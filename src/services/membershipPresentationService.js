@@ -37,7 +37,7 @@ export function buildMembershipBenefitsPayload(client, guildId) {
     '> Liên kết đúng tài khoản Discord và tham gia server để bot tự đồng bộ role.',
   ].join('\n')));
   const cards = MEMBER_ROLES.map(tier => new ContainerBuilder()
-    .setAccentColor(parseInt(roleColorsFor(tier.id).primaryColor.slice(1),16))
+    .setAccentColor(parseInt(roleColorsFor(tier.id, { storeOne: true }).primaryColor.slice(1),16))
     .addTextDisplayComponents(new TextDisplayBuilder().setContent([
       `## ${iconText(client,tier,E)} ${tier.label}`, `-# ${tier.tagline}`,
       `**${tier.minSpent ? `${tier.minSpent.toLocaleString('vi-VN')}đ tích luỹ` : tier.requireActivity ? 'Đã thanh toán đơn hoặc dùng dịch vụ hợp lệ' : 'Thành viên đã xác minh'}** · <@&${tier.id}>`,
@@ -57,7 +57,7 @@ export function buildMembershipBenefitsPayload(client, guildId) {
 }
 const integerColor = value => value ? parseInt(value.replace('#',''),16) : null;
 export function rolePresentationPatch(role,tier,{enhanced,roleIcons,iconCurrent=false}={}) {
-  const palette=roleColorsFor(tier.id,{enhanced});
+  const palette=roleColorsFor(tier.id,{enhanced,storeOne:true});
   const colors={...palette,secondaryColor:palette.secondaryColor || null,tertiaryColor:palette.tertiaryColor || null};
   const name = STORE_ROLE_PRESENTATION[tier.id].name;
   const patch={};
