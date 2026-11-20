@@ -95,6 +95,9 @@ export async function execute(interaction) {
         await sendOrRefreshPaymentQr({ guild: interaction.guild, orderCode });
         await interaction.editReply(`${E('status_check')} Đã gửi QR + checkout **PayOS** cho đơn \`${orderCode}\`.`);
       } catch (payosError) {
+        if (['PAYMENT_RECONCILIATION_REQUIRED', 'PAYMENT_IDENTITY_MISMATCH', 'PAYMENT_METHOD_LOCKED'].includes(payosError.code)) {
+          throw payosError;
+        }
         // PayOS lỗi → tự động thử VietQR
         console.warn('[QR] PayOS failed, trying VietQR fallback:', payosError.message);
         try {

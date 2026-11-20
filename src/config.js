@@ -222,7 +222,7 @@ export const config = {
   payosReturnPath: pathWithLeadingSlash('PAYOS_RETURN_PATH', '/payments/payos/return'),
   payosCancelPath: pathWithLeadingSlash('PAYOS_CANCEL_PATH', '/payments/payos/cancel'),
   payosAutoConfirmWebhook: getBooleanEnv('PAYOS_AUTO_CONFIRM_WEBHOOK', false),
-  payosExpireMinutes: Number.parseInt(getEnv('PAYOS_EXPIRE_MINUTES', '60'), 10),
+  payosExpireMinutes: Math.max(1440, Number.parseInt(getEnv('PAYOS_EXPIRE_MINUTES', '1440'), 10) || 1440),
   binancePayEnabled: getBooleanEnv('BINANCE_PAY_ENABLED', false),
   binancePayApiKey: getEnv('BINANCE_PAY_API_KEY', ''),
   binancePaySecretKey: getEnv('BINANCE_PAY_SECRET_KEY', ''),

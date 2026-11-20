@@ -218,6 +218,20 @@ function applyPayOSTerminalInfo(order, info, state) {
       && Number(fresh.payos_order_code) === Number(info.orderCode)
       && (!fresh.payment_link_id || String(fresh.payment_link_id) === String(info.id || ''));
     if (!matches) return null;
+    if (Number(getPayOSReceivedAmount(info)) > 0) return null;
+    if (state === 'EXPIRED' && fresh.fulfillment_mode !== 'SUPPLIER') {
+      const created = Date.parse(fresh.created_at);
+      const expires = Date.parse(fresh.payment_expired_at);
+      const orderDeadline = created + config.unpaidOrderTicketHours * 3600_000;
+      // Older invoices may still use the previous short TTL. Keep the order
+      // payable until its own window ends, and retain the invoice identity for
+      // an in-flight receipt or a provider lookup.
+      if (!Number.isFinite(orderDeadline) || Date.now() < Math.max(orderDeadline, Number.isFinite(expires) ? expires : 0)) {
+        db.prepare(`UPDATE orders SET payment_checkout_url=NULL, payment_qr_code=NULL,
+          payment_qr_url=NULL, payment_qr_text=NULL WHERE order_code=?`).run(order.order_code);
+        return null;
+      }
+    }
     db.prepare('UPDATE orders SET payment_cancel_reason=? WHERE order_code=?')
       .run(state === 'EXPIRED' ? 'Thanh toán PayOS đã hết hạn' : 'Thanh toán bị hủy (PayOS)', order.order_code);
     return setOrderStatus(order.order_code, 'CANCELLED');
@@ -236,6 +250,11 @@ async function renderPaymentQrImage(order) {
       light: '#FFFFFFFF',
     },
   });
+}
+
+function invoiceExpiryHasPassed(value) {
+  const expiresAt = Date.parse(value);
+  return Number.isFinite(expiresAt) && expiresAt <= Date.now();
 }
 
 export async function createOrLoadPayOSLink(order) {
@@ -287,7 +306,8 @@ export async function createOrLoadPayOSLink(order) {
         throw new OrderPaymentError('PAYMENT_IDENTITY_MISMATCH', 'Thông tin PayOS không khớp đơn cần đối soát.');
       }
       assertPayOSLookupIdentity(fresh, info);
-      const offerable = state === 'PENDING' && fresh.status === 'PENDING_PAYMENT' && fresh.payment_status === 'UNPAID';
+      const offerable = state === 'PENDING' && !invoiceExpiryHasPassed(expiry)
+        && fresh.status === 'PENDING_PAYMENT' && fresh.payment_status === 'UNPAID';
       const checkoutUrl = offerable ? payment_checkout_url ?? buildCheckoutUrlFromLinkId(info.id) : null;
       return savePaymentLinkData(order_code, {
         paymentLinkId: info.id, checkoutUrl,
@@ -297,7 +317,8 @@ export async function createOrLoadPayOSLink(order) {
       });
     }).immediate();
     if (['CANCELLED', 'EXPIRED'].includes(state)) applyPayOSTerminalInfo(lookupOrder, info, state);
-    if (state !== 'PENDING' || saved.status !== 'PENDING_PAYMENT' || saved.payment_status !== 'UNPAID') {
+    if (state !== 'PENDING' || invoiceExpiryHasPassed(saved.payment_expired_at)
+      || saved.status !== 'PENDING_PAYMENT' || saved.payment_status !== 'UNPAID') {
       // PAID still requires a real received amount through the existing worker/
       // webhook path. Retain its ID, but never turn invoice amount into a receipt
       // or expose a payable QR for terminal, processing or unknown states.
@@ -306,7 +327,8 @@ export async function createOrLoadPayOSLink(order) {
     return saved;
   }
 
-  if (payment_link_id && payment_checkout_url) {
+  if (payment_link_id && payment_checkout_url && !invoiceExpiryHasPassed(order.payment_expired_at ?? order.paymentExpiredAt)
+    && (!persisted || (persisted.status === 'PENDING_PAYMENT' && persisted.payment_status === 'UNPAID'))) {
     return order;
   }
   if (payment_link_id) return recoverKnownInvoice(await getPayOSPaymentInfo(payment_link_id));
@@ -325,15 +347,17 @@ export async function createOrLoadPayOSLink(order) {
         throw new OrderPaymentError('PAYMENT_IDENTITY_MISMATCH', 'Thông tin PayOS không khớp đơn cần đối soát.');
       }
       if (created.orderCode !== undefined) assertPayOSLookupIdentity(fresh, { ...created, id: invoiceId });
-      const offerable = fresh.status === 'PENDING_PAYMENT' && fresh.payment_status === 'UNPAID';
+      const expiredAt = new Date(Number(created.expiredAt ?? payload.expiredAt) * 1000).toISOString();
+      const offerable = fresh.status === 'PENDING_PAYMENT' && fresh.payment_status === 'UNPAID'
+        && !invoiceExpiryHasPassed(expiredAt);
       const checkoutUrl = offerable ? created.checkoutUrl ?? buildCheckoutUrlFromLinkId(invoiceId) : null;
       return savePaymentLinkData(order_code, {
         paymentLinkId: invoiceId, checkoutUrl, qrCode: offerable ? created.qrCode ?? null : null,
         qrUrl: checkoutUrl, qrText: offerable ? created.qrCode ?? null : null,
-        expiredAt: new Date(Number(created.expiredAt ?? payload.expiredAt) * 1000).toISOString(),
+        expiredAt,
       });
     }).immediate();
-    if (saved.status !== 'PENDING_PAYMENT' || saved.payment_status !== 'UNPAID') {
+    if (saved.status !== 'PENDING_PAYMENT' || saved.payment_status !== 'UNPAID' || invoiceExpiryHasPassed(saved.payment_expired_at)) {
       throw new OrderPaymentError('PAYMENT_RECONCILIATION_REQUIRED', 'Hóa đơn cần được đối soát. Vui lòng kiểm tra trạng thái đơn trước khi thanh toán.');
     }
     return saved;

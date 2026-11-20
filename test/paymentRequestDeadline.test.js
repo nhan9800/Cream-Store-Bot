@@ -106,7 +106,7 @@ describe('payment provider request deadlines', () => {
     const saved = await createOrLoadPayOSLink(order);
     const submitted = JSON.parse(fetchMock.mock.calls[0][1].body);
     expect(saved.payment_expired_at).toBe(new Date(submitted.expiredAt * 1000).toISOString());
-    expect(Date.parse(saved.payment_expired_at)).toBeGreaterThan(Date.now());
+    expect(submitted.expiredAt - Math.floor(Date.now() / 1000)).toBe(24 * 60 * 60);
   });
 
   it('retains original expiry on duplicate lookup rather than inventing a fresh lifetime', async () => {
@@ -116,7 +116,33 @@ describe('payment provider request deadlines', () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(Response.json({ code: '231', desc: 'Đơn thanh toán đã tồn tại' }))
       .mockResolvedValueOnce(Response.json({ code: '00', data: { id: 'old-invoice', orderCode: order.payos_order_code, status: 'EXPIRED' } }));
     await expect(createOrLoadPayOSLink(getOrderByCode(order.order_code))).rejects.toMatchObject({ code: 'PAYMENT_RECONCILIATION_REQUIRED' });
-    expect(getOrderByCode(order.order_code)).toMatchObject({ payment_expired_at: original, status: 'CANCELLED', payment_checkout_url: null });
+    expect(getOrderByCode(order.order_code)).toMatchObject({ payment_expired_at: original, status: 'PENDING_PAYMENT', payment_checkout_url: null });
+  });
+
+  it('retires an expired old QR but accepts a later verified full receipt before 24 hours', async () => {
+    const order = pendingOrder();
+    const expiresAt = new Date(Date.now() + 3600_000).toISOString();
+    db.prepare(`UPDATE orders SET payment_link_id='original-link', payment_checkout_url='https://pay.payos.vn/web/original-link',
+      payment_qr_code='old-qr', payment_expired_at=? WHERE order_code=?`).run(expiresAt, order.order_code);
+    vi.setSystemTime(new Date(Date.now() + 3 * 3600_000));
+    const providerInfo = { id: 'original-link', orderCode: order.payos_order_code, amount: order.total_amount };
+    vi.spyOn(globalThis, 'fetch').mockResolvedValueOnce(Response.json({ data: { ...providerInfo, status: 'EXPIRED', amountPaid: 0 } }))
+      .mockResolvedValueOnce(Response.json({ data: { ...providerInfo, status: 'PAID', amountPaid: order.total_amount } }));
+    await expect(createOrLoadPayOSLink(getOrderByCode(order.order_code))).rejects.toMatchObject({ code: 'PAYMENT_RECONCILIATION_REQUIRED' });
+    expect(getOrderByCode(order.order_code)).toMatchObject({ payment_link_id: 'original-link', payment_checkout_url: null,
+      payment_qr_code: null, status: 'PENDING_PAYMENT', payment_status: 'UNPAID' });
+    const client = { guilds: { fetch: vi.fn().mockResolvedValue(null) } };
+    await expect(syncPaymentStatusFromPayOS({ client, orderCode: order.order_code })).resolves.toMatchObject({ state: 'PAID', synced: true });
+    expect(getOrderByCode(order.order_code)).toMatchObject({ payment_status: 'PAID', status: 'PROCESSING', amount_paid: order.total_amount });
+  });
+
+  it.each([0, 50000])('only allows provider expiry after 24 hours if it reports no incoming amount (%s)', async (amountPaid) => {
+    const order = pendingOrder();
+    vi.setSystemTime(new Date(Date.now() + 24 * 3600_000 + 1000));
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(Response.json({ data: { id: 'test-link', orderCode: order.payos_order_code,
+      status: 'EXPIRED', amountPaid } }));
+    const result = await syncPaymentStatusFromPayOS({ client: {}, orderCode: order.order_code });
+    expect(result.order.status).toBe(amountPaid === 0 ? 'CANCELLED' : 'PENDING_PAYMENT');
   });
 
   it('bounds a stalled VietQR image before sending a message or saving link data', async () => {
