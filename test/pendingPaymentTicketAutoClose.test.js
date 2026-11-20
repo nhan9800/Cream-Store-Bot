@@ -71,7 +71,16 @@ afterAll(() => {
 describe('24-hour unpaid Discord ORDER ticket policy', () => {
   it('reports the exact running retention policy and keeps invoice validity separate', () => {
     expect(getPendingPaymentTicketPolicy()).toEqual({ idleHours: 24, activityBasis: 'LATEST_ORDER_OR_HUMAN_TICKET_ACTIVITY', invoiceExpirySeparate: true });
-    expect(config.payosExpireMinutes).toBe(60);
+    expect(config.payosExpireMinutes).toBe(1440);
+  });
+  it('keeps a normal ticket open past its deadline when an issued PayOS invoice cannot be reconciled', async () => {
+    const { ticket, order, channel } = ticketFixture({ ageHours: 25, paymentLinkId: 'unverified-pay-os-link' });
+    db.prepare("UPDATE orders SET payment_provider='PAYOS' WHERE order_code=?").run(order.order_code);
+    await processPendingPaymentTickets(client);
+    expect(getTicketById(ticket.id).status).toBe('OPEN');
+    expect(db.prepare('SELECT status FROM orders WHERE order_code=?').get(order.order_code).status).toBe('PENDING_PAYMENT');
+    expect(fixture.archive).not.toHaveBeenCalled();
+    expect(channel.delete).not.toHaveBeenCalled();
   });
   it.each([0.25, 0.6, 23.999])('does not use old 15/20/10-minute warning timestamps to close an existing %.3fh ticket', async ageHours => {
     const { ticket, channel, order } = ticketFixture({ ageHours });

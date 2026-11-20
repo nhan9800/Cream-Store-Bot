@@ -101,10 +101,18 @@ export function buildOrderLogContent(order, guildId = null) {
   const customer = `<@${order.customer_id}>`;
   const product = `**${formatOrderProduct(order.quantity, order.product_name)}**`;
   // Không bọc trong backtick vì getOrderStatusLabel trả về custom emoji
-  const status = getOrderStatusLabel(order.status, guildId || order.guild_id || null);
+  const resolvedGuildId = guildId || order.guild_id || null;
+  const status = getOrderLogStatusLabel(order, resolvedGuildId);
   const ticket = resolveTicketLabel(order);
   const duration = formatOrderDuration(order);
   return `${orderCode} ${customer} ${product} · **${duration}** ${status} | ${ticket}`;
+}
+
+export function getOrderLogStatusLabel(order, guildId = order.guild_id) {
+  if (order.status === 'CANCELLED' && order.payment_status === 'PAID') {
+    return `${createEmojiResolver(guildId)('status_warn')} ĐÃ NHẬN TIỀN · CẦN ĐỐI SOÁT`;
+  }
+  return getOrderStatusLabel(order.status, guildId);
 }
 
 export function toStars(stars, guildId = null) {

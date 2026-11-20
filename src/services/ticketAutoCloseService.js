@@ -6,6 +6,7 @@ import { withUniqueCustomEmoji } from '../utils/uniqueCustomEmoji.js';
 import { emitStaffLog } from './staffLogService.js';
 import { archiveTicketConversation } from './ticketClosureService.js';
 import { sendOrderCancelledFlow, updateOrderLogMessage } from './notificationService.js';
+import { syncPaymentStatusFromPayOS } from './paymentService.js';
 import {
   ContainerBuilder,
   TextDisplayBuilder,
@@ -132,6 +133,11 @@ function hasUnresolvedSupplierInvoice(orders) {
   });
 }
 
+function pendingPayOSInvoices(orders) {
+  return orders.filter(order => order.status === 'PENDING_PAYMENT' && order.payment_status === 'UNPAID'
+    && order.payment_provider === 'PAYOS' && order.payment_link_id);
+}
+
 export function getPendingPaymentTicketPolicy() {
   return { idleHours: config.unpaidOrderTicketHours, activityBasis: 'LATEST_ORDER_OR_HUMAN_TICKET_ACTIVITY', invoiceExpirySeparate: true };
 }
@@ -143,13 +149,21 @@ export function processPendingPaymentTickets(client) {
     const orders = db.prepare(`SELECT * FROM orders WHERE guild_id=?
       AND payment_status IN ('UNPAID','CANCELLED') AND status IN ('PENDING_PAYMENT','CANCELLED')`).all(config.guildId);
     const seen = new Set();
+    let invoiceChecksRemaining = 3;
     for (const order of orders) {
       try {
         // Preserve the separate legacy no-ticket cleanup; a web pseudo-channel
         // is never a Discord channel and is not part of this policy.
         if (!order.ticket_channel_id) {
           if (hasUnresolvedSupplierInvoice([order])) continue;
-          if (order.status === 'PENDING_PAYMENT' && (Date.now() - Date.parse(order.created_at) >= 15 * 60000
+          if (pendingPayOSInvoices([order]).length) {
+            if (invoiceChecksRemaining > 0 && Date.now() - Date.parse(order.created_at) >= config.unpaidOrderTicketHours * 3600_000) {
+              invoiceChecksRemaining--;
+              await syncPaymentStatusFromPayOS({ client, orderCode: order.order_code }).catch(() => null);
+            }
+            continue;
+          }
+          if (order.status === 'PENDING_PAYMENT' && (Date.now() - Date.parse(order.created_at) >= config.unpaidOrderTicketHours * 3600_000
             || order.payment_status === 'CANCELLED')) await cancelPendingOrderEverywhere({ client, order,
               reason: order.payment_cancel_reason || 'Tự động hủy đơn hàng không có kênh ticket' });
           continue;
@@ -182,6 +196,17 @@ export function processPendingPaymentTickets(client) {
           continue;
         }
         if (hasUnresolvedSupplierInvoice(state.pending)) continue;
+        const invoices = pendingPayOSInvoices(state.pending);
+        if (invoices.length) {
+          // The worker's lookback may have elapsed by this deadline. Check a
+          // bounded number here and defer closure on unknown or pending state.
+          for (const invoice of invoices.slice(0, invoiceChecksRemaining)) {
+            invoiceChecksRemaining--;
+            await syncPaymentStatusFromPayOS({ client, orderCode: invoice.order_code }).catch(() => null);
+          }
+          state = paymentTicketState(getTicketById(ticket.id));
+          if (!state?.due || pendingPayOSInvoices(state.pending).length || hasUnresolvedSupplierInvoice(state.pending)) continue;
+        }
         const deadline = state.deadline;
         const archive = await archiveTicketConversation({ guild: channel.guild, ticket: state.ticket, channel,
           closedById: client.user.id, minimumCreatedAt: new Date().toISOString() });
@@ -193,7 +218,8 @@ export function processPendingPaymentTickets(client) {
         // Keep Open, warranty work or a new order must cancel this closure.
         const claim = db.transaction(() => {
           const fresh = paymentTicketState(getTicketById(ticket.id));
-          if (!fresh?.due || fresh.deadline !== deadline || hasUnresolvedSupplierInvoice(fresh.pending)) return null;
+          if (!fresh?.due || fresh.deadline !== deadline || hasUnresolvedSupplierInvoice(fresh.pending)
+            || pendingPayOSInvoices(fresh.pending).length) return null;
           const cancelled = fresh.pending.filter(item => item.status === 'PENDING_PAYMENT').map(item => cancelOrder(item.order_code, reason));
           // A new purchase must see a closed ticket while Discord DELETE is in
           // flight, rather than bind to a channel already being removed.
