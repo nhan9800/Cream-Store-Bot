@@ -18,6 +18,7 @@ const testDatabasePath = vi.hoisted(() => {
 });
 
 import { db, initDatabase, nowIso } from '../src/database/db.js';
+import { execute as manageOrder } from '../src/commands/quanly-don.js';
 import { encrypt } from '../src/utils/crypto.js';
 import {
   cancelOrder,
@@ -35,10 +36,10 @@ import express from 'express';
 let sequence = 0;
 const customerId = '123456789012345678';
 
-function createPendingOrder(quantity = 1) {
+function createPendingOrder(quantity = 1, guildId = 'WEB') {
   sequence += 1;
   const ticket = createTicket({
-    guildId: 'WEB',
+    guildId,
     channelId: `web-test-${sequence}`,
     customerId,
     openedById: customerId,
@@ -46,7 +47,7 @@ function createPendingOrder(quantity = 1) {
   });
   return createOrder({
     orderCode: `CN_${910000 + sequence}`,
-    guildId: 'WEB',
+    guildId,
     ticketId: ticket.id,
     ticketChannelId: ticket.channel_id,
     customerId,
@@ -70,15 +71,30 @@ function addStock(count, serviceType = 'Netflix Premium') {
   }
 }
 
-function confirmPayment(order, transactionId) {
+function confirmPayment(order, transactionId, rawPayload = { amount: order.total_amount }) {
   return recordOrderPayment({
     orderCode: order.order_code,
     provider: 'PAYOS',
     transactionId,
     amount: order.total_amount,
     content: order.order_code,
-    rawPayload: { code: '00' },
+    rawPayload,
   });
+}
+
+function confirmPaymentInteraction(order, { guildId = order.guild_id, manager = true } = {}) {
+  return {
+    guildId,
+    guild: {
+      members: { fetch: vi.fn().mockResolvedValue({ permissions: { has: () => manager }, roles: { cache: new Map() } }) },
+      channels: { fetch: vi.fn().mockResolvedValue(null) },
+    },
+    user: { id: '123456789012345679' },
+    client: { users: { fetch: vi.fn() } },
+    options: { getString: (option) => option === 'ma_don' ? order.order_code.toLowerCase() : 'PAID' },
+    deferReply: vi.fn(),
+    editReply: vi.fn(),
+  };
 }
 
 describe('payment and fulfillment reliability', () => {
@@ -279,6 +295,64 @@ describe('payment and fulfillment reliability', () => {
     expect(getOrderByCode(order.order_code)).toMatchObject({ status: 'CANCELLED', payment_status: 'PAID' });
     expect(db.prepare('SELECT * FROM order_fulfillments WHERE order_code = ?').get(order.order_code)).toBeUndefined();
     expect(db.prepare("SELECT status FROM account_stock LIMIT 1").get().status).toBe('AVAILABLE');
+  });
+
+  it('restores a cancelled Discord order via /quanly-don using its original PayOS receipt only once', async () => {
+    const order = createPendingOrder(1, process.env.GUILD_ID);
+    addStock(1);
+    cancelOrder(order.order_code, 'expired');
+    const { updated: paid } = confirmPayment(order, 'late-discord-payment');
+    const interaction = confirmPaymentInteraction(order);
+
+    await manageOrder(interaction);
+    expect(interaction.editReply).toHaveBeenLastCalledWith(expect.stringContaining('**Đang xử lý**'));
+    expect(getOrderByCode(order.order_code)).toMatchObject({
+      status: 'PROCESSING',
+      payment_status: 'PAID',
+      amount_paid: paid.amount_paid,
+      paid_at: paid.paid_at,
+      paid_transaction_id: paid.paid_transaction_id,
+      paid_transaction_content: paid.paid_transaction_content,
+    });
+    expect(db.prepare('SELECT * FROM order_fulfillments WHERE order_code = ?').get(order.order_code)).toBeUndefined();
+    expect(db.prepare('SELECT status FROM account_stock').get().status).toBe('AVAILABLE');
+    expect(interaction.client.users.fetch).not.toHaveBeenCalled();
+
+    await manageOrder(interaction);
+    const history = db.prepare(`SELECT old_status, new_status, actor FROM order_status_history
+      WHERE order_code = ? AND new_status = 'PROCESSING'`).all(order.order_code);
+    expect(history).toEqual([{ old_status: 'CANCELLED', new_status: 'PROCESSING', actor: interaction.user.id }]);
+    expect(db.prepare('SELECT amount FROM payment_events WHERE order_code = ?').all(order.order_code))
+      .toEqual([{ amount: paid.amount_paid }]);
+    expect(db.prepare(`SELECT action FROM staff_logs
+      WHERE related_order_code = ? AND action = 'ORDER_PAYMENT_RESTORED'`).all(order.order_code)).toHaveLength(1);
+  });
+
+  it.each([
+    ['different server', (order) => confirmPaymentInteraction(order, { guildId: '111111111111111111' }), 'máy chủ này'],
+    ['non-manager', (order) => confirmPaymentInteraction(order, { manager: false }), 'Chỉ staff/manager'],
+    ['refunded', (order) => {
+      addWalletBalance(order.guild_id, customerId, order.total_amount, 'REFUND', 'test refund', order.order_code);
+      return confirmPaymentInteraction(order);
+    }, 'hoàn tiền hoặc giao hàng'],
+    ['incomplete PayOS receipt', (order) => {
+      db.prepare('UPDATE payment_events SET raw_payload = ? WHERE order_code = ?')
+        .run(JSON.stringify({ amount: order.total_amount, amountPaid: 500 }), order.order_code);
+      return confirmPaymentInteraction(order);
+    }, 'chưa đủ tổng đơn'],
+    ['unmatched receipt', (order) => {
+      db.prepare('UPDATE payment_events SET transaction_id = ? WHERE order_code = ?').run('unmatched', order.order_code);
+      return confirmPaymentInteraction(order);
+    }, 'Chưa tìm thấy giao dịch PayOS gốc'],
+  ])('blocks /quanly-don recovery for a %s', async (_case, setup, message) => {
+    const order = createPendingOrder(1, process.env.GUILD_ID);
+    cancelOrder(order.order_code, 'expired');
+    confirmPayment(order, 'cancelled-discord-payment');
+    const interaction = setup(order);
+
+    await manageOrder(interaction);
+    expect(interaction.editReply).toHaveBeenLastCalledWith(expect.stringContaining(message));
+    expect(getOrderByCode(order.order_code)).toMatchObject({ status: 'CANCELLED', payment_status: 'PAID' });
   });
 
   it('rolls the payment event back when the order update fails so a replay can recover', () => {

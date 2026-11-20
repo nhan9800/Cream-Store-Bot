@@ -1,7 +1,7 @@
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { PermissionFlagsBits, SlashCommandBuilder } from 'discord.js';
 import { getGuildConfig } from '../services/guildConfigService.js';
-import { getOrderByCode, cancelOrder, markOrderPaid, markOrderCompleted, ensureOrderExpiry } from '../services/orderService.js';
+import { getOrderByCode, cancelOrder, markOrderPaid, markOrderCompleted, ensureOrderExpiry, restoreCancelledPayOSOrder, OrderPaymentError } from '../services/orderService.js';
 import { sendOrderCancelledFlow, updateOrderLogMessage, sendCompletedFlow } from '../services/notificationService.js';
 import { emitStaffLog } from '../services/staffLogService.js';
 import { assertStaffCapability } from '../utils/permissions.js';
@@ -62,6 +62,22 @@ export async function execute(interaction) {
     }
 
     if (action === 'PAID') {
+      if (currentOrder.status === 'CANCELLED') {
+        const order = restoreCancelledPayOSOrder({ orderCode, guildId: interaction.guildId, actorId: interaction.user.id });
+        await interaction.editReply(`${E('status_check')} Đơn \`${orderCode}\` đã được đưa về **Đang xử lý**. Bot giữ nguyên giao dịch PayOS đã xác nhận.`);
+        await Promise.allSettled([
+          updateOrderLogMessage(interaction.guild, order),
+          emitStaffLog(interaction.client, {
+            guildId: interaction.guildId,
+            actorId: interaction.user.id,
+            targetId: order.customer_id,
+            action: 'ORDER_PAYMENT_RESTORED',
+            detail: 'Đưa đơn đã hủy về xử lý bằng giao dịch PayOS gốc',
+            relatedOrderCode: order.order_code,
+          }),
+        ]);
+        return;
+      }
       if (currentOrder.payment_status === 'PAID' || currentOrder.payment_status === 'FREE') {
         await interaction.editReply(`${E('status_info')} Đơn này đã được thanh toán hoặc miễn phí.`);
         return;
@@ -95,6 +111,10 @@ export async function execute(interaction) {
       return;
     }
   } catch (error) {
+    if (error instanceof OrderPaymentError) {
+      await interaction.editReply(`${E('status_warn')} ${error.message}`);
+      return;
+    }
     console.error('[QUANLY_DON] Lỗi:', error);
     await interaction.editReply(`${E('status_cross')} Có lỗi xảy ra: ${error.message}`);
   }
