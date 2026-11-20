@@ -8,7 +8,7 @@ import { isSpotifyProductName, normalizeServiceSearch } from '../utils/serviceDe
 import { broadcastDashboardEvent } from './dashboardMiniServer.js';
 import { encrypt } from '../utils/crypto.js';
 import { awardOrderPoints, refundOrderPoints } from './loyaltyService.js';
-import { recordStatusChange } from './orderStateMachine.js';
+import { ensureStatusHistoryTable, recordStatusChange } from './orderStateMachine.js';
 import { syncCtvOrderLog } from './ctvOrderLogService.js';
 import {
   markAdminOrderReminderLifecycleChanged,
@@ -18,6 +18,7 @@ import { unscheduleOrderTicketAutoClose } from './ticketService.js';
 import { getCustomerPurchaseSummary, getCustomerActivitySummary } from './customerActivityService.js';
 import { membershipPriorityForSpend } from '../config/membershipProgram.js';
 import { STORE_ONE_GUILD_ID } from '../utils/locale.js';
+import { getStoredPayOSReceivedAmount } from '../utils/payosReceipt.js';
 
 function createOrderStmt() {
   return db.prepare(`
@@ -325,10 +326,9 @@ export function markOrderPaid(orderCode,{amountPaid,transactionId,transactionCon
 
   const amount = validateOrderPaymentAmount(order, amountPaid);
 
-  // Nếu đơn đã bị CANCELLED, vẫn ghi nhận thanh toán nhưng GIỮ status='CANCELLED'
-  // (admin sẽ phải refund thủ công hoặc xóa giao dịch)
+  // Record a late receipt without reactivating a cancelled order automatically.
   if (order.status === 'CANCELLED') {
-    console.warn(`[ORDER] markOrderPaid: đơn ${orderCode} đã bị CANCELLED nhưng nhận tiền — giữ status, cần refund.`);
+    console.warn(`[ORDER] markOrderPaid: đơn ${orderCode} đã bị CANCELLED nhưng nhận tiền, cần staff đối soát.`);
   }
 
   const paidAt=nowIso();
@@ -337,6 +337,59 @@ export function markOrderPaid(orderCode,{amountPaid,transactionId,transactionCon
   if (order.status !== updated.status) {
     recordStatusChange(db, { orderCode, previousStatus: order.status, newStatus: updated.status, changedBy: 'SYSTEM_PAYOS', reason: transactionContent || 'Payment confirmed' });
   }
+  syncCustomerStats(updated.guild_id, updated.customer_id);
+  scheduleCtvOrderLogSync(updated);
+  scheduleAdminOrderCenterRefresh(updated.guild_id);
+  broadcastDashboardEvent('order_update');
+  return updated;
+}
+
+export function restoreCancelledPayOSOrder({ orderCode, guildId, actorId }) {
+  const { order, updated } = db.transaction(() => {
+    const order = getOrderByCode(orderCode);
+    if (!order || order.guild_id !== guildId || order.status !== 'CANCELLED') {
+      throw new OrderPaymentError('CANCELLED_ORDER_NOT_FOUND', 'Không tìm thấy đơn đã hủy trong máy chủ này.');
+    }
+    if (order.fulfillment_mode === 'SUPPLIER') {
+      throw new OrderPaymentError('SUPPLIER_ORDER', 'Đơn AutoBuy cần được xử lý trong bảng quản trị AutoBuy.');
+    }
+    if (order.payment_status !== 'PAID' || order.payment_provider !== 'PAYOS') {
+      throw new OrderPaymentError('NO_PAYOS_PAYMENT', 'Chỉ có thể khôi phục đơn đã hủy khi bot đã xác nhận thanh toán PayOS.');
+    }
+    ensureStatusHistoryTable(db);
+    const hadRefund = db.prepare(`SELECT 1 FROM wallet_transactions
+      WHERE related_code = ? AND customer_id = ? AND guild_id = ? AND amount > 0
+        AND type IN ('REFUND', 'ORDER_REFUND', 'REFUND_ORDER')`).get(orderCode, order.customer_id, guildId)
+      || db.prepare("SELECT 1 FROM order_status_history WHERE order_code = ? AND new_status = 'REFUNDED'").get(orderCode);
+    const hadDelivery = order.delivered_at || order.completed_at
+      || db.prepare('SELECT 1 FROM order_delivery_items WHERE order_code = ? LIMIT 1').get(orderCode);
+    if (hadRefund || hadDelivery) {
+      throw new OrderPaymentError('ORDER_ALREADY_HANDLED', 'Đơn có dấu vết hoàn tiền hoặc giao hàng. Kiểm tra lịch sử đơn trước khi xử lý.');
+    }
+    const receipt = db.prepare(`SELECT id, amount, raw_payload FROM payment_events
+      WHERE order_code = ? AND provider = 'PAYOS' AND transaction_id = ?`).get(orderCode, order.paid_transaction_id);
+    if (!receipt) {
+      throw new OrderPaymentError('MISSING_PAYOS_RECEIPT', 'Chưa tìm thấy giao dịch PayOS gốc. Vui lòng đối soát đơn.');
+    }
+    validateOrderPaymentAmount(order, order.amount_paid);
+    validateOrderPaymentAmount(order, receipt.amount);
+    validateOrderPaymentAmount(order, getStoredPayOSReceivedAmount(receipt.raw_payload));
+
+    const timestamp = nowIso();
+    db.prepare(`UPDATE orders SET status = 'PROCESSING', status_changed_at = ?, updated_at = ?
+      WHERE order_code = ?`).run(timestamp, timestamp, orderCode);
+    recordStatusChange(db, {
+      orderCode,
+      previousStatus: order.status,
+      newStatus: 'PROCESSING',
+      actor: actorId,
+      reason: 'Khôi phục đơn đã hủy bằng giao dịch PayOS đã xác nhận',
+      metadata: { paymentEventId: receipt.id },
+    });
+    return { order, updated: getOrderByCode(orderCode) };
+  }).immediate();
+
+  markAdminOrderReminderLifecycleChanged(order, updated);
   syncCustomerStats(updated.guild_id, updated.customer_id);
   scheduleCtvOrderLogSync(updated);
   scheduleAdminOrderCenterRefresh(updated.guild_id);

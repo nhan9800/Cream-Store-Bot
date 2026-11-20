@@ -28,6 +28,9 @@ import { buildLegacyFeatureCard } from '../utils/featureCard.js';
 import { deliverPaidOrder } from './autoDeliveryService.js';
 import { db } from '../database/db.js';
 import { startSupplierPaymentEffects } from './supplierAutobuyPaymentNoticeService.js';
+import { getPayOSReceivedAmount } from '../utils/payosReceipt.js';
+
+export { getPayOSReceivedAmount };
 
 const PAYOS_API_BASE = 'https://api-merchant.payos.vn';
 const PAYMENT_CONFIRMATION_ACTIONS = [
@@ -869,24 +872,6 @@ export async function syncPaymentStatusFromPayOS({ client, orderCode = null, pay
   }
 
   return { order, state, synced: false };
-}
-
-// GET amount is the invoice value, never proof of a bank receipt.
-// Older responses can be checked against unique transaction receipts instead.
-export function getPayOSReceivedAmount(info) {
-  if (info?.amountPaid !== undefined && info?.amountPaid !== null) return info.amountPaid;
-  if (!Array.isArray(info?.transactions) || !info.transactions.length) return null;
-  const seen = new Set();
-  let amount = 0;
-  for (const transaction of info.transactions) {
-    const value = Number(transaction?.amount);
-    const reference = String(transaction?.reference || '').trim();
-    if (!reference || !Number.isSafeInteger(value) || value <= 0) return null;
-    if (seen.has(reference)) continue;
-    seen.add(reference);
-    amount += value;
-  }
-  return Number.isSafeInteger(amount) ? amount : null;
 }
 
 export async function reconcileRecentPayOSPayments(client, { limit = 20, lookbackHours = 24 } = {}) {
