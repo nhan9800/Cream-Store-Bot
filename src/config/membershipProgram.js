@@ -1,5 +1,5 @@
 // Stable commerce keys and IDs: names/artwork can change without moving tiers.
-export const MEMBERSHIP_REVISION = 'CENAR-MEMBERSHIP-20261007';
+export const MEMBERSHIP_REVISION = 'CENAR-MEMBERSHIP-20261121';
 export const MEMBER_ROLES = Object.freeze([
   {key:'ruby', id:'1282637775291551776', label:'Cenar Sovereign', minSpent:8_000_000, symbol:'♛', fallback:'👑', slot:'icon_crown', tagline:'Dấu ấn cao nhất của hành trình Cenar', perks:['Đơn mới được xếp hàng ưu tiên cao nhất theo hạng thành viên.', 'Được tư vấn riêng khi chọn gói dài hạn, gia hạn hoặc nhiều dịch vụ.', 'Nhận xét duyệt ưu đãi tri ân theo chương trình đang mở.']},
   {key:'diamond', id:'1282637814571466808', label:'Cenar Prestige', minSpent:5_000_000, symbol:'◇', fallback:'💎', slot:'icon_gem', tagline:'Đặc quyền dành cho khách hàng gắn bó', perks:['Đơn mới được xếp hàng ưu tiên ở hạng Prestige.', 'Được tư vấn gói phù hợp với lịch sử mua hàng.', 'Có thể yêu cầu mã tri ân; staff xác nhận điều kiện trước khi lên đơn.']},

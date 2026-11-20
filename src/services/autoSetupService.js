@@ -1,3 +1,4 @@
+import { readFile } from 'node:fs/promises';
 import {
   ActionRowBuilder,
   ButtonBuilder,
@@ -12,13 +13,14 @@ import {
 } from 'discord.js';
 import { db } from '../database/db.js';
 import { roleColorsFor } from '../config/roleColors.js';
+import { storeRoleIconUrl } from '../config/storeRolePresentation.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { getPartnerSettings, upsertPartnerSettings } from './partnerService.js';
 import { ensureCtvRecruitmentCampaign, getCtvSettings, upsertCtvSettings } from './ctvService.js';
 import { accentFor } from '../utils/uiKit.js';
 import { publishCtvPricePanel } from './ctvPriceService.js';
 import { publishCtvRecruitmentPanel } from './ctvRecruitmentPanelService.js';
-import { isInternationalGuild } from '../utils/locale.js';
+import { isInternationalGuild, STORE_ONE_GUILD_ID } from '../utils/locale.js';
 import { STORE_ONE_CHANNEL_NAMES } from '../config/storeOneChannelAesthetic.js';
 
 const IDS = Object.freeze({
@@ -116,6 +118,10 @@ function restrictedOverrides(guild, clientId, roleId, staffRoleIds = [], { allow
 
 async function setRoleIcon(role, url) {
   try {
+    if (url instanceof URL && url.protocol === 'file:') {
+      await role.setIcon(await readFile(url), 'Cenar custom role icon');
+      return;
+    }
     const response = await fetch(url);
     if (response.ok) await role.setIcon(Buffer.from(await response.arrayBuffer()), 'Cenar custom role icon');
   } catch (error) {
@@ -455,12 +461,16 @@ export async function autoSetupPartnerAndCtv(client) {
         '1282638119497109524',
       ].filter((id) => id && guild.roles.cache.has(id)))];
       const enhancedRoleColors = guild.features.includes('ENHANCED_ROLE_COLORS');
+      const storeOne = guild.id === STORE_ONE_GUILD_ID;
       const partnerRole = await ensureRole(guild, client, IDS.partnerRole, {
-        name: 'Cenar Partner', colors: roleColorsFor(IDS.partnerRole, { enhanced: enhancedRoleColors }), iconUrl: ROLE_ICON_URLS.partner, mentionable: false,
+        name: 'Cenar Partner', colors: roleColorsFor(IDS.partnerRole, { enhanced: enhancedRoleColors, storeOne }),
+        iconUrl: storeOne ? storeRoleIconUrl(IDS.partnerRole) : ROLE_ICON_URLS.partner, mentionable: false,
         legacyIds: ['1367138153735131176'],
       });
       const ctvRole = await ensureRole(guild, client, IDS.ctvRole, {
-        name: isInternationalGuild(guild.id) ? 'Cenar Affiliate' : 'Cenar CTV', colors: roleColorsFor(IDS.ctvRole, { enhanced: enhancedRoleColors }), iconUrl: ROLE_ICON_URLS.ctv, mentionable: false,
+        name: isInternationalGuild(guild.id) ? 'Cenar Affiliate' : 'Cenar CTV',
+        colors: roleColorsFor(IDS.ctvRole, { enhanced: enhancedRoleColors, storeOne }),
+        iconUrl: storeOne ? storeRoleIconUrl(IDS.ctvRole) : ROLE_ICON_URLS.ctv, mentionable: false,
         legacyIds: ['1514858684151369832'],
       });
 

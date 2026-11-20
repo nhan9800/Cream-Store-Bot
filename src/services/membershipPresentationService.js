@@ -5,6 +5,7 @@ import { db } from '../database/db.js';
 import { config } from '../config.js';
 import { MEMBER_ROLES, MEMBERSHIP_REVISION } from '../config/membershipProgram.js';
 import { roleColorsFor } from '../config/roleColors.js';
+import { STORE_ROLE_PRESENTATION, storeRoleIconUrl } from '../config/storeRolePresentation.js';
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { STORE_ONE_GUILD_ID } from '../utils/locale.js';
 import { STORE_SERVICE_FORUM } from '../config/storeServiceForum202611.js';
@@ -58,11 +59,11 @@ const integerColor = value => value ? parseInt(value.replace('#',''),16) : null;
 export function rolePresentationPatch(role,tier,{enhanced,roleIcons,iconCurrent=false}={}) {
   const palette=roleColorsFor(tier.id,{enhanced});
   const colors={...palette,secondaryColor:palette.secondaryColor || null,tertiaryColor:palette.tertiaryColor || null};
-  const name=`${tier.symbol} ${tier.label}${tier.minSpent ? ` · ${tier.minSpent/1_000_000}M+` : ''}`;
+  const name = STORE_ROLE_PRESENTATION[tier.id].name;
   const patch={};
   if(role.name!==name) patch.name=name;
   if(['primaryColor','secondaryColor','tertiaryColor'].some(key=>(role.colors?.[key] ?? (key==='primaryColor' ? role.color : null))!==integerColor(colors[key]))) patch.colors=colors;
-  if(roleIcons && !iconCurrent) patch.icon=fs.readFileSync(assetPath(tier.key));
+  if(roleIcons && !iconCurrent) patch.icon=fs.readFileSync(storeRoleIconUrl(tier.id));
   return patch;
 }
 export async function refreshMembershipPresentation(client,{guildId=config.guildId}={}) {

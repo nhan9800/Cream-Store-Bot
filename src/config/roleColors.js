@@ -1,3 +1,5 @@
+import { STORE_ROLE_PRESENTATION } from './storeRolePresentation.js';
+
 /**
  * Curated vivid palettes for Cenar roles.
  *
@@ -35,8 +37,11 @@ export const ROLE_COLOR_PALETTES = Object.freeze({
   '1468389308426616895': Object.freeze({ primaryColor: '#FF0033', secondaryColor: '#FF7A00' }),
 });
 
-export function roleColorsFor(roleId, { enhanced = true } = {}) {
-  const palette = ROLE_COLOR_PALETTES[roleId];
+export function roleColorsFor(roleId, { enhanced = true, storeOne = true } = {}) {
+  const style = storeOne ? STORE_ROLE_PRESENTATION[roleId] : null;
+  const palette = style
+    ? { primaryColor: style.primaryColor, secondaryColor: style.secondaryColor }
+    : ROLE_COLOR_PALETTES[roleId];
   if (!palette) return null;
   return enhanced
     ? { ...palette }
