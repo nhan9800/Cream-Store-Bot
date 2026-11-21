@@ -14,7 +14,7 @@ const testPaths = vi.hoisted(() => {
 });
 
 import { db, initDatabase } from '../src/database/db.js';
-import { backupDatabase, verifyBackupRestore } from '../src/services/backupService.js';
+import { backupDatabase, readLatestBackupStatus, verifyBackupRestore } from '../src/services/backupService.js';
 
 describe('backup restore verification and status reporting', () => {
   beforeAll(() => initDatabase());
@@ -53,6 +53,10 @@ describe('backup restore verification and status reporting', () => {
     const savedStatus = JSON.parse(fs.readFileSync(path.resolve(process.cwd(), testPaths.backups, 'latest-status.json'), 'utf8'));
     expect(savedStatus.backupPath).toBe(second.backupPath);
     expect(savedStatus.overallStatus).toBe('local_only');
+
+    const storeStatusPath = path.resolve(process.cwd(), testPaths.backups, 'latest-status-shopbot-store1.json');
+    expect(JSON.parse(fs.readFileSync(storeStatusPath, 'utf8')).backupPath).toBe(second.backupPath);
+    expect(readLatestBackupStatus()).toMatchObject({ backupPath: second.backupPath, overallStatus: 'local_only' });
   });
 
   it('marks partial Telegram configuration as failed instead of successful', async () => {

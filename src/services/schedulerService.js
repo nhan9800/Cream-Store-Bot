@@ -1,5 +1,6 @@
 import { runDeepNotifications, runSubscriptionNotifications } from './deepNotificationService.js';
-import { backupDatabase } from './backupService.js';
+import { backupDatabase, readLatestBackupStatus } from './backupService.js';
+import { BACKUP_INTERVAL_MS, STARTUP_BACKUP_DELAY_MS, startupBackupReason } from './backupStartupPolicy.js';
 import { config } from '../config.js';
 import { startFeedbackTicketAutoClose, stopFeedbackTicketAutoClose } from './feedbackTicketAutoCloseService.js';
 import { runAutoVinhDanh } from './vinhDanhService.js';
@@ -20,6 +21,8 @@ import { AUTOMATIC_MARKETING_PAUSED } from '../config/marketingAutomationPolicy.
 
 let schedulerHandle = null;
 let backupHandle = null;
+let startupBackupHandle = null;
+let backupInFlight = false;
 let dailyPromotionHandle = null;
 let customerRoleHandle = null;
 let bootstrapped = false;
@@ -29,12 +32,29 @@ let lastYoutubeWarrantySync = 0;
 let lastDailyFlashSaleDate = null;
 
 async function autoBackupDatabase() {
+  if (backupInFlight) return;
+  backupInFlight = true;
   try {
     const report = await backupDatabase();
     console.log(`[BACKUP] Hoàn tất với trạng thái ${report.overallStatus}; Telegram=${report.telegram.status}, GoogleDrive=${report.googleDrive.status}, Encryption=${report.encryption?.status ?? 'n/a'}.`);
   } catch (error) {
     console.error('[BACKUP] Lỗi hệ thống sao lưu tự động:', error);
+  } finally {
+    backupInFlight = false;
   }
+}
+
+// Restart/deploy làm lịch 12 giờ đếm lại từ đầu, nên sao lưu bù khi bản gần nhất đã cũ
+// hoặc đích Telegram vừa được cấu hình mà chưa gửi thành công.
+function scheduleStartupBackup() {
+  if (startupBackupHandle) return;
+  const reason = startupBackupReason(readLatestBackupStatus());
+  if (!reason) return;
+  console.log(`[BACKUP] Sẽ sao lưu bù sau khởi động (${reason}) trong ${Math.round(STARTUP_BACKUP_DELAY_MS / 1000)} giây.`);
+  startupBackupHandle = setTimeout(() => {
+    startupBackupHandle = null;
+    autoBackupDatabase();
+  }, STARTUP_BACKUP_DELAY_MS);
 }
 
 export function startScheduler(client) {
@@ -227,7 +247,8 @@ export function startScheduler(client) {
   // Chạy file backup mỗi 12 tiếng một lần
   backupHandle = setInterval(() => {
     autoBackupDatabase();
-  }, 12 * 60 * 60 * 1000);
+  }, BACKUP_INTERVAL_MS);
+  scheduleStartupBackup();
 
   // Chạy độc lập với vòng bảo trì chính để một tác vụ mạng chậm không làm lỡ
   // bài Flash Sale 09:00. Khóa ngày và marker Discord vẫn ngăn đăng trùng.
@@ -251,6 +272,11 @@ export function stopScheduler() {
   if (backupHandle) {
     clearInterval(backupHandle);
     backupHandle = null;
+  }
+
+  if (startupBackupHandle) {
+    clearTimeout(startupBackupHandle);
+    startupBackupHandle = null;
   }
 
   if (dailyPromotionHandle) {

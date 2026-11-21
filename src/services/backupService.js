@@ -161,12 +161,31 @@ export function verifyBackupRestore(filePath) {
   }
 }
 
+// Hai store có thể dùng chung thư mục backup, nên trạng thái dùng để quyết định
+// sao lưu bù được lưu riêng theo store; latest-status.json giữ nguyên để tương thích.
+function storeBackupStatusPath() {
+  return path.join(BACKUP_DIR, `latest-status-${getBackupPrefix()}.json`);
+}
+
+export function readLatestBackupStatus() {
+  try {
+    return JSON.parse(fs.readFileSync(storeBackupStatusPath(), 'utf8'));
+  } catch {
+    return null;
+  }
+}
+
+function writeStatusFile(targetPath, report) {
+  const temporaryPath = `${targetPath}.${process.pid}.tmp`;
+  fs.writeFileSync(temporaryPath, `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600 });
+  if (fs.existsSync(targetPath)) fs.rmSync(targetPath, { force: true });
+  fs.renameSync(temporaryPath, targetPath);
+}
+
 function writeBackupStatus(report) {
   fs.mkdirSync(BACKUP_DIR, { recursive: true });
-  const temporaryPath = `${BACKUP_STATUS_PATH}.${process.pid}.tmp`;
-  fs.writeFileSync(temporaryPath, `${JSON.stringify(report, null, 2)}\n`, { mode: 0o600 });
-  if (fs.existsSync(BACKUP_STATUS_PATH)) fs.rmSync(BACKUP_STATUS_PATH, { force: true });
-  fs.renameSync(temporaryPath, BACKUP_STATUS_PATH);
+  writeStatusFile(BACKUP_STATUS_PATH, report);
+  writeStatusFile(storeBackupStatusPath(), report);
 }
 
 export async function backupDatabase({ snapshot = true } = {}) {
