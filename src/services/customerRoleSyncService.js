@@ -41,6 +41,15 @@ export function getCustomerRoleSyncState() {
   return { lastBackfill, lastRun, queue };
 }
 
+// A member who left is re-queued immediately by guildMemberAdd, so polling them
+// hourly forever only spends Discord requests. Back off 1h → 24h for absent members;
+// other failures keep the short exponential retry capped at one hour.
+export function retryDelayMinutes(error, attempts) {
+  const step = Math.max(0, Math.min(attempts - 1, 5));
+  if (error === 'MEMBER_NOT_FOUND') return Math.min(24 * 60, 60 * 2 ** step);
+  return Math.min(60, 2 ** Math.min(attempts, 6));
+}
+
 export function queueCustomerRoleSync(guildId, customerId, { preservePending = false } = {}) {
   if (!snowflake(guildId) || !snowflake(customerId)) return false;
   const now = nowIso();
@@ -126,7 +135,7 @@ export async function syncCustomerRolesNow(client, guildId, customerId, { notify
     }
     const error = result.error || result.failed?.[0]?.error || 'ROLE_SYNC_FAILED';
     const attempts = job.attempts + 1;
-    const delayMinutes = error === 'MEMBER_NOT_FOUND' ? 60 : Math.min(60, 2 ** Math.min(attempts, 6));
+    const delayMinutes = retryDelayMinutes(error, attempts);
     const now = nowIso();
     const saved = db.prepare(`UPDATE customer_role_sync_jobs SET status = ?, attempts = ?,
       retry_at = ?, last_error = ?, updated_at = ? WHERE guild_id = ? AND customer_id = ? AND revision = ?`)
