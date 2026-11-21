@@ -19,7 +19,7 @@ import { createOrder, markOrderPaid, payOrderWithWallet, recordOrderPayment } fr
 import { createTicket } from '../src/services/ticketService.js';
 import { upsertGuildConfig } from '../src/services/guildConfigService.js';
 import { applyCustomerRoles, resolveCustomerRoleTiers } from '../src/services/roleService.js';
-import { backfillCustomerRoleSync, getCustomerRoleSyncState, processPendingCustomerRoles, queueCustomerRoleSync, syncCustomerRolesNow } from '../src/services/customerRoleSyncService.js';
+import { backfillCustomerRoleSync, getCustomerRoleSyncState, processPendingCustomerRoles, queueCustomerRoleSync, retryDelayMinutes, syncCustomerRolesNow } from '../src/services/customerRoleSyncService.js';
 import { getCustomerPurchaseSummary } from '../src/services/customerActivityService.js';
 import { addWalletBalance, getWalletBalance } from '../src/services/walletService.js';
 import { finalizePaidOrder } from '../src/services/paymentService.js';
@@ -423,5 +423,13 @@ describe('paid website purchaser role synchronization', () => {
       expect(getWalletBalance(guildId, customerId)).toBe(0);
       expect(db.prepare("SELECT COUNT(*) AS count FROM wallet_transactions WHERE type = 'PAYMENT'").get().count).toBe(1);
     } finally { await new Promise((resolve) => server.close(resolve)); }
+  });
+});
+
+describe('customer role retry delays', () => {
+  it('backs absent members off from one hour to one day while other failures stay short', () => {
+    expect([1, 2, 3, 4, 5, 6, 9].map((attempts) => retryDelayMinutes('MEMBER_NOT_FOUND', attempts)))
+      .toEqual([60, 120, 240, 480, 960, 1440, 1440]);
+    expect([1, 2, 6, 9].map((attempts) => retryDelayMinutes('DISCORD_UNAVAILABLE', attempts))).toEqual([2, 4, 60, 60]);
   });
 });
