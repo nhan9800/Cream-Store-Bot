@@ -8,7 +8,7 @@ import { isSpotifyProductName, normalizeServiceSearch } from '../utils/serviceDe
 import { broadcastDashboardEvent } from './dashboardMiniServer.js';
 import { encrypt } from '../utils/crypto.js';
 import { awardOrderPoints, refundOrderPoints } from './loyaltyService.js';
-import { ensureStatusHistoryTable, recordStatusChange } from './orderStateMachine.js';
+import { canCancelUnpaidOrder, ensureStatusHistoryTable, recordStatusChange } from './orderStateMachine.js';
 import { syncCtvOrderLog } from './ctvOrderLogService.js';
 import {
   markAdminOrderReminderLifecycleChanged,
@@ -47,7 +47,7 @@ function attachPaymentMessageStmt(){return db.prepare('UPDATE orders SET payment
 function savePaymentLinkStmt(){return db.prepare('UPDATE orders SET payment_link_id=?, payment_checkout_url=?, payment_qr_code=?, payment_qr_url=?, payment_qr_text=?, payment_expired_at=?, updated_at=? WHERE order_code=?');}
 function resetPaymentLinkStmt(){return db.prepare('UPDATE orders SET payment_link_id=NULL, payment_checkout_url=NULL, payment_qr_code=NULL, payment_qr_url=NULL, payment_qr_text=NULL, payment_expired_at=NULL, payment_message_id=NULL, payos_order_code=?, updated_at=? WHERE order_code=?');}
 function completeOrderStmt(){return db.prepare(`UPDATE orders SET status='COMPLETED', status_changed_at=?, completed_by_id=?, completed_at=?, feedback_requested_at=?, feedback_due_at=?, updated_at=? WHERE order_code=? AND status=? AND payment_status=? AND customer_id=? AND guild_id=? AND total_amount=? AND updated_at=? AND status NOT IN ('CANCELLED','REFUNDED','FAILED') AND payment_status NOT IN ('CANCELLED','REFUNDED')`);}
-function cancelOrderStmt(){return db.prepare(`UPDATE orders SET status='CANCELLED', status_changed_at=?, payment_status = CASE WHEN payment_status IN ('PAID','FREE') THEN payment_status ELSE 'CANCELLED' END, payment_cancel_reason=COALESCE(?, payment_cancel_reason), updated_at=? WHERE order_code=?`);}
+function cancelOrderStmt(){return db.prepare(`UPDATE orders SET status='CANCELLED', status_changed_at=?, payment_status='CANCELLED', payment_cancel_reason=COALESCE(?, payment_cancel_reason), updated_at=? WHERE order_code=?`);}
 function saveDeliveryStmt(){return db.prepare(`UPDATE orders SET delivered_by_id=?, delivered_at=?, credential_email=?, credential_password=?, credential_profile=?, credential_pin=?, delivery_login_url=?, claim_notes=?, delivery_dm_channel_id=?, delivery_dm_message_id=?, updated_at=? WHERE order_code=?`);}
 function markFeedbackSubmittedStmt(){return db.prepare(`UPDATE orders SET feedback_submitted_at=?, updated_at=? WHERE order_code=?`);}
 function insertFeedbackStmt(){return db.prepare(`INSERT INTO feedbacks (guild_id,order_id,order_code,ticket_id,ticket_code,customer_id,stars,content,feedback_channel_id,feedback_message_id,product_id,product_name,is_visible,created_at,updated_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1,?,?)`);}
@@ -225,7 +225,7 @@ export function markOrderCompleted(orderCode, completedById, timeoutHours = conf
   const updated = getOrderByCode(orderCode);
   markAdminOrderReminderLifecycleChanged(order, updated);
   if (order.status !== updated.status) {
-    recordStatusChange(db, { orderCode, previousStatus: order.status, newStatus: updated.status, changedBy: completedById || 'SYSTEM', reason: 'Order completed and delivered' });
+    recordStatusChange(db, { orderCode, previousStatus: order.status, newStatus: updated.status, actor: completedById || 'SYSTEM', reason: 'Order marked completed' });
   }
   syncCustomerStats(updated.guild_id, updated.customer_id);
   scheduleCtvOrderLogSync(updated);
@@ -251,13 +251,20 @@ export function markOrderCompleted(orderCode, completedById, timeoutHours = conf
   broadcastDashboardEvent('order_update');
   return updated;
 }
-export function cancelOrder(orderCode, reason = null){
-  const order=getOrderByCode(orderCode); if(!order) return null; 
-  cancelOrderStmt().run(nowIso(), reason ?? null, nowIso(), orderCode); 
-  clearClaimStmt().run(nowIso(), orderCode); 
-  if (order.status !== 'CANCELLED') {
-    recordStatusChange(db, { orderCode, previousStatus: order.status, newStatus: 'CANCELLED', changedBy: 'SYSTEM', reason: reason || 'Order cancelled' });
-  } 
+export function cancelOrder(orderCode, reason = null, { actorId = 'SYSTEM', expectedOrder = null } = {}) {
+  const result = db.transaction(() => {
+    const order = getOrderByCode(orderCode);
+    if (!canCancelUnpaidOrder(order)) return null;
+    if (expectedOrder && ['guild_id', 'customer_id', 'ticket_channel_id', 'payment_provider', 'payment_link_id',
+      'payos_order_code', 'total_amount'].some(field => order[field] !== expectedOrder[field])) return null;
+    const timestamp = nowIso();
+    cancelOrderStmt().run(timestamp, reason, timestamp, orderCode);
+    clearClaimStmt().run(timestamp, orderCode);
+    recordStatusChange(db, { orderCode, previousStatus: order.status, newStatus: 'CANCELLED', actor: actorId, reason: reason || 'Order cancelled' });
+    return { order, updated: getOrderByCode(orderCode) };
+  }).immediate();
+  if (!result) return null;
+  const { order, updated } = result;
   
   if (order.guild_id !== 'WEB' && order.customer_id !== 'WEB') {
     try {
@@ -267,7 +274,6 @@ export function cancelOrder(orderCode, reason = null){
     }
   }
 
-  const updated=getOrderByCode(orderCode);
   markAdminOrderReminderLifecycleChanged(order, updated);
   syncCustomerStats(updated.guild_id, updated.customer_id); 
   scheduleCtvOrderLogSync(updated);
@@ -344,7 +350,7 @@ export function markOrderPaid(orderCode,{amountPaid,transactionId,transactionCon
   return updated;
 }
 
-export function restoreCancelledPayOSOrder({ orderCode, guildId, actorId }) {
+export function restoreCancelledPayOSOrder({ orderCode, guildId, actorId, complete = false }) {
   const { order, updated } = db.transaction(() => {
     const order = getOrderByCode(orderCode);
     if (!order || order.guild_id !== guildId || order.status !== 'CANCELLED') {
@@ -386,9 +392,11 @@ export function restoreCancelledPayOSOrder({ orderCode, guildId, actorId }) {
       reason: 'Khôi phục đơn đã hủy bằng giao dịch PayOS đã xác nhận',
       metadata: { paymentEventId: receipt.id },
     });
-    return { order, updated: getOrderByCode(orderCode) };
+    const updated = complete ? markOrderCompleted(orderCode, actorId) : getOrderByCode(orderCode);
+    return { order, updated };
   }).immediate();
 
+  if (complete) return updated;
   markAdminOrderReminderLifecycleChanged(order, updated);
   syncCustomerStats(updated.guild_id, updated.customer_id);
   scheduleCtvOrderLogSync(updated);

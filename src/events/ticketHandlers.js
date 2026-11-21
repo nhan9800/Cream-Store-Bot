@@ -31,7 +31,8 @@ import { getOrderByCode, getLatestOrderByTicketChannel, cancelOrder, getQueuePos
 import { closeTicket, createTicket, getOpenTicketByCustomer, getTicketByChannelId, getTicketById, keepTicketOpen } from '../services/ticketService.js';
 import { archiveTicketConversation } from '../services/ticketClosureService.js';
 import { sendOrderCancelledFlow, updateOrderLogMessage } from '../services/notificationService.js';
-import { cancelPayOSPaymentLink } from '../services/paymentService.js';
+import { verifyPayOSInvoiceCancellation } from '../services/paymentService.js';
+import { canCancelUnpaidOrder, ORDER_CANCEL_BLOCKED } from '../services/orderStateMachine.js';
 import { ensureRateLimit } from '../services/abuseService.js';
 import { sendTicketAiWelcome } from '../services/aiSupportAutomationService.js';
 import { getCenarHub } from '../services/cenarHub.js';
@@ -626,12 +627,17 @@ export async function handleTicketClose(interaction, ticketId) {
       // Nếu Admin đóng ticket khi khách chưa thanh toán, đơn liên kết phải đóng
       // cùng trạng thái CANCELLED ở log và khách nhận được DM rõ lý do.
       const linkedOrder = getLatestOrderByTicketChannel(ticket.channel_id || interaction.channelId);
-      if (linkedOrder?.status === 'PENDING_PAYMENT' && linkedOrder.payment_status !== 'PAID') {
+      if (linkedOrder?.status === 'PENDING_PAYMENT' && canCancelUnpaidOrder(linkedOrder)) {
         const cancellationReason = 'Ticket đã đóng do quá hạn/chưa hoàn tất thanh toán';
-        await cancelPayOSPaymentLink(linkedOrder, cancellationReason).catch((error) => {
-          console.error(`[TICKET_CLOSE] Không thể hủy link PayOS ${linkedOrder.order_code}:`, error.message);
+        const confirmed = linkedOrder.payment_provider !== 'PAYOS' || !linkedOrder.payment_link_id
+          || await verifyPayOSInvoiceCancellation(linkedOrder, cancellationReason).then(() => true).catch((error) => {
+            console.error(`[TICKET_CLOSE] PayOS không xác nhận ${linkedOrder.order_code}:`, error.code || error.name);
+            return false;
+          });
+        const cancelledOrder = confirmed && cancelOrder(linkedOrder.order_code, cancellationReason, {
+          expectedOrder: linkedOrder,
+          actorId: interaction.user.id,
         });
-        const cancelledOrder = cancelOrder(linkedOrder.order_code, cancellationReason);
         if (cancelledOrder) {
           await updateOrderLogMessage(interaction.guild, cancelledOrder).catch(() => null);
           await sendOrderCancelledFlow({
@@ -747,11 +753,12 @@ export async function handleQueueView(interaction, orderCode) {
   });
 }
 
-export async function handleOrderCancel(interaction, orderCode) {
+export async function handleOrderCancel(interaction, orderCode, { customerOnly = false } = {}) {
   const E = createEmojiResolver(interaction.guildId);
+  await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   const order = getOrderByCode(orderCode);
-  if (!order) {
-    await safeReply(interaction, { content: `${E('status_warn')} Không tìm thấy đơn hàng.`, ephemeral: true });
+  if (!order || order.guild_id !== interaction.guildId) {
+    await interaction.editReply(`${E('status_warn')} Không tìm thấy đơn hàng trong máy chủ này.`);
     return;
   }
 
@@ -760,25 +767,31 @@ export async function handleOrderCancel(interaction, orderCode) {
   const isOwner = order.customer_id === interaction.user.id;
   const isStaff = isStaffMember(member, guildConfig);
 
-  if (!isOwner && !isStaff) {
-    await safeReply(interaction, { content: `${E('status_warn')} Bạn không có quyền hủy đơn này.`, ephemeral: true });
+  if ((!isOwner && !isStaff) || (customerOnly && (!isOwner || order.ticket_channel_id !== interaction.channelId))) {
+    await interaction.editReply(`${E('status_warn')} Bạn không có quyền hủy đơn này.`);
     return;
   }
 
-  if (!['PENDING_PAYMENT', 'PROCESSING'].includes(order.status)) {
-    await safeReply(interaction, { content: `${E('status_warn')} Chỉ có thể hủy đơn đang chờ thanh toán hoặc đang xử lý.`, ephemeral: true });
+  if (!canCancelUnpaidOrder(order)) {
+    await interaction.editReply(`${E('status_warn')} ${ORDER_CANCEL_BLOCKED}`);
     return;
   }
 
   try {
-    if (order.payment_status !== 'PAID' && order.status === 'PENDING_PAYMENT') {
-      await cancelPayOSPaymentLink(order, `Cancelled by ${interaction.user.tag}`);
+    if (order.payment_provider === 'PAYOS' && order.payment_link_id) {
+      await verifyPayOSInvoiceCancellation(order, 'Khách hoặc staff yêu cầu hủy đơn chưa thanh toán');
     }
   } catch (error) {
-    console.error('[ORDER CANCEL] PayOS cancel failed:', error.message);
+    console.error('[ORDER CANCEL] PayOS cancel failed:', error.code || error.name);
+    await interaction.editReply(`${E('status_warn')} Chưa xác nhận được việc hủy hóa đơn PayOS. Vui lòng kiểm tra lại.`);
+    return;
   }
 
-  const cancelled = cancelOrder(orderCode, `Cancelled by ${interaction.user.tag}`);
+  const cancelled = cancelOrder(orderCode, 'Hủy qua nút Discord', { actorId: interaction.user.id, expectedOrder: order });
+  if (!cancelled) {
+    await interaction.editReply(`${E('status_warn')} Đơn vừa thay đổi. Kiểm tra lại trạng thái trước khi hủy.`);
+    return;
+  }
   await updateOrderLogMessage(interaction.guild, cancelled);
   // Chỉ xóa components của tin hiện tại nếu không phải kênh log (tránh làm trắng V2 log embed)
   if (interaction.channelId !== cancelled.order_log_channel_id) {
@@ -794,10 +807,12 @@ export async function handleOrderCancel(interaction, orderCode) {
     }).catch(() => null);
   }
 
-  await safeReply(interaction, {
-    content: `${E('status_cross')} Đơn \`${cancelled.order_code}\` đã được hủy.`,
-    ephemeral: true,
+  await emitStaffLog(interaction.client, {
+    guildId: interaction.guildId, actorId: interaction.user.id, action: 'ORDER_CANCELLED',
+    detail: customerOnly ? 'Hủy đơn chưa thanh toán qua nút khách hàng' : 'Hủy đơn chưa thanh toán qua nút Discord',
+    relatedOrderCode: cancelled.order_code,
   });
+  await interaction.editReply(`${E('status_cross')} Đơn \`${cancelled.order_code}\` đã được hủy.`);
 }
 
 

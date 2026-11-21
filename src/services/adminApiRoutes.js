@@ -14,7 +14,8 @@ import { addWalletBalance, getWalletBalance } from './walletService.js';
 import { createCoupon, listCoupons, deactivateCoupon } from './couponService.js';
 import * as subService from './subscriptionService.js';
 import { getAiKnowledge, updateAiKnowledge } from './aiKnowledgeService.js';
-import { transitionOrderStatus } from './orderStateMachine.js';
+import { normalizeStatus, transitionOrderStatus } from './orderStateMachine.js';
+import { getOrderByCode, OrderPaymentError, restoreCancelledPayOSOrder } from './orderService.js';
 import { getOrderProgress, updateOrderProgress, OrderProgressError } from './orderProgressService.js';
 import { hydrateOrderDiscordCustomer, OrderLinkError, resolveOrderLink } from './orderLinkService.js';
 import { encrypt, decrypt } from '../utils/crypto.js';
@@ -660,18 +661,29 @@ export function registerAdminRoutes(app) {
 
   app.put('/api/bot/admin/orders/:code/status', requireAdminRole, async (req, res) => {
     try {
-      const { status } = req.body;
-      const result = transitionOrderStatus(req.params.code, status, { changedBy: req.user?.email || 'ADMIN', reason: 'Admin dashboard manual update', dbInstance: db });
+      const status = normalizeStatus(req.body.status);
+      const code = String(req.params.code || '').trim().toUpperCase();
+      const current = getOrderByCode(code);
+      const client = req.app.locals.discordClient;
+      const actorId = String(req.header('x-discord-id') || client?.user?.id || 'SYSTEM');
+      const paidCancelledRecovery = current?.status === 'CANCELLED' && current.payment_status === 'PAID'
+        && ['PROCESSING', 'COMPLETED'].includes(status);
+      if (paidCancelledRecovery && req.adminRole !== 'admin') {
+        return errorResponse(res, 403, 'Admin cần đối soát và xử lý đơn đã nhận tiền nhưng từng bị hủy.');
+      }
+      const result = paidCancelledRecovery
+        ? { success: true, changed: true, order: restoreCancelledPayOSOrder({
+          orderCode: code, guildId: config.guildId, actorId, complete: status === 'COMPLETED',
+        }) }
+        : transitionOrderStatus(code, status, { changedBy: actorId, reason: 'Admin dashboard manual update', dbInstance: db });
       if (!result.success) {
         return res.status(400).json({ ok: false, error: result.error });
       }
       if (result.changed) {
-        const client = req.app.locals.discordClient;
         const guild = client?.guilds?.cache?.get(result.order.guild_id)
           || await client?.guilds?.fetch?.(result.order.guild_id).catch(() => null);
         if (guild) {
           await updateOrderLogMessage(guild, result.order).catch(() => null);
-          const actorId = String(req.header('x-discord-id') || client.user?.id || 'SYSTEM');
           if (result.order.status === 'COMPLETED') {
             await sendCompletedFlow({ guild, order: result.order, actorId, supportId: actorId }).catch((error) => {
               console.error('[ADMIN] completion notification', error);
@@ -686,9 +698,14 @@ export function registerAdminRoutes(app) {
             }
           }
         }
+        if (paidCancelledRecovery) {
+          recordStaffLog({ guildId: result.order.guild_id, actorId, action: 'ORDER_PAYMENT_RESTORED',
+            relatedOrderCode: code, detail: `Đối soát PayOS và cập nhật sang ${status}` });
+        }
       }
       res.json({ ok: true, data: result.order });
     } catch (e) {
+      if (e instanceof OrderPaymentError) return errorResponse(res, 409, e.message);
       console.error('[ADMIN]', e); res.status(500).json({ ok: false, error: 'Lỗi máy chủ nội bộ.' });
     }
   });

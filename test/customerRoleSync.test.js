@@ -15,7 +15,7 @@ const databasePath = vi.hoisted(() => {
 });
 
 import { db, initDatabase, nowIso } from '../src/database/db.js';
-import { createOrder, markOrderPaid, payOrderWithWallet, cancelOrder, recordOrderPayment } from '../src/services/orderService.js';
+import { createOrder, markOrderPaid, payOrderWithWallet, recordOrderPayment } from '../src/services/orderService.js';
 import { createTicket } from '../src/services/ticketService.js';
 import { upsertGuildConfig } from '../src/services/guildConfigService.js';
 import { applyCustomerRoles, resolveCustomerRoleTiers } from '../src/services/roleService.js';
@@ -120,7 +120,7 @@ describe('paid website purchaser role synchronization', () => {
   it('does not award customer/VIP roles for unpaid, partially paid, cancelled or refunded orders', async () => {
     pendingOrder(8_000_000);
     const cancelled = paidOrder();
-    cancelOrder(cancelled.order_code, 'cancelled');
+    db.prepare("UPDATE orders SET status = 'CANCELLED' WHERE order_code = ?").run(cancelled.order_code);
     const refunded = paidOrder();
     db.prepare("UPDATE orders SET status = 'REFUNDED' WHERE order_code = ?").run(refunded.order_code);
     const partial = pendingOrder(3_000_000);

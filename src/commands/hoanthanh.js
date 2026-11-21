@@ -47,6 +47,13 @@ export async function execute(interaction) {
     return;
   }
 
+  if (currentOrder.status === 'CANCELLED' && currentOrder.payment_status === 'PAID') {
+    await interaction.editReply({
+      content: `${E('status_warn')} Đơn đã nhận tiền nhưng từng bị hủy. Manager dùng \`/quanly-don\` để đối soát và chọn đưa về xử lý hoặc hoàn thành.`,
+    });
+    return;
+  }
+
   let order = markOrderCompleted(orderCode, interaction.user.id, config.feedbackTimeoutHours);
   order = ensureOrderExpiry(order.order_code, new Date(order.completed_at ?? Date.now())) ?? order;
   await updateOrderLogMessage(interaction.guild, order);

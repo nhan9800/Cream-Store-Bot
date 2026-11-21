@@ -13,7 +13,7 @@ const databasePath = vi.hoisted(() => {
 import { db, initDatabase } from '../src/database/db.js';
 import { config } from '../src/config.js';
 import { createTicket, closeTicket } from '../src/services/ticketService.js';
-import { createOrder, getOrderByCode, queueOrderDelivery } from '../src/services/orderService.js';
+import { createOrder, getOrderByCode, queueOrderDelivery, recordOrderPayment } from '../src/services/orderService.js';
 import { getOrderProgress, updateOrderProgress } from '../src/services/orderProgressService.js';
 import { registerAdminRoutes } from '../src/services/adminApiRoutes.js';
 import { deliverPaidOrder } from '../src/services/autoDeliveryService.js';
@@ -89,6 +89,27 @@ describe('live order progress', () => {
     expect(db.prepare('SELECT actor_id FROM order_progress_events WHERE order_code=?').get(order.order_code).actor_id).toBe('admin-progress');
     const read = await fetch(url, { headers }); expect((await read.json()).data.progress.stage).toBe('PREPARING');
     config.guildId = 'other'; expect((await fetch(url, { headers })).status).toBe(404); config.guildId = guild;
+  });
+  it('allows only an admin to complete a historically cancelled order using its full PayOS receipt', async () => {
+    const order = fixture(false);
+    const txnId = 'synthetic-original-receipt';
+    recordOrderPayment({ orderCode: order.order_code, provider: 'PAYOS', transactionId: txnId,
+      amount: order.total_amount, rawPayload: { amount: order.total_amount } });
+    db.prepare("UPDATE orders SET status='CANCELLED' WHERE order_code=?").run(order.order_code);
+    db.prepare("INSERT INTO web_users(id,email,role) VALUES ('staff-progress','progress-staff@example.test','staff')").run();
+    const request = id => fetch(`${base}/api/bot/admin/orders/${order.order_code}/status`, {
+      method: 'PUT', headers: { 'x-bot-api-key': 'live-progress-test-key', 'x-user-id': id, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'COMPLETED' }),
+    });
+    expect((await request('staff-progress')).status).toBe(403);
+    expect(getOrderByCode(order.order_code).status).toBe('CANCELLED');
+    const first = await request('admin-progress');
+    expect(first.status).toBe(200);
+    expect((await first.json()).data).toMatchObject({ status: 'COMPLETED', payment_status: 'PAID',
+      amount_paid: order.total_amount, paid_transaction_id: txnId, delivered_at: null });
+    expect((await request('admin-progress')).status).toBe(200);
+    expect(db.prepare("SELECT COUNT(*) AS count FROM order_status_history WHERE order_code=? AND new_status='COMPLETED'")
+      .get(order.order_code).count).toBe(1);
   });
   it('manual orders do not consume stock even when stock is available', async () => {
     const order = fixture();

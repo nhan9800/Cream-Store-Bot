@@ -19,12 +19,14 @@ const testDatabasePath = vi.hoisted(() => {
 
 import { db, initDatabase, nowIso } from '../src/database/db.js';
 import { execute as manageOrder } from '../src/commands/quanly-don.js';
+import { handleOrderCancel } from '../src/events/ticketHandlers.js';
 import { encrypt } from '../src/utils/crypto.js';
 import {
   cancelOrder,
   createOrder,
   getOrderByCode,
   recordOrderPayment,
+  restoreCancelledPayOSOrder,
 } from '../src/services/orderService.js';
 import { deliverPaidOrder } from '../src/services/autoDeliveryService.js';
 import { finalizePaidOrder, reconcileRecentPayOSPayments } from '../src/services/paymentService.js';
@@ -295,6 +297,39 @@ describe('payment and fulfillment reliability', () => {
     expect(getOrderByCode(order.order_code)).toMatchObject({ status: 'CANCELLED', payment_status: 'PAID' });
     expect(db.prepare('SELECT * FROM order_fulfillments WHERE order_code = ?').get(order.order_code)).toBeUndefined();
     expect(db.prepare("SELECT status FROM account_stock LIMIT 1").get().status).toBe('AVAILABLE');
+  });
+
+  it('blocks both versions of a stale Discord cancel button after the payment commits', async () => {
+    const order = createPendingOrder(1, process.env.GUILD_ID);
+    const { updated: paid } = confirmPayment(order, 'paid-before-stale-button');
+    for (const customerOnly of [false, true]) {
+      const interaction = confirmPaymentInteraction(order);
+      interaction.user.id = order.customer_id;
+      interaction.channelId = order.ticket_channel_id;
+      interaction.message = { edit: vi.fn() };
+      await handleOrderCancel(interaction, order.order_code, { customerOnly });
+      expect(interaction.editReply).toHaveBeenLastCalledWith(expect.stringContaining('đã nhận tiền'));
+      expect(interaction.message.edit).not.toHaveBeenCalled();
+    }
+    expect(cancelOrder(order.order_code, 'stale checkout snapshot', { expectedOrder: order })).toBeNull();
+    expect(getOrderByCode(order.order_code)).toEqual(paid);
+  });
+
+  it('restores and completes a paid order cancelled by older code in one administrative action', () => {
+    const order = createPendingOrder(1, process.env.GUILD_ID);
+    const { updated: paid } = confirmPayment(order, 'complete-recovered-order');
+    db.prepare("UPDATE orders SET status='CANCELLED' WHERE order_code=?").run(order.order_code);
+    const actorId = 'synthetic-admin';
+    const result = restoreCancelledPayOSOrder({ orderCode: order.order_code, guildId: order.guild_id, actorId, complete: true });
+    expect(result).toMatchObject({ status: 'COMPLETED', payment_status: 'PAID', completed_by_id: actorId,
+      paid_at: paid.paid_at, paid_transaction_id: paid.paid_transaction_id, amount_paid: paid.amount_paid,
+      delivered_at: null });
+    expect(result.completed_at).toBeTruthy();
+    expect(() => restoreCancelledPayOSOrder({ orderCode: order.order_code, guildId: order.guild_id, actorId, complete: true }))
+      .toThrow(expect.objectContaining({ code: 'CANCELLED_ORDER_NOT_FOUND' }));
+    expect(db.prepare("SELECT count(*) AS count FROM payment_events WHERE order_code=?").get(order.order_code).count).toBe(1);
+    expect(db.prepare("SELECT count(*) AS count FROM order_status_history WHERE order_code=? AND new_status='COMPLETED'")
+      .get(order.order_code).count).toBe(1);
   });
 
   it('restores a cancelled Discord order via /quanly-don using its original PayOS receipt only once', async () => {

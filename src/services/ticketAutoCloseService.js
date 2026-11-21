@@ -111,6 +111,7 @@ function paymentTicketState(ticket, now = Date.now()) {
     (ticket_id=? OR ticket_channel_id=? OR order_code=?)`).all(ticket.guild_id, ticket.id,
     ticket.channel_id, ticket.related_order_code || '');
   if (!linked.length || linked.some(order => ['PAID', 'FREE'].includes(order.payment_status)
+    || (order.status === 'PENDING_PAYMENT' && (order.paid_at || Number(order.amount_paid) > 0))
     || !['PENDING_PAYMENT', 'CANCELLED', 'REFUNDED'].includes(order.status))) return null;
   const retention = getUnpaidOrderTicketRetention(ticket, linked, config.unpaidOrderTicketHours, now);
   return retention?.deadline === null || !retention ? null : { ticket, ...retention };

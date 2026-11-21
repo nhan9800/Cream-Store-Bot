@@ -22,7 +22,7 @@ vi.mock('../src/services/deliverySubscriptionService.js', () => ({
 import { db, initDatabase } from '../src/database/db.js';
 import { encrypt } from '../src/utils/crypto.js';
 import { createTicket } from '../src/services/ticketService.js';
-import { cancelOrder, createOrder, getOrderByCode, markOrderCompleted, markOrderPaid } from '../src/services/orderService.js';
+import { createOrder, getOrderByCode, markOrderCompleted, markOrderPaid } from '../src/services/orderService.js';
 import { detectDeliverySubscriptionService, syncDeliverySubscription } from '../src/services/deliverySubscriptionService.js';
 import { updateOrderLogMessage } from '../src/services/notificationService.js';
 import { getCenarHub } from '../src/services/cenarHub.js';
@@ -59,7 +59,7 @@ afterAll(() => {
 
 describe('manual delivery fences around Discord I/O', () => {
   it('does not send credentials or resurrect an order cancelled during DM setup', async () => {
-    const f = fixture({ onCreateDm: code => cancelOrder(code, 'synthetic cancellation during createDM') });
+    const f = fixture({ onCreateDm: code => db.prepare("UPDATE orders SET status = 'CANCELLED' WHERE order_code = ?").run(code) });
     await execute(f.interaction);
     expect(f.send).not.toHaveBeenCalled();
     expect(getOrderByCode(f.code)).toMatchObject({ status: 'CANCELLED', completed_at: null, delivered_at: null });
