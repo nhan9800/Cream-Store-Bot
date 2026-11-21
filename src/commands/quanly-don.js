@@ -5,6 +5,7 @@ import { getOrderByCode, cancelOrder, markOrderPaid, markOrderCompleted, ensureO
 import { sendOrderCancelledFlow, updateOrderLogMessage, sendCompletedFlow } from '../services/notificationService.js';
 import { emitStaffLog } from '../services/staffLogService.js';
 import { assertStaffCapability } from '../utils/permissions.js';
+import { ORDER_CANCEL_BLOCKED } from '../services/orderStateMachine.js';
 
 export const data = new SlashCommandBuilder()
   .setName('quanly-don')
@@ -47,7 +48,13 @@ export async function execute(interaction) {
         await interaction.editReply(`${E('status_info')} Đơn này đã bị hủy từ trước.`);
         return;
       }
-      const order = cancelOrder(orderCode, 'Hủy thủ công qua lệnh quản lý');
+      const order = currentOrder.guild_id === interaction.guildId
+        ? cancelOrder(orderCode, 'Hủy thủ công qua lệnh quản lý', { actorId: interaction.user.id })
+        : null;
+      if (!order) {
+        await interaction.editReply(`${E('status_warn')} ${ORDER_CANCEL_BLOCKED}`);
+        return;
+      }
       await updateOrderLogMessage(interaction.guild, order);
       await emitStaffLog(interaction.client, { guildId: interaction.guildId, actorId: interaction.user.id, targetId: order.customer_id, action: 'ORDER_EDITED', detail: 'Hủy đơn', relatedOrderCode: order.order_code });
 
@@ -102,7 +109,9 @@ export async function execute(interaction) {
         return;
       }
       // Khác với /hoanthanh, lệnh này là Override admin, cho phép hoàn thành ngay cả khi chưa thanh toán xong (nếu staff muốn vậy)
-      let order = markOrderCompleted(orderCode, interaction.user.id, 24);
+      let order = currentOrder.status === 'CANCELLED' && currentOrder.payment_status === 'PAID'
+        ? restoreCancelledPayOSOrder({ orderCode, guildId: interaction.guildId, actorId: interaction.user.id, complete: true })
+        : markOrderCompleted(orderCode, interaction.user.id, 24);
       order = ensureOrderExpiry(order.order_code, new Date(order.completed_at ?? Date.now())) ?? order;
       await updateOrderLogMessage(interaction.guild, order);
       const result = await sendCompletedFlow({ guild: interaction.guild, order, actorId: interaction.user.id, supportId: interaction.user.id });

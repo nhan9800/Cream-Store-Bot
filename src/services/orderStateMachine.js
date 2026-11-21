@@ -101,6 +101,15 @@ export function canTransition(oldStatusRaw, newStatusRaw) {
   return allowed.includes(newStatus);
 }
 
+export const ORDER_CANCEL_BLOCKED = 'Đơn đã nhận tiền hoặc đã kết thúc. Cần đối soát trước khi đổi trạng thái.';
+
+export function canCancelUnpaidOrder(order) {
+  return Boolean(order && ['PENDING_PAYMENT', 'PAYMENT_PROCESSING', 'PROCESSING', 'WAITING_STAFF'].includes(normalizeStatus(order.status))
+    && !['PAID', 'FREE', 'REFUNDED'].includes(order.payment_status)
+    && !order.paid_at && !order.completed_at && !order.delivered_at
+    && Number(order.amount_paid ?? 0) === 0);
+}
+
 export function ensureStatusHistoryTable(db) {
   db.prepare(`
     CREATE TABLE IF NOT EXISTS order_status_history (
@@ -137,13 +146,17 @@ export const recordStatusChange = recordStatusHistory;
 
 export function transitionOrder(db, orderCode, newStatusRaw, actor = 'system', reason = '', metadata = null) {
   const codeUpper = String(orderCode).toUpperCase();
-  const order = db.prepare('SELECT order_code, status FROM orders WHERE UPPER(order_code) = ?').get(codeUpper);
+  const order = db.prepare('SELECT * FROM orders WHERE UPPER(order_code) = ?').get(codeUpper);
   if (!order) {
     throw new Error(`Order not found: ${orderCode}`);
   }
 
   const normOld = normalizeStatus(order.status);
   const normNew = normalizeStatus(newStatusRaw);
+
+  if (normNew === ORDER_STATUSES.CANCELLED && normOld !== normNew && !canCancelUnpaidOrder(order)) {
+    throw new Error(ORDER_CANCEL_BLOCKED);
+  }
 
   if (!canTransition(normOld, normNew)) {
     const errorMsg = `Invalid order transition for ${orderCode} from ${normOld} to ${normNew}`;
@@ -207,7 +220,7 @@ export function transitionOrderStatus(orderCode, status, options = {}) {
   try {
     const actor = options.changedBy || options.actor || 'ADMIN';
     const reason = options.reason || 'Manual status update';
-    const trans = transitionOrder(dbInst, orderCode, status, actor, reason);
+    const trans = dbInst.transaction(() => transitionOrder(dbInst, orderCode, status, actor, reason)).immediate();
     const order = dbInst.prepare('SELECT * FROM orders WHERE UPPER(order_code) = ?').get(String(orderCode).toUpperCase());
     return { success: true, order, changed: trans.changed };
   } catch (err) {

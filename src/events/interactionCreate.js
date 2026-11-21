@@ -29,7 +29,6 @@ import { getCustomerFlag, getTicketMuteStatus, setTicketMuteStatus } from '../se
 import { emitStaffLog } from '../services/staffLogService.js';
 import { joinGiveaway } from '../services/giveawayService.js';
 import {
-  cancelOrder,
   getLatestOrderByTicketChannel,
   getOrderByCode,
   getQueuePosition,
@@ -43,9 +42,9 @@ import {
   completeWarranty,
 } from '../services/orderService.js';
 import { publishFeedback } from '../services/feedbackService.js';
-import { cancelPayOSPaymentLink, confirmOrderPaidManually, sendOrRefreshPaymentQr } from '../services/paymentService.js';
+import { confirmOrderPaidManually, sendOrRefreshPaymentQr } from '../services/paymentService.js';
 import { sendCompletedFlow, updateOrderLogMessage } from '../services/notificationService.js';
-import { closeTicket, closeTicketIfOpen, createTicket, getOpenTicketByCustomer, getTicketByChannelId, getTicketById } from '../services/ticketService.js';
+import { closeTicket, closeTicketIfOpen, createTicket, getOpenTicketByCustomer, getTicketById } from '../services/ticketService.js';
 import { archiveTicketConversation } from '../services/ticketClosureService.js';
 import {
   openWarrantyTicket,
@@ -966,38 +965,8 @@ export function registerInteractionHandler(client, commands) {
 
       // Customer cancel order button
       if (interaction.isButton() && interaction.customId.startsWith('order:cancel_customer:')) {
-        await interaction.deferReply({ ephemeral: true });
         const orderCode = interaction.customId.split(':')[2];
-        try {
-          cancelOrder(orderCode);
-          const order = getOrderByCode(orderCode);
-          if (order) {
-            const ticket = getTicketByChannelId(interaction.channelId);
-            if (ticket && ticket.status !== 'CLOSED') {
-              const E_cc = createEmojiResolver(interaction.guildId);
-              const archiveResult = await archiveTicketConversation({
-                guild: interaction.guild,
-                ticket,
-                channel: interaction.channel,
-                closedById: interaction.client.user.id,
-              });
-              if (archiveResult.archived) {
-                closeTicket(ticket.id, interaction.client.user.id);
-                await interaction.channel.send(`${E_cc('status_cross')} Khách hàng đã hủy đơn. Transcript đã lưu, kênh sẽ đóng trong giây lát...`);
-                setTimeout(() => {
-                  interaction.channel.delete('Customer cancelled order after transcript archive').catch(() => null);
-                }, 5000);
-              } else {
-                await interaction.channel.send(`${E_cc('status_warn')} Đơn đã hủy nhưng kênh được giữ lại vì transcript chưa lưu được.`);
-              }
-            }
-          }
-          const E_cc2 = createEmojiResolver(interaction.guildId);
-          await interaction.editReply(`${E_cc2('status_check')} Đã hủy đơn hàng và đóng ticket.`);
-        } catch (e) {
-          const E_cc3 = createEmojiResolver(interaction.guildId);
-          await interaction.editReply(`${E_cc3('status_warn')} Lỗi: ${e.message}`);
-        }
+        await handleOrderCancel(interaction, orderCode, { customerOnly: true });
         return;
       }
 

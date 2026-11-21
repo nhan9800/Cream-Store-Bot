@@ -15,6 +15,7 @@ import {
   OrderPaymentError,
 } from './orderService.js';
 import { findOrderByIncomingPaymentCode, syncPaymentCodeIfPossible } from './paymentOrderMatcher.js';
+import { canCancelUnpaidOrder } from './orderStateMachine.js';
 import { getTopupByPayOSCode, finalizeTopup } from './walletService.js';
 import { syncCustomerRolesNow } from './customerRoleSyncService.js';
 import { emitStaffLog } from './staffLogService.js';
@@ -217,7 +218,7 @@ function applyPayOSTerminalInfo(order, info, state) {
   // A webhook or replacement invoice may have committed during the lookup.
   return db.transaction(() => {
     const fresh = getOrderByCode(order.order_code);
-    const matches = fresh?.status === 'PENDING_PAYMENT' && fresh.payment_status === 'UNPAID'
+    const matches = fresh?.status === 'PENDING_PAYMENT' && fresh.payment_status === 'UNPAID' && canCancelUnpaidOrder(fresh)
       && Number(fresh.payos_order_code) === Number(info.orderCode)
       && (!fresh.payment_link_id || String(fresh.payment_link_id) === String(info.id || ''));
     if (!matches) return null;
@@ -391,6 +392,17 @@ export async function cancelPayOSPaymentLink(order, cancellationReason = 'Khách
       return null;
     }
     throw error;
+  }
+}
+
+export async function verifyPayOSInvoiceCancellation(order, reason) {
+  const info = await cancelPayOSPaymentLink(order, reason)
+    || await getPayOSPaymentInfo(order.payment_link_id);
+  assertPayOSLookupIdentity(order, info);
+  const status = String(info?.status ?? '').toUpperCase();
+  const received = getPayOSReceivedAmount(info);
+  if (!['CANCELLED', 'EXPIRED'].includes(status) || received == null || Number(received) !== 0) {
+    throw new OrderPaymentError('PAYOS_CANCELLATION_UNVERIFIED', 'PayOS chưa xác nhận hóa đơn đã hủy và chưa nhận tiền.');
   }
 }
 
