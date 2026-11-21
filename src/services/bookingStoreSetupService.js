@@ -1,7 +1,7 @@
 import { fileURLToPath } from 'node:url';
 import {
   ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, ContainerBuilder,
-  MessageFlags, PermissionFlagsBits as P, SeparatorBuilder, TextDisplayBuilder,
+  MessageFlags, PermissionFlagsBits as P, Routes, SeparatorBuilder, TextDisplayBuilder,
 } from 'discord.js';
 import { db } from '../database/db.js';
 import { STORE_TWO_GUILD_ID } from '../utils/locale.js';
@@ -84,7 +84,9 @@ async function loadIcons(guild) {
       ?? await guild.emojis.create({
         name, attachment: fileURLToPath(new URL(`../../assets/emojis/ui27/${image}`, import.meta.url)), reason,
       }).catch(() => null);
-    if (item?.available && !item.roles.cache.size) result[key] = { id: item.id, name: item.name, animated: Boolean(item.animated) };
+    if (item && item.available !== false && !item.roles.cache.size) {
+      result[key] = { id: item.id, name: item.name, animated: Boolean(item.animated) };
+    }
   }
   return result;
 }
@@ -145,11 +147,14 @@ async function ensurePanel(channel, key, payload) {
   if (!message.pinned) await message.pin(reason);
 }
 
-function channelSnapshot(channels) {
-  return [...channels.values()].map(channel => ({
-    id: channel.id, type: channel.type, name: channel.name, parent: channel.parentId ?? null,
-    position: channel.rawPosition, acl: [...(channel.permissionOverwrites?.cache.values() ?? [])]
-      .map(item => [item.id, item.type, String(item.allow.bitfield), String(item.deny.bitfield)])
+async function channelSnapshot(guild) {
+  // Discord.js may return null for a channel type it cannot represent. Use the
+  // API inventory to verify that even those channels and their ACLs survive.
+  const channels = await guild.client.rest.get(Routes.guildChannels(guild.id));
+  return channels.map(channel => ({
+    id: channel.id, type: channel.type, name: channel.name, parent: channel.parent_id ?? null,
+    position: channel.position, acl: (channel.permission_overwrites ?? [])
+      .map(item => [item.id, item.type, String(item.allow), String(item.deny)])
       .sort((a, b) => a[0].localeCompare(b[0])),
   }));
 }
@@ -171,9 +176,10 @@ export async function setupBookingStore(client, guildId) {
 
 async function applyBookingLayout(client, guildId) {
   const guild = await client.guilds.fetch({ guild: guildId, force: true });
-  const [existingChannels] = await Promise.all([guild.channels.fetch(), guild.roles.fetch()]);
-  if (!requiredExisting.every(key => existingChannels.has(oldChannels[key][0]))) throw new Error('BOOKING_BASELINE_MISSING');
-  const original = channelSnapshot(existingChannels);
+  const [existingChannels, original] = await Promise.all([
+    guild.channels.fetch(), channelSnapshot(guild), guild.roles.fetch(),
+  ]);
+  if (!requiredExisting.every(key => existingChannels.get(oldChannels[key][0]))) throw new Error('BOOKING_BASELINE_MISSING');
   const key = `booking_discord_snapshot:${guildId}:${REVISION}`;
   db.prepare('INSERT OR IGNORE INTO system_settings (key,value) VALUES (?,?)').run(key, JSON.stringify(original));
   const proof = JSON.parse(db.prepare('SELECT value FROM system_settings WHERE key=?').get(key).value);
@@ -255,7 +261,7 @@ async function applyBookingLayout(client, guildId) {
     await ensurePanel(channels[id], id, payload);
   }
   if (guild.name !== 'Cenar Booking') await guild.setName('Cenar Booking', reason);
-  const live = new Map(channelSnapshot(await guild.channels.fetch()).map(channel => [channel.id, channel]));
+  const live = new Map((await channelSnapshot(guild)).map(channel => [channel.id, channel]));
   if (!original.every(channel => live.has(channel.id) && JSON.stringify(live.get(channel.id).acl) === JSON.stringify(channel.acl))) {
     throw new Error('BOOKING_LEGACY_ACCESS_MISMATCH');
   }

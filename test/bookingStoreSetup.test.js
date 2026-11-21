@@ -23,14 +23,23 @@ function setupGuild() {
   const id = () => String(nextId++);
   const cache = new Collection();
   const emojis = new Collection();
-  const client = { user: { id: '1139187282075721768' } };
+  const unrepresented = { id: id(), name: 'unrepresented', type: 255, permission_overwrites: [] };
+  const client = {
+    user: { id: '1139187282075721768' },
+    rest: { get: vi.fn(async () => [...cache.values()].map(row => ({
+      id: row.id, name: row.name, type: row.type, parent_id: row.parentId, position: row.rawPosition,
+      permission_overwrites: [...row.permissionOverwrites.cache.values()].map(item => ({
+        id: item.id, type: item.type, allow: String(item.allow.bitfield), deny: String(item.deny.bitfield),
+      })),
+    })).concat(unrepresented)) },
+  };
   const guild = {
     id: STORE_TWO_GUILD_ID, client, name: 'Cenar Global', features: ['COMMUNITY'],
     roles: { cache: new Collection(), fetch: async () => new Collection() }, members: {},
     emojis: {
       fetch: async () => emojis,
       create: vi.fn(async ({ name }) => {
-        const icon = { id: id(), name, available: true, roles: { cache: new Collection() } };
+        const icon = { id: id(), name, roles: { cache: new Collection() } };
         emojis.set(icon.id, icon);
         return icon;
       }),
@@ -62,7 +71,7 @@ function setupGuild() {
     return row;
   }
   guild.channels = {
-    cache, fetch: async () => new Collection(cache),
+    cache, fetch: async () => new Collection(cache).set(unrepresented.id, null),
     create: vi.fn(async options => channel(options)),
     setPositions: async positions => {
       for (const { channel: channelId, position } of positions) cache.get(channelId).rawPosition = position;
@@ -90,7 +99,7 @@ describe('Store 2 booking layout', () => {
     expect(guild.channels.create).not.toHaveBeenCalled();
     const before = [...cache.keys()];
     const result = await setupBookingStore(client, guild.id);
-    expect(result).toMatchObject({ status: 'ready', existingChannelsRetained: before.length, bookingChannels: 8,
+    expect(result).toMatchObject({ status: 'ready', existingChannelsRetained: before.length + 1, bookingChannels: 8,
       guidesPinned: 5, forums: 2, customEmoji: 12 });
     expect(bookingStoreSetupStatus(client)).toBe(result);
     expect(guild.name).toBe('Cenar Booking');
