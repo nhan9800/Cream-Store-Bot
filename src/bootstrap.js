@@ -283,16 +283,6 @@ export async function buildClient() {
       }
     }
 
-    // Store 2 is the international storefront. The migration is idempotent,
-    // preserves Discord IDs/permission overwrites and creates a recovery
-    // snapshot before the first structural rename.
-    try {
-      const { setupInternationalStores } = await import('./services/internationalStoreSetupService.js');
-      await setupInternationalStores(readyClient);
-    } catch (error) {
-      console.error('[GLOBAL-SETUP] International storefront migration failed:', error);
-    }
-
     // Slash-command definitions live in Discord, not in the running process.
     // Republish them on every production restart so newly added options (for
     // example so_ngay on /order and /oder) always match the deployed source.
@@ -337,6 +327,12 @@ export async function buildClient() {
 
       const { autoSetupPartnerAndCtv } = await import('./services/autoSetupService.js');
       await autoSetupPartnerAndCtv(readyClient);
+      if (isInternationalGuild(config.guildId)) {
+        const { setupBookingStore } = await import('./services/bookingStoreSetupService.js');
+        void setupBookingStore(readyClient, config.guildId)
+          .then(result => console.log('[BOOKING-SETUP]', result))
+          .catch(error => console.error('[BOOKING-SETUP]', error.code || error.message));
+      }
 
       // Promotion and terms channels are Store 1 campaigns. Store 2 has its
       // own international price board and does not belong to these guild IDs.

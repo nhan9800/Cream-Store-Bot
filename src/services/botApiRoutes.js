@@ -28,6 +28,7 @@ import { runtimeCommitSha } from '../utils/revision.js';
 import { discordCollectibleUrl, getDiscordCollectibleShopPrice } from './discordCollectiblePricing.js';
 import { getCustomerDiscordRoleSnapshot, getCustomerMembershipProgress } from './roleService.js';
 import { getMembershipPresentationStatus } from './membershipPresentationService.js';
+import { bookingStoreSetupStatus } from './bookingStoreSetupService.js';
 import { getCustomerActivitySummary, getCustomerRecentActivities } from './customerActivityService.js';
 import { getCustomerRoleSyncState } from './customerRoleSyncService.js';
 import { getMemberRecoveryHealth } from './memberRecoveryHealthService.js';
@@ -555,6 +556,7 @@ export function registerBotApiRoutes(app) {
             storeChannelRouting: getStoreChannelRoutingHealth(),
             feedbackTicketAutoClose: getFeedbackTicketAutoCloseStatus(),
             membershipPresentation: getMembershipPresentationStatus(req.app.locals.discordClient),
+            bookingStore: bookingStoreSetupStatus(req.app.locals.discordClient),
             marketingAutomation: { ...getMarketingPauseStatus(), priceBoardResendPaused: AUTOMATIC_PRICE_BOARD_PAUSED },
             uptime: Math.floor(process.uptime()),
             timestamp: Date.now(),
