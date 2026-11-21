@@ -31,7 +31,7 @@ let lastDailyFlashSaleDate = null;
 async function autoBackupDatabase() {
   try {
     const report = await backupDatabase();
-    console.log(`[BACKUP] Hoàn tất với trạng thái ${report.overallStatus}; Telegram=${report.telegram.status}, GoogleDrive=${report.googleDrive.status}.`);
+    console.log(`[BACKUP] Hoàn tất với trạng thái ${report.overallStatus}; Telegram=${report.telegram.status}, GoogleDrive=${report.googleDrive.status}, Encryption=${report.encryption?.status ?? 'n/a'}.`);
   } catch (error) {
     console.error('[BACKUP] Lỗi hệ thống sao lưu tự động:', error);
   }

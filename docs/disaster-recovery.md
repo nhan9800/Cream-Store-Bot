@@ -52,6 +52,23 @@ mới dọn bản cũ và tải bản mới lên dịch vụ ngoài. Kết quả
 - `failed`: cấu hình thiếu hoặc thao tác thất bại; bản sao cục bộ đã xác minh vẫn được giữ nếu có.
 - `overallStatus: local_only`: bản cục bộ và phép thử khôi phục thành công nhưng chưa cấu hình nơi lưu từ xa.
 
+## Bản sao lưu ngoài host (mã hóa)
+
+- Bản gửi lên Telegram/Google Drive là file `*.sqlite.gz.cenc`: SQLite nén gzip rồi mã hóa AES-256-GCM, khóa
+  dẫn xuất bằng scrypt từ `BACKUP_ENCRYPTION_KEY` (>= 32 ký tự). Thiếu hoặc khóa yếu thì trạng thái từ xa là
+  `failed` với `encryption_key_missing`/`encryption_key_too_short` và **không có file nào được gửi**.
+- Telegram: tạo bot bằng @BotFather, cho bot vào một kênh/nhóm riêng tư, đặt `TELEGRAM_BACKUP_TOKEN` và
+  `TELEGRAM_BACKUP_CHAT_ID`. Bot gửi tối đa một bản mỗi ngày; bản mã hóa vượt 50 MB bị đánh dấu `file_too_large`.
+- Dọn bản cũ: sau mỗi lần gửi thành công, bot giữ `BACKUP_REMOTE_KEEP` bản mới nhất (mặc định 1) và xóa phần còn lại.
+  Telegram chỉ cho bot xóa tin nhắn gửi trong vòng 48 giờ, nên message_id được lưu ở
+  `backups/remote-state-<store>.json`; nếu bot tắt quá 48 giờ, bản cũ hơn phải xóa tay trong kênh. Google Drive xóa các
+  file `.cenc` cùng store trong thư mục đích mà chính ứng dụng đã tạo. Bản cục bộ vẫn giữ theo `BACKUP_RETENTION`.
+- Google Drive: service account không có dung lượng My Drive, nên `GD_FOLDER_ID` phải nằm trong Shared Drive.
+- Khôi phục từ bản ngoài host: tải file `.cenc`, chạy
+  `BACKUP_ENCRYPTION_KEY=... node scripts/decrypt-backup.js <file.cenc> data/restored.sqlite`; script từ chối ghi đè
+  file có sẵn và chạy `PRAGMA integrity_check`. Chỉ đưa bản đã kiểm tra vào `/home/container/data/` khi bot đã dừng.
+- Lưu `BACKUP_ENCRYPTION_KEY` cùng `ENCRYPTION_KEY` trong kho secret ngoài hosting. Mất khóa thì không mở được bản sao.
+
 ## Cấu hình OAuth bắt buộc
 
 - `CLIENT_SECRET`: secret của đúng Discord Application đang chạy bot.

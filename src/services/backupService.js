@@ -6,6 +6,13 @@ import Database from 'better-sqlite3';
 import { db, getDatabasePath } from '../database/db.js';
 import { fileURLToPath } from 'node:url';
 import { snapshotAllGuilds } from './guildRecoveryService.js';
+import { encryptBackupFile, getBackupEncryptionKey } from './backupEncryption.js';
+import {
+  getRemoteKeepCount,
+  lastTelegramSendDay,
+  pruneGoogleDriveBackups,
+  pruneTelegramBackups,
+} from './backupRemoteRetention.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -13,6 +20,8 @@ const projectRoot = path.resolve(__dirname, '..', '..');
 const BACKUP_DIR = path.resolve(projectRoot, process.env.BACKUP_DIRECTORY || 'backups');
 const BACKUP_RETENTION = Math.max(3, Number(process.env.BACKUP_RETENTION || 3));
 const BACKUP_STATUS_PATH = path.join(BACKUP_DIR, 'latest-status.json');
+// Giới hạn upload tài liệu của Telegram Bot API là 50 MB.
+const TELEGRAM_MAX_UPLOAD_BYTES = 50 * 1024 * 1024;
 
 function getBackupPrefix() {
   return String(process.env.ENV_FILE || '.env').includes('store2')
@@ -109,7 +118,7 @@ async function uploadToGoogleDrive(accessToken, filePath, folderId = null) {
   const closePart = Buffer.from(`\r\n--${boundary}--`, 'utf8');
   const body = Buffer.concat([metaPart, fileContent, closePart]);
 
-  const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
+  const res = await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&supportsAllDrives=true', {
     method: 'POST',
     headers: {
       'Authorization': `Bearer ${accessToken}`,
@@ -170,6 +179,7 @@ export async function backupDatabase({ snapshot = true } = {}) {
     restoreVerification: { status: 'pending' },
     telegram: { status: 'pending' },
     googleDrive: { status: 'pending' },
+    encryption: { status: 'pending' },
   };
 
   // Chụp cấu trúc Discord trước khi sao lưu SQLite để cùng một file có thể
@@ -223,48 +233,119 @@ export async function backupDatabase({ snapshot = true } = {}) {
 
   const telegramToken = process.env.TELEGRAM_BACKUP_TOKEN;
   const telegramChatId = process.env.TELEGRAM_BACKUP_CHAT_ID;
-  if (!telegramToken && !telegramChatId) {
-    report.telegram = { status: 'skipped', reason: 'not_configured' };
-    console.log('[BACKUP-TG] Chưa cấu hình; bản sao Telegram không được gửi.');
-  } else if (!telegramToken || !telegramChatId) {
-    report.telegram = { status: 'failed', reason: 'incomplete_configuration' };
-    console.error('[BACKUP-TG] Cấu hình chưa đầy đủ; cần cả TELEGRAM_BACKUP_TOKEN và TELEGRAM_BACKUP_CHAT_ID.');
-  } else if (lastTelegramSentDate === todayStr) {
-    report.telegram = { status: 'skipped', reason: 'already_sent_today' };
-    console.log(`[BACKUP-TG] Bỏ qua — đã gửi Telegram hôm nay (${todayStr}).`);
-  } else {
-    try {
-      const result = await sendBackupToTelegram(backupPath);
-      lastTelegramSentDate = todayStr;
-      report.telegram = { status: 'success', messageId: result?.result?.message_id ?? null };
-      console.log(`[BACKUP-TG] Đã gửi backup lên Telegram thành công (${todayStr}).`);
-    } catch (error) {
-      report.telegram = { status: 'failed', error: String(error.message || error) };
-      console.error('[BACKUP-TG] Thất bại khi gửi lên Telegram:', error.message);
-    }
-  }
-
   const clientEmail = process.env.GD_CLIENT_EMAIL;
   const privateKeyRaw = process.env.GD_PRIVATE_KEY;
   const folderId = process.env.GD_FOLDER_ID;
-  if (!clientEmail && !privateKeyRaw && !folderId) {
-    report.googleDrive = { status: 'skipped', reason: 'not_configured' };
-    console.log('[BACKUP-GD] Chưa cấu hình; bản sao Google Drive không được gửi.');
-  } else if (!clientEmail || !privateKeyRaw || !folderId) {
-    report.googleDrive = { status: 'failed', reason: 'incomplete_configuration' };
-    console.error('[BACKUP-GD] Cấu hình chưa đầy đủ; cần email, private key và folder ID.');
-  } else {
-    try {
-      console.log('[BACKUP-GD] Bắt đầu đồng bộ bản sao lưu lên Google Drive...');
-      const privateKey = privateKeyRaw.replace(/\\n/g, '\n');
-      const accessToken = await getGoogleAccessToken(clientEmail, privateKey);
-      const result = await uploadToGoogleDrive(accessToken, backupPath, folderId);
-      report.googleDrive = { status: 'success', fileId: result.id || null };
-      console.log(`[BACKUP-GD] Đồng bộ lên Google Drive thành công. File ID: ${result.id}`);
-    } catch (error) {
-      report.googleDrive = { status: 'failed', error: String(error.message || error) };
-      console.error('[BACKUP-GD] Thất bại khi đồng bộ lên Google Drive:', error.message);
+  const telegramComplete = Boolean(telegramToken && telegramChatId);
+  const remoteStatePath = path.join(BACKUP_DIR, `remote-state-${backupPrefix}.json`);
+  const remoteKeep = getRemoteKeepCount();
+  const telegramDue = telegramComplete
+    && lastTelegramSentDate !== todayStr
+    && lastTelegramSendDay(remoteStatePath) !== todayStr;
+  const googleDriveComplete = Boolean(clientEmail && privateKeyRaw && folderId);
+
+  // Bản sao ra ngoài host chứa dữ liệu khách hàng, ví và token OAuth đã mã hóa,
+  // nên chỉ được gửi dưới dạng đã mã hóa. Thiếu khóa thì không gửi bản thô.
+  let encryptedPath = null;
+  let encryptionFailure = null;
+  if (telegramDue || googleDriveComplete) {
+    const encryptionKey = getBackupEncryptionKey();
+    if (encryptionKey.status !== 'ok') {
+      encryptionFailure = `encryption_key_${encryptionKey.status}`;
+      report.encryption = { status: 'failed', reason: encryptionFailure };
+      console.error('[BACKUP-ENC] Thiếu BACKUP_ENCRYPTION_KEY hợp lệ (>= 32 ký tự); không gửi bản sao lưu ra ngoài host.');
+    } else {
+      try {
+        encryptedPath = `${backupPath}.gz.cenc`;
+        const encrypted = encryptBackupFile(backupPath, encryptedPath, encryptionKey.value);
+        report.encryption = { status: 'success', algorithm: 'aes-256-gcm+scrypt', ...encrypted };
+      } catch (error) {
+        encryptedPath = null;
+        encryptionFailure = 'encryption_failed';
+        report.encryption = { status: 'failed', error: String(error.message || error) };
+        console.error('[BACKUP-ENC] Mã hóa bản sao lưu thất bại:', error.message);
+      }
     }
+  } else {
+    report.encryption = { status: 'skipped', reason: 'no_remote_upload' };
+  }
+
+  try {
+    if (!telegramToken && !telegramChatId) {
+      report.telegram = { status: 'skipped', reason: 'not_configured' };
+      console.log('[BACKUP-TG] Chưa cấu hình; bản sao Telegram không được gửi.');
+    } else if (!telegramComplete) {
+      report.telegram = { status: 'failed', reason: 'incomplete_configuration' };
+      console.error('[BACKUP-TG] Cấu hình chưa đầy đủ; cần cả TELEGRAM_BACKUP_TOKEN và TELEGRAM_BACKUP_CHAT_ID.');
+    } else if (!telegramDue) {
+      report.telegram = { status: 'skipped', reason: 'already_sent_today' };
+      console.log(`[BACKUP-TG] Bỏ qua — đã gửi Telegram hôm nay (${todayStr}).`);
+    } else if (!encryptedPath) {
+      report.telegram = { status: 'failed', reason: encryptionFailure };
+    } else if (fs.statSync(encryptedPath).size > TELEGRAM_MAX_UPLOAD_BYTES) {
+      report.telegram = { status: 'failed', reason: 'file_too_large' };
+      console.error('[BACKUP-TG] Bản mã hóa vượt giới hạn 50 MB của Telegram Bot API.');
+    } else {
+      try {
+        const result = await sendBackupToTelegram(encryptedPath);
+        lastTelegramSentDate = todayStr;
+        const messageId = result?.result?.message_id ?? null;
+        report.telegram = { status: 'success', messageId };
+        console.log(`[BACKUP-TG] Đã gửi bản sao lưu đã mã hóa lên Telegram (${todayStr}).`);
+        if (messageId != null) {
+          try {
+            const retention = await pruneTelegramBackups({
+              statePath: remoteStatePath,
+              token: telegramToken,
+              chatId: telegramChatId,
+              newEntry: { messageId, chatId: telegramChatId, sentAt: new Date().toISOString() },
+              keep: remoteKeep,
+            });
+            report.telegram.retention = { keep: remoteKeep, deleted: retention.deleted, failed: retention.failed.length };
+            if (retention.failed.length) {
+              console.error(`[BACKUP-TG] Không xóa được ${retention.failed.length} bản cũ:`, retention.failed.map((f) => f.error).join('; '));
+            }
+          } catch (error) {
+            report.telegram.retention = { keep: remoteKeep, error: String(error.message || error) };
+            console.error('[BACKUP-TG] Lỗi khi dọn bản sao lưu cũ:', error.message);
+          }
+        }
+      } catch (error) {
+        report.telegram = { status: 'failed', error: String(error.message || error) };
+        console.error('[BACKUP-TG] Thất bại khi gửi lên Telegram:', error.message);
+      }
+    }
+
+    if (!clientEmail && !privateKeyRaw && !folderId) {
+      report.googleDrive = { status: 'skipped', reason: 'not_configured' };
+      console.log('[BACKUP-GD] Chưa cấu hình; bản sao Google Drive không được gửi.');
+    } else if (!googleDriveComplete) {
+      report.googleDrive = { status: 'failed', reason: 'incomplete_configuration' };
+      console.error('[BACKUP-GD] Cấu hình chưa đầy đủ; cần email, private key và folder ID.');
+    } else if (!encryptedPath) {
+      report.googleDrive = { status: 'failed', reason: encryptionFailure };
+    } else {
+      try {
+        console.log('[BACKUP-GD] Bắt đầu đồng bộ bản sao lưu đã mã hóa lên Google Drive...');
+        const privateKey = privateKeyRaw.replace(/\\n/g, '\n');
+        const accessToken = await getGoogleAccessToken(clientEmail, privateKey);
+        const result = await uploadToGoogleDrive(accessToken, encryptedPath, folderId);
+        report.googleDrive = { status: 'success', fileId: result.id || null };
+        try {
+          const retention = await pruneGoogleDriveBackups({ accessToken, folderId, prefix: backupPrefix, keep: remoteKeep });
+          report.googleDrive.retention = { keep: remoteKeep, deleted: retention.deleted, failed: retention.failed.length };
+        } catch (error) {
+          report.googleDrive.retention = { keep: remoteKeep, error: String(error.message || error) };
+          console.error('[BACKUP-GD] Lỗi khi dọn bản sao lưu cũ:', error.message);
+        }
+        console.log(`[BACKUP-GD] Đồng bộ lên Google Drive thành công. File ID: ${result.id}`);
+      } catch (error) {
+        report.googleDrive = { status: 'failed', error: String(error.message || error) };
+        console.error('[BACKUP-GD] Thất bại khi đồng bộ lên Google Drive:', error.message);
+      }
+    }
+  } finally {
+    if (encryptedPath) fs.rmSync(encryptedPath, { force: true });
   }
 
   report.completedAt = new Date().toISOString();
@@ -301,4 +382,9 @@ function cleanOldBackups(prefix, maxKeep) {
   } catch (err) {
     console.error('[BACKUP] Lỗi khi dọn dẹp backup cũ:', err);
   }
+}
+
+// Chỉ dùng trong test: mô phỏng bot vừa khởi động lại (mất trạng thái trong bộ nhớ).
+export function __resetTelegramDayForTests() {
+  lastTelegramSentDate = null;
 }
