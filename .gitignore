@@ -44,6 +44,7 @@ backups/
 
 # Untracked Scripts Exclusion
 scripts/*
+!scripts/decrypt-backup.js
 !scripts/publish-birthday-sale.js
 !scripts/publish-ai-creative-pricing-update.js
 !scripts/publish-youtube-family-policy-update.js
