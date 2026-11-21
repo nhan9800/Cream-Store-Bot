@@ -19,6 +19,12 @@ const icons = {
   game: '451014-target.png', voice: '308605-microphone.png', male: '962321-maparrow.png',
   female: '510611-star.png', support: '687464-ticketsupportroleicon.png', news: '541187-announce.png',
 };
+const existingIcons = {
+  welcome: '7560cinnamonwave', rules: 'AGENT_Warning_327', calendar: 'pepenoted',
+  profiles: '1651_peepo_neutral', apply: 'tickgreen', reviews: 'starxoay',
+  game: '1621swordge', voice: '6038peepochat', male: '2558keroppiwave',
+  female: '9014hellokittywave', support: 'blobcathug', news: 'tsm_fire',
+};
 const newCategories = {
   start: ['01 · BẮT ĐẦU', 'START HERE'],
   booking: ['02 · BOOKING'],
@@ -78,13 +84,15 @@ function access(guild, verified, staff, kind) {
 async function loadIcons(guild) {
   const inventory = await guild.emojis.fetch();
   const result = {};
+  const usable = item => item && item.available !== false && !item.roles.cache.size;
   for (const [key, image] of Object.entries(icons)) {
     const name = `cenar_booking_${key}`;
-    const item = inventory.find(emoji => emoji.name === name)
+    const item = inventory.find(emoji => usable(emoji) && emoji.name === name)
+      ?? inventory.find(emoji => usable(emoji) && emoji.name === existingIcons[key])
       ?? await guild.emojis.create({
         name, attachment: fileURLToPath(new URL(`../../assets/emojis/ui27/${image}`, import.meta.url)), reason,
       }).catch(() => null);
-    if (item && item.available !== false && !item.roles.cache.size) {
+    if (usable(item)) {
       result[key] = { id: item.id, name: item.name, animated: Boolean(item.animated) };
     }
   }
@@ -132,6 +140,18 @@ function textOnMessage(message) {
   return [message.content || '', ...inspect(message.components ?? [])].join('\n');
 }
 
+function panelEmojiIds(components) {
+  const ids = components.flatMap(component => {
+    const row = component.toJSON?.() ?? component;
+    return [
+      ...[...(row.content ?? '').matchAll(/<a?:\w+:(\d+)>/g)].map(match => match[1]),
+      ...(row.emoji?.id ? [row.emoji.id] : []),
+      ...panelEmojiIds(row.components ?? []),
+    ];
+  });
+  return ids;
+}
+
 async function ensurePanel(channel, key, payload) {
   const messages = await channel.messages.fetch({ limit: 50 });
   const marker = `${REVISION} · ${key}`;
@@ -143,7 +163,9 @@ async function ensurePanel(channel, key, payload) {
   const message = replaced || await channel.send({
     ...payload, nonce: `cenar-bk-261121-${key}`, enforceNonce: true,
   });
-  if (replaced && !saved) await replaced.edit(payload);
+  if (replaced && (!saved || panelEmojiIds(replaced.components).join(',') !== panelEmojiIds(payload.components).join(','))) {
+    await replaced.edit(payload);
+  }
   if (!message.pinned) await message.pin(reason);
 }
 
@@ -226,19 +248,39 @@ async function applyBookingLayout(client, guildId) {
       : kind === 'forum' && hasForums ? ChannelType.GuildForum : ChannelType.GuildText;
     let channel = existing(guild.channels.cache, name, type);
     if (id === 'chat') channel ||= existing(guild.channels.cache, 'global-chat', type);
+    const tagIcons = id === 'profiles' ? [['Nam', 'male'], ['Nữ', 'female'], ['Chơi game', 'game'], ['Trò chuyện', 'voice']]
+      : [['Chơi game', 'game'], ['Trò chuyện', 'voice']];
+    const forumTags = tagIcons.map(([tag, icon]) => ({
+      name: tag, moderated: true, ...(emoji[icon] ? { emoji: { id: emoji[icon].id } } : {}),
+    }));
+    const defaultReactionEmoji = emoji.reviews ? { id: emoji.reviews.id } : undefined;
     if (channel) {
-      channels[id] = await edit(channel, name, categories[parent]);
+      channel = await edit(channel, name, categories[parent]);
+      if (type === ChannelType.GuildForum) {
+        const tags = channel.availableTags.map(current => {
+          const expected = forumTags.find(tag => tag.name === current.name);
+          return expected ? { ...current, emoji: expected.emoji } : current;
+        });
+        tags.push(...forumTags.filter(tag => !tags.some(current => current.name === tag.name)));
+        const changedTags = tags.length !== channel.availableTags.length || tags.some((tag, i) =>
+          (tag.emoji?.id ?? tag.emoji?.name) !== (channel.availableTags[i].emoji?.id ?? channel.availableTags[i].emoji?.name),
+        );
+        const changedReaction = defaultReactionEmoji?.id !== (channel.defaultReactionEmoji?.id ?? channel.defaultReactionEmoji?.name);
+        if (changedTags || changedReaction) {
+          channel = await channel.edit({
+            ...(changedTags ? { availableTags: tags } : {}),
+            ...(changedReaction ? { defaultReactionEmoji: defaultReactionEmoji ?? null } : {}),
+            reason,
+          });
+        }
+      }
+      channels[id] = channel;
       continue;
     }
-    const forumTags = id === 'profiles' ? [['Nam', 'male'], ['Nữ', 'female'], ['Chơi game', 'game'], ['Trò chuyện', 'voice']]
-      : [['Chơi game', 'game'], ['Trò chuyện', 'voice']];
     channels[id] = await guild.channels.create({
       name, type, parent: categories[parent].id, topic, reason, permissionOverwrites: access(guild, verified, staff, kind),
       ...(type === ChannelType.GuildForum ? {
-        availableTags: forumTags.map(([tag, icon]) => ({
-          name: tag, moderated: true, ...(emoji[icon] ? { emoji: { id: emoji[icon].id } } : {}),
-        })),
-        ...(emoji.reviews ? { defaultReactionEmoji: { id: emoji.reviews.id } } : {}),
+        availableTags: forumTags, defaultReactionEmoji,
       } : {}),
       ...(kind === 'voice' ? { userLimit: 0 } : {}),
     });

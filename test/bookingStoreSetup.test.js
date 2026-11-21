@@ -45,12 +45,13 @@ function setupGuild() {
       }),
     },
   };
-  function channel({ name, type, parent, id: channelId = id(), availableTags }) {
+  function channel({ name, type, parent, id: channelId = id(), availableTags, defaultReactionEmoji }) {
     const messages = new Collection();
     const row = {
       id: channelId, name, type, client, parentId: parent, rawPosition: cache.size,
-      availableTags,
+      availableTags: availableTags?.map(tag => ({ ...tag, id: id() })), defaultReactionEmoji,
       permissionOverwrites: { cache: new Collection() },
+      edit: vi.fn(async options => Object.assign(row, options)),
       setName: async value => Object.assign(row, { name: value }),
       setParent: vi.fn(async (value, options) => {
         expect(options.lockPermissions).toBe(false);
@@ -62,6 +63,7 @@ function setupGuild() {
           ...payload, id: id(), author: client.user, attachments: new Collection(),
           pinned: false, flags: new Set([MessageFlags.IsComponentsV2]),
           pin: async () => Object.assign(message, { pinned: true }),
+          edit: vi.fn(async value => Object.assign(message, { components: value.components })),
         };
         messages.set(message.id, message);
         return message;
@@ -89,7 +91,7 @@ function setupGuild() {
   support.permissionOverwrites.cache.set(guild.id, {
     id: guild.id, type: 0, allow: { bitfield: 0n }, deny: { bitfield: 1024n },
   });
-  return { client, guild, cache, support };
+  return { client, guild, cache, support, emojis };
 }
 
 describe('Store 2 booking layout', () => {
@@ -124,5 +126,30 @@ describe('Store 2 booking layout', () => {
     expect(button.custom_id).toBe('ticket:create:SUPPORT');
     expect(button.emoji).toBeUndefined();
     expect(JSON.stringify(content)).not.toMatch(/\p{Extended_Pictographic}|<a?:\w+:\d+>/u);
+  });
+
+  it('styles previously published panels and forum tags using available server emoji on a full server', async () => {
+    const { client, guild, cache, emojis } = setupGuild();
+    guild.emojis.create.mockRejectedValue(new Error('Emoji slots are full'));
+    expect(await setupBookingStore(client, guild.id)).toMatchObject({ customEmoji: 0 });
+    const profiles = cache.find(channel => channel.name === 'ho-so-host');
+    const tags = profiles.availableTags.map(tag => tag.id);
+    const request = cache.find(channel => channel.name === 'dat-lich');
+    const message = (await request.messages.fetch()).first();
+    for (const [index, name] of ['pepenoted', 'blobcathug', '2558keroppiwave', 'starxoay'].entries()) {
+      const emojiId = String(1523000000000000000n + BigInt(index));
+      emojis.set(emojiId, { id: emojiId, name, available: true, roles: { cache: new Collection() } });
+    }
+    expect(await setupBookingStore(client, guild.id)).toMatchObject({ customEmoji: 4 });
+    expect(profiles.availableTags.map(tag => tag.id)).toEqual(tags);
+    expect(profiles.availableTags[0].emoji.id).toBe('1523000000000000002');
+    expect(profiles.defaultReactionEmoji.id).toBe('1523000000000000003');
+    expect(message.edit.mock.calls).toHaveLength(1);
+    expect(message.components[0].toJSON().components[0].content).toContain('<:pepenoted:1523000000000000000>');
+    expect(message.pinned).toBe(true);
+    expect(request.send.mock.calls).toHaveLength(1);
+    await setupBookingStore(client, guild.id);
+    expect(message.edit.mock.calls).toHaveLength(1);
+    expect(profiles.edit.mock.calls).toHaveLength(1);
   });
 });
