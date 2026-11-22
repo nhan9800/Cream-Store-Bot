@@ -10,7 +10,7 @@ const databasePath = vi.hoisted(() => {
 });
 import { db, initDatabase } from '../src/database/db.js';
 import { STORE_TWO_GUILD_ID } from '../src/utils/locale.js';
-import { bookingPanels, bookingStoreSetupStatus, setupBookingStore } from '../src/services/bookingStoreSetupService.js';
+import { bookingPanels, bookingPortal, bookingStoreSetupStatus, setupBookingStore } from '../src/services/bookingStoreSetupService.js';
 
 beforeAll(() => initDatabase());
 afterAll(() => {
@@ -101,8 +101,8 @@ describe('Store 2 booking layout', () => {
     expect(guild.channels.create).not.toHaveBeenCalled();
     const before = [...cache.keys()];
     const result = await setupBookingStore(client, guild.id);
-    expect(result).toMatchObject({ status: 'ready', existingChannelsRetained: before.length + 1, bookingChannels: 8,
-      guidesPinned: 5, forums: 2, customEmoji: 12 });
+    expect(result).toMatchObject({ status: 'ready', existingChannelsRetained: before.length + 1, bookingChannels: 9,
+      guidesPinned: 6, forums: 2, customEmoji: 12 });
     expect(bookingStoreSetupStatus(client)).toBe(result);
     expect(guild.name).toBe('Cenar Booking');
     expect(before.every(channelId => cache.has(channelId))).toBe(true);
@@ -113,18 +113,23 @@ describe('Store 2 booking layout', () => {
     const firstChannelCount = cache.size;
     await setupBookingStore(client, guild.id);
     expect(cache.size).toBe(firstChannelCount);
-    expect([...cache.values()].reduce((n, channel) => n + channel.send.mock.calls.length, 0)).toBe(5);
+    expect([...cache.values()].reduce((n, channel) => n + channel.send.mock.calls.length, 0)).toBe(6);
+    const ticketCategory = cache.get(bookingPortal(client).tickets);
+    expect(ticketCategory.name).toBe('05 · PHIẾU BOOKING');
+    const creation = guild.channels.create.mock.calls.find(([options]) => options.name === ticketCategory.name)[0];
+    expect(creation.permissionOverwrites[0]).toEqual({ id: guild.id, deny: [1024n] });
   });
 
-  it('omits missing emoji and gives the booking button the existing support ticket action', () => {
-    const channels = Object.fromEntries(['profiles', 'request', 'rules', 'welcome', 'support'].map((key, i) => [
+  it('omits missing emoji and opens service-specific booking forms', () => {
+    const channels = Object.fromEntries(['profiles', 'request', 'rules', 'welcome', 'support', 'handbook'].map((key, i) => [
       key, { id: String(1500000000000000000n + BigInt(i)) },
     ]));
     const panels = bookingPanels(STORE_TWO_GUILD_ID, channels, {});
     const content = panels.request.components[0].toJSON();
-    const button = content.components.find(item => item.type === 1).components[0];
-    expect(button.custom_id).toBe('ticket:create:SUPPORT');
-    expect(button.emoji).toBeUndefined();
+    const [game, voice] = content.components.find(item => item.type === 1).components;
+    expect(game.custom_id).toBe('booking:open:game');
+    expect(voice.custom_id).toBe('booking:open:voice');
+    expect(game.emoji).toBeUndefined();
     expect(JSON.stringify(content)).not.toMatch(/\p{Extended_Pictographic}|<a?:\w+:\d+>/u);
   });
 
@@ -151,5 +156,19 @@ describe('Store 2 booking layout', () => {
     await setupBookingStore(client, guild.id);
     expect(message.edit.mock.calls).toHaveLength(1);
     expect(profiles.edit.mock.calls).toHaveLength(1);
+  });
+
+  it('updates an old pinned panel in place even when the custom emoji inventory is unchanged', async () => {
+    const { client, guild, cache } = setupGuild();
+    await setupBookingStore(client, guild.id);
+    const request = cache.find(channel => channel.name === 'dat-lich');
+    const message = (await request.messages.fetch()).first();
+    const old = message.components.map(component => component.toJSON());
+    old[0].components.find(item => item.type === 1).components[0].custom_id = 'ticket:create:SUPPORT';
+    message.components = old;
+    await setupBookingStore(client, guild.id);
+    expect(message.pinned).toBe(true);
+    expect(message.edit).toHaveBeenCalledTimes(1);
+    expect(request.send).toHaveBeenCalledTimes(1);
   });
 });
