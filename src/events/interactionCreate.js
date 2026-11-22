@@ -330,6 +330,11 @@ export function registerInteractionHandler(client, commands) {
       // publication lock instead of the generic button cooldown.
       if (await handleAnnouncementDraftInteraction(interaction)) return;
 
+      if (interaction.customId?.startsWith('booking:')) {
+        const { handleBookingInteraction } = await import('./bookingHandlers.js');
+        if (await handleBookingInteraction(interaction)) return;
+      }
+
       // ── Autocomplete handler ──
       if (interaction.isAutocomplete()) {
         const command = commands.get(interaction.commandName);

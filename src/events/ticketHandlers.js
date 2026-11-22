@@ -86,7 +86,7 @@ export async function sendTicketComponents(channel, payload) {
   }
 }
 
-export async function handleTicketCreate(interaction, ticketType = 'ORDER', gmailAddress = null) {
+export async function handleTicketCreate(interaction, ticketType = 'ORDER', gmailAddress = null, booking = null) {
   const E = createEmojiResolver(interaction.guildId);
   if (!interaction.inGuild()) {
     await safeReply(interaction, { content: 'Ticket chỉ tạo được trong server.', ephemeral: true });
@@ -120,6 +120,10 @@ export async function handleTicketCreate(interaction, ticketType = 'ORDER', gmai
   }
 
   const normalizedType = String(ticketType || 'ORDER').toUpperCase();
+  if (['BOOKING', 'HOST_APPLICATION'].includes(normalizedType) && !booking) {
+    await safeReply(interaction, { content: 'Vui lòng dùng biểu mẫu ở khu Cenar Booking.', ephemeral: true });
+    return;
+  }
 
   if (normalizedType === 'APPEAL') {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral }).catch(() => null);
@@ -320,10 +324,16 @@ export async function handleTicketCreate(interaction, ticketType = 'ORDER', gmai
       ];
 
       if (guildConfig.support_role_id) {
-        overwrites.push({ id: guildConfig.support_role_id, allow: TICKET_MEMBER_PERMISSIONS });
+        if (!booking || (guildConfig.support_role_id !== interaction.guildId && interaction.guild.roles.cache.has(guildConfig.support_role_id))) {
+          overwrites.push({ id: guildConfig.support_role_id, allow: TICKET_MEMBER_PERMISSIONS });
+        }
+      }
+      if (booking && guildConfig.manager_role_id !== interaction.guildId
+        && guildConfig.manager_role_id !== guildConfig.support_role_id && interaction.guild.roles.cache.has(guildConfig.manager_role_id)) {
+        overwrites.push({ id: guildConfig.manager_role_id, allow: TICKET_MEMBER_PERMISSIONS });
       }
 
-      const categoryId = getTicketCategoryId(guildConfig, normalizedType);
+      const categoryId = booking?.categoryId ?? getTicketCategoryId(guildConfig, normalizedType);
       channel = await interaction.guild.channels.create({
         name: `ticket-${Math.random().toString().slice(2, 8)}`,
         type: ChannelType.GuildText,
@@ -337,6 +347,8 @@ export async function handleTicketCreate(interaction, ticketType = 'ORDER', gmai
         customerId: interaction.user.id,
         openedById: interaction.user.id,
         ticketType: normalizedType,
+        ticketSubject: booking?.title,
+        supportSource: booking ? 'DISCORD_BOOKING' : undefined,
       });
 
       const hub = getCenarHub();
@@ -350,7 +362,7 @@ export async function handleTicketCreate(interaction, ticketType = 'ORDER', gmai
 
       await channel.setName(buildTicketChannelName(ticket.ticket_code, 'ticket')).catch(() => null);
       
-      const { container: welcomeV2, flags: welcomeV2Flags } = buildTicketWelcomeV2(
+      const { container: welcomeV2, flags: welcomeV2Flags } = booking?.render(ticket) ?? buildTicketWelcomeV2(
         ticket.ticket_code, interaction.user.id, normalizedType, null, null, interaction.guildId
       );
       
@@ -382,6 +394,7 @@ export async function handleTicketCreate(interaction, ticketType = 'ORDER', gmai
       await sendTicketComponents(channel, {
         components: components,
         flags: welcomeV2Flags,
+        ...(booking ? { allowedMentions: { parse: [] } } : {}),
       });
       await channel.send({ content: `<@${interaction.user.id}> — Ticket của bạn đã được tạo!` }).catch(() => null);
       if (allowMultipleTickets) {
@@ -390,7 +403,7 @@ export async function handleTicketCreate(interaction, ticketType = 'ORDER', gmai
           allowedMentions: { parse: [] },
         }).catch(() => null);
       }
-      await sendTicketAiWelcome({
+      if (!booking) await sendTicketAiWelcome({
         channel,
         ticket,
         guildId: interaction.guildId,
@@ -413,7 +426,7 @@ export async function handleTicketCreate(interaction, ticketType = 'ORDER', gmai
       });
     } else {
       await safeReply(interaction, {
-        content: `${E('status_check')} Ticket **${normalizedType}** của bạn đã được tạo: ${channel}`,
+        content: `${E('status_check')} ${booking ? 'Phiếu riêng' : `Ticket **${normalizedType}**`} của bạn đã được tạo: ${channel}`,
         ephemeral: true,
       });
     }
@@ -421,7 +434,8 @@ export async function handleTicketCreate(interaction, ticketType = 'ORDER', gmai
     if (error.code === 'RATE_LIMITED') {
       await safeReply(interaction, { content: `${E('status_warn')} ${error.message}`, ephemeral: true });
     } else {
-      console.error('[TICKET_CREATE] Lỗi:', error);
+      if (booking) console.error('[BOOKING_TICKET_CREATE]', error.code || error.name);
+      else console.error('[TICKET_CREATE] Lỗi:', error);
       await safeReply(interaction, { content: `${E('status_cross')} Đã có lỗi xảy ra khi tạo ticket.`, ephemeral: true });
     }
   } finally {

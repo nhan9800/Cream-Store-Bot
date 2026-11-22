@@ -494,6 +494,8 @@ export async function execute(message) {
     }
   }
 
+  if (['BOOKING', 'HOST_APPLICATION'].includes(ticket?.ticket_type)) return;
+
   const isMentioned = message.mentions.has(message.client.user);
 
   // ═══════════════════════════════════════════════
