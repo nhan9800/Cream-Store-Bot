@@ -93,16 +93,17 @@ describe('Cenar terms board 2026', () => {
     expect(icons.size).toBe(2);
   });
 
-  it('requires Netflix profile credentials to stay unchanged and allows a single simultaneous stream', () => {
+  it('keeps Netflix profile credentials unchanged and clarifies the device limit and consequence', () => {
     const netflix = buildTermsBoardPayload().components.map((component) => component.toJSON())
       .flatMap((section) => section.components)
       .find((component) => component.content?.includes('05 · ĐIỀU KHOẢN NETFLIX')).content;
 
     expect(netflix).toContain('Giữ nguyên tên hồ sơ');
-    expect(netflix).toContain('Giữ nguyên mã PIN của hồ sơ và mật khẩu tài khoản Netflix');
-    expect(netflix).toContain('Được đăng nhập trên nhiều thiết bị');
-    expect(netflix).toContain('Chỉ xem trên **1 thiết bị tại một thời điểm**');
-    expect(netflix).not.toMatch(/Được đổi tên|trừ khi|\p{Extended_Pictographic}/u);
+    expect(netflix).toContain('Giữ nguyên PIN hồ sơ và mật khẩu');
+    expect(netflix).toContain('Đăng nhập tối đa **3 thiết bị**');
+    expect(netflix).toContain('Chỉ xem trên **1 thiết bị cùng lúc**');
+    expect(netflix).toContain('từ **2 thiết bị trở lên** sẽ bị thu hồi quyền sử dụng và không được bảo hành');
+    expect(netflix).not.toMatch(/Được đổi tên|trên nhiều thiết bị|trừ khi|\p{Extended_Pictographic}/u);
     const icons = new Set([...netflix.matchAll(/<a?:\w+:(\d+)>/g)].map((match) => match[1]));
     expect(icons.size).toBe(4);
   });

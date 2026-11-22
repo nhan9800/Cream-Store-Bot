@@ -113,9 +113,10 @@ export function buildTermsBoardPayload() {
     .setAccentColor(0xE50914)
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(normalizeV2Text([
       `## ${E('brand_netflix', 'cenar_board26_netflix')} 05 · ĐIỀU KHOẢN NETFLIX`,
-      `${E('ticket_user')} **Hồ sơ (profile)** · Giữ nguyên tên hồ sơ. Không xoá hoặc truy cập hồ sơ của người khác.`,
-      `${E('icon_lock')} **PIN và mật khẩu** · Giữ nguyên mã PIN của hồ sơ và mật khẩu tài khoản Netflix.`,
-      `${E('music_play')} **Thiết bị xem** · Được đăng nhập trên nhiều thiết bị. Chỉ xem trên **1 thiết bị tại một thời điểm**.`,
+      `${E('ticket_user')} Giữ nguyên tên hồ sơ. Không xoá hoặc dùng hồ sơ người khác.`,
+      `${E('icon_lock')} Giữ nguyên PIN hồ sơ và mật khẩu.`,
+      `${E('music_play')} Đăng nhập tối đa **3 thiết bị**. Chỉ xem trên **1 thiết bị cùng lúc**.`,
+      `> Xem cùng lúc từ **2 thiết bị trở lên** sẽ bị thu hồi quyền sử dụng và không được bảo hành.`,
     ].join('\n'))));
 
   const footer = new ContainerBuilder()
