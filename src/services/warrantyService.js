@@ -125,10 +125,12 @@ export function resolveWarrantyTimeline(order = {}, formData = {}) {
 
 export function normalizeWarrantyFormData(order, formData = {}) {
   const timeline = resolveWarrantyTimeline(order, formData || {});
+  const issue = meaningful(formData?.issue);
   return {
     productType: meaningful(formData?.productType) || order.product_name || 'Sản phẩm Cenar',
     accountInfo: meaningful(formData?.accountInfo),
     password: meaningful(formData?.password),
+    ...(issue ? { issue } : {}),
     purchaseDate: timeline.purchaseDate,
     dateExpired: timeline.dateExpired,
   };
@@ -176,6 +178,7 @@ export function buildWarrantyTicketOpenedV2({ order, ticket, channel, formData, 
       formData.password     && `${E('icon_unlock')} **${international ? 'Password' : 'Mật Khẩu'}** — \`${formData.password}\``,
       formData.purchaseDate && `${E('warranty_purchase')} **${international ? 'Purchase date' : 'Ngày mua'}** — ${formData.purchaseDate}`,
       formData.dateExpired  && `${E('warranty_expiry')} **${international ? 'Expiry date' : 'Ngày hết hạn'}** — ${formData.dateExpired}`,
+      formData.issue        && `${E('icon_doc')} **${international ? 'Reported issue' : 'Lỗi đã báo'}** — ${formData.issue}`,
     ].filter(Boolean);
 
     if (fields.length) {

@@ -170,8 +170,10 @@ export async function handleBookingInteraction(interaction) {
   }
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   await handleTicketCreate(interaction, value === 'apply' ? 'HOST_APPLICATION' : 'BOOKING', null, {
-    title: bookingServices[value], categoryId: portal.tickets,
-    render: ticket => bookingReceipt(ticket, value, details, portal.emoji),
+    booking: {
+      title: bookingServices[value], categoryId: portal.tickets,
+      render: ticket => bookingReceipt(ticket, value, details, portal.emoji),
+    },
   });
   return true;
 }
