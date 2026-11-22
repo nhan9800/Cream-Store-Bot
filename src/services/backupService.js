@@ -9,10 +9,11 @@ import { snapshotAllGuilds } from './guildRecoveryService.js';
 import { encryptBackupFile, getBackupEncryptionKey } from './backupEncryption.js';
 import {
   getRemoteKeepCount,
-  lastTelegramSendDay,
+  lastTelegramSentAt,
   pruneGoogleDriveBackups,
   pruneTelegramBackups,
 } from './backupRemoteRetention.js';
+import { telegramSlotKey } from './backupStartupPolicy.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -135,8 +136,18 @@ async function uploadToGoogleDrive(accessToken, filePath, folderId = null) {
 
 // ─── Main backup function ─────────────────────────────────────────────────────
 
-// Theo dõi ngày đã gửi Telegram để tránh spam mỗi 5 phút
-let lastTelegramSentDate = null;
+// Lượt giờ (03:00 / 15:00 VN) đã gửi Telegram trong tiến trình này; trạng thái bền vững nằm
+// trong remote-state-<prefix>.json nên restart không làm gửi trùng.
+let lastTelegramSentSlot = null;
+
+function remoteStatePathFor(prefix = getBackupPrefix()) {
+  return path.join(BACKUP_DIR, `remote-state-${prefix}.json`);
+}
+
+/** Thời điểm gửi Telegram thành công gần nhất của store này (đọc từ đĩa). */
+export function latestTelegramSentAt() {
+  return lastTelegramSentAt(remoteStatePathFor());
+}
 
 export function verifyBackupRestore(filePath) {
   const restoreDirectory = fs.mkdtempSync(path.join(os.tmpdir(), 'cenar-restore-check-'));
@@ -211,7 +222,6 @@ export async function backupDatabase({ snapshot = true } = {}) {
 
   fs.mkdirSync(BACKUP_DIR, { recursive: true });
   const now = new Date();
-  const todayStr = now.toLocaleDateString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
   const timestamp = now.toISOString().replace(/[:.]/g, '-');
   const backupPrefix = getBackupPrefix();
   const backupPath = path.join(BACKUP_DIR, `${backupPrefix}-${timestamp}.sqlite`);
@@ -256,11 +266,13 @@ export async function backupDatabase({ snapshot = true } = {}) {
   const privateKeyRaw = process.env.GD_PRIVATE_KEY;
   const folderId = process.env.GD_FOLDER_ID;
   const telegramComplete = Boolean(telegramToken && telegramChatId);
-  const remoteStatePath = path.join(BACKUP_DIR, `remote-state-${backupPrefix}.json`);
+  const remoteStatePath = remoteStatePathFor(backupPrefix);
+  const slotKey = telegramSlotKey(now.getTime());
+  const persistedSlot = lastTelegramSentAt(remoteStatePath);
   const remoteKeep = getRemoteKeepCount();
   const telegramDue = telegramComplete
-    && lastTelegramSentDate !== todayStr
-    && lastTelegramSendDay(remoteStatePath) !== todayStr;
+    && lastTelegramSentSlot !== slotKey
+    && (persistedSlot ? telegramSlotKey(persistedSlot) : null) !== slotKey;
   const googleDriveComplete = Boolean(clientEmail && privateKeyRaw && folderId);
 
   // Bản sao ra ngoài host chứa dữ liệu khách hàng, ví và token OAuth đã mã hóa,
@@ -297,8 +309,8 @@ export async function backupDatabase({ snapshot = true } = {}) {
       report.telegram = { status: 'failed', reason: 'incomplete_configuration' };
       console.error('[BACKUP-TG] Cấu hình chưa đầy đủ; cần cả TELEGRAM_BACKUP_TOKEN và TELEGRAM_BACKUP_CHAT_ID.');
     } else if (!telegramDue) {
-      report.telegram = { status: 'skipped', reason: 'already_sent_today' };
-      console.log(`[BACKUP-TG] Bỏ qua — đã gửi Telegram hôm nay (${todayStr}).`);
+      report.telegram = { status: 'skipped', reason: 'already_sent_this_slot', slot: slotKey };
+      console.log(`[BACKUP-TG] Bỏ qua — lượt ${slotKey} đã gửi Telegram.`);
     } else if (!encryptedPath) {
       report.telegram = { status: 'failed', reason: encryptionFailure };
     } else if (fs.statSync(encryptedPath).size > TELEGRAM_MAX_UPLOAD_BYTES) {
@@ -307,10 +319,10 @@ export async function backupDatabase({ snapshot = true } = {}) {
     } else {
       try {
         const result = await sendBackupToTelegram(encryptedPath);
-        lastTelegramSentDate = todayStr;
+        lastTelegramSentSlot = slotKey;
         const messageId = result?.result?.message_id ?? null;
-        report.telegram = { status: 'success', messageId };
-        console.log(`[BACKUP-TG] Đã gửi bản sao lưu đã mã hóa lên Telegram (${todayStr}).`);
+        report.telegram = { status: 'success', messageId, slot: slotKey };
+        console.log(`[BACKUP-TG] Đã gửi bản sao lưu đã mã hóa lên Telegram (lượt ${slotKey}).`);
         if (messageId != null) {
           try {
             const retention = await pruneTelegramBackups({
@@ -405,5 +417,5 @@ function cleanOldBackups(prefix, maxKeep) {
 
 // Chỉ dùng trong test: mô phỏng bot vừa khởi động lại (mất trạng thái trong bộ nhớ).
 export function __resetTelegramDayForTests() {
-  lastTelegramSentDate = null;
+  lastTelegramSentSlot = null;
 }
