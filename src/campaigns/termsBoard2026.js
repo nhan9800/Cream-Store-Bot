@@ -68,9 +68,9 @@ export function buildTermsBoardPayload() {
     .setAccentColor(0xF97316)
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(normalizeV2Text([
       `## ${E('payment_refund')} 02 · HOÀN ĐƠN, CHI PHÍ & QUY TẮC ỨNG XỬ`,
-      `### Đơn đã nhập nguồn hoặc đang xử lý`,
-      `• Khách yêu cầu huỷ/refund sau khi shop đã nhập hàng hoặc bắt đầu xử lý được hoàn tối đa **${policy.processingOrderRefundPercent}% giá trị sản phẩm**.`,
-      `> Phần còn lại đối soát chi phí nguồn hàng, vận hành, thanh toán và thuế đã phát sinh.`,
+      `${E('order_complete')} **Đơn đã giao đúng cam kết** · Shop không hoàn tiền khi khách đổi ý.`,
+      `**Đơn vừa đặt hoặc đang xử lý** · Khi khách đổi ý, mức hoàn tối đa **${policy.processingOrderRefundPercent}% giá trị sản phẩm** sau đối soát chi phí. Dự kiến **2–3 tuần** nếu được duyệt.`,
+      `Quyền theo luật, bảo hành và hoàn tiền riêng vẫn áp dụng.`,
     ].join('\n'))))
     .addSeparatorComponents(divider())
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(normalizeV2Text([

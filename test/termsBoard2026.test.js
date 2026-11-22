@@ -55,7 +55,7 @@ describe('Cenar terms board 2026', () => {
     expect(json).toContain('không thuộc phạm vi bảo hành');
     expect(json).toContain('chỉ hỗ trợ giá ưu đãi');
     expect(json).toContain('HOÀN ĐƠN, CHI PHÍ & QUY TẮC ỨNG XỬ');
-    expect(json).toContain('hoàn tối đa **50% giá trị sản phẩm**');
+    expect(json).toContain('mức hoàn tối đa **50% giá trị sản phẩm**');
     expect(json).toContain('lăng mạ, đe doạ, quấy rối');
     expect(json).toContain('Chi phí đã phát sinh **không được hoàn lại**');
     expect(json).toContain('đổi mật khẩu Gmail, bật 2FA');
@@ -76,6 +76,21 @@ describe('Cenar terms board 2026', () => {
     };
     payload.components.map((component) => component.toJSON()).forEach(collect);
     expect(contents.reduce((total, content) => total + content.length, 0)).toBeLessThanOrEqual(3_800);
+  });
+
+  it('describes voluntary refunds, the processing window, and retained customer rights separately', () => {
+    const refund = buildTermsBoardPayload().components.map((component) => component.toJSON())
+      .flatMap((section) => section.components)
+      .find((component) => component.content?.includes('02 · HOÀN ĐƠN')).content;
+
+    expect(refund).toContain('Đơn đã giao đúng cam kết** · Shop không hoàn tiền khi khách đổi ý');
+    expect(refund).toContain('Đơn vừa đặt hoặc đang xử lý');
+    expect(refund).toContain('mức hoàn tối đa **50% giá trị sản phẩm**');
+    expect(refund).toContain('Dự kiến **2–3 tuần** nếu được duyệt');
+    expect(refund).toContain('Quyền theo luật, bảo hành và hoàn tiền riêng vẫn áp dụng');
+    expect(refund).not.toMatch(/\p{Extended_Pictographic}/u);
+    const icons = new Set([...refund.matchAll(/<a?:\w+:(\d+)>/g)].map((match) => match[1]));
+    expect(icons.size).toBe(2);
   });
 
   it('requires Netflix profile credentials to stay unchanged and allows a single simultaneous stream', () => {
