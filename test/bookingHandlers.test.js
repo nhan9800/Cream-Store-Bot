@@ -55,8 +55,8 @@ describe('Cenar Booking intake and private ticket controls', () => {
     });
     await handleBookingInteraction(submitted);
     expect(submitted.deferReply).toHaveBeenCalledWith({ flags: 64 });
-    expect(mocks.open).toHaveBeenCalledWith(submitted, 'BOOKING', null, expect.objectContaining({ categoryId: 'private-category' }));
-    const data = mocks.open.mock.lastCall[3].render({ id: 19, ticket_code: 'TKT_001' }).container.toJSON();
+    expect(mocks.open).toHaveBeenCalledWith(submitted, 'BOOKING', null, { booking: expect.objectContaining({ categoryId: 'private-category' }) });
+    const data = mocks.open.mock.lastCall[3].booking.render({ id: 19, ticket_code: 'TKT_001' }).container.toJSON();
     expect(data.components.find(component => component.content?.includes('Thời lượng')).content).toContain('**Thời lượng** · 60 phút');
     expect(data.components.find(component => component.type === 1).components[0].custom_id).toBe('booking:state:confirm:19');
   });

@@ -86,7 +86,7 @@ export async function sendTicketComponents(channel, payload) {
   }
 }
 
-export async function handleTicketCreate(interaction, ticketType = 'ORDER', gmailAddress = null, booking = null) {
+export async function handleTicketCreate(interaction, ticketType = 'ORDER', gmailAddress = null, { booking, intake } = {}) {
   const E = createEmojiResolver(interaction.guildId);
   if (!interaction.inGuild()) {
     await safeReply(interaction, { content: 'Ticket chỉ tạo được trong server.', ephemeral: true });
@@ -158,6 +158,12 @@ export async function handleTicketCreate(interaction, ticketType = 'ORDER', gmai
       // Kiểm tra channel còn tồn tại không
       const existingChannel = await interaction.guild.channels.fetch(existingTicket.channel_id).catch(() => null);
       if (existingChannel) {
+        if (intake && existingChannel.isTextBased()
+          && existingChannel.permissionsFor(interaction.guild.roles.everyone)?.has(PermissionFlagsBits.ViewChannel) === false) {
+          await existingChannel.send({ content: intake.text, allowedMentions: { parse: [] }, nonce: interaction.id, enforceNonce: true });
+          await safeReply(interaction, { content: `${E('status_check')} Đã chuyển yêu cầu vào ticket đang mở: ${existingChannel}.`, ephemeral: true });
+          return;
+        }
         await safeReply(interaction, {
           content: `${E('status_warn')} Bạn đã có ticket ${normalizedType.toLowerCase()} đang mở tại <#${existingTicket.channel_id}>.`,
           ephemeral: true,
@@ -347,7 +353,7 @@ export async function handleTicketCreate(interaction, ticketType = 'ORDER', gmai
         customerId: interaction.user.id,
         openedById: interaction.user.id,
         ticketType: normalizedType,
-        ticketSubject: booking?.title,
+        ticketSubject: booking?.title ?? intake?.title,
         supportSource: booking ? 'DISCORD_BOOKING' : undefined,
       });
 
@@ -365,6 +371,10 @@ export async function handleTicketCreate(interaction, ticketType = 'ORDER', gmai
       const { container: welcomeV2, flags: welcomeV2Flags } = booking?.render(ticket) ?? buildTicketWelcomeV2(
         ticket.ticket_code, interaction.user.id, normalizedType, null, null, interaction.guildId
       );
+      if (intake) {
+        welcomeV2.addSeparatorComponents(new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small))
+          .addTextDisplayComponents(new TextDisplayBuilder().setContent(intake.text));
+      }
       
       const components = [
         welcomeV2,
@@ -394,7 +404,7 @@ export async function handleTicketCreate(interaction, ticketType = 'ORDER', gmai
       await sendTicketComponents(channel, {
         components: components,
         flags: welcomeV2Flags,
-        ...(booking ? { allowedMentions: { parse: [] } } : {}),
+        ...(booking || intake ? { allowedMentions: { parse: [] } } : {}),
       });
       await channel.send({ content: `<@${interaction.user.id}> — Ticket của bạn đã được tạo!` }).catch(() => null);
       if (allowMultipleTickets) {
@@ -434,7 +444,7 @@ export async function handleTicketCreate(interaction, ticketType = 'ORDER', gmai
     if (error.code === 'RATE_LIMITED') {
       await safeReply(interaction, { content: `${E('status_warn')} ${error.message}`, ephemeral: true });
     } else {
-      if (booking) console.error('[BOOKING_TICKET_CREATE]', error.code || error.name);
+      if (booking || intake) console.error('[TICKET_INTAKE_CREATE]', error.code || error.name);
       else console.error('[TICKET_CREATE] Lỗi:', error);
       await safeReply(interaction, { content: `${E('status_cross')} Đã có lỗi xảy ra khi tạo ticket.`, ephemeral: true });
     }

@@ -32,7 +32,7 @@ import { getEmojiMap } from '../services/emojiService.js';
 import { T, fmt, h2, h3, subtext, fieldQ, fields, vnd, lines as joinLines, statusPill, SP } from './embedHelpers.js';
 import { accentFor, brandName, normalizeV2Text, textDisplay } from './uiKit.js';
 import { createEmojiResolver } from './emojiHelper.js';
-import { isInternationalGuild } from './locale.js';
+import { isInternationalGuild, STORE_ONE_GUILD_ID } from './locale.js';
 import { formatInternationalPrice, translateProductName } from './internationalCatalog.js';
 
 // Parses a custom emoji string "<a:name:id>" or "<:name:id>" into a component object
@@ -79,6 +79,7 @@ export function buildTicketPanelV2(customConfig = {}) {
   const imageUrl = customConfig.panel_image_url || null;
   const guildId = customConfig.guild_id;
   const international = isInternationalGuild(guildId);
+  const storeOne = guildId === STORE_ONE_GUILD_ID;
   const effectiveTitle = international && !customConfig.panel_title ? 'Cenar Global • Order & Support Center' : title;
 
   // Luôn lấy emoji qua resolver: custom đã cấu hình > bộ custom mặc định của bot.
@@ -118,8 +119,10 @@ export function buildTicketPanelV2(customConfig = {}) {
     ].map((line) => `- ${line.trim()}`).join('\n') : [
       `${E('panel_order')} **Mua hàng** — Netflix, Spotify, YouTube Premium và các dịch vụ số`,
       `${E('panel_support')} **Hỗ trợ** — Tài khoản lỗi hoặc cần hướng dẫn`,
-      `${E('panel_complaint')} **Khiếu nại** — Phản ánh trải nghiệm chưa tốt`,
-      `${E('panel_partnership')} **Hợp tác** — Đề xuất hợp tác kinh doanh`,
+      ...(!storeOne ? [
+        `${E('panel_complaint')} **Khiếu nại** — Phản ánh trải nghiệm chưa tốt`,
+        `${E('panel_partnership')} **Hợp tác** — Đề xuất hợp tác kinh doanh`,
+      ] : []),
       `${E('panel_warranty')} **Bảo hành** — Yêu cầu bảo hành sản phẩm đã mua`,
     ].map((line) => `- ${line.trim()}`).join('\n');
     container.addTextDisplayComponents(new TextDisplayBuilder().setContent(normalizeV2Text(serviceLines)));
@@ -129,12 +132,28 @@ export function buildTicketPanelV2(customConfig = {}) {
   container.addTextDisplayComponents(
     new TextDisplayBuilder().setContent(
       normalizeV2Text([
-        international ? `> ${E('icon_sparkle')} The bot will guide you through each step after the ticket opens.` : `> ${E('icon_sparkle')} Sau khi mở ticket, bot sẽ hướng dẫn bạn từng bước.`,
+        international ? `> ${E('icon_sparkle')} The bot will guide you through each step after the ticket opens.`
+          : `> ${E('icon_sparkle')} ${storeOne ? 'Điền biểu mẫu để gửi thông tin vào ticket riêng.' : 'Sau khi mở ticket, bot sẽ hướng dẫn bạn từng bước.'}`,
         subtext(`${E('icon_heart_purple')} ${international ? 'Cenar Global' : (brand.footer || brand.name)}`),
       ].join('\n'))
     )
   );
 
+
+  if (storeOne) {
+    const actions = [
+      ['order', 'Mua hàng', 'cenar_ui27_cart', 'panel_order'],
+      ['support', 'Hỗ trợ', 'cenar_ui27_support', 'panel_support'],
+      ['warranty', 'Bảo hành', 'cenar_ui27_shield', 'panel_warranty'],
+    ].map(([type, label, icon, fallback]) => {
+      const button = new ButtonBuilder().setCustomId(`ticket:intake:open:${type}`)
+        .setLabel(label).setStyle(ButtonStyle.Secondary);
+      const emoji = E.component(icon) ?? E.component(fallback);
+      if (emoji) button.setEmoji(emoji);
+      return button;
+    });
+    return { container, rows: [new ActionRowBuilder().addComponents(actions)], flags: MessageFlags.IsComponentsV2 };
+  }
 
   // Buttons row 1
   const btnOrder = new ButtonBuilder().setCustomId('ticket:create:ORDER').setLabel(international ? 'Place an Order' : 'Mua Hàng').setStyle(ButtonStyle.Primary);
@@ -1316,7 +1335,7 @@ export function buildFeedbackReminderText(orderCode) {
     '**Hãy đánh giá trải nghiệm mua hàng của bạn!**',
     '> Feedback của bạn giúp chúng tôi cải thiện dịch vụ ngày càng tốt hơn.',
     '',
-    'Cần **bảo hành** sau này? Dùng nút **Bảo Hành Sản Phẩm** ở panel ticket.',
+    'Cần bảo hành sau này? Mở kênh tạo ticket và chọn mục **Bảo hành**.',
   ].join('\n');
 }
 

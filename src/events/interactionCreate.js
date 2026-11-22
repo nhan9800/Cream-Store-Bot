@@ -335,6 +335,11 @@ export function registerInteractionHandler(client, commands) {
         if (await handleBookingInteraction(interaction)) return;
       }
 
+      if (interaction.customId?.startsWith('ticket:intake:')) {
+        const { handleTicketIntakeInteraction } = await import('./ticketIntakeHandlers.js');
+        if (await handleTicketIntakeInteraction(interaction)) return;
+      }
+
       // ── Autocomplete handler ──
       if (interaction.isAutocomplete()) {
         const command = commands.get(interaction.commandName);
