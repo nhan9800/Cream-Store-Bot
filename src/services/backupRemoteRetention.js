@@ -70,6 +70,15 @@ export async function pruneTelegramBackups({ statePath, token, chatId, newEntry,
   return result;
 }
 
+/** Thời điểm (ISO) của bản Telegram mới nhất đã gửi thành công, hoặc null. */
+export function lastTelegramSentAt(statePath) {
+  const latest = readRemoteState(statePath).telegram
+    .map((entry) => Date.parse(entry.sentAt))
+    .filter(Number.isFinite)
+    .sort((a, b) => b - a)[0];
+  return latest ? new Date(latest).toISOString() : null;
+}
+
 export function lastTelegramSendDay(statePath, timeZone = 'Asia/Ho_Chi_Minh') {
   const latest = readRemoteState(statePath).telegram
     .map((entry) => Date.parse(entry.sentAt))

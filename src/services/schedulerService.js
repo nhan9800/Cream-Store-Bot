@@ -1,6 +1,6 @@
 import { runDeepNotifications, runSubscriptionNotifications } from './deepNotificationService.js';
-import { backupDatabase, readLatestBackupStatus } from './backupService.js';
-import { BACKUP_INTERVAL_MS, STARTUP_BACKUP_DELAY_MS, startupBackupReason } from './backupStartupPolicy.js';
+import { backupDatabase, latestTelegramSentAt, readLatestBackupStatus } from './backupService.js';
+import { BACKUP_CHECK_INTERVAL_MS, STARTUP_BACKUP_DELAY_MS, scheduledBackupReason } from './backupStartupPolicy.js';
 import { config } from '../config.js';
 import { startFeedbackTicketAutoClose, stopFeedbackTicketAutoClose } from './feedbackTicketAutoCloseService.js';
 import { runAutoVinhDanh } from './vinhDanhService.js';
@@ -46,14 +46,32 @@ async function autoBackupDatabase() {
 
 // Restart/deploy làm lịch 12 giờ đếm lại từ đầu, nên sao lưu bù khi bản gần nhất đã cũ
 // hoặc đích Telegram vừa được cấu hình mà chưa gửi thành công.
+function backupReasonNow() {
+  try {
+    return scheduledBackupReason(readLatestBackupStatus(), { lastTelegramSentAt: latestTelegramSentAt() });
+  } catch (error) {
+    console.error('[BACKUP] Không đọc được trạng thái sao lưu:', error.message);
+    return null;
+  }
+}
+
+// Kiểm tra theo giờ thực mỗi 10 phút: sao lưu khi bản cục bộ cũ hơn 12 giờ hoặc tới lượt
+// gửi Telegram 03:00/15:00 (giờ VN) mà chưa gửi. Lần kiểm tra đầu chạy 3 phút sau khởi động.
+function runBackupCheck() {
+  const reason = backupReasonNow();
+  if (reason) {
+    console.log(`[BACKUP] Đến hạn sao lưu (${reason}).`);
+    autoBackupDatabase();
+  }
+}
+
 function scheduleStartupBackup() {
   if (startupBackupHandle) return;
-  const reason = startupBackupReason(readLatestBackupStatus());
-  if (!reason) return;
-  console.log(`[BACKUP] Sẽ sao lưu bù sau khởi động (${reason}) trong ${Math.round(STARTUP_BACKUP_DELAY_MS / 1000)} giây.`);
+  const reason = backupReasonNow();
+  if (reason) console.log(`[BACKUP] Sẽ sao lưu sau khởi động (${reason}) trong ${Math.round(STARTUP_BACKUP_DELAY_MS / 1000)} giây.`);
   startupBackupHandle = setTimeout(() => {
     startupBackupHandle = null;
-    autoBackupDatabase();
+    runBackupCheck();
   }, STARTUP_BACKUP_DELAY_MS);
 }
 
@@ -244,10 +262,8 @@ export function startScheduler(client) {
   }
   customerRoleHandle = setTimeout(runCustomerRoleLoop, 10_000);
 
-  // Chạy file backup mỗi 12 tiếng một lần
-  backupHandle = setInterval(() => {
-    autoBackupDatabase();
-  }, BACKUP_INTERVAL_MS);
+  // Sao lưu theo giờ thực (không đếm lại từ đầu mỗi lần restart/deploy).
+  backupHandle = setInterval(runBackupCheck, BACKUP_CHECK_INTERVAL_MS);
   scheduleStartupBackup();
 
   // Chạy độc lập với vòng bảo trì chính để một tác vụ mạng chậm không làm lỡ

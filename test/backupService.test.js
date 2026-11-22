@@ -94,7 +94,7 @@ describe('backup restore verification and status reporting', () => {
     process.env.BACKUP_ENCRYPTION_KEY = 'k'.repeat(40);
 
     const report = await backupDatabase({ snapshot: false });
-    expect(report.telegram).toEqual({ status: 'success', messageId: 42, retention: { keep: 1, deleted: 0, failed: 0 } });
+    expect(report.telegram).toEqual({ status: 'success', messageId: 42, slot: expect.stringMatching(/@(03|15)$/), retention: { keep: 1, deleted: 0, failed: 0 } });
     expect(report.encryption).toMatchObject({ status: 'success', algorithm: 'aes-256-gcm+scrypt' });
     expect(report.overallStatus).toBe('success');
     expect(bodies).toHaveLength(1);
@@ -107,7 +107,7 @@ describe('backup restore verification and status reporting', () => {
 
   it('keeps only the newest Telegram backup by deleting the previous message', async () => {
     const statePath = path.resolve(process.cwd(), testPaths.backups, 'remote-state-shopbot-store1.json');
-    // Giả lập bản của hôm qua (đã gửi 24 giờ trước) để bot được phép gửi lại hôm nay.
+    // Giả lập bản của hôm qua (đã gửi 24 giờ trước) để bot được phép gửi ở lượt hiện tại.
     const previous = JSON.parse(fs.readFileSync(statePath, 'utf8'));
     expect(previous.telegram.map((entry) => entry.messageId)).toEqual([42]);
     fs.writeFileSync(statePath, JSON.stringify({
@@ -135,10 +135,11 @@ describe('backup restore verification and status reporting', () => {
     const state = JSON.parse(fs.readFileSync(statePath, 'utf8'));
     expect(state.telegram.map((entry) => entry.messageId)).toEqual([43]);
 
-    // Cùng ngày thì không gửi thêm bản thứ hai, kể cả sau khi bot khởi động lại.
+    // Cùng lượt giờ (03:00 hoặc 15:00 VN) thì không gửi thêm, kể cả sau khi bot khởi động lại.
     __resetTelegramDayForTests();
     const again = await backupDatabase({ snapshot: false });
-    expect(again.telegram).toEqual({ status: 'skipped', reason: 'already_sent_today' });
+    expect(again.telegram).toMatchObject({ status: 'skipped', reason: 'already_sent_this_slot' });
+    expect(again.telegram.slot).toMatch(/^\d{4}-\d{2}-\d{2}@(03|15)$/);
   });
 
   it('rejects a file that cannot be restored as SQLite', () => {
