@@ -14,7 +14,7 @@ beforeAll(() => {
     const id = String(1558200000000000000n + BigInt(index));
     return [id, { id, name: asset.name, animated: false, available: true }];
   }));
-  const guildEmojis = new Collection(['cenar_price_nitro', 'cenar_yt_logo'].map((name, index) => {
+  const guildEmojis = new Collection(['cenar_price_nitro', 'cenar_yt_logo', 'cenar_board26_netflix'].map((name, index) => {
     const id = String(1558200000000001000n + BigInt(index));
     return [id, { id, name, animated: false, available: true }];
   }));
@@ -76,6 +76,20 @@ describe('Cenar terms board 2026', () => {
     };
     payload.components.map((component) => component.toJSON()).forEach(collect);
     expect(contents.reduce((total, content) => total + content.length, 0)).toBeLessThanOrEqual(3_800);
+  });
+
+  it('requires Netflix profile credentials to stay unchanged and allows a single simultaneous stream', () => {
+    const netflix = buildTermsBoardPayload().components.map((component) => component.toJSON())
+      .flatMap((section) => section.components)
+      .find((component) => component.content?.includes('05 · ĐIỀU KHOẢN NETFLIX')).content;
+
+    expect(netflix).toContain('Giữ nguyên tên hồ sơ');
+    expect(netflix).toContain('Giữ nguyên mã PIN của hồ sơ và mật khẩu tài khoản Netflix');
+    expect(netflix).toContain('Được đăng nhập trên nhiều thiết bị');
+    expect(netflix).toContain('Chỉ xem trên **1 thiết bị tại một thời điểm**');
+    expect(netflix).not.toMatch(/Được đổi tên|trừ khi|\p{Extended_Pictographic}/u);
+    const icons = new Set([...netflix.matchAll(/<a?:\w+:(\d+)>/g)].map((match) => match[1]));
+    expect(icons.size).toBe(4);
   });
 
   it('recognizes every legacy terms fragment so the publisher can replace all old messages', () => {
