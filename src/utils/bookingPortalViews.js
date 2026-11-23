@@ -43,7 +43,9 @@ function panel(title, intro, accent) {
 }
 
 export function bookingPanels(guildId, channels, emoji) {
-  const link = (key, label, channel) => button(emoji, key, label, { url: `https://discord.com/channels/${guildId}/${channels[channel].id}` });
+  const link = (key, label, channel) => channels[channel]
+    ? button(emoji, key, label, { url: `https://discord.com/channels/${guildId}/${channels[channel].id}` })
+    : button(emoji, key, label, { id: 'booking:dashboard:help' });
   const action = (key, label, id, primary = false) => button(emoji, key, label, { id, primary });
   const finish = (key, card) => message(card.setId(BOOKING_PANEL_IDS[key]));
   const title = (key, label) => `${glyph(emoji, key)}${label}`;
@@ -62,7 +64,7 @@ export function bookingPanels(guildId, channels, emoji) {
       section('**Trở thành host**\nGửi hồ sơ để staff xem xét cùng bạn.', link('apply', 'Ứng tuyển', 'apply')),
     )
     .addSeparatorComponents(split())
-    .addActionRowComponents(row(link('rules', 'Cẩm nang', 'handbook'), action('support', 'Liên hệ hỗ trợ', 'ticket:create:SUPPORT')));
+    .addActionRowComponents(row(link('rules', 'Cẩm nang', 'handbook'), link('game', 'Cộng đồng', 'chat'), action('support', 'Liên hệ hỗ trợ', 'ticket:create:SUPPORT')));
 
   const request = panel(title('calendar', 'Đặt phiên cùng Cenar'), 'Chọn một dịch vụ bên dưới để mở phiếu riêng.', indigo)
     .addSeparatorComponents(split())

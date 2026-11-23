@@ -9,6 +9,7 @@ import { resolveVerificationRole } from './verificationRoleService.js';
 export { bookingPanels } from '../utils/bookingPortalViews.js';
 export const BOOKING_APP_ID = '1139187282075721768';
 const LAYOUT = 'CENAR-BOOKING-VISUAL-20261123';
+const LEGACY_PANEL_MARKERS = ['CENAR-BOOKING-LOBBY-20261122', 'CENAR-BOOKING-OPERATIONS-20261123'];
 const reason = 'Cenar Booking channel setup';
 const glyphs = /[\p{Extended_Pictographic}\p{Regional_Indicator}\u200d\ufe0f\u20e3]/u;
 const statuses = new WeakMap();
@@ -143,7 +144,8 @@ async function ensurePanel(channel, key, payload) {
   const hasIdentity = message => owned(message) && (message.components.some(component =>
     (component.id ?? component.data?.id) === BOOKING_PANEL_IDS[key]) || textOnMessage(message).includes(marker));
   const candidates = messages.filter(owned);
-  let saved = candidates.find(hasIdentity);
+  let saved = candidates.find(hasIdentity)
+    ?? candidates.find(message => LEGACY_PANEL_MARKERS.some(version => textOnMessage(message).includes(`${version} · ${key}`)));
   if (!saved && channel.messages.fetchPins) {
     const pins = await channel.messages.fetchPins({ limit: 50 });
     saved = pins.items.map(item => item.message).find(hasIdentity);
