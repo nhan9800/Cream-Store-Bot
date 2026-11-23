@@ -13,8 +13,9 @@ vi.mock('../src/services/bookingStoreSetupService.js', () => ({
   BOOKING_APP_ID: '1139187282075721768',
   bookingPortal: () => ({ chat: 'room', voiceChannels: ['voice'], emoji: { reviews: { id: '1234567890123456789', name: 'cenar_book' } } }),
 }));
-import { data, execute, bookingOnly } from '../src/commands/cenar-cong-dong.js';
+import { data, execute, bookingOnly, handleBookingCommunityInteraction } from '../src/commands/cenar-cong-dong.js';
 import { bookingCommunity, eligibleVoiceMembers, registerBookingCommunity } from '../src/events/bookingCommunityEvents.js';
+import { communityCheckInCard, communityMissionCard } from '../src/utils/bookingCommunityViews.js';
 
 const memberId = suffix => `11391872820757${String(suffix).padStart(5, '0')}`;
 const first = memberId(1);
@@ -160,6 +161,17 @@ describe('Cenar Booking community persistence', () => {
 });
 
 describe('Cenar Booking community Discord surface', () => {
+  const makeSlash = (userId, interactionId, subcommand, strings = {}) => ({
+    client: { user: { id: appId } }, guildId: STORE_TWO_GUILD_ID, user: { id: userId }, id: interactionId,
+    options: { getSubcommand: () => subcommand, getString: name => strings[name] ?? null }, reply: vi.fn(),
+  });
+  const makeButton = (userId, interactionId, customId) => ({
+    client: { user: { id: appId } }, guildId: STORE_TWO_GUILD_ID, user: { id: userId }, id: interactionId, customId,
+    message: { author: { id: appId } }, isButton: () => true, isModalSubmit: () => false,
+    reply: vi.fn(), update: vi.fn(), showModal: vi.fn(),
+  });
+  const tree = payload => payload.components[0].toJSON().components;
+
   it('runs six standalone games and both Vietnamese word prompts', () => {
     const low = () => 0;
     const high = max => max - 1;
@@ -196,6 +208,63 @@ describe('Cenar Booking community Discord surface', () => {
     expect(payload.flags & MessageFlags.Ephemeral).toBeTruthy();
     expect(payload.allowedMentions).toEqual({ parse: [] });
     expect(payload.components[0].toJSON().components[0].content).toContain('<:cenar_book:1234567890123456789>');
+  });
+
+  it('displays shop inventory and prices and spends once per private card', async () => {
+    const shopper = memberId(91);
+    bookingCommunity().checkIn(shopper);
+    const slash = makeSlash(shopper, memberId(900), 'cua-hang');
+    await execute(slash);
+    const sections = tree(slash.reply.mock.lastCall[0]).filter(component => component.type === 9);
+    expect(sections).toHaveLength(3);
+    expect(sections[0].accessory.disabled).toBe(true);
+    const food = sections[1];
+    expect(food.components[0].content).toContain('**5 điểm**');
+    expect(food.accessory).toMatchObject({ label: 'Mua', disabled: false });
+    const unrelated = makeButton(memberId(92), memberId(901), food.accessory.custom_id);
+    await handleBookingCommunityInteraction(unrelated);
+    expect(unrelated.update).not.toHaveBeenCalled();
+    expect(bookingCommunity().profile(shopper).points).toBe(10);
+
+    const confirm = makeButton(shopper, memberId(902), food.accessory.custom_id);
+    const duplicate = makeButton(shopper, memberId(903), food.accessory.custom_id);
+    await Promise.all([handleBookingCommunityInteraction(confirm), handleBookingCommunityInteraction(duplicate)]);
+    expect(bookingCommunity().profile(shopper)).toMatchObject({ points: 5, inventory: { 'thuc-an': 1 } });
+    expect(confirm.update.mock.lastCall[0].flags).toBe(MessageFlags.IsComponentsV2);
+    expect(tree(confirm.update.mock.lastCall[0])[0].content).toContain('Đã thêm');
+    expect(duplicate.reply.mock.lastCall[0].content).toContain('đã xử lý lần bấm trước');
+  });
+
+  it('renders mission and streak bars with text counts and a Vietnam-midnight reset', () => {
+    const context = { owner: first };
+    const reset = Date.parse('2026-11-22T17:00:00Z') / 1000;
+    const checkIn = tree(communityCheckInCard(context, { status: 'checked-in', points: 14, streak: 5 }, baseTime));
+    expect(checkIn[0].content).toContain('+14 điểm');
+    expect(checkIn.some(component => component.content?.includes('5/7'))).toBe(true);
+    const missions = tree(communityMissionCard(context, [{ label: 'Nhắn tin', count: 2, goal: 3 }], { status: 'incomplete' }, baseTime));
+    expect(missions[0].content).toContain('0/1 nhiệm vụ');
+    expect(missions.some(component => component.content?.includes('**2/3**'))).toBe(true);
+    expect(missions.some(component => component.content?.includes(`<t:${reset}:R>`))).toBe(true);
+  });
+
+  it('renders a playable game board and a private modal for word puzzle answers', async () => {
+    const player = memberId(93);
+    const game = makeSlash(player, memberId(910), 'choi', { tro: 'xuc-xac' });
+    await execute(game);
+    const diceActions = tree(game.reply.mock.lastCall[0]).at(-1).components;
+    expect(diceActions.map(action => action.label)).toEqual(['Cao', 'Thấp']);
+    const play = makeButton(player, memberId(911), diceActions[0].custom_id);
+    await handleBookingCommunityInteraction(play);
+    expect(tree(play.update.mock.lastCall[0]).some(component => component.content?.includes('Ba viên xúc xắc'))).toBe(true);
+
+    const word = makeSlash(player, memberId(912), 'tro-tu', { tro: 'noi-tu' });
+    await execute(word);
+    const answerAction = tree(word.reply.mock.lastCall[0]).at(-1).components[0];
+    expect(answerAction.label).toBe('Nhập đáp án');
+    const answer = makeButton(player, memberId(913), answerAction.custom_id);
+    await handleBookingCommunityInteraction(answer);
+    expect(answer.showModal.mock.lastCall[0].toJSON()).toMatchObject({ custom_id: answerAction.custom_id, title: 'Nối từ' });
+    expect(answer.update).not.toHaveBeenCalled();
   });
 
   it('registers once and awards text XP only in the intended guild, bot and channel', () => {
