@@ -60,6 +60,10 @@ describe('Cenar Booking private voice', () => {
     ]);
     expect(f.ticket.send.mock.calls[0][0].allowedMentions).toEqual({ parse: [] });
     expect(f.host.send).toHaveBeenCalledOnce();
+    const hostNotice = f.host.send.mock.lastCall[0].components[0].toJSON();
+    expect(hostNotice.components.find(item => item.type === 1).components[0]).toMatchObject({
+      url: `https://discord.com/channels/${STORE_TWO_GUILD_ID}/room`, label: 'Vào phòng voice',
+    });
     f.room.members.set('host', { id: 'host', voice: { channelId: 'room', disconnect: vi.fn() } });
     f.setTime(start + ninety - 14 * 60_000);
     const restarted = f.getTick();
@@ -68,6 +72,8 @@ describe('Cenar Booking private voice', () => {
     expect(f.guild.channels.create).toHaveBeenCalledTimes(1);
     expect(f.host.send).toHaveBeenCalledOnce();
     expect(f.ticket.send).toHaveBeenCalledTimes(2);
+    const warning = f.ticket.send.mock.lastCall[0].components[0].toJSON();
+    expect(warning.components.find(item => item.type === 1).components[0].custom_id).toBe('booking:extension:open:1');
     f.setTime(start + ninety);
     await restarted(f.guild, 'category');
     expect(f.ledger.completeSession).toHaveBeenCalledWith(expect.objectContaining({ onlyIfDue: true }));

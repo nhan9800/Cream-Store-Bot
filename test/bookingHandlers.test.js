@@ -76,7 +76,10 @@ describe('Cenar Booking intake and private ticket controls', () => {
     expect(submitted.deferReply).toHaveBeenCalledWith({ flags: 64 });
     expect(mocks.open).toHaveBeenCalledWith(submitted, 'BOOKING', null, { booking: expect.objectContaining({ categoryId: 'private-category' }) });
     const data = mocks.open.mock.lastCall[3].booking.render({ id: 19, ticket_code: 'TKT_001', guild_id: STORE_TWO_GUILD_ID }).container.toJSON();
+    expect(data.accent_color).toBe(0x7167db);
+    expect(data.components[0].content).toContain('Mã phiếu `TKT_001`');
     expect(data.components.find(component => component.content?.includes('Thời lượng')).content).toContain('**Thời lượng** · 60 phút');
+    expect(data.components.find(component => component.content?.includes('Yêu cầu của bạn')).content).toContain('\\*\\*Valorant\\*\\*');
     expect(data.components.find(component => component.content?.includes('Theo dõi phiên')).content).toContain('/cenar-booking lich');
     expect(data.components.some(component => component.type === 1)).toBe(false);
     expect(mocks.createSession).toHaveBeenCalledWith({ guildId: STORE_TWO_GUILD_ID, ticketId: 19,

@@ -31,6 +31,8 @@ import { db } from '../database/db.js';
 import { startSupplierPaymentEffects } from './supplierAutobuyPaymentNoticeService.js';
 import { getPayOSReceivedAmount } from '../utils/payosReceipt.js';
 import { createBookingLedger, getBookingInvoiceForOrder, isBookingPayOSReceipt } from './bookingLedgerService.js';
+import { bookingPortal } from './bookingStoreSetupService.js';
+import { buildBookingPayOSCard } from '../utils/bookingTicketUi.js';
 
 export { getPayOSReceivedAmount };
 
@@ -243,8 +245,9 @@ function applyPayOSTerminalInfo(order, info, state) {
   }).immediate();
 }
 
-async function renderPaymentQrImage(order) {
-  const qrData = order.payment_qr_code || order.payment_checkout_url || order.payment_code || order.order_code;
+async function renderPaymentQrImage(order, bookingInvoice) {
+  const qrData = bookingInvoice ? order.payment_qr_code
+    : order.payment_qr_code || order.payment_checkout_url || order.payment_code || order.order_code;
   if (!qrData) return null;
   return QRCode.toBuffer(qrData, {
     type: 'png',
@@ -555,23 +558,25 @@ export async function sendOrRefreshPaymentQr({ guild, orderCode }) {
   }
 
   const attachmentName = `payos-${order.order_code}.png`;
-  const imageBuffer = await renderPaymentQrImage(order);
+  const booking = getBookingInvoiceForOrder(db, order);
+  const bookingHasPayOS = booking?.status === 'PENDING' && order.payment_link_id && order.payos_order_code === booking.provider_order_code
+    && order.total_amount === booking.amount;
+  const imageBuffer = !booking || bookingHasPayOS ? await renderPaymentQrImage(order, booking) : null;
   const files = imageBuffer ? [new AttachmentBuilder(imageBuffer, { name: attachmentName })] : [];
 
-  // ═══ PayOS QR — Components V2 (QR inline qua MediaGallery attachment://) ═══
-  const { container, actionRow, flags } = buildPaymentQrV2({
-    order,
-    attachmentName,
-    checkoutUrl: order.payment_checkout_url,
-    hasImage: Boolean(imageBuffer),
-  });
-
-  const messagePayload = {
-    components: [container, actionRow],
-    flags,
-    files,
-    allowedMentions: { users: [order.customer_id] },
-  };
+  let messagePayload;
+  if (booking) {
+    messagePayload = {
+      ...buildBookingPayOSCard({ order, invoice: booking, attachmentName: imageBuffer ? attachmentName : null,
+        checkoutUrl: bookingHasPayOS ? order.payment_checkout_url : null, emoji: bookingPortal(guild.client)?.emoji?.calendar }),
+      files,
+    };
+  } else {
+    const { container, actionRow, flags } = buildPaymentQrV2({
+      order, attachmentName, checkoutUrl: order.payment_checkout_url, hasImage: Boolean(imageBuffer),
+    });
+    messagePayload = { components: [container, actionRow], flags, files, allowedMentions: { users: [order.customer_id] } };
+  }
 
   let sentMessage = null;
   if (order.payment_message_id) {

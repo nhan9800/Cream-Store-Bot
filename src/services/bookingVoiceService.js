@@ -1,4 +1,5 @@
-import { ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, PermissionFlagsBits as P } from 'discord.js';
+import { ChannelType, PermissionFlagsBits as P } from 'discord.js';
+import { buildBookingVoiceNotice } from '../utils/bookingTicketUi.js';
 import { STORE_TWO_GUILD_ID } from '../utils/locale.js';
 
 const REASON = 'Cenar Booking · Phòng theo lịch';
@@ -149,26 +150,21 @@ export function createBookingVoiceTick({ db, ledger, voiceStore = createBookingV
           if (!state?.participants_met && room.members.has(session.host_id) && room.members.has(session.customer_id)) {
             voiceStore.recordAttendance(ticketId);
           }
+          const notice = { guildId: guild.id, roomId: room.id, endsAt: session.ends_at, ticketId };
           if (voiceStore.claimHostNotice(ticketId)) {
             const host = await guild.members.fetch({ user: session.host_id, force: true }).catch(() => null);
-            await host?.send({ content: `**Cenar Booking · Phiên đã đến giờ**\nVào phòng <#${room.id}> trước <t:${Math.floor(session.ends_at / 1000)}:t>. Bạn cũng có thể mở \`/cenar-booking lich\` trong máy chủ.`,
-              allowedMentions: { parse: [] } }).catch(() => onError('BOOKING_HOST_DM_UNAVAILABLE'));
+            await host?.send(buildBookingVoiceNotice({ ...notice, audience: 'host' })).catch(() => onError('BOOKING_HOST_DM_UNAVAILABLE'));
           }
           const ticket = await guild.channels.fetch(session.ticket_channel_id);
           if (!(ticket?.type === ChannelType.GuildText && ticket.guildId === guild.id)) continue;
           if (!state?.reminder_sent) {
-            await ticket.send({
-              content: `**Phiên của bạn đã đến giờ**\nVào phòng <#${room.id}> để bắt đầu. Host nhận đường dẫn qua tin nhắn riêng và mục Lịch của bạn.`,
-              allowedMentions: { parse: [] },
-            });
+            await ticket.send(buildBookingVoiceNotice(notice));
             voiceStore.remind(ticketId);
           }
           const remaining = session.ends_at - time;
           const warningTime = Math.min(15 * MINUTE, Math.max(MINUTE, session.duration_minutes * MINUTE / 2));
           if (remaining <= warningTime && state?.warning_for !== session.ends_at) {
-            await ticket.send({ content: `Phiên sẽ kết thúc <t:${Math.floor(session.ends_at / 1000)}:R>. Nếu cần thêm thời gian, hãy yêu cầu gia hạn trong phiếu.`,
-              components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setStyle(ButtonStyle.Secondary)
-                .setLabel('Yêu cầu gia hạn').setCustomId(`booking:extension:open:${ticketId}`))], allowedMentions: { parse: [] } });
+            await ticket.send(buildBookingVoiceNotice({ ...notice, audience: 'warning' }));
             voiceStore.warn(ticketId, session.ends_at);
           }
         } catch (error) {

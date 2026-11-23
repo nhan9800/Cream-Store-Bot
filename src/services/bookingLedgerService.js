@@ -10,7 +10,7 @@ const SETTLED_ORDER_STATES = new Set(['PROCESSING', 'COMPLETED']);
 export function getBookingInvoiceForOrder(db, order) {
   if (order?.guild_id !== STORE_TWO_GUILD_ID || !order.id
     || !db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='booking_invoices'").get()) return null;
-  return db.prepare(`SELECT i.id, i.amount, i.provider_order_code, i.status FROM booking_invoices i
+  return db.prepare(`SELECT i.id, i.amount, i.provider_order_code, i.status, i.kind, i.minutes FROM booking_invoices i
     JOIN booking_sessions s ON s.ticket_id = i.ticket_id
     WHERE i.order_id = ? AND i.order_code = ? AND s.guild_id = ?`).get(order.id, order.order_code, order.guild_id) ?? null;
 }
