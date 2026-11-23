@@ -8,7 +8,7 @@ import { resolveVerificationRole } from './verificationRoleService.js';
 
 export { bookingPanels } from '../utils/bookingPortalViews.js';
 export const BOOKING_APP_ID = '1139187282075721768';
-const LAYOUT = 'CENAR-BOOKING-VISUAL-20261123';
+const LAYOUT = 'CENAR-BOOKING-REFERENCE-20261123';
 const LEGACY_PANEL_MARKERS = ['CENAR-BOOKING-LOBBY-20261122', 'CENAR-BOOKING-OPERATIONS-20261123'];
 const reason = 'Cenar Booking channel setup';
 const glyphs = /[\p{Extended_Pictographic}\p{Regional_Indicator}\u200d\ufe0f\u20e3]/u;
@@ -27,25 +27,29 @@ const existingIcons = {
   female: '9014hellokittywave', support: 'blobcathug', news: 'tsm_fire',
 };
 const newCategories = {
-  start: ['01 · SẢNH CENAR', '01 · BẮT ĐẦU'],
-  booking: ['02 · ĐẶT LỊCH', '02 · BOOKING'],
-  hosts: ['03 · HOST & ĐÁNH GIÁ'],
-  community: ['04 · CỘNG ĐỒNG & VOICE', '03 · CỘNG ĐỒNG & VOICE'],
-  tickets: ['05 · PHIẾU BOOKING'],
-  support: ['HỖ TRỢ & BẢO HÀNH ĐƠN CŨ', '04 · HỖ TRỢ & BẢO HÀNH'],
+  start: ['----- ☬ 𝐈𝐦𝐩𝐨𝐫𝐭𝐚𝐧𝐭 ☬ ------', '01 · SẢNH CENAR'],
+  booking: ['----- ☬ 𝐁𝐨𝐨𝐤𝐢𝐧𝐠 ☬ ------', '02 · ĐẶT LỊCH'],
+  hosts: ['----- ☬ 𝐇𝐨𝐬𝐭 & 𝐅𝐞𝐞𝐝𝐛𝐚𝐜𝐤 ☬ ------'],
+  community: ['----- ☬ 𝐂𝐡𝐚𝐭𝐭𝐢𝐧𝐠 ☬ ------', '04 · CỘNG ĐỒNG & VOICE'],
+  tickets: ['----- ☬ 𝐏𝐡𝐢ế𝐮 𝐁𝐨𝐨𝐤𝐢𝐧𝐠 ☬ ------'],
+  support: ['----- ☬ 𝐒𝐮𝐩𝐩𝐨𝐫𝐭 ☬ ------', 'HỖ TRỢ & BẢO HÀNH ĐƠN CŨ'],
   market: ['05 · DỊCH VỤ CŨ', 'GLOBAL MARKETPLACE'],
   guides: ['06 · HƯỚNG DẪN DỊCH VỤ CŨ', 'GUIDES & RESOURCES'],
   premium: ['07 · TIỆN ÍCH CŨ', 'PREMIUM SERVICES'],
 };
 const oldChannels = {
-  welcome: ['1514604934245384233', 'bat-dau', 'start'],
-  rules: ['1536693543463297104', 'noi-quy', 'start'],
-  news: ['1514594182717640735', 'thong-bao', 'start'],
-  verify: ['1514604946308464722', 'xac-minh', 'start'],
+  welcome: ['1514604934245384233', '✦ㆍ𝑰𝑵𝑭𝑶𝑹𝑴𝑨𝑻𝑰𝑶𝑵', 'start'],
+  rules: ['1536693543463297104', '✦ㆍ𝑹𝑼𝑳𝑬𝑺', 'start'],
+  news: ['1514594182717640735', '✦ㆍ𝑵𝑶𝑻𝑰𝑭𝑰𝑪𝑨𝑻𝑰𝑶𝑵𝑺', 'start'],
+  verify: ['1514604946308464722', '✦ㆍ𝑽𝑬𝑹𝑰𝑭𝒀', 'start'],
   guide: ['1536693550455070761', 'huong-dan-mua-hang-cu', 'market'],
-  support: ['1514604974066237551', 'ho-tro-dich-vu-cu', 'support'],
-  reminders: ['1514604985193861182', 'log-nhac-nho', 'support'],
-  warranty: ['1517266178282618980', 'log-bao-hanh', 'support'],
+  support: ['1514604974066237551', '✦ㆍ𝑺𝑼𝑷𝑷𝑶𝑹𝑻', 'support'],
+  reminders: ['1514604985193861182', '✦ㆍ𝑹𝑬𝑴𝑰𝑵𝑫𝑬𝑹𝑺', 'support'],
+  warranty: ['1517266178282618980', '✦ㆍ𝑾𝑨𝑹𝑹𝑨𝑵𝑻𝒀', 'support'],
+};
+const oldSlotNames = {
+  request: ['dat-lich'], handbook: ['cam-nang-booking'], profiles: ['ho-so-host'], reviews: ['danh-gia-booking'],
+  apply: ['tuyen-host'], chat: ['tro-chuyen', 'global-chat'], lobby: ['Sảnh chờ'], game: ['Chơi cùng'], voice: ['Voice chill'],
 };
 const requiredExisting = ['welcome', 'rules', 'news', 'verify', 'support'];
 
@@ -242,22 +246,22 @@ async function applyBookingLayout(client, guildId) {
   }
 
   const slots = [
-    ['request', 'dat-lich', 'booking', 'read', 'Mở ticket để gửi host, dịch vụ, thời gian và thời lượng. Staff xác nhận lịch.'],
-    ['handbook', 'cam-nang-booking', 'booking', 'read', 'Cách chọn host, gửi giờ mong muốn, đổi lịch và gửi phản hồi.'],
-    ['profiles', 'ho-so-host', 'hosts', 'forum', 'Hồ sơ do staff duyệt. Lọc theo nhóm Nam/Nữ và dịch vụ. Hồ sơ ghi game/chủ đề, giờ rảnh theo UTC+7, thời lượng và giá đã xác nhận.'],
-    ['reviews', 'danh-gia-booking', 'hosts', 'forum', 'Đánh giá các phiên đã diễn ra. Gửi phản hồi qua ticket để staff hỗ trợ đăng.'],
-    ['apply', 'tuyen-host', 'hosts', 'read', 'Đăng ký host chơi game hoặc trò chuyện qua phiếu riêng.'],
-    ['chat', 'tro-chuyen', 'community', 'chat', 'Tìm bạn chơi game, voice và trò chuyện cùng cộng đồng.'],
-    ['lobby', 'Sảnh chờ', 'community', 'voice'],
-    ['game', 'Chơi cùng', 'community', 'voice'],
-    ['voice', 'Voice chill', 'community', 'voice'],
+    ['request', '˖ი𐑼⋆𝑻𝑰𝑪𝑲𝑬𝑻', 'booking', 'read', 'Mở ticket để gửi host, dịch vụ, thời gian và thời lượng. Staff xác nhận lịch.'],
+    ['handbook', '˖ი𐑼⋆𝑩𝑶𝑶𝑲𝑰𝑵𝑮-𝑮𝑼𝑰𝑫𝑬', 'booking', 'read', 'Cách chọn host, gửi giờ mong muốn, đổi lịch và gửi phản hồi.'],
+    ['profiles', '✰・𝑽𝑰𝑷-𝑷𝑹𝑶𝑭𝑰𝑳𝑬', 'hosts', 'forum', 'Hồ sơ do staff duyệt. Lọc theo nhóm Nam/Nữ và dịch vụ. Hồ sơ ghi game/chủ đề, giờ rảnh theo UTC+7, thời lượng và giá đã xác nhận.'],
+    ['reviews', '✰・𝑭𝑬𝑬𝑫𝑩𝑨𝑪𝑲', 'hosts', 'forum', 'Đánh giá các phiên đã diễn ra. Gửi phản hồi qua ticket để staff hỗ trợ đăng.'],
+    ['apply', '✰・𝑨𝑷𝑷𝑳𝒀', 'hosts', 'read', 'Đăng ký host chơi game hoặc trò chuyện qua phiếu riêng.'],
+    ['chat', '˳·˖✶ㆍ𝑴𝑨𝑰𝑵-𝑪𝑯𝑨𝑻', 'community', 'chat', 'Tìm bạn chơi game, voice và trò chuyện cùng cộng đồng.'],
+    ['lobby', '⌁・𝑳𝑶𝑩𝑩𝒀', 'community', 'voice'],
+    ['game', '⌁・𝑮𝑨𝑴𝑬', 'community', 'voice'],
+    ['voice', '⌁・𝑽𝑶𝑰𝑪𝑬', 'community', 'voice'],
   ];
   const hasForums = guild.features.includes('COMMUNITY');
   for (const [id, name, parent, kind, topic] of slots) {
     const type = kind === 'voice' ? ChannelType.GuildVoice
       : kind === 'forum' && hasForums ? ChannelType.GuildForum : ChannelType.GuildText;
     let channel = existing(guild.channels.cache, name, type);
-    if (id === 'chat') channel ||= existing(guild.channels.cache, 'global-chat', type);
+    for (const oldName of oldSlotNames[id] ?? []) channel ||= existing(guild.channels.cache, oldName, type);
     const tagIcons = id === 'profiles' ? [['Nam', 'male'], ['Nữ', 'female'], ['Chơi game', 'game'], ['Trò chuyện', 'voice']]
       : [['Chơi game', 'game'], ['Trò chuyện', 'voice']];
     const forumTags = tagIcons.map(([tag, icon]) => ({
@@ -298,15 +302,27 @@ async function applyBookingLayout(client, guildId) {
 
   for (const item of original) {
     const channel = guild.channels.cache.get(item.id);
-    if (!channel || /^(?:closed-)?(?:ticket|order|support|warranty)-\d/i.test(channel.name)) continue;
+    if (!channel || Object.values(categories).some(target => target.id === channel.id)
+      || Object.values(channels).some(target => target.id === channel.id)
+      || /^(?:closed-)?(?:ticket|order|support|warranty)-\d/i.test(channel.name)) continue;
     const cleaned = withoutDecoration(channel.name);
     if (cleaned && cleaned !== channel.name) await channel.setName(cleaned, reason);
   }
-  const ordered = [...Object.values(categories), ...guild.channels.cache.filter(channel =>
-    channel.type === ChannelType.GuildCategory && !Object.values(categories).some(target => target.id === channel.id),
-  ).sort((a, b) => a.rawPosition - b.rawPosition).values()];
-  if (ordered.some((channel, index) => channel.rawPosition !== index)) {
-    await guild.channels.setPositions(ordered.map(({ id }, position) => ({ channel: id, position, lockPermissions: false })));
+  const orderedGroups = [
+    [categories.start, channels.welcome, channels.news, channels.rules, channels.verify],
+    [categories.booking, channels.request, channels.handbook],
+    [categories.hosts, channels.profiles, channels.reviews, channels.apply],
+    [categories.community, channels.chat, channels.lobby, channels.game, channels.voice],
+    [categories.tickets],
+    [categories.support, channels.support, channels.reminders, channels.warranty],
+  ];
+  const orderedIds = orderedGroups.flat().filter(Boolean).map(channel => channel.id);
+  const orderedSet = new Set(orderedIds);
+  const remainder = guild.channels.cache.filter(channel => !orderedSet.has(channel.id))
+    .sort((a, b) => a.rawPosition - b.rawPosition).map(channel => channel.id);
+  const ordered = [...orderedIds, ...remainder];
+  if (ordered.some((id, index) => guild.channels.cache.get(id)?.rawPosition !== index)) {
+    await guild.channels.setPositions(ordered.map((id, position) => ({ channel: id, position, lockPermissions: false })));
   }
 
   for (const [id, payload] of Object.entries(bookingPanels(guild.id, channels, emoji))) {

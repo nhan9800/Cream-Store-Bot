@@ -111,7 +111,7 @@ describe('Store 2 booking layout', () => {
     expect(guild.name).toBe('Cenar Booking');
     expect(before.every(channelId => cache.has(channelId))).toBe(true);
     expect(support.permissionOverwrites.cache.get(guild.id).deny.bitfield).toBe(1024n);
-    const directory = cache.find(channel => channel.name === 'ho-so-host');
+    const directory = cache.find(channel => channel.name === '✰・𝑽𝑰𝑷-𝑷𝑹𝑶𝑭𝑰𝑳𝑬');
     expect(directory.availableTags.map(tag => tag.name)).toEqual(['Nam', 'Nữ', 'Chơi game', 'Trò chuyện']);
     expect(directory.availableTags.every(tag => /^\d+$/.test(tag.emoji.id))).toBe(true);
     const firstChannelCount = cache.size;
@@ -119,7 +119,7 @@ describe('Store 2 booking layout', () => {
     expect(cache.size).toBe(firstChannelCount);
     expect([...cache.values()].reduce((n, channel) => n + channel.send.mock.calls.length, 0)).toBe(6);
     const ticketCategory = cache.get(bookingPortal(client).tickets);
-    expect(ticketCategory.name).toBe('05 · PHIẾU BOOKING');
+    expect(ticketCategory.name).toBe('----- ☬ 𝐏𝐡𝐢ế𝐮 𝐁𝐨𝐨𝐤𝐢𝐧𝐠 ☬ ------');
     const creation = guild.channels.create.mock.calls.find(([options]) => options.name === ticketCategory.name)[0];
     expect(creation.permissionOverwrites[0]).toEqual({ id: guild.id, deny: [1024n] });
   });
@@ -145,9 +145,9 @@ describe('Store 2 booking layout', () => {
     const { client, guild, cache, emojis } = setupGuild();
     guild.emojis.create.mockRejectedValue(new Error('Emoji slots are full'));
     expect(await setupBookingStore(client, guild.id)).toMatchObject({ customEmoji: 0 });
-    const profiles = cache.find(channel => channel.name === 'ho-so-host');
+    const profiles = cache.find(channel => channel.name === '✰・𝑽𝑰𝑷-𝑷𝑹𝑶𝑭𝑰𝑳𝑬');
     const tags = profiles.availableTags.map(tag => tag.id);
-    const request = cache.find(channel => channel.name === 'dat-lich');
+    const request = cache.find(channel => channel.name === '˖ი𐑼⋆𝑻𝑰𝑪𝑲𝑬𝑻');
     const message = (await request.messages.fetch()).first();
     for (const [index, name] of ['pepenoted', 'blobcathug', '2558keroppiwave', 'starxoay'].entries()) {
       const emojiId = String(1523000000000000000n + BigInt(index));
@@ -169,7 +169,7 @@ describe('Store 2 booking layout', () => {
   it('updates an old pinned panel in place even when the custom emoji inventory is unchanged', async () => {
     const { client, guild, cache } = setupGuild();
     await setupBookingStore(client, guild.id);
-    const request = cache.find(channel => channel.name === 'dat-lich');
+    const request = cache.find(channel => channel.name === '˖ი𐑼⋆𝑻𝑰𝑪𝑲𝑬𝑻');
     const message = (await request.messages.fetch()).first();
     const old = message.components.map(component => component.toJSON());
     old[0].components.find(item => item.type === 1).components[0].custom_id = 'ticket:create:SUPPORT';
