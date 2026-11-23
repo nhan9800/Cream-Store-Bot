@@ -4,8 +4,22 @@ import { getStoredPayOSReceivedAmount } from '../utils/payosReceipt.js';
 const MINUTE = 60_000;
 const MAX_MINUTES = 1440;
 const MAX_RATE = 100_000_000;
-const STATUSES = new Set(['REQUESTED', 'CONFIRMED', 'ACTIVE', 'COMPLETED', 'DECLINED']);
+const STATUSES = new Set(['REQUESTED', 'CONFIRMED', 'ACTIVE', 'COMPLETED', 'DECLINED', 'NEEDS_REVIEW']);
 const SETTLED_ORDER_STATES = new Set(['PROCESSING', 'COMPLETED']);
+
+export function getBookingInvoiceForOrder(db, order) {
+  if (order?.guild_id !== STORE_TWO_GUILD_ID || !order.id
+    || !db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='booking_invoices'").get()) return null;
+  return db.prepare(`SELECT i.id, i.amount, i.provider_order_code, i.status FROM booking_invoices i
+    JOIN booking_sessions s ON s.ticket_id = i.ticket_id
+    WHERE i.order_id = ? AND i.order_code = ? AND s.guild_id = ?`).get(order.id, order.order_code, order.guild_id) ?? null;
+}
+
+export function isBookingPayOSReceipt(order, invoice, data) {
+  return Boolean(order.payment_link_id && data && Number(data.orderCode) === invoice.provider_order_code
+    && order.payos_order_code === invoice.provider_order_code && order.total_amount === invoice.amount
+    && (data.paymentLinkId ?? data.id) === order.payment_link_id);
+}
 
 export class BookingLedgerError extends Error {
   constructor(code, message) {
@@ -54,7 +68,7 @@ export function createBookingLedger(db, { now = Date.now } = {}) {
       ticket_channel_id TEXT NOT NULL,
       service TEXT NOT NULL CHECK (service IN ('game','voice')),
       host_id TEXT,
-      status TEXT NOT NULL CHECK (status IN ('REQUESTED','CONFIRMED','ACTIVE','COMPLETED','DECLINED')),
+      status TEXT NOT NULL CHECK (status IN ('REQUESTED','CONFIRMED','ACTIVE','COMPLETED','DECLINED','NEEDS_REVIEW')),
       starts_at INTEGER NOT NULL,
       ends_at INTEGER NOT NULL,
       requested_duration_minutes INTEGER NOT NULL CHECK (requested_duration_minutes BETWEEN 1 AND 1440),
@@ -274,14 +288,14 @@ export function createBookingLedger(db, { now = Date.now } = {}) {
   function findReceipt(order, invoice, session) {
     if (!(isOrderForSession(order, session, invoice.amount) && order.order_code === invoice.order_code
       && order.payos_order_code === invoice.provider_order_code && order.payment_status === 'PAID'
-      && order.amount_paid === invoice.amount
+      && Number.isSafeInteger(order.amount_paid) && order.amount_paid >= invoice.amount
       && order.payment_link_id && order.paid_transaction_id)) return null;
 
     const receipt = db.prepare(`SELECT id, amount, raw_payload FROM payment_events
       WHERE order_code = ? AND provider = 'PAYOS' AND transaction_id = ?`)
       .get(invoice.order_code, order.paid_transaction_id);
-    if (!receipt || receipt.amount !== invoice.amount
-      || Number(getStoredPayOSReceivedAmount(receipt.raw_payload)) !== invoice.amount) return null;
+    if (!receipt || receipt.amount !== order.amount_paid
+      || Number(getStoredPayOSReceivedAmount(receipt.raw_payload)) !== order.amount_paid) return null;
     const data = JSON.parse(receipt.raw_payload);
     return Number(data.orderCode) === invoice.provider_order_code
       && (data.paymentLinkId ?? data.id) === order.payment_link_id ? receipt : null;
@@ -291,7 +305,8 @@ export function createBookingLedger(db, { now = Date.now } = {}) {
     if (invoice?.status === 'FREE') return true;
     if (invoice?.status !== 'PAID') return false;
     const order = orderById.get(invoice.order_id);
-    return SETTLED_ORDER_STATES.has(order?.status) && findReceipt(order, invoice, session)?.id === invoice.payment_event_id;
+    return SETTLED_ORDER_STATES.has(order?.status) && order.amount_paid === invoice.amount
+      && findReceipt(order, invoice, session)?.id === invoice.payment_event_id;
   }
 
   // Only the canonical PAYOS receipt committed by the existing verification path is accepted.
@@ -309,7 +324,7 @@ export function createBookingLedger(db, { now = Date.now } = {}) {
       const at = now();
       const extension = invoice.kind === 'EXTENSION';
       const ticketOpen = openTicket.get(session.ticket_id, guildId);
-      const applicable = SETTLED_ORDER_STATES.has(order.status) && ticketOpen
+      const applicable = order.amount_paid === invoice.amount && SETTLED_ORDER_STATES.has(order.status) && ticketOpen
         && ['CONFIRMED', 'ACTIVE'].includes(session.status) && at < session.ends_at
         && (!extension || isSlotAvailable(session, session.host_id, session.started_at ?? session.starts_at,
           session.ends_at + invoice.minutes * MINUTE));
@@ -348,7 +363,7 @@ export function createBookingLedger(db, { now = Date.now } = {}) {
   function completeSession({ guildId, ticketId, actorId, onlyIfDue = false }) {
     requireActor(actorId);
     return db.transaction(() => {
-      const session = requireSession(guildId, ticketId, ['ACTIVE', 'COMPLETED']);
+      const session = requireSession(guildId, ticketId, ['ACTIVE', 'COMPLETED', 'NEEDS_REVIEW']);
       if (session.status === 'COMPLETED') return session;
       const at = now();
       requireBooking(!onlyIfDue || at >= session.ends_at, 'SESSION_NOT_DUE', 'Phiên vẫn còn thời gian.');
@@ -357,6 +372,19 @@ export function createBookingLedger(db, { now = Date.now } = {}) {
         'INVOICE_NOT_SETTLED', 'Cần đối soát thanh toán trước khi hoàn tất sổ lương.');
       db.prepare(`UPDATE booking_sessions SET status = 'COMPLETED', completed_at = ?, updated_by_id = ?,
         updated_at = ? WHERE ticket_id = ?`).run(at, actorId, at, ticketId);
+      return getSession(guildId, ticketId);
+    }).immediate();
+  }
+
+  function reviewExpiredSession({ guildId, ticketId, actorId }) {
+    requireActor(actorId);
+    return db.transaction(() => {
+      const session = requireSession(guildId, ticketId, ['ACTIVE', 'NEEDS_REVIEW']);
+      if (session.status === 'NEEDS_REVIEW') return session;
+      const at = now();
+      requireBooking(at >= session.ends_at, 'SESSION_NOT_DUE', 'Phiên vẫn còn thời gian.');
+      db.prepare(`UPDATE booking_sessions SET status = 'NEEDS_REVIEW', updated_by_id = ?, updated_at = ? WHERE ticket_id = ?`)
+        .run(actorId, at, ticketId);
       return getSession(guildId, ticketId);
     }).immediate();
   }
@@ -404,5 +432,5 @@ export function createBookingLedger(db, { now = Date.now } = {}) {
   }
 
   return { createSession, getSession, listSessions, assignHost, createInvoice, extendSession, syncInvoicePayment,
-    listInvoices, startSession, completeSession, declineSession, getWages, getPayrollReport };
+    listInvoices, startSession, completeSession, declineSession, reviewExpiredSession, getWages, getPayrollReport };
 }

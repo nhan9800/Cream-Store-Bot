@@ -1,16 +1,8 @@
 import { assertPaymentConfig, config } from '../config.js';
-import { STORE_TWO_GUILD_ID } from '../utils/locale.js';
 import { createOrder } from './orderService.js';
 import { sendOrRefreshPaymentQr, syncPaymentStatusFromPayOS } from './paymentService.js';
 
 const disabled = () => Object.assign(new Error('Booking PayOS is disabled'), { code: 'BOOKING_PAYMENTS_DISABLED' });
-
-export function isBookingPaymentOrder(db, order) {
-  if (order?.guild_id !== STORE_TWO_GUILD_ID || !order.id
-    || !db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='booking_invoices'").get()) return false;
-  return Boolean(db.prepare(`SELECT 1 FROM booking_invoices i JOIN booking_sessions s ON s.ticket_id = i.ticket_id
-    WHERE i.order_id = ? AND i.order_code = ? AND s.guild_id = ?`).get(order.id, order.order_code, order.guild_id));
-}
 
 export async function quoteBooking({ interaction, ledger, ticketId, hourlyPrice, hourlyWage, durationMinutes }) {
   const guildId = interaction.guildId;

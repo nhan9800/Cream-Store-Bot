@@ -20,21 +20,23 @@ function fixture() {
     getSession: vi.fn(() => session), listInvoices: vi.fn(() => [invoice]), syncInvoicePayment: vi.fn(),
     startSession: vi.fn(() => { session.status = 'ACTIVE'; return session; }),
     completeSession: vi.fn(() => { session.status = 'COMPLETED'; return session; }),
+    reviewExpiredSession: vi.fn(() => { session.status = 'NEEDS_REVIEW'; return session; }),
   };
   const guest = { id: 'customer', voice: { channelId: 'room', disconnect: vi.fn() } };
   const room = { name: 'cenar-phien-1', id: 'room', guildId: STORE_TWO_GUILD_ID, parentId: 'category',
     type: ChannelType.GuildVoice, members: new Collection([[guest.id, guest]]), delete: vi.fn() };
   const ticket = { type: ChannelType.GuildText, guildId: STORE_TWO_GUILD_ID, send: vi.fn() };
+  const host = { send: vi.fn(async () => {}) };
   const snapshots = new Collection();
   const guild = { id: STORE_TWO_GUILD_ID, client: { user: { id: 'bot' } },
-    members: { me: { permissions: { has: () => true } }, fetch: vi.fn() }, channels: {
+    members: { me: { permissions: { has: () => true } }, fetch: vi.fn(async () => host) }, channels: {
       fetch: vi.fn(id => Promise.resolve(id === 'ticket' ? ticket : id === 'room' ? room : snapshots)), create: vi.fn(() => room),
     } };
   const error = vi.fn();
   const getTick = () => createBookingVoiceTick({ db, ledger, now: () => time, onError: error });
   const tick = getTick();
   return { guild, getTick, tick: () => tick(guild, 'category'), setTime: value => { time = value; },
-    setInvoice: value => { invoice = value; }, ticket, room, guest, voiceStore, ledger, session, error };
+    setInvoice: value => { invoice = value; }, ticket, host, room, guest, voiceStore, ledger, session, error };
 }
 
 afterEach(() => db?.close());
@@ -56,12 +58,15 @@ describe('Cenar Booking private voice', () => {
     expect(f.guild.channels.create.mock.calls[0][0].permissionOverwrites.map(grant => grant.id)).toEqual([
       STORE_TWO_GUILD_ID, 'bot', 'host', 'customer',
     ]);
-    expect(f.ticket.send.mock.calls[0][0].allowedMentions).toEqual({ parse: [], users: ['host'] });
+    expect(f.ticket.send.mock.calls[0][0].allowedMentions).toEqual({ parse: [] });
+    expect(f.host.send).toHaveBeenCalledOnce();
+    f.room.members.set('host', { id: 'host', voice: { channelId: 'room', disconnect: vi.fn() } });
     f.setTime(start + ninety - 14 * 60_000);
     const restarted = f.getTick();
     await restarted(f.guild, 'category');
     await restarted(f.guild, 'category');
     expect(f.guild.channels.create).toHaveBeenCalledTimes(1);
+    expect(f.host.send).toHaveBeenCalledOnce();
     expect(f.ticket.send).toHaveBeenCalledTimes(2);
     f.setTime(start + ninety);
     await restarted(f.guild, 'category');
@@ -80,5 +85,24 @@ describe('Cenar Booking private voice', () => {
     expect(f.error).toHaveBeenCalled();
     expect(f.room.delete).not.toHaveBeenCalled();
     expect(f.guest.voice.disconnect).not.toHaveBeenCalled();
+  });
+
+  it('removes a room when the ticket closes between allocation and session start', async () => {
+    const f = fixture();
+    f.ledger.startSession.mockImplementation(() => { throw Object.assign(new Error(), { code: 'TICKET_CLOSED' }); });
+    await f.tick();
+    expect(f.room.delete).toHaveBeenCalledOnce();
+    expect(f.voiceStore.get(1).released).toBe(1);
+    expect(f.host.send).not.toHaveBeenCalled();
+  });
+
+  it('expires an unattended booking without granting completion or wages', async () => {
+    const f = fixture();
+    await f.tick();
+    f.setTime(start + ninety);
+    await f.tick();
+    expect(f.room.delete).toHaveBeenCalledOnce();
+    expect(f.ledger.reviewExpiredSession).toHaveBeenCalledOnce();
+    expect(f.ledger.completeSession).not.toHaveBeenCalled();
   });
 });

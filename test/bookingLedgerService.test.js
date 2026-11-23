@@ -128,7 +128,6 @@ describe('Store2 booking sessions and billing', () => {
   it.each([
     ['manual approval', { provider: 'MANUAL' }],
     ['underpayment', { amount: 99_999 }],
-    ['overpayment', { amount: 100_001 }],
     ['wrong order code', { orderCode: 650002 }],
     ['wrong payment link', { artifact: { orderCode: 650001, paymentLinkId: 'wrong', amount: 100_000 } }],
     ['invoice amount only', { artifact: { orderCode: 650001, id: 'link_1', invoiceAmount: 100_000, amount: 100_000 } }],
@@ -139,6 +138,16 @@ describe('Store2 booking sessions and billing', () => {
     commitReceipt(invoice, receipt);
     clock = start;
     expect(ledger.syncInvoicePayment(guildId, invoice.id).status).toBe('PENDING');
+    expect(() => ledger.startSession({ guildId, ticketId: 1, actorId })).toThrow(expect.objectContaining({ code: 'INVOICE_NOT_SETTLED' }));
+  });
+
+  it('puts an authenticated overpayment into review and keeps the room locked', () => {
+    booking(1);
+    assign(1);
+    const invoice = quote(1);
+    commitReceipt(invoice, { amount: 100_001 });
+    clock = start;
+    expect(ledger.syncInvoicePayment(guildId, invoice.id)).toMatchObject({ status: 'NEEDS_REVIEW', payment_event_id: 1 });
     expect(() => ledger.startSession({ guildId, ticketId: 1, actorId })).toThrow(expect.objectContaining({ code: 'INVOICE_NOT_SETTLED' }));
   });
 

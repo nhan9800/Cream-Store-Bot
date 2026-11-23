@@ -4,7 +4,8 @@ Các lệnh booking được đăng ký cho Store 2. Mở `#dat-lich` để đ�
 
 ## Phiên và thanh toán
 
-- Báo giá 0đ và tiền công 0đ tạo phiên miễn phí. Khi đến giờ, bot cấp phòng voice riêng cho khách và host, nhắc host một lần trong phiếu, cảnh báo trước khi hết và thu hồi phòng khi kết thúc. Bot cần quyền quản lý kênh, quyền và di chuyển thành viên. [Kênh đặt lịch](https://discord.com/channels/1070676180103086132/1573607352555405365)
+- Báo giá 0đ và tiền công 0đ tạo phiên miễn phí. Khi đến giờ, bot cấp phòng voice riêng, gửi đường dẫn cho khách trong phiếu và nhắn host một lần. Host cũng xem được phòng trong Lịch của bạn. Bot cảnh báo trước khi hết và thu hồi phòng lúc kết thúc. Bot cần quyền quản lý kênh, quyền và di chuyển thành viên. [Kênh đặt lịch](https://discord.com/channels/1070676180103086132/1573607352555405365)
+- Phiên hết giờ khi bot chưa thấy cả hai người có mặt chuyển sang chờ staff kiểm tra. Staff xác nhận phiên đã thực sự diễn ra bằng `/cenar-booking ket-thuc` trong phiếu. Chỉ phiên hoàn thành mới tính vào bảng lương và nhận đánh giá.
 - Khách bấm yêu cầu gia hạn trong phiếu. Staff xác nhận với host và dùng `/cenar-booking gia-han` để báo giá. Khoản gia hạn có phí chỉ kéo dài thời gian sau khi đối soát PayOS hợp lệ.
 - Muốn bật hóa đơn có phí, kiểm tra đúng tài khoản PayOS của Store 2, callback và webhook đã ký rồi đặt `BOOKING_PAYOS_ENABLED=true` trên Store 2. `/cenar-booking kiem-tra-bill` tra đơn riêng theo chứng từ ngân hàng ghi trong cơ sở dữ liệu. Ảnh chuyển khoản chỉ dùng để staff trao đổi. Khoản đã nhận sau khi phiên hết hiệu lực cần quản lý kiểm tra trước khi hoàn hoặc đặt lịch mới.
 - `/cenar-booking bao-cao` hiển thị doanh thu, tiền công và số phiên hoàn thành cho quản lý. Thời lượng dùng theo báo giá đã chốt. Báo cáo không chuyển tiền tự động.

@@ -8,7 +8,9 @@ const MINUTE = 60_000;
 export function createBookingVoiceStore(db) {
   db.exec(`CREATE TABLE IF NOT EXISTS booking_voice_rooms (
     ticket_id INTEGER PRIMARY KEY, room_id TEXT UNIQUE, warning_for INTEGER,
-    reminder_sent INTEGER NOT NULL DEFAULT 0, released INTEGER NOT NULL DEFAULT 0
+    reminder_sent INTEGER NOT NULL DEFAULT 0, host_notice_attempted INTEGER NOT NULL DEFAULT 0,
+    participants_met INTEGER NOT NULL DEFAULT 0,
+    released INTEGER NOT NULL DEFAULT 0
   )`);
   return {
     get: ticketId => db.prepare('SELECT * FROM booking_voice_rooms WHERE ticket_id = ?').get(ticketId),
@@ -18,6 +20,9 @@ export function createBookingVoiceStore(db) {
     warn: (ticketId, endAt) => db.prepare('UPDATE booking_voice_rooms SET warning_for = ? WHERE ticket_id = ?').run(endAt, ticketId),
     remind: ticketId => db.prepare(`INSERT INTO booking_voice_rooms (ticket_id,reminder_sent) VALUES (?,1)
       ON CONFLICT(ticket_id) DO UPDATE SET reminder_sent=1`).run(ticketId),
+    claimHostNotice: ticketId => db.prepare(`UPDATE booking_voice_rooms SET host_notice_attempted = 1
+      WHERE ticket_id = ? AND host_notice_attempted = 0`).run(ticketId).changes === 1,
+    recordAttendance: ticketId => db.prepare('UPDATE booking_voice_rooms SET participants_met = 1 WHERE ticket_id = ?').run(ticketId),
     release: ticketId => db.prepare('UPDATE booking_voice_rooms SET released = 1 WHERE ticket_id = ?').run(ticketId),
   };
 }
@@ -100,8 +105,12 @@ export function createBookingVoiceTick({ db, ledger, voiceStore = createBookingV
         const ticketId = session.ticket_id;
         try {
           let state = voiceStore.get(ticketId);
-          if (['COMPLETED', 'DECLINED'].includes(session.status)) {
+          if (['COMPLETED', 'DECLINED', 'NEEDS_REVIEW'].includes(session.status)) {
             if (state?.room_id && !state.released) await closeRoom(guild, session, categoryId, state, voiceStore);
+            continue;
+          }
+          if (session.status === 'CONFIRMED' && time >= session.ends_at && state?.room_id && !state.released) {
+            await closeRoom(guild, session, categoryId, state, voiceStore);
             continue;
           }
           if (session.status === 'CONFIRMED' && time >= session.starts_at && time < session.starts_at + session.duration_minutes * MINUTE) {
@@ -109,7 +118,12 @@ export function createBookingVoiceTick({ db, ledger, voiceStore = createBookingV
             for (const item of pending) ledger.syncInvoicePayment(guild.id, item.id);
             if (ledger.listInvoices(guild.id, ticketId).some(invoice => invoice.kind === 'BASE' && ['FREE', 'PAID'].includes(invoice.status))) {
               if (!await openRoom(guild, session, categoryId, state, voiceStore)) continue;
-              session = ledger.startSession({ guildId: guild.id, ticketId, actorId: guild.client.user.id });
+              try {
+                session = ledger.startSession({ guildId: guild.id, ticketId, actorId: guild.client.user.id });
+              } catch (error) {
+                await closeRoom(guild, session, categoryId, voiceStore.get(ticketId), voiceStore);
+                throw error;
+              }
               state = voiceStore.get(ticketId);
             }
           }
@@ -119,22 +133,33 @@ export function createBookingVoiceTick({ db, ledger, voiceStore = createBookingV
           }
           session = ledger.getSession(guild.id, ticketId);
           if (time >= session.ends_at) {
+            const completion = { guildId: guild.id, ticketId, actorId: guild.client.user.id };
             try {
-              session = ledger.completeSession({ guildId: guild.id, ticketId, actorId: guild.client.user.id, onlyIfDue: true });
+              session = state?.participants_met ? ledger.completeSession({ ...completion, onlyIfDue: true })
+                : ledger.reviewExpiredSession(completion);
             } catch (error) {
               if (error.code !== 'INVOICE_NOT_SETTLED') throw error;
+              session = ledger.reviewExpiredSession(completion);
             }
             if (state?.room_id && !state.released) await closeRoom(guild, session, categoryId, state, voiceStore);
             continue;
           }
           const room = await openRoom(guild, session, categoryId, state, voiceStore);
           if (!room) continue;
+          if (!state?.participants_met && room.members.has(session.host_id) && room.members.has(session.customer_id)) {
+            voiceStore.recordAttendance(ticketId);
+          }
+          if (voiceStore.claimHostNotice(ticketId)) {
+            const host = await guild.members.fetch({ user: session.host_id, force: true }).catch(() => null);
+            await host?.send({ content: `**Cenar Booking · Phiên đã đến giờ**\nVào phòng <#${room.id}> trước <t:${Math.floor(session.ends_at / 1000)}:t>. Bạn cũng có thể mở \`/cenar-booking lich\` trong máy chủ.`,
+              allowedMentions: { parse: [] } }).catch(() => onError('BOOKING_HOST_DM_UNAVAILABLE'));
+          }
           const ticket = await guild.channels.fetch(session.ticket_channel_id);
           if (!(ticket?.type === ChannelType.GuildText && ticket.guildId === guild.id)) continue;
           if (!state?.reminder_sent) {
             await ticket.send({
-              content: `<@${session.host_id}> Phiên của bạn đã đến giờ. Khách và host có thể vào <#${room.id}>.`,
-              allowedMentions: { parse: [], users: [session.host_id] },
+              content: `**Phiên của bạn đã đến giờ**\nVào phòng <#${room.id}> để bắt đầu. Host nhận đường dẫn qua tin nhắn riêng và mục Lịch của bạn.`,
+              allowedMentions: { parse: [] },
             });
             voiceStore.remind(ticketId);
           }

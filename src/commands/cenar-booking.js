@@ -6,6 +6,7 @@ import { createBookingLedger } from '../services/bookingLedgerService.js';
 import { BOOKING_APP_ID, bookingPortal } from '../services/bookingStoreSetupService.js';
 import { getGuildConfig } from '../services/guildConfigService.js';
 import { getTicketByChannelId } from '../services/ticketService.js';
+import { createBookingVoiceStore } from '../services/bookingVoiceService.js';
 import { STORE_TWO_GUILD_ID } from '../utils/locale.js';
 import { isManager, isSupport } from '../utils/permissions.js';
 
@@ -25,6 +26,7 @@ export const data = new SlashCommandBuilder().setName('cenar-booking').setDescri
     .addIntegerOption(hourlyPrice).addIntegerOption(hourlyWage))
   .addSubcommand(cmd => cmd.setName('kiem-tra-bill').setDescription('Đối chiếu hóa đơn booking với PayOS'))
   .addSubcommand(cmd => cmd.setName('tu-choi').setDescription('Từ chối lịch chưa có hóa đơn thanh toán'))
+  .addSubcommand(cmd => cmd.setName('ket-thuc').setDescription('Xác nhận hoàn thành một phiên đã diễn ra'))
   .addSubcommand(cmd => cmd.setName('bao-cao').setDescription('Xem báo cáo doanh thu và lương host trong 7 ngày gần nhất'))
   .addSubcommand(cmd => cmd.setName('nhap-icon').setDescription('Nhập emoji hoặc sticker từ tệp bạn có quyền sử dụng')
     .addStringOption(o => o.setName('loai').setDescription('Loại biểu tượng').setRequired(true)
@@ -35,7 +37,8 @@ export const data = new SlashCommandBuilder().setName('cenar-booking').setDescri
   .addSubcommand(cmd => cmd.setName('hoi').setDescription('Hỏi về Cenar Booking hoặc yêu cầu số liệu được cấp quyền')
     .addStringOption(o => o.setName('cau_hoi').setDescription('Câu hỏi, ví dụ Tổng doanh thu tuần này?').setRequired(true).setMaxLength(200)));
 
-const statusLabels = { REQUESTED: 'Chờ xếp host', CONFIRMED: 'Đã xếp host', ACTIVE: 'Đang diễn ra', COMPLETED: 'Đã hoàn thành', DECLINED: 'Đã từ chối' };
+const statusLabels = { REQUESTED: 'Chờ xếp host', CONFIRMED: 'Đã xếp host', ACTIVE: 'Đang diễn ra',
+  COMPLETED: 'Đã hoàn thành', DECLINED: 'Đã từ chối', NEEDS_REVIEW: 'Chờ staff kiểm tra' };
 const time = ms => `<t:${Math.floor(ms / 1000)}:f>`;
 
 export function ledgerCard(title, lines, emoji) {
@@ -51,8 +54,13 @@ export function showSessions(ledger, guildId, userId) {
   const owned = [ledger.listSessions(guildId, { customerId: userId, limit: 8 }), ledger.listSessions(guildId, { hostId: userId, limit: 8 })];
   const unique = new Map(owned.flat().map(session => [session.ticket_id, session]));
   if (!unique.size) return ['Bạn chưa có phiên booking nào. Mở kênh đặt lịch để gửi yêu cầu.'];
-  return [...unique.values()].sort((a, b) => b.starts_at - a.starts_at).slice(0, 8).map(session =>
-    `**${session.service === 'game' ? 'Chơi game' : 'Trò chuyện'} · ${statusLabels[session.status]}**\n${time(session.starts_at)} · ${session.duration_minutes} phút · <#${session.ticket_channel_id}>`);
+  const voice = createBookingVoiceStore(db);
+  return [...unique.values()].sort((a, b) => b.starts_at - a.starts_at).slice(0, 8).map(session => {
+    const room = session.status === 'ACTIVE' ? voice.get(session.ticket_id) : null;
+    const link = room?.room_id && !room.released ? ` · <#${room.room_id}>`
+      : session.customer_id === userId ? ` · <#${session.ticket_channel_id}>` : '';
+    return `**${session.service === 'game' ? 'Chơi game' : 'Trò chuyện'} · ${statusLabels[session.status]}**\n${time(session.starts_at)} · ${session.duration_minutes} phút${link}`;
+  });
 }
 
 function requirePrivateTicket(interaction) {
@@ -126,6 +134,11 @@ export async function execute(interaction) {
     if (operation === 'tu-choi') {
       ledger.declineSession({ guildId, ticketId, actorId });
       await interaction.editReply('Đã đánh dấu không nhận lịch. Khách có thể xem trạng thái trong `/cenar-booking lich`.');
+      return;
+    }
+    if (operation === 'ket-thuc') {
+      ledger.completeSession({ guildId, ticketId, actorId });
+      await interaction.editReply('Đã xác nhận phiên diễn ra. Khách có thể đánh giá bằng `/cenar-ho-so danh-gia`.');
       return;
     }
     if (operation === 'phan-host') {

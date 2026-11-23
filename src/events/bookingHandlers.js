@@ -228,10 +228,10 @@ export async function handleBookingInteraction(interaction) {
     }
     details = `**Biệt danh** · ${clean('name')}\n**Nhóm hồ sơ** · ${clean('group') || 'Chưa chọn'}\n**Dịch vụ** · ${clean('skills')}\n**Giờ rảnh** · ${clean('availability')}`;
   } else {
-    const start = parseBookingTime(raw('start'));
+    const start = parseBookingTime(raw('start'), Date.now() + 60_000);
     const duration = Number(raw('duration'));
     if (!start || !/^\d{1,4}$/.test(raw('duration')) || duration < 1 || duration > 1440 || (value === 'game' && !raw('details'))) {
-      await respond('Nhập giờ trong tương lai theo dd/mm/yyyy HH:mm (UTC+7), thời lượng từ 1 đến 1440 phút và tên game nếu đặt phiên chơi game.');
+      await respond('Chọn giờ sau ít nhất 1 phút theo dd/mm/yyyy HH:mm (UTC+7), thời lượng từ 1 đến 1440 phút và tên game nếu đặt phiên chơi game.');
       return true;
     }
     schedule = { startsAt: start * 1000, durationMinutes: duration };

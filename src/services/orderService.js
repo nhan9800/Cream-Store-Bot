@@ -18,6 +18,7 @@ import { unscheduleOrderTicketAutoClose } from './ticketService.js';
 import { getCustomerPurchaseSummary, getCustomerActivitySummary } from './customerActivityService.js';
 import { membershipPriorityForSpend } from '../config/membershipProgram.js';
 import { STORE_ONE_GUILD_ID } from '../utils/locale.js';
+import { getBookingInvoiceForOrder, isBookingPayOSReceipt } from './bookingLedgerService.js';
 import { getStoredPayOSReceivedAmount } from '../utils/payosReceipt.js';
 
 function createOrderStmt() {
@@ -420,6 +421,10 @@ export function recordOrderPayment({ orderCode, provider, transactionId, amount,
   return db.transaction(() => {
     const order = getOrderByCode(orderCode);
     if (!order) throw new Error('Không tìm thấy đơn hàng.');
+    const booking = getBookingInvoiceForOrder(db, order);
+    if (booking && (provider !== 'PAYOS' || !isBookingPayOSReceipt(order, booking, rawPayload))) {
+      throw new OrderPaymentError('BOOKING_PAYMENT_IDENTITY_MISMATCH', 'Chứng từ PayOS không khớp hóa đơn booking.');
+    }
     // Validate even on a replay, before creating financial/delivery side effects.
     validateOrderPaymentAmount(order, amount);
     const event = recordPaymentEvent({ orderCode, provider, transactionId, amount, content, rawPayload });
@@ -431,7 +436,7 @@ export function recordOrderPayment({ orderCode, provider, transactionId, amount,
     const updated = duplicate ? order : markOrderPaid(orderCode, {
       amountPaid: amount, transactionId, transactionContent: content,
     });
-    queueOrderDelivery(orderCode);
+    if (!booking) queueOrderDelivery(orderCode);
     return { updated, duplicate };
   }).immediate();
 }
@@ -484,6 +489,9 @@ export function payOrderWithWallet({ orderCode, guildId, customerId, amount }) {
     }
     if (ensureAmountValue(order.total_amount) !== safeAmount) {
       throw new WalletPaymentError('AMOUNT_MISMATCH', 'Giá đơn hàng đã thay đổi. Vui lòng thử lại.');
+    }
+    if (getBookingInvoiceForOrder(db, order)) {
+      throw new WalletPaymentError('PAYMENT_METHOD_LOCKED', 'Vui lòng dùng QR PayOS trong phiếu booking.');
     }
     if (order.fulfillment_mode === 'SUPPLIER') {
       // A PayOS invoice and a wallet debit must not race for the same supplier
