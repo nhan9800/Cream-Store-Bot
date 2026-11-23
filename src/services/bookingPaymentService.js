@@ -14,7 +14,7 @@ export async function quoteBooking({ interaction, ledger, ticketId, hourlyPrice,
   const createPaymentOrder = ({ customerId, ticketChannelId, amount, invoiceId }) => createOrder({
     guildId, ticketId, ticketChannelId, customerId, quantity: 1,
     productName: `Phiên Cenar Booking #${ticketId}`, serviceType: 'service', note: `BOOKING_INVOICE:${invoiceId}`,
-    totalAmount: amount, createdById: actorId,
+    totalAmount: amount, orderLogChannelId: ticketChannelId, createdById: actorId,
   });
   const input = { guildId, actorId, ticketId, hourlyPrice, hourlyWage, createPaymentOrder };
   const invoice = durationMinutes == null ? ledger.createInvoice(input)
