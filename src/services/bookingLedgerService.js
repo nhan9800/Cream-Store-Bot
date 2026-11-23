@@ -11,9 +11,13 @@ export const BOOKING_HOST_START_NOTICE_WINDOW_MS = 15 * MINUTE;
 export function getBookingInvoiceForOrder(db, order) {
   if (order?.guild_id !== STORE_TWO_GUILD_ID || !order.id
     || !db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='booking_invoices'").get()) return null;
-  return db.prepare(`SELECT i.id, i.amount, i.provider_order_code, i.status, i.kind, i.minutes FROM booking_invoices i
+  const invoice = db.prepare(`SELECT i.id, i.ticket_id, i.amount, i.provider_order_code, i.status, i.kind, i.minutes FROM booking_invoices i
     JOIN booking_sessions s ON s.ticket_id = i.ticket_id
     WHERE i.order_id = ? AND i.order_code = ? AND s.guild_id = ?`).get(order.id, order.order_code, order.guild_id) ?? null;
+  if (!invoice || invoice.kind !== 'BASE'
+    || !db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='booking_auto_reservations'").get()) return invoice;
+  const reservation = db.prepare('SELECT checkout_expires_at FROM booking_auto_reservations WHERE ticket_id = ?').get(invoice.ticket_id);
+  return { ...invoice, checkout_expires_at: reservation?.checkout_expires_at ?? null };
 }
 
 export function isBookingPayOSReceipt(order, invoice, data) {
@@ -51,7 +55,7 @@ function requireActor(value) {
 }
 
 // Invoice amounts round up to a whole đồng; the wage rounds to the nearest đồng.
-function quoteFor(minutes, hourlyPrice, hourlyWage) {
+export function quoteBookingRates(minutes, hourlyPrice, hourlyWage) {
   requireBooking(isInteger(minutes, 1, MAX_MINUTES), 'INVALID_DURATION', 'Nhập thời lượng từ 1 đến 1440 phút.');
   requireBooking(isInteger(hourlyPrice, 0, MAX_RATE) && isInteger(hourlyWage, 0, hourlyPrice),
     'INVALID_RATE', 'Kiểm tra lại giá giờ và lương giờ.');
@@ -111,6 +115,33 @@ export function createBookingLedger(db, { now = Date.now } = {}) {
     CREATE UNIQUE INDEX IF NOT EXISTS booking_invoice_request ON booking_invoices(ticket_id, request_key);
     CREATE INDEX IF NOT EXISTS booking_invoice_status ON booking_invoices(ticket_id, status);
 
+    CREATE TABLE IF NOT EXISTS booking_auto_slots (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      guild_id TEXT NOT NULL,
+      host_id TEXT NOT NULL,
+      service TEXT NOT NULL CHECK (service IN ('game','voice')),
+      starts_at INTEGER NOT NULL,
+      duration_minutes INTEGER NOT NULL CHECK (duration_minutes BETWEEN 1 AND 1440),
+      hourly_price INTEGER NOT NULL CHECK (hourly_price >= 0),
+      hourly_wage INTEGER NOT NULL CHECK (hourly_wage BETWEEN 0 AND hourly_price),
+      created_by_id TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      closed_at INTEGER,
+      closed_by_id TEXT
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS booking_auto_slots_open_unique
+      ON booking_auto_slots(guild_id,host_id,service,starts_at,duration_minutes) WHERE closed_at IS NULL;
+    CREATE INDEX IF NOT EXISTS booking_auto_slots_open_time
+      ON booking_auto_slots(guild_id,starts_at) WHERE closed_at IS NULL;
+
+    CREATE TABLE IF NOT EXISTS booking_auto_reservations (
+      ticket_id INTEGER PRIMARY KEY REFERENCES booking_sessions(ticket_id),
+      slot_id INTEGER NOT NULL REFERENCES booking_auto_slots(id),
+      request_id TEXT NOT NULL UNIQUE,
+      checkout_expires_at INTEGER,
+      reserved_at INTEGER NOT NULL
+    );
+
     CREATE TABLE IF NOT EXISTS booking_host_start_notices (
       ticket_id INTEGER PRIMARY KEY REFERENCES booking_sessions(ticket_id) ON DELETE CASCADE,
       attempted_at INTEGER NOT NULL
@@ -135,9 +166,12 @@ export function createBookingLedger(db, { now = Date.now } = {}) {
   const insertHostStartNotice = db.prepare('INSERT INTO booking_host_start_notices(ticket_id, attempted_at) VALUES (?, ?)');
   const overlappingSlot = db.prepare(`
     SELECT 1 FROM booking_sessions s
-    WHERE s.guild_id = @guildId AND s.host_id = @hostId AND s.ticket_id <> @ticketId
+    WHERE s.guild_id = @guildId AND (s.host_id = @hostId OR s.customer_id = @customerId) AND s.ticket_id <> @ticketId
       AND s.status IN ('CONFIRMED','ACTIVE') AND COALESCE(s.started_at,s.starts_at) < @endsAt
       AND (s.status = 'ACTIVE' OR EXISTS (SELECT 1 FROM tickets t WHERE t.id = s.ticket_id AND t.status = 'OPEN'))
+      AND NOT EXISTS (SELECT 1 FROM booking_auto_reservations a JOIN booking_invoices b
+        ON b.ticket_id = a.ticket_id AND b.kind = 'BASE'
+        WHERE a.ticket_id = s.ticket_id AND a.checkout_expires_at <= @at AND b.status <> 'PAID')
       AND s.ends_at + 60000 * COALESCE((SELECT SUM(i.minutes) FROM booking_invoices i
         WHERE i.ticket_id = s.ticket_id AND i.kind = 'EXTENSION' AND i.status = 'PENDING'),0) > @startsAt
     LIMIT 1`);
@@ -151,6 +185,7 @@ export function createBookingLedger(db, { now = Date.now } = {}) {
       status, created_by_id, created_at)
     VALUES (@ticketId, @kind, @requestKey, @hostId, @minutes, @hourlyPrice, @hourlyWage, @amount, @wage,
       @status, @actorId, @at)`);
+  const autoCheckout = db.prepare('SELECT checkout_expires_at FROM booking_auto_reservations WHERE ticket_id = ?');
 
   function getSession(guildId, ticketId) {
     requireStore(guildId);
@@ -170,7 +205,12 @@ export function createBookingLedger(db, { now = Date.now } = {}) {
   }
 
   function isSlotAvailable(session, hostId, startsAt, endsAt) {
-    return !overlappingSlot.get({ guildId: session.guild_id, ticketId: session.ticket_id, hostId, startsAt, endsAt });
+    return isReservationSlotAvailable({ guildId: session.guild_id, ticketId: session.ticket_id, hostId, startsAt, endsAt });
+  }
+
+  function isReservationSlotAvailable({ guildId, ticketId = 0, hostId, customerId = null, startsAt, endsAt }) {
+    requireStore(guildId);
+    return !overlappingSlot.get({ guildId, ticketId, hostId, customerId, startsAt, endsAt, at: now() });
   }
 
   function createSession({ guildId, ticketId, service, startsAt, durationMinutes }) {
@@ -271,7 +311,7 @@ export function createBookingLedger(db, { now = Date.now } = {}) {
       requireBooking((extension ? ['CONFIRMED', 'ACTIVE'] : ['CONFIRMED']).includes(session.status),
         'INVALID_BOOKING_STATUS', 'Phiếu không ở trạng thái phù hợp.');
       requireOpenTicket(guildId, ticketId);
-      const { amount, wage } = quoteFor(minutes, hourlyPrice, hourlyWage);
+      const { amount, wage } = quoteBookingRates(minutes, hourlyPrice, hourlyWage);
       const at = now();
       requireBooking(session.host_id && at < session.ends_at, 'EXPIRED_SLOT', 'Lịch không còn khả dụng để lập báo giá.');
       if (extension) {
@@ -359,8 +399,10 @@ export function createBookingLedger(db, { now = Date.now } = {}) {
       const at = now();
       const extension = invoice.kind === 'EXTENSION';
       const ticketOpen = openTicket.get(session.ticket_id, guildId);
+      const checkoutExpiresAt = extension ? null : autoCheckout.get(session.ticket_id)?.checkout_expires_at;
       const applicable = order.amount_paid === invoice.amount && SETTLED_ORDER_STATES.has(order.status) && ticketOpen
         && ['CONFIRMED', 'ACTIVE'].includes(session.status) && at < session.ends_at
+        && (checkoutExpiresAt == null || at < checkoutExpiresAt)
         && (!extension || isSlotAvailable(session, session.host_id, session.started_at ?? session.starts_at,
           session.ends_at + invoice.minutes * MINUTE));
       db.prepare(`UPDATE booking_invoices SET status = ?, payment_event_id = ?, paid_at = ? WHERE id = ?`)
@@ -466,6 +508,6 @@ export function createBookingLedger(db, { now = Date.now } = {}) {
     }), { sessions: 0, minutes: 0, revenue: 0, wage: 0 }) };
   }
 
-  return { createSession, getSession, listSessions, claimUpcomingHostStart, assignHost, createInvoice, extendSession, syncInvoicePayment,
+  return { createSession, getSession, listSessions, claimUpcomingHostStart, assignHost, isReservationSlotAvailable, createInvoice, extendSession, syncInvoicePayment,
     listInvoices, startSession, completeSession, declineSession, reviewExpiredSession, getWages, getPayrollReport };
 }
