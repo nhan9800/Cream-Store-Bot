@@ -51,6 +51,7 @@ const oldSlotNames = {
   request: ['dat-lich'], handbook: ['cam-nang-booking'], profiles: ['ho-so-host'], reviews: ['danh-gia-booking'],
   apply: ['tuyen-host'], chat: ['tro-chuyen', 'global-chat'], lobby: ['Sảnh chờ'], game: ['Chơi cùng'], voice: ['Voice chill'],
 };
+const legacyCategoryNames = new Set(['03 · HOST & ĐÁNH GIÁ', '05 · PHIẾU BOOKING', '05 · DỊCH VỤ CŨ']);
 const requiredExisting = ['welcome', 'rules', 'news', 'verify', 'support'];
 
 export function bookingStoreSetupStatus(client) {
@@ -298,6 +299,17 @@ async function applyBookingLayout(client, guildId) {
       } : {}),
       ...(kind === 'voice' ? { userLimit: 0 } : {}),
     });
+  }
+
+  let archiveNumber = 1;
+  for (const legacyCategory of guild.channels.cache.filter(channel =>
+    channel.type === ChannelType.GuildCategory && legacyCategoryNames.has(channel.name)).values()) {
+    const hasChildren = guild.channels.cache.some(channel => channel.parentId === legacyCategory.id);
+    if (!hasChildren) {
+      const archiveName = `----- ☬ 𝐀𝐫𝐜𝐡𝐢𝐯𝐞 ${archiveNumber} ☬ ------`;
+      archiveNumber += 1;
+      await legacyCategory.setName(archiveName, reason);
+    }
   }
 
   for (const item of original) {
