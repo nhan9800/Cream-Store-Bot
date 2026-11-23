@@ -9,6 +9,7 @@ import { getGuildConfig } from '../services/guildConfigService.js';
 import { getTicketByChannelId } from '../services/ticketService.js';
 import { STORE_TWO_GUILD_ID } from '../utils/locale.js';
 import { isSupport } from '../utils/permissions.js';
+import { bookingHelpCard, bookingScheduleCard } from '../utils/bookingPortalViews.js';
 import { safeReply } from './shared.js';
 import { handleTicketCreate } from './ticketHandlers.js';
 
@@ -18,11 +19,6 @@ const nextStates = {
   confirm: 'Đã xác nhận lịch', complete: 'Đã diễn ra', decline: 'Không thể nhận lịch',
 };
 
-const bookingHelp = [
-  '**Đặt lịch và theo dõi**\nGửi lịch từ bảng này. Dùng `/cenar-booking lich` để xem tiến độ và mở lại phiếu.',
-  '**Hồ sơ và đánh giá**\nDùng `/cenar-ho-so` để chuẩn bị hồ sơ host hoặc gửi đánh giá cho phiên đã diễn ra.',
-  '**Cộng đồng**\nDùng `/cenar-cong-dong` để xem cấp, điểm danh, nhiệm vụ và các trò chơi.',
-];
 
 export function parseBookingTime(value, now = Date.now()) {
   const parts = /^(\d{1,2})\/(\d{1,2})\/(20\d{2})\s+(\d{1,2}):(\d{2})$/.exec(value.trim());
@@ -190,18 +186,33 @@ export async function handleBookingInteraction(interaction) {
     return true;
   }
   const [, operation, value, id] = interaction.customId.split(':');
+  if (operation === 'community') {
+    const { handleBookingCommunityInteraction } = await import('../commands/cenar-cong-dong.js');
+    return handleBookingCommunityInteraction(interaction);
+  }
+  const guideChannel = interaction.channelId === portal.request || interaction.channelId === portal.handbook;
+  if (operation === 'guide' && value === 'topic' && guideChannel && interaction.isStringSelectMenu()) {
+    if (id !== interaction.user.id || !interaction.message?.flags?.has(MessageFlags.Ephemeral)
+      || interaction.message.author?.id !== BOOKING_APP_ID) {
+      await respond('Mở hướng dẫn của bạn trong cổng đặt lịch hoặc cẩm nang.');
+    } else {
+      const { flags, ...update } = bookingHelpCard({ userId: id, emoji: portal.emoji, topic: interaction.values[0] });
+      await interaction.update(update);
+    }
+    return true;
+  }
   if (operation === 'extension' && id) {
     await askExtension(interaction, value, id);
     return true;
   }
-  if (operation === 'dashboard' && interaction.channelId === portal.request && !id && interaction.isButton()) {
-    const { ledgerCard, showSessions } = await import('../commands/cenar-booking.js');
-    if (value === 'my' || value === 'help') {
-      const mine = value === 'my';
-      await safeReply(interaction, { ...ledgerCard(mine ? 'Lịch của bạn' : 'Trợ giúp Cenar Booking', mine
-        ? showSessions(createBookingLedger(db), interaction.guildId, interaction.user.id) : bookingHelp, portal.emoji.calendar),
-      flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral });
-    }
+  if (operation === 'dashboard' && !id && interaction.isButton()) {
+    if (value === 'help' && guideChannel) {
+      await safeReply(interaction, bookingHelpCard({ userId: interaction.user.id, emoji: portal.emoji }));
+    } else if (value === 'my' && interaction.channelId === portal.request) {
+      const { showSessions } = await import('../commands/cenar-booking.js');
+      const sessions = showSessions(createBookingLedger(db), interaction.guildId, interaction.user.id);
+      await safeReply(interaction, bookingScheduleCard(interaction.guildId, portal, sessions, true));
+    } else await respond('Mở bảng đặt lịch mới nhất trong máy chủ.');
     return true;
   }
   if (operation === 'state' && Object.hasOwn(nextStates, value) && interaction.isButton()) {

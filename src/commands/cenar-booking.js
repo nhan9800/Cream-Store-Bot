@@ -8,6 +8,7 @@ import { getGuildConfig } from '../services/guildConfigService.js';
 import { getTicketByChannelId } from '../services/ticketService.js';
 import { createBookingVoiceStore } from '../services/bookingVoiceService.js';
 import { STORE_TWO_GUILD_ID } from '../utils/locale.js';
+import { bookingScheduleCard } from '../utils/bookingPortalViews.js';
 import { isManager, isSupport } from '../utils/permissions.js';
 
 export const bookingOnly = true;
@@ -91,7 +92,7 @@ export async function execute(interaction) {
   const operation = interaction.options.getSubcommand();
   const ledger = createBookingLedger(db);
   if (operation === 'lich') {
-    await interaction.editReply(ledgerCard('Lịch của bạn', showSessions(ledger, guildId, actorId), portal.emoji.calendar));
+    await interaction.editReply(bookingScheduleCard(guildId, portal, showSessions(ledger, guildId, actorId)));
     return;
   }
   const member = await interaction.guild.members.fetch({ user: actorId, force: true });

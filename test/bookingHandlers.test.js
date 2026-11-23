@@ -3,7 +3,7 @@ import { STORE_TWO_GUILD_ID } from '../src/utils/locale.js';
 
 const mocks = vi.hoisted(() => ({
   open: vi.fn(), reply: vi.fn(), ticket: vi.fn(), config: vi.fn(), createSession: vi.fn(),
-  portal: { request: 'request', apply: 'apply', tickets: 'private-category', emoji: {} },
+  portal: { request: 'request', apply: 'apply', handbook: 'handbook', tickets: 'private-category', emoji: {} },
 }));
 vi.mock('../src/services/bookingStoreSetupService.js', () => ({
   BOOKING_APP_ID: '1139187282075721768', bookingPortal: () => mocks.portal,
@@ -48,6 +48,24 @@ describe('Cenar Booking intake and private ticket controls', () => {
     expect(voice.showModal.mock.lastCall[0].toJSON().custom_id).toBe('booking:form:voice');
     expect(bookingForm('apply').toJSON().components[1].components[0].required).toBe(false);
     expect(mocks.open).not.toHaveBeenCalled();
+  });
+
+  it('opens a private help menu from the handbook and binds topic updates to the owner', async () => {
+    const help = interaction('booking:dashboard:help', { channel: 'handbook' });
+    await handleBookingInteraction(help);
+    const card = mocks.reply.mock.lastCall[1];
+    expect(card.flags).toBe(32832);
+    const choose = interaction('booking:guide:topic:member', { channel: 'handbook' });
+    choose.isStringSelectMenu = () => true;
+    choose.message = { author: { id: '1139187282075721768' }, flags: new Set([64]) };
+    choose.values = ['ho_so'];
+    choose.update = vi.fn();
+    await handleBookingInteraction(choose);
+    const content = choose.update.mock.lastCall[0].components[0].toJSON();
+    expect(content.components.some(item => item.content?.includes('/cenar-ho-so'))).toBe(true);
+    choose.user = { id: 'different' };
+    await handleBookingInteraction(choose);
+    expect(choose.update).toHaveBeenCalledTimes(1);
   });
 
   it('routes valid dates to a dedicated private ticket with a Vietnamese summary', async () => {
