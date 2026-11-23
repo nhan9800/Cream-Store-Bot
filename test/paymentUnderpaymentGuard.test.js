@@ -16,7 +16,7 @@ import { db, initDatabase } from '../src/database/db.js';
 import { createTicket } from '../src/services/ticketService.js';
 import { createOrder, getOrderByCode, markOrderPaid, payOrderWithWallet, recordOrderPayment } from '../src/services/orderService.js';
 import { addWalletBalance } from '../src/services/walletService.js';
-import { finalizePaidOrder, getPayOSReceivedAmount, sendOrRefreshPaymentQr, syncPaymentStatusFromPayOS } from '../src/services/paymentService.js';
+import { createOrLoadPayOSLink, finalizePaidOrder, getPayOSReceivedAmount, sendOrRefreshPaymentQr, syncPaymentStatusFromPayOS } from '../src/services/paymentService.js';
 import { auditOrderPayment } from '../src/services/paymentIncidentAuditService.js';
 import { registerBotApiRoutes } from '../src/services/botApiRoutes.js';
 import { createBookingLedger } from '../src/services/bookingLedgerService.js';
@@ -74,6 +74,7 @@ describe('real receipt required before confirming an order', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
     if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='booking_invoices'").get()) {
+      db.exec('DELETE FROM booking_auto_reservations; DELETE FROM booking_auto_slots;');
       db.exec('DELETE FROM booking_invoices; DELETE FROM booking_sessions;');
     }
     db.exec(`DELETE FROM order_delivery_items; DELETE FROM order_fulfillments;
@@ -145,35 +146,61 @@ describe('real receipt required before confirming an order', () => {
     const checkout = 'https://pay.payos.vn/web/test-booking';
     db.prepare('UPDATE orders SET payment_checkout_url=?, payment_expired_at=? WHERE id=?')
       .run(checkout, new Date(Date.now() + 30 * 60_000).toISOString(), invoice.order_id);
-    const posted = { id: 'booking-invoice-message', edit: vi.fn() };
-    const channel = { isTextBased: () => true, send: vi.fn(async () => posted),
+    const posted = { id: 'booking-invoice-message', author: { id: 'booking-bot' }, edit: vi.fn() };
+    const channel = { type: 0, guildId, permissionsFor: () => ({ has: () => false }),
+      isTextBased: () => true, send: vi.fn(async () => posted),
       messages: { fetch: vi.fn(async () => posted) } };
     posted.edit.mockResolvedValue(posted);
-    const guild = { id: guildId, client: {}, channels: { fetch: vi.fn(async () => channel) } };
+    const guild = { id: guildId, client: { user: posted.author }, roles: { everyone: {} }, channels: { fetch: vi.fn(async () => channel) } };
     const noNetwork = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Unexpected provider call'));
 
     await sendOrRefreshPaymentQr({ guild, orderCode: order.order_code });
     expect(guild.channels.fetch).toHaveBeenCalledWith(ticket.channel_id);
     const first = channel.send.mock.lastCall[0];
-    expect(first.files).toHaveLength(0);
+    expect(first.files[0].name).toBe('cenar-booking.png');
     expect(first.allowedMentions).toEqual({ parse: [] });
     const components = first.components[0].toJSON().components;
     expect(components[0].content).toContain('50.000 VND');
     expect(components.find(item => item.type === 1).components).toEqual([
       expect.objectContaining({ url: checkout, label: 'Mở thanh toán PayOS' }),
     ]);
-    expect(JSON.stringify(components)).not.toMatch(/attachment:\/\/|payment:regen|queue:view/);
+    expect(JSON.stringify(components)).not.toMatch(/Có mã QR PayOS|payment:regen|queue:view/);
 
-    db.prepare('UPDATE orders SET payment_qr_code=? WHERE id=?').run('payment-test-fixture', invoice.order_id);
+    db.prepare('UPDATE orders SET payment_qr_code=? WHERE id=?').run('000201010212PAYOSFIXTURE', invoice.order_id);
     await sendOrRefreshPaymentQr({ guild, orderCode: order.order_code });
     const refreshed = posted.edit.mock.lastCall[0];
-    expect(refreshed.files[0].name).toBe(`payos-${order.order_code}.png`);
+    expect(refreshed.files[0].name).toBe('cenar-booking.png');
+    expect(refreshed.attachments).toEqual([]);
     expect(refreshed.components[0].toJSON().components.find(item => item.type === 12).items[0]).toMatchObject({
-      media: { url: `attachment://payos-${order.order_code}.png` }, description: 'Mã QR thanh toán PayOS của hóa đơn Booking',
+      media: { url: 'attachment://cenar-booking.png' }, description: expect.stringContaining('Có mã QR PayOS'),
     });
     expect(channel.send).toHaveBeenCalledTimes(1);
     expect(noNetwork).not.toHaveBeenCalled();
     expect(getOrderByCode(order.order_code).payment_status).toBe('UNPAID');
+  });
+
+  it('caps PayOS checkout at the booking hold and rejects cached links once it expires', async () => {
+    const { guildId, ticket, order } = pendingBooking();
+    const deadline = (Math.floor(Date.now() / 1000) + 900) * 1000;
+    const slot = db.prepare(`INSERT INTO booking_auto_slots(guild_id,host_id,service,starts_at,duration_minutes,hourly_price,
+      hourly_wage,created_by_id,created_at) VALUES (?,?, 'voice', ?,30,100000,60000,?,?)`)
+      .run(guildId, '123456789012345681', deadline + 3600_000, '123456789012345679', Date.now()).lastInsertRowid;
+    db.prepare('INSERT INTO booking_auto_reservations VALUES (?,?,?,?,?)')
+      .run(ticket.id, slot, '123456789012345699', deadline, Date.now());
+    db.prepare('UPDATE orders SET payment_link_id=NULL WHERE id=?').run(order.id);
+    vi.stubEnv('BOOKING_PAYOS_ENABLED', 'true');
+    try {
+      const provider = mockPayOS(order, { status: 'PENDING', amount: 50_000, expiredAt: deadline / 1000 + 60,
+        checkoutUrl: 'https://pay.payos.vn/web/test-booking' });
+      const result = await createOrLoadPayOSLink(getOrderByCode(order.order_code));
+      expect(JSON.parse(provider.mock.calls[0][1].body).expiredAt).toBeLessThanOrEqual(deadline / 1000);
+      expect(Date.parse(result.payment_expired_at)).toBe(deadline);
+      db.prepare('UPDATE booking_auto_reservations SET checkout_expires_at=? WHERE ticket_id=?').run(Date.now() - 1000, ticket.id);
+      await expect(createOrLoadPayOSLink(result)).rejects.toMatchObject({ code: 'BOOKING_HOLD_EXPIRED' });
+      expect(provider).toHaveBeenCalledOnce();
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it('does not re-deliver a legacy paid order on replay of its short receipt', async () => {

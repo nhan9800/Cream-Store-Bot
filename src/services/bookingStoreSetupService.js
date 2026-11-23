@@ -8,7 +8,7 @@ import { resolveVerificationRole } from './verificationRoleService.js';
 
 export { bookingPanels } from '../utils/bookingPortalViews.js';
 export const BOOKING_APP_ID = '1139187282075721768';
-const LAYOUT = 'CENAR-BOOKING-MEMBER-20261123';
+const LAYOUT = 'CENAR-BOOKING-CHECKOUT-20261123';
 const LEGACY_PANEL_MARKERS = ['CENAR-BOOKING-LOBBY-20261122', 'CENAR-BOOKING-OPERATIONS-20261123'];
 const reason = 'Cenar Booking channel setup';
 const glyphs = /[\p{Extended_Pictographic}\p{Regional_Indicator}\u200d\ufe0f\u20e3]/u;

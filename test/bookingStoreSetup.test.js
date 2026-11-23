@@ -110,7 +110,7 @@ describe('Store 2 booking layout', () => {
     expect(guild.channels.create).not.toHaveBeenCalled();
     const before = [...cache.keys()];
     const result = await setupBookingStore(client, guild.id);
-    expect(result).toMatchObject({ status: 'ready', revision: 'CENAR-BOOKING-MEMBER-20261123',
+    expect(result).toMatchObject({ status: 'ready', revision: 'CENAR-BOOKING-CHECKOUT-20261123',
       existingChannelsRetained: before.length + 1, bookingChannels: 11, guidesPinned: 8, forums: 2, customEmoji: 12 });
     expect(bookingStoreSetupStatus(client)).toBe(result);
     expect(guild.name).toBe('Cenar Booking');
@@ -142,7 +142,8 @@ describe('Store 2 booking layout', () => {
     ]));
     const panels = bookingPanels(STORE_TWO_GUILD_ID, channels, {});
     const content = panels.request.components[0].toJSON();
-    const [game, voice] = content.components.filter(item => item.type === 9).map(item => item.accessory);
+    const [auto, game, voice] = content.components.filter(item => item.type === 9).map(item => item.accessory);
+    expect(auto.custom_id).toBe('booking:dashboard:auto');
     expect(game.custom_id).toBe('booking:open:game');
     expect(voice.custom_id).toBe('booking:open:voice');
     expect(game.emoji).toBeUndefined();

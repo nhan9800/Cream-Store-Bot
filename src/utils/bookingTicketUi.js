@@ -1,6 +1,6 @@
 import {
   ActionRowBuilder, ButtonBuilder, ButtonStyle, ContainerBuilder, formatEmoji,
-  MediaGalleryBuilder, MediaGalleryItemBuilder, MessageFlags, SeparatorBuilder, SeparatorSpacingSize, TextDisplayBuilder,
+  MessageFlags, SeparatorBuilder, SeparatorSpacingSize, TextDisplayBuilder,
 } from 'discord.js';
 import { formatCurrency } from './formatters.js';
 
@@ -26,32 +26,6 @@ export function addBookingTicketSection(container, content) {
 
 export function bookingTicketPayload(container) {
   return { components: [container], flags: MessageFlags.IsComponentsV2, allowedMentions: { parse: [] } };
-}
-
-export function buildBookingPayOSCard({ order, invoice, attachmentName, checkoutUrl, emoji }) {
-  const expiry = Date.parse(order.payment_expired_at);
-  const hasCheckout = typeof checkoutUrl === 'string' && /^https:\/\//i.test(checkoutUrl);
-  const container = bookingTicketCard({ section: 'HÓA ĐƠN RIÊNG', title: formatCurrency(order.total_amount),
-    subtitle: `${invoicePurpose(invoice)} · ${invoice.minutes} phút · **Chờ thanh toán**`, emoji });
-  addBookingTicketSection(container, [
-    `**Mã hóa đơn**\n\`${order.order_code}\``,
-    `**Nội dung chuyển khoản**\n\`${order.payment_code ?? order.order_code}\``,
-    ...(Number.isFinite(expiry) ? [`**Hết hạn**\n<t:${Math.floor(expiry / 1000)}:f> · <t:${Math.floor(expiry / 1000)}:R>`] : []),
-  ].join('\n\n'));
-  if (attachmentName) {
-    container.addSeparatorComponents(new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small))
-      .addMediaGalleryComponents(new MediaGalleryBuilder().addItems(new MediaGalleryItemBuilder()
-        .setURL(`attachment://${attachmentName}`).setDescription('Mã QR thanh toán PayOS của hóa đơn Booking')));
-  }
-  if (hasCheckout) {
-    const button = new ButtonBuilder().setLabel('Mở thanh toán PayOS').setStyle(ButtonStyle.Link).setURL(checkoutUrl);
-    if (emoji?.id) button.setEmoji(emoji);
-    container.addActionRowComponents(new ActionRowBuilder().addComponents(button));
-  }
-  addBookingTicketSection(container, attachmentName || hasCheckout
-    ? '-# Kiểm tra số tiền và nội dung trước khi chuyển. Bot cập nhật trạng thái sau khi PayOS xác nhận giao dịch.'
-    : 'Hóa đơn chưa có mã QR hoặc đường dẫn thanh toán. Nhắn staff trong phiếu để được kiểm tra.');
-  return bookingTicketPayload(container);
 }
 
 export function buildBookingFreeQuote(invoice, ticketCode, emoji) {
