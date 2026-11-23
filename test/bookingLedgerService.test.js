@@ -87,6 +87,9 @@ describe('Store2 booking sessions and billing', () => {
     expect(reopened.getSession(guildId, 1)).toMatchObject({ starts_at: start, ends_at: start + 60 * MINUTE, host_id: hostId });
     expect(reopened.listSessions(guildId, { status: 'CONFIRMED', dueBefore: start + 30 * MINUTE, startAscending: true })
       .map(row => row.ticket_id)).toEqual([1, 2]);
+    const cutoff = start + 60 * MINUTE;
+    expect(reopened.listSessions(guildId, { endsAfter: cutoff, startAscending: true }).map(row => row.ticket_id)).toEqual([2, 3]);
+    expect(reopened.listSessions(guildId, { endsBy: cutoff }).map(row => row.ticket_id)).toEqual([1]);
   });
 
   it('rejects other stores, non-booking tickets, and draft tickets without authorization', () => {

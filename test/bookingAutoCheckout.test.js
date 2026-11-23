@@ -9,12 +9,13 @@ vi.mock('../src/events/shared.js', () => ({ safeReply: mocks.reply }));
 vi.mock('../src/services/paymentService.js', () => ({ sendOrRefreshPaymentQr: mocks.qr }));
 vi.mock('../src/services/bookingPaymentService.js', () => ({ bookingPayosAvailable: mocks.paid, createBookingPaymentOrder: () => vi.fn() }));
 
-import { handleBookingAutoCheckout } from '../src/events/bookingAutoCheckout.js';
+import { bookingSlotListForHost, handleBookingAutoCheckout } from '../src/events/bookingAutoCheckout.js';
 
 const owner = '123456789012345678';
 const bot = '1139187282075721768';
-const portal = { request: 'request', tickets: 'private', emoji: {} };
-const slot = { id: 7, hostName: 'Host thử', service: 'voice', startsAt: 1_800_000_000_000, durationMinutes: 30, amount: 0 };
+const portal = { request: 'request', welcome: 'welcome', tickets: 'private', emoji: {} };
+const hostId = '123456789012345689';
+const slot = { id: 7, hostId, hostName: 'Host thử', service: 'voice', startsAt: 1_800_000_000_000, durationMinutes: 30, amount: 0 };
 
 function press(customId, { channelId = portal.request, userId = owner, select = false } = {}) {
   return { customId, guildId: STORE_TWO_GUILD_ID, channelId, id: '123456789012345688',
@@ -56,4 +57,22 @@ it('reserves only after the owner confirms and sends no QR for a free slot', asy
   expect(service.reserveSlot).toHaveBeenCalledWith(expect.objectContaining({ slotId: 7, ticketId: 22, customerId: owner,
     requestId: confirmation.id, paymentAvailable: false }));
   expect(mocks.qr).not.toHaveBeenCalled();
+});
+
+it('filters from a host card and revalidates the selected host before quoting in the welcome channel', async () => {
+  const host = { profile_number: 9, host_id: hostId, approved: { name: slot.hostName } };
+  const service = { listSlots: vi.fn(() => [slot]), quoteSlot: vi.fn(() => slot) };
+  const view = bookingSlotListForHost(press('booking:hosts:slots', { channelId: 'welcome' }), portal, host, service);
+  expect(service.listSlots).toHaveBeenCalledWith(expect.objectContaining({ hostId, paymentAvailable: false }));
+  expect(JSON.stringify(view.components[0].toJSON())).toContain(`booking:auto:select:${owner}:9`);
+  const selection = press(`booking:auto:select:${owner}:9`, { channelId: 'welcome', select: true });
+  await handleBookingAutoCheckout(selection, portal, { createService: () => service, getPublishedHost: () => host });
+  const quote = selection.reply.mock.lastCall[0];
+  expect(JSON.stringify(quote.components[0].toJSON())).toContain(`booking:hosts:slots:${owner}:9`);
+
+  const stale = press(`booking:auto:select:${owner}:9`, { channelId: 'welcome', select: true });
+  await handleBookingAutoCheckout(stale, portal, { createService: () => service, getPublishedHost: () => null });
+  expect(stale.reply).not.toHaveBeenCalled();
+  expect(mocks.reply).toHaveBeenCalledWith(stale, expect.objectContaining({ content: expect.stringContaining('đã thay đổi') }));
+  expect(mocks.create).not.toHaveBeenCalled();
 });

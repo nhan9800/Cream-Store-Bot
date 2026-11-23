@@ -61,7 +61,7 @@ export function bookingPanels(guildId, channels, emoji) {
     .addSeparatorComponents(split())
     .addSectionComponents(
       section('**Đặt phiên**\nChọn dịch vụ và giờ rảnh. Staff xác nhận lịch trong phiếu riêng.', requestLink()),
-      section('**Khám phá host**\nLướt từng hồ sơ để xem dịch vụ, giờ rảnh và chọn host khi đặt phiên.', hostBrowser()),
+      section('**Khám phá host**\nXem hồ sơ, chọn ca trống theo host hoặc gửi yêu cầu riêng.', hostBrowser()),
       section('**Trở thành host**\nGửi hồ sơ để staff xem xét cùng bạn.', link('apply', 'Ứng tuyển', 'apply')),
     )
     .addSeparatorComponents(split())
@@ -122,7 +122,7 @@ export function bookingPanels(guildId, channels, emoji) {
 
 const topics = {
   dat_lich: { label: 'Đặt lịch và phòng voice', icon: 'calendar', body: 'Chọn game hoặc voice, nhập giờ Việt Nam và thời lượng. Staff chốt host, giờ và chi phí trong phiếu. Khi đến giờ, mở phòng riêng từ mục **Lịch của bạn** hoặc từ tin nhắn trong phiếu.' },
-  ho_so: { label: 'Hồ sơ và đánh giá', icon: 'profiles', body: 'Bấm **Duyệt hồ sơ** ở sảnh hoặc cổng đặt lịch. Chọn dịch vụ từ thẻ host để điền sẵn nguyện vọng. Dùng `/cenar-ho-so` để cập nhật hồ sơ hoặc đánh giá phiên đã hoàn thành.' },
+  ho_so: { label: 'Hồ sơ và đánh giá', icon: 'profiles', body: 'Bấm **Duyệt hồ sơ** ở sảnh hoặc cổng đặt lịch, rồi chọn **Xem ca trống**. Nếu cần giờ khác, chọn dịch vụ từ thẻ để điền sẵn host trong phiếu. Dùng `/cenar-ho-so` để cập nhật hồ sơ hoặc đánh giá phiên đã hoàn thành.' },
   cong_dong: { label: 'Trò chơi và vật phẩm', icon: 'game', body: 'Dùng `/cenar-cong-dong` để mở trò chơi chữ, trò chơi nhanh và cửa hàng vật phẩm. Điểm chỉ dùng trong cộng đồng Cenar.' },
   nhiem_vu: { label: 'Nhiệm vụ và điểm danh', icon: 'welcome', body: 'Xem tiến độ ngày và chuỗi điểm danh tại `/cenar-cong-dong`. Mốc ngày tính theo giờ Việt Nam.' },
   ho_tro: { label: 'Trợ giúp trong phiếu', icon: 'support', body: 'Mở lại phiếu của bạn từ mục **Lịch của bạn** để đổi lịch, yêu cầu gia hạn hoặc nhờ staff kiểm tra báo giá.' },
@@ -141,9 +141,12 @@ export function bookingHelpCard({ userId, emoji, topic }) {
 }
 
 export function bookingScheduleCard(guildId, portal, sessions, hidden = false) {
-  const card = panel(`${glyph(portal.emoji, 'calendar')}Lịch của bạn`, 'Xem các phiên bạn đã đặt hoặc đang phụ trách.', indigo)
+  const card = panel(`${glyph(portal.emoji, 'calendar')}Lịch của bạn`, 'Các phiên sắp tới và lịch sử gần đây.', indigo)
     .addSeparatorComponents(split());
-  card.addTextDisplayComponents(...sessions.slice(0, 8).map(text));
+  for (const [index, session] of sessions.slice(0, 8).entries()) {
+    if (index) card.addSeparatorComponents(split());
+    card.addTextDisplayComponents(text(session));
+  }
   card.addActionRowComponents(row(button(portal.emoji, 'calendar', 'Mở cổng đặt lịch', {
     url: `https://discord.com/channels/${guildId}/${portal.request}`,
   })));

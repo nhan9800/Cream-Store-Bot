@@ -27,16 +27,20 @@ export async function bookingHostDirectoryCard({ guildId, ownerId, portal, page,
   }
 
   const payload = await buildBookingProfilePost(profile, rating, template, portal.emoji);
+  const availability = new ButtonBuilder().setStyle(ButtonStyle.Primary).setLabel('Xem ca trống')
+    .setCustomId(`booking:hosts:slots:${ownerId}:${profile.profile_number}`);
+  if (portal.emoji.calendar) availability.setEmoji(portal.emoji.calendar);
   const bookButtons = Object.entries(services).filter(([service]) => canRequestHostService(profile, service))
     .map(([service, label]) => {
-      const button = new ButtonBuilder().setStyle(ButtonStyle.Primary).setLabel(label)
+      const button = new ButtonBuilder().setStyle(ButtonStyle.Secondary).setLabel(label)
         .setCustomId(`booking:hosts:${service}:${ownerId}:${profile.profile_number}`);
       if (portal.emoji[service]) button.setEmoji(portal.emoji[service]);
       return button;
     });
   const card = payload.components[0];
-  card.addTextDisplayComponents(new TextDisplayBuilder().setContent(`-# Hồ sơ ${page}/${total} · Staff chốt lịch và báo giá trong phiếu.`));
+  card.addTextDisplayComponents(new TextDisplayBuilder().setContent(`-# Hồ sơ ${page}/${total} · Ca trống hiển thị giờ và giá đã chốt. Yêu cầu giờ khác qua phiếu riêng.`));
   card.addActionRowComponents(new ActionRowBuilder().addComponents(
+    availability,
     ...bookButtons,
     link('Bài hồ sơ', channelUrl(guildId, profile.forum_thread_id), portal.emoji.profiles),
     link('Xem đánh giá', channelUrl(guildId, portal.reviews), portal.emoji.reviews),

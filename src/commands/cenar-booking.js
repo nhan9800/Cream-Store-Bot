@@ -3,6 +3,7 @@ import {
 } from 'discord.js';
 import { db } from '../database/db.js';
 import { createBookingLedger } from '../services/bookingLedgerService.js';
+import { bookingMemberSchedule } from '../services/bookingMemberSchedule.js';
 import { bookingReceiptPreview, createBookingReceiptService } from '../services/bookingReceiptService.js';
 import { createBookingSelfService } from '../services/bookingSelfService.js';
 import { BOOKING_APP_ID, bookingPortal } from '../services/bookingStoreSetupService.js';
@@ -63,8 +64,6 @@ export const data = new SlashCommandBuilder().setName('cenar-booking').setDescri
   .addSubcommand(cmd => cmd.setName('hoi').setDescription('Hỏi về Cenar Booking hoặc yêu cầu số liệu được cấp quyền')
     .addStringOption(o => o.setName('cau_hoi').setDescription('Câu hỏi, ví dụ Tổng doanh thu tuần này?').setRequired(true).setMaxLength(200)));
 
-const statusLabels = { REQUESTED: 'Chờ xếp host', CONFIRMED: 'Đã xếp host', ACTIVE: 'Đang diễn ra',
-  COMPLETED: 'Đã hoàn thành', DECLINED: 'Đã từ chối', NEEDS_REVIEW: 'Chờ staff kiểm tra' };
 const time = ms => `<t:${Math.floor(ms / 1000)}:f>`;
 
 export function ledgerCard(title, lines, emoji) {
@@ -77,16 +76,7 @@ export function ledgerCard(title, lines, emoji) {
 }
 
 export function showSessions(ledger, guildId, userId) {
-  const owned = [ledger.listSessions(guildId, { customerId: userId, limit: 8 }), ledger.listSessions(guildId, { hostId: userId, limit: 8 })];
-  const unique = new Map(owned.flat().map(session => [session.ticket_id, session]));
-  if (!unique.size) return ['Bạn chưa có phiên booking nào. Mở kênh đặt lịch để gửi yêu cầu.'];
-  const voice = createBookingVoiceStore(db);
-  return [...unique.values()].sort((a, b) => b.starts_at - a.starts_at).slice(0, 8).map(session => {
-    const room = session.status === 'ACTIVE' ? voice.get(session.ticket_id) : null;
-    const link = room?.room_id && !room.released ? ` · <#${room.room_id}>`
-      : session.customer_id === userId ? ` · <#${session.ticket_channel_id}>` : '';
-    return `**${session.service === 'game' ? 'Chơi game' : 'Trò chuyện'} · ${statusLabels[session.status]}**\n${time(session.starts_at)} · ${session.duration_minutes} phút${link}`;
-  });
+  return bookingMemberSchedule({ ledger, guildId, userId, receipts: createBookingReceiptService(db), voice: createBookingVoiceStore(db) });
 }
 
 function requirePrivateTicket(interaction) {

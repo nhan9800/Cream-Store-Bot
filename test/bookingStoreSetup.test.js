@@ -110,7 +110,7 @@ describe('Store 2 booking layout', () => {
     expect(guild.channels.create).not.toHaveBeenCalled();
     const before = [...cache.keys()];
     const result = await setupBookingStore(client, guild.id);
-    expect(result).toMatchObject({ status: 'ready', revision: 'CENAR-BOOKING-CHECKOUT-20261123',
+    expect(result).toMatchObject({ status: 'ready', revision: 'CENAR-BOOKING-HOST-DESK-20261123',
       existingChannelsRetained: before.length + 1, bookingChannels: 11, guidesPinned: 8, forums: 2, customEmoji: 12 });
     expect(bookingStoreSetupStatus(client)).toBe(result);
     expect(guild.name).toBe('Cenar Booking');
