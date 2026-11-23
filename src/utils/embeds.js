@@ -362,7 +362,7 @@ const TICKET_V2_STEPS_EN = Object.freeze({
   ],
 });
 
-export function buildTicketWelcomeV2(ticketCode, customerId, ticketType = 'ORDER', relatedOrderCode = null, productName = null, guildId = null) {
+export function buildTicketWelcomeV2(ticketCode, customerId, ticketType = 'ORDER', relatedOrderCode = null, productName = null, guildId = null, { purchaseRequest } = {}) {
   const international = isInternationalGuild(guildId);
   const baseMeta = TICKET_TYPE_META[ticketType] ?? TICKET_TYPE_META.ORDER;
   const meta = international ? { ...baseMeta, ...(TICKET_TYPE_META_EN[ticketType] || TICKET_TYPE_META_EN.ORDER) } : baseMeta;
@@ -392,17 +392,21 @@ export function buildTicketWelcomeV2(ticketCode, customerId, ticketType = 'ORDER
     new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)
   );
 
-  // Một dòng định hướng, sau đó là ba bước cùng nhịp để quét nhanh.
-  container.addTextDisplayComponents(textDisplay(joinLines(
-    `### ${E('status_info')} ${international ? 'NEXT STEPS' : 'Hướng dẫn xử lý'}`,
-    meta.intro,
-  )));
-  container.addSeparatorComponents(
-    new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small)
-  );
-  container.addTextDisplayComponents(textDisplay(joinLines(
-    ...steps.map((s) => `- ${E(s.slot)} ${s.text}`),
-  )));
+  if (purchaseRequest) {
+    container.addTextDisplayComponents(textDisplay(purchaseRequest));
+  } else {
+    // Một dòng định hướng, sau đó là ba bước cùng nhịp để quét nhanh.
+    container.addTextDisplayComponents(textDisplay(joinLines(
+      `### ${E('status_info')} ${international ? 'NEXT STEPS' : 'Hướng dẫn xử lý'}`,
+      meta.intro,
+    )));
+    container.addSeparatorComponents(
+      new SeparatorBuilder().setDivider(false).setSpacing(SeparatorSpacingSize.Small)
+    );
+    container.addTextDisplayComponents(textDisplay(joinLines(
+      ...steps.map((s) => `- ${E(s.slot)} ${s.text}`),
+    )));
+  }
 
   container.addSeparatorComponents(
     new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small)

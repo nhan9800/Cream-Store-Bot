@@ -368,10 +368,11 @@ export async function handleTicketCreate(interaction, ticketType = 'ORDER', gmai
 
       await channel.setName(buildTicketChannelName(ticket.ticket_code, 'ticket')).catch(() => null);
       
+      const purchaseRequest = normalizedType === 'ORDER' ? intake?.text : undefined;
       const { container: welcomeV2, flags: welcomeV2Flags } = booking?.render(ticket) ?? buildTicketWelcomeV2(
-        ticket.ticket_code, interaction.user.id, normalizedType, null, null, interaction.guildId
+        ticket.ticket_code, interaction.user.id, normalizedType, null, null, interaction.guildId, { purchaseRequest }
       );
-      if (intake) {
+      if (intake && !purchaseRequest) {
         welcomeV2.addSeparatorComponents(new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small))
           .addTextDisplayComponents(new TextDisplayBuilder().setContent(intake.text));
       }

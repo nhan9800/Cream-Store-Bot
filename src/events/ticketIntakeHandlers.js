@@ -117,11 +117,16 @@ export async function handleTicketIntakeInteraction(interaction) {
     return true;
   }
 
-  const items = type === 'order'
-    ? [['Sản phẩm', data.product], ['Thời hạn', data.duration], ['Thanh toán mong muốn', data.payment]]
-    : [['Chủ đề', data.topic], ['Mã đơn', data.code], ['Nội dung', data.issue]];
-  const text = [`### ${title}`, ...items.filter(([, value]) => value).map(([label, value]) =>
-    `**${label}** · ${escapeMarkdown(value)}`)].join('\n');
+  const text = type === 'order'
+    ? [
+      '### Yêu cầu mua hàng của khách',
+      `**Sản phẩm khách muốn mua**\n${escapeMarkdown(data.product)}`,
+      `**Thời hạn gói**\n${escapeMarkdown(data.duration)}`,
+      `**Phương thức thanh toán mong muốn**\n${escapeMarkdown(data.payment)}`,
+      '-# Staff sẽ xác nhận gói, giá và cách thanh toán ngay trong ticket này.',
+    ].join('\n\n')
+    : [`### ${title}`, ...[['Chủ đề', data.topic], ['Mã đơn', data.code], ['Nội dung', data.issue]]
+      .filter(([, value]) => value).map(([label, value]) => `**${label}** · ${escapeMarkdown(value)}`)].join('\n');
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   await handleTicketCreate(interaction, type.toUpperCase(), null, { intake: { title, text } });
   return true;
