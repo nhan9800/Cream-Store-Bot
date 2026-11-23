@@ -6,6 +6,7 @@ const MAX_MINUTES = 1440;
 const MAX_RATE = 100_000_000;
 const STATUSES = new Set(['REQUESTED', 'CONFIRMED', 'ACTIVE', 'COMPLETED', 'DECLINED', 'NEEDS_REVIEW']);
 const SETTLED_ORDER_STATES = new Set(['PROCESSING', 'COMPLETED']);
+export const BOOKING_HOST_START_NOTICE_WINDOW_MS = 15 * MINUTE;
 
 export function getBookingInvoiceForOrder(db, order) {
   if (order?.guild_id !== STORE_TWO_GUILD_ID || !order.id
@@ -83,6 +84,8 @@ export function createBookingLedger(db, { now = Date.now } = {}) {
       ON booking_sessions(guild_id, host_id, status, starts_at, ends_at);
     CREATE INDEX IF NOT EXISTS booking_sessions_customer_slots
       ON booking_sessions(guild_id, customer_id, starts_at);
+    CREATE INDEX IF NOT EXISTS booking_sessions_start_status
+      ON booking_sessions(guild_id, status, starts_at);
 
     CREATE TABLE IF NOT EXISTS booking_invoices (
       id INTEGER PRIMARY KEY,
@@ -107,6 +110,11 @@ export function createBookingLedger(db, { now = Date.now } = {}) {
     CREATE UNIQUE INDEX IF NOT EXISTS booking_invoice_base ON booking_invoices(ticket_id) WHERE kind = 'BASE';
     CREATE UNIQUE INDEX IF NOT EXISTS booking_invoice_request ON booking_invoices(ticket_id, request_key);
     CREATE INDEX IF NOT EXISTS booking_invoice_status ON booking_invoices(ticket_id, status);
+
+    CREATE TABLE IF NOT EXISTS booking_host_start_notices (
+      ticket_id INTEGER PRIMARY KEY REFERENCES booking_sessions(ticket_id) ON DELETE CASCADE,
+      attempted_at INTEGER NOT NULL
+    );
   `);
 
   const sessionByTicket = db.prepare('SELECT * FROM booking_sessions WHERE guild_id = ? AND ticket_id = ?');
@@ -116,6 +124,15 @@ export function createBookingLedger(db, { now = Date.now } = {}) {
   const orderById = db.prepare('SELECT * FROM orders WHERE id = ?');
   const openTicket = db.prepare(`SELECT id, guild_id, customer_id, channel_id FROM tickets
     WHERE id = ? AND guild_id = ? AND ticket_type = 'BOOKING' AND status = 'OPEN'`);
+  const upcomingHostStarts = db.prepare(`SELECT s.*, i.id AS base_invoice_id FROM booking_sessions s
+    JOIN tickets t ON t.id = s.ticket_id AND t.guild_id = s.guild_id
+      AND t.channel_id = s.ticket_channel_id AND t.customer_id = s.customer_id
+    JOIN booking_invoices i ON i.ticket_id = s.ticket_id AND i.kind = 'BASE' AND i.host_id = s.host_id
+    WHERE s.guild_id = @guildId AND s.status = 'CONFIRMED' AND s.starts_at > @after AND s.starts_at <= @through
+      AND t.ticket_type = 'BOOKING' AND t.status = 'OPEN' AND i.status IN ('FREE', 'PAID')
+      AND NOT EXISTS (SELECT 1 FROM booking_host_start_notices n WHERE n.ticket_id = s.ticket_id)
+    ORDER BY s.starts_at, s.ticket_id`);
+  const insertHostStartNotice = db.prepare('INSERT INTO booking_host_start_notices(ticket_id, attempted_at) VALUES (?, ?)');
   const overlappingSlot = db.prepare(`
     SELECT 1 FROM booking_sessions s
     WHERE s.guild_id = @guildId AND s.host_id = @hostId AND s.ticket_id <> @ticketId
@@ -309,6 +326,24 @@ export function createBookingLedger(db, { now = Date.now } = {}) {
       && findReceipt(order, invoice, session)?.id === invoice.payment_event_id;
   }
 
+  // Claim the attempt before Discord sends the DM so closed DMs or a restart cannot cause repeat notifications.
+  const claimReadyStart = db.transaction(params => {
+    for (const session of upcomingHostStarts.all(params)) {
+      const invoice = invoiceById.get(params.guildId, session.base_invoice_id);
+      if (!isSettled(invoice, session)) continue;
+      insertHostStartNotice.run(session.ticket_id, params.after);
+      return { hostId: session.host_id, startsAt: session.starts_at };
+    }
+    return null;
+  });
+
+  function claimUpcomingHostStart(guildId, { after, through }) {
+    requireStore(guildId);
+    requireBooking(isInteger(after, 1) && isInteger(through, after + 1, after + BOOKING_HOST_START_NOTICE_WINDOW_MS),
+      'INVALID_FILTER', 'Khoảng thời gian nhắc lịch không hợp lệ.');
+    return claimReadyStart.immediate({ guildId, after, through });
+  }
+
   // Only the canonical PAYOS receipt committed by the existing verification path is accepted.
   // An unverified or mismatched receipt leaves the invoice pending for a provider recheck.
   function syncInvoicePayment(guildId, invoiceId) {
@@ -431,6 +466,6 @@ export function createBookingLedger(db, { now = Date.now } = {}) {
     }), { sessions: 0, minutes: 0, revenue: 0, wage: 0 }) };
   }
 
-  return { createSession, getSession, listSessions, assignHost, createInvoice, extendSession, syncInvoicePayment,
+  return { createSession, getSession, listSessions, claimUpcomingHostStart, assignHost, createInvoice, extendSession, syncInvoicePayment,
     listInvoices, startSession, completeSession, declineSession, reviewExpiredSession, getWages, getPayrollReport };
 }
