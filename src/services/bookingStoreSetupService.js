@@ -8,7 +8,7 @@ import { resolveVerificationRole } from './verificationRoleService.js';
 
 export { bookingPanels } from '../utils/bookingPortalViews.js';
 export const BOOKING_APP_ID = '1139187282075721768';
-const LAYOUT = 'CENAR-BOOKING-REFERENCE-20261123';
+const LAYOUT = 'CENAR-BOOKING-MEMBER-20261123';
 const LEGACY_PANEL_MARKERS = ['CENAR-BOOKING-LOBBY-20261122', 'CENAR-BOOKING-OPERATIONS-20261123'];
 const reason = 'Cenar Booking channel setup';
 const glyphs = /[\p{Extended_Pictographic}\p{Regional_Indicator}\u200d\ufe0f\u20e3]/u;
@@ -31,6 +31,9 @@ const newCategories = {
   booking: ['----- ☬ 𝐁𝐨𝐨𝐤𝐢𝐧𝐠 ☬ ------', '02 · ĐẶT LỊCH'],
   hosts: ['----- ☬ 𝐇𝐨𝐬𝐭 & 𝐅𝐞𝐞𝐝𝐛𝐚𝐜𝐤 ☬ ------'],
   community: ['----- ☬ 𝐂𝐡𝐚𝐭𝐭𝐢𝐧𝐠 ☬ ------', '04 · CỘNG ĐỒNG & VOICE'],
+  events: ['----- ☬ 𝐄𝐯𝐞𝐧𝐭𝐬 ☬ ------'],
+  games: ['----- ☬ 𝐆𝐚𝐦𝐞𝐬 ☬ ------'],
+  voice: ['----- ☬ 𝐕𝐨𝐢𝐜𝐞 ☬ ------'],
   tickets: ['----- ☬ 𝐏𝐡𝐢ế𝐮 𝐁𝐨𝐨𝐤𝐢𝐧𝐠 ☬ ------'],
   support: ['----- ☬ 𝐒𝐮𝐩𝐩𝐨𝐫𝐭 ☬ ------', 'HỖ TRỢ & BẢO HÀNH ĐƠN CŨ'],
   market: ['05 · DỊCH VỤ CŨ', 'GLOBAL MARKETPLACE'],
@@ -253,9 +256,11 @@ async function applyBookingLayout(client, guildId) {
     ['reviews', '✰・𝑭𝑬𝑬𝑫𝑩𝑨𝑪𝑲', 'hosts', 'forum', 'Đánh giá các phiên đã diễn ra. Gửi phản hồi qua ticket để staff hỗ trợ đăng.'],
     ['apply', '✰・𝑨𝑷𝑷𝑳𝒀', 'hosts', 'read', 'Đăng ký host chơi game hoặc trò chuyện qua phiếu riêng.'],
     ['chat', '˳·˖✶ㆍ𝑴𝑨𝑰𝑵-𝑪𝑯𝑨𝑻', 'community', 'chat', 'Tìm bạn chơi game, voice và trò chuyện cùng cộng đồng.'],
-    ['lobby', '⌁・𝑳𝑶𝑩𝑩𝒀', 'community', 'voice'],
-    ['game', '⌁・𝑮𝑨𝑴𝑬', 'community', 'voice'],
-    ['voice', '⌁・𝑽𝑶𝑰𝑪𝑬', 'community', 'voice'],
+    ['events', '✦・sự-kiện-cenar', 'events', 'read', 'Sự kiện cộng đồng và giveaway do ban vận hành Cenar tổ chức.'],
+    ['games', '✦・trò-chơi-cenar', 'games', 'read', 'Ô chữ hằng ngày, nhiệm vụ và cửa hàng điểm cộng đồng.'],
+    ['lobby', '⌁・𝑳𝑶𝑩𝑩𝒀', 'voice', 'voice'],
+    ['game', '⌁・𝑮𝑨𝑴𝑬', 'voice', 'voice'],
+    ['voice', '⌁・𝑽𝑶𝑰𝑪𝑬', 'voice', 'voice'],
   ];
   const hasForums = guild.features.includes('COMMUNITY');
   for (const [id, name, parent, kind, topic] of slots) {
@@ -322,22 +327,30 @@ async function applyBookingLayout(client, guildId) {
   }
   const orderedGroups = [
     [categories.start, channels.welcome, channels.news, channels.rules, channels.verify],
+    [categories.events, channels.events],
     [categories.booking, channels.request, channels.handbook],
     [categories.hosts, channels.profiles, channels.reviews, channels.apply],
-    [categories.community, channels.chat, channels.lobby, channels.game, channels.voice],
+    [categories.community, channels.chat],
+    [categories.games, channels.games],
+    [categories.voice, channels.lobby, channels.game, channels.voice],
     [categories.tickets],
     [categories.support, channels.support, channels.reminders, channels.warranty],
   ];
   const orderedIds = orderedGroups.flat().filter(Boolean).map(channel => channel.id);
   const orderedSet = new Set(orderedIds);
+  const byPosition = (left, right) => left.rawPosition - right.rawPosition || left.id.localeCompare(right.id);
+  const inOrder = list => list.every((channel, i) => i === 0 || byPosition(list[i - 1], channel) < 0);
   const remainder = guild.channels.cache.filter(channel => !orderedSet.has(channel.id))
-    .sort((a, b) => a.rawPosition - b.rawPosition).map(channel => channel.id);
+    .sort(byPosition).map(channel => channel.id);
   const ordered = [...orderedIds, ...remainder];
-  if (ordered.some((id, index) => guild.channels.cache.get(id)?.rawPosition !== index)) {
+  // Discord can renumber positions. Compare sidebar order, not absolute offsets.
+  if (!inOrder(orderedGroups.map(([category]) => category).filter(Boolean))
+    || orderedGroups.some(([, ...children]) => !inOrder(children.filter(Boolean)))) {
     await guild.channels.setPositions(ordered.map((id, position) => ({ channel: id, position, lockPermissions: false })));
   }
 
-  for (const [id, payload] of Object.entries(bookingPanels(guild.id, channels, emoji))) {
+  const panels = Object.entries(bookingPanels(guild.id, channels, emoji));
+  for (const [id, payload] of panels) {
     await ensurePanel(channels[id], id, payload);
   }
   if (guild.name !== 'Cenar Booking') await guild.setName('Cenar Booking', reason);
@@ -345,8 +358,12 @@ async function applyBookingLayout(client, guildId) {
   if (!original.every(channel => live.has(channel.id) && JSON.stringify(live.get(channel.id).acl) === JSON.stringify(channel.acl))) {
     throw new Error('BOOKING_LEGACY_ACCESS_MISMATCH');
   }
+  if (!slots.every(([id, , parent]) => live.get(channels[id].id)?.parent === categories[parent].id)) {
+    throw new Error('BOOKING_CHANNEL_GROUP_MISMATCH');
+  }
   portals.set(client, {
-    request: channels.request.id, apply: channels.apply.id, handbook: channels.handbook.id, tickets: categories.tickets.id,
+    welcome: channels.welcome.id, request: channels.request.id, apply: channels.apply.id, handbook: channels.handbook.id,
+    tickets: categories.tickets.id, games: channels.games.id, rules: channels.rules.id,
     profiles: channels.profiles.id, reviews: channels.reviews.id, chat: channels.chat.id,
     voiceChannels: [channels.lobby.id, channels.game.id, channels.voice.id],
     voiceCategory: categories.tickets.id, emoji,
@@ -354,7 +371,7 @@ async function applyBookingLayout(client, guildId) {
   return {
     status: 'ready', revision: LAYOUT,
     existingChannelsRetained: proof.filter(channel => live.has(channel.id)).length,
-    bookingChannels: slots.length, guidesPinned: 6, customEmoji: Object.keys(emoji).length,
+    bookingChannels: slots.length, guidesPinned: panels.length, customEmoji: Object.keys(emoji).length,
     forums: hasForums ? 2 : 0,
   };
 }

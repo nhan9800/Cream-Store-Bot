@@ -1,9 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { STORE_TWO_GUILD_ID } from '../src/utils/locale.js';
+import { BOOKING_PANEL_IDS } from '../src/utils/bookingPortalViews.js';
 
 const mocks = vi.hoisted(() => ({
   open: vi.fn(), reply: vi.fn(), ticket: vi.fn(), config: vi.fn(), createSession: vi.fn(),
-  portal: { request: 'request', apply: 'apply', handbook: 'handbook', tickets: 'private-category', emoji: {} },
+  directory: vi.fn(), shortcut: vi.fn(),
+  portal: { welcome: 'welcome', request: 'request', apply: 'apply', handbook: 'handbook', games: 'games', tickets: 'private-category', emoji: {} },
 }));
 vi.mock('../src/services/bookingStoreSetupService.js', () => ({
   BOOKING_APP_ID: '1139187282075721768', bookingPortal: () => mocks.portal,
@@ -13,6 +15,8 @@ vi.mock('../src/services/ticketService.js', () => ({ getTicketByChannelId: mocks
 vi.mock('../src/events/shared.js', () => ({ safeReply: mocks.reply }));
 vi.mock('../src/events/ticketHandlers.js', () => ({ handleTicketCreate: mocks.open }));
 vi.mock('../src/services/bookingLedgerService.js', () => ({ createBookingLedger: () => ({ createSession: mocks.createSession }) }));
+vi.mock('../src/events/bookingHostDirectoryHandlers.js', () => ({ handleBookingHostDirectoryInteraction: mocks.directory }));
+vi.mock('../src/commands/cenar-cong-dong.js', () => ({ openBookingCommunityShortcut: mocks.shortcut }));
 
 import { bookingForm, handleBookingInteraction, parseBookingTime } from '../src/events/bookingHandlers.js';
 
@@ -66,6 +70,38 @@ describe('Cenar Booking intake and private ticket controls', () => {
     choose.user = { id: 'different' };
     await handleBookingInteraction(choose);
     expect(choose.update).toHaveBeenCalledTimes(1);
+  });
+
+  it('wires the host directory to the existing booking form and accepts a private welcome-origin form', async () => {
+    const launch = interaction('booking:dashboard:hosts', { channel: 'welcome' });
+    mocks.directory.mockResolvedValue(true);
+    expect(await handleBookingInteraction(launch)).toBe(true);
+    expect(mocks.directory).toHaveBeenCalledWith(launch, { portal: mocks.portal, bookingForm });
+    const form = bookingForm('voice', { preferredHost: '#012 Minh' }).toJSON();
+    expect(form.components[0].components[0]).toMatchObject({ custom_id: 'host', value: '#012 Minh', required: false });
+    const submitted = interaction(form.custom_id, { channel: 'welcome', fields: {
+      host: '#012 Minh', start: '23/11/2026 20:30', duration: '60',
+    } });
+    await handleBookingInteraction(submitted);
+    expect(mocks.open).not.toHaveBeenCalled();
+    submitted.message = { author: submitted.client.user, flags: new Set([64]) };
+    await handleBookingInteraction(submitted);
+    expect(mocks.open).toHaveBeenCalledOnce();
+  });
+
+  it('runs community shortcuts only from the Store2 bot-owned games panel', async () => {
+    const shortcut = interaction('booking:shortcut:words-vi', { channel: 'games' });
+    shortcut.message = { author: { id: 'untrusted' }, components: [{ id: BOOKING_PANEL_IDS.games }] };
+    await handleBookingInteraction(shortcut);
+    expect(mocks.shortcut).not.toHaveBeenCalled();
+    shortcut.message.author = shortcut.client.user;
+    shortcut.channelId = 'welcome';
+    await handleBookingInteraction(shortcut);
+    expect(mocks.shortcut).not.toHaveBeenCalled();
+    shortcut.channelId = 'games';
+    mocks.shortcut.mockResolvedValue(true);
+    await handleBookingInteraction(shortcut);
+    expect(mocks.shortcut).toHaveBeenCalledExactlyOnceWith(shortcut, 'words-vi');
   });
 
   it('routes valid dates to a dedicated private ticket with a Vietnamese summary', async () => {

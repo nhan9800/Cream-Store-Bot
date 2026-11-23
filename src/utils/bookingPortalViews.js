@@ -8,7 +8,7 @@ import {
 export const BOOKING_PANEL_MARKER = 'CENAR-BOOKING-20261121';
 export const BOOKING_BANNER_NAME = 'cenar-booking-header.webp';
 export const BOOKING_PANEL_IDS = { welcome: 84267101, rules: 84267102, request: 84267103,
-  handbook: 84267104, apply: 84267105, news: 84267106 };
+  handbook: 84267104, apply: 84267105, news: 84267106, games: 84267107, events: 84267108 };
 const bannerPath = fileURLToPath(new URL(`../../assets/booking/${BOOKING_BANNER_NAME}`, import.meta.url));
 const indigo = 0x7167db;
 const mint = 0x50c8a2;
@@ -50,7 +50,8 @@ export function bookingPanels(guildId, channels, emoji) {
   const finish = (key, card) => message(card.setId(BOOKING_PANEL_IDS[key]));
   const title = (key, label) => `${glyph(emoji, key)}${label}`;
   const requestLink = () => link('calendar', 'Đặt lịch', 'request');
-  const hostLink = () => link('profiles', 'Xem host', 'profiles');
+  const hostBrowser = () => action('profiles', 'Duyệt hồ sơ', 'booking:dashboard:hosts');
+  const hostForum = () => link('profiles', 'Diễn đàn host', 'profiles');
   const help = () => action('rules', 'Mở hướng dẫn', 'booking:dashboard:help');
 
   const welcome = new ContainerBuilder().setAccentColor(indigo)
@@ -60,11 +61,12 @@ export function bookingPanels(guildId, channels, emoji) {
     .addSeparatorComponents(split())
     .addSectionComponents(
       section('**Đặt phiên**\nChọn dịch vụ và giờ rảnh. Staff xác nhận lịch trong phiếu riêng.', requestLink()),
-      section('**Khám phá host**\nXem chủ đề, trò chơi và giờ nhận lịch của từng host.', hostLink()),
+      section('**Khám phá host**\nLướt từng hồ sơ để xem dịch vụ, giờ rảnh và chọn host khi đặt phiên.', hostBrowser()),
       section('**Trở thành host**\nGửi hồ sơ để staff xem xét cùng bạn.', link('apply', 'Ứng tuyển', 'apply')),
     )
     .addSeparatorComponents(split())
-    .addActionRowComponents(row(link('rules', 'Cẩm nang', 'handbook'), link('game', 'Cộng đồng', 'chat'), action('support', 'Liên hệ hỗ trợ', 'ticket:create:SUPPORT')));
+    .addActionRowComponents(row(link('rules', 'Cẩm nang', 'handbook'), link('game', 'Trò chơi', 'games'),
+      link('news', 'Sự kiện', 'events'), action('support', 'Liên hệ hỗ trợ', 'ticket:create:SUPPORT')));
 
   const request = panel(title('calendar', 'Đặt phiên cùng Cenar'), 'Chọn một dịch vụ bên dưới để mở phiếu riêng.', indigo)
     .addSeparatorComponents(split())
@@ -73,7 +75,7 @@ export function bookingPanels(guildId, channels, emoji) {
       section('**Trò chuyện qua voice**\nChọn host hoặc nhờ staff gợi ý theo chủ đề bạn thích.', action('voice', 'Chọn voice', 'booking:open:voice', true)),
     )
     .addSeparatorComponents(split())
-    .addActionRowComponents(row(action('reviews', 'Lịch của bạn', 'booking:dashboard:my'), hostLink(), help()))
+    .addActionRowComponents(row(action('reviews', 'Lịch của bạn', 'booking:dashboard:my'), hostBrowser(), help()))
     .addTextDisplayComponents(text('-# Ban vận hành xác nhận host, giờ và chi phí ngay trong phiếu.'));
 
   const handbook = panel(title('rules', 'Cẩm nang Booking'), 'Chọn một chủ đề để xem hướng dẫn riêng.', blue)
@@ -84,7 +86,7 @@ export function bookingPanels(guildId, channels, emoji) {
   const apply = panel(title('apply', 'Tham gia đội ngũ host'), 'Đồng hành cùng khách trong các phiên game hoặc trò chuyện.', rose)
     .addSeparatorComponents(split())
     .addTextDisplayComponents(text('**Chuẩn bị hồ sơ**\nBiệt danh, game hoặc chủ đề bạn nhận và khung giờ rảnh theo giờ Việt Nam.\n\nStaff trao đổi qua phiếu riêng trước khi duyệt hồ sơ công khai.'))
-    .addActionRowComponents(row(action('apply', 'Gửi hồ sơ', 'booking:open:apply', true), hostLink()));
+    .addActionRowComponents(row(action('apply', 'Gửi hồ sơ', 'booking:open:apply', true), hostForum()));
 
   const rules = panel(title('rules', 'Nội quy phiên booking'), 'Giữ lịch hẹn và tôn trọng ranh giới của nhau.', mint)
     .addSeparatorComponents(split())
@@ -92,16 +94,33 @@ export function bookingPanels(guildId, channels, emoji) {
     .addActionRowComponents(row(action('support', 'Liên hệ hỗ trợ', 'ticket:create:SUPPORT')));
 
   const news = panel(title('news', 'Tin từ Cenar'), 'Lịch hoạt động và thay đổi dịch vụ được cập nhật tại đây.', indigo)
-    .addActionRowComponents(row(link('calendar', 'Về sảnh', 'welcome'), link('support', 'Hỗ trợ đơn cũ', 'support')));
+    .addActionRowComponents(row(link('calendar', 'Về sảnh', 'welcome'), link('news', 'Xem sự kiện', 'events'),
+      link('support', 'Hỗ trợ đơn cũ', 'support')));
+
+  const shortcut = (icon, label, key, primary = false) => action(icon, label, `booking:shortcut:${key}`, primary);
+  const games = panel(title('game', 'Phòng trò chơi Cenar'), 'Chọn một bảng để mở riêng cho bạn.', blue)
+    .addSeparatorComponents(split())
+    .addTextDisplayComponents(text('**Ô chữ hôm nay**\nChọn Tiếng Việt hoặc English. Mỗi đề có sáu lượt đoán và làm mới lúc 00:00 giờ Việt Nam.'))
+    .addActionRowComponents(row(shortcut('game', 'Ô chữ Tiếng Việt', 'words-vi', true), shortcut('rules', 'English word grid', 'words-en', true)))
+    .addSeparatorComponents(split())
+    .addTextDisplayComponents(text('**Điểm cộng đồng**\nĐiểm danh, nhận thưởng nhiệm vụ và dùng điểm để lấy vật phẩm trong bot.'))
+    .addActionRowComponents(row(shortcut('calendar', 'Điểm danh', 'checkin'), shortcut('news', 'Nhiệm vụ', 'missions'),
+      shortcut('apply', 'Cửa hàng', 'shop'), shortcut('reviews', 'Bảng xếp hạng', 'leaderboard')))
+    .addTextDisplayComponents(text('-# Dùng `/cenar-cong-dong choi` để mở các trò chơi nhanh. Điểm cộng đồng không quy đổi ra tiền.'));
+
+  const events = panel(title('news', 'Sự kiện Cenar'), 'Theo dõi lịch sinh hoạt và các đợt giveaway do ban vận hành tổ chức.', rose)
+    .addSeparatorComponents(split())
+    .addTextDisplayComponents(text('Mỗi bài sự kiện sẽ ghi giờ bắt đầu, điều kiện tham gia và phần thưởng nếu có. Khi có giveaway, nút tham gia nằm ngay trong bài sự kiện.'))
+    .addActionRowComponents(row(link('game', 'Mở trò chơi', 'games'), link('voice', 'Vào trò chuyện', 'chat')));
 
   return { welcome: { ...finish('welcome', welcome), files: [new AttachmentBuilder(bannerPath, { name: BOOKING_BANNER_NAME })] },
     rules: finish('rules', rules), request: finish('request', request), handbook: finish('handbook', handbook),
-    apply: finish('apply', apply), news: finish('news', news) };
+    apply: finish('apply', apply), news: finish('news', news), games: finish('games', games), events: finish('events', events) };
 }
 
 const topics = {
   dat_lich: { label: 'Đặt lịch và phòng voice', icon: 'calendar', body: 'Chọn game hoặc voice, nhập giờ Việt Nam và thời lượng. Staff chốt host, giờ và chi phí trong phiếu. Khi đến giờ, mở phòng riêng từ mục **Lịch của bạn** hoặc từ tin nhắn trong phiếu.' },
-  ho_so: { label: 'Hồ sơ và đánh giá', icon: 'profiles', body: 'Xem host trong diễn đàn hồ sơ. Dùng `/cenar-ho-so` để cập nhật hồ sơ hoặc đánh giá một phiên đã hoàn thành. Bạn có thể đồng ý cho staff đăng nhận xét ẩn danh.' },
+  ho_so: { label: 'Hồ sơ và đánh giá', icon: 'profiles', body: 'Bấm **Duyệt hồ sơ** ở sảnh hoặc cổng đặt lịch. Chọn dịch vụ từ thẻ host để điền sẵn nguyện vọng. Dùng `/cenar-ho-so` để cập nhật hồ sơ hoặc đánh giá phiên đã hoàn thành.' },
   cong_dong: { label: 'Trò chơi và vật phẩm', icon: 'game', body: 'Dùng `/cenar-cong-dong` để mở trò chơi chữ, trò chơi nhanh và cửa hàng vật phẩm. Điểm chỉ dùng trong cộng đồng Cenar.' },
   nhiem_vu: { label: 'Nhiệm vụ và điểm danh', icon: 'welcome', body: 'Xem tiến độ ngày và chuỗi điểm danh tại `/cenar-cong-dong`. Mốc ngày tính theo giờ Việt Nam.' },
   ho_tro: { label: 'Trợ giúp trong phiếu', icon: 'support', body: 'Mở lại phiếu của bạn từ mục **Lịch của bạn** để đổi lịch, yêu cầu gia hạn hoặc nhờ staff kiểm tra báo giá.' },

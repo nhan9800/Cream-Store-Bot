@@ -9,7 +9,7 @@ import { getGuildConfig } from '../services/guildConfigService.js';
 import { getTicketByChannelId } from '../services/ticketService.js';
 import { STORE_TWO_GUILD_ID } from '../utils/locale.js';
 import { isSupport } from '../utils/permissions.js';
-import { bookingHelpCard, bookingScheduleCard } from '../utils/bookingPortalViews.js';
+import { BOOKING_PANEL_IDS, bookingHelpCard, bookingScheduleCard } from '../utils/bookingPortalViews.js';
 import { addBookingTicketSection, bookingTicketCard } from '../utils/bookingTicketUi.js';
 import { safeReply } from './shared.js';
 import { handleTicketCreate } from './ticketHandlers.js';
@@ -19,12 +19,6 @@ const bookingServices = { game: 'Chơi game', voice: 'Trò chuyện qua voice', 
 const nextStates = {
   confirm: 'Đã xác nhận lịch', complete: 'Đã diễn ra', decline: 'Không thể nhận lịch',
 };
-
-const bookingHelp = [
-  '**Đặt lịch và theo dõi**\nGửi lịch từ bảng này. Dùng `/cenar-booking lich` để xem tiến độ và mở lại phiếu.',
-  '**Hồ sơ và đánh giá**\nDùng `/cenar-ho-so` để chuẩn bị hồ sơ host hoặc gửi đánh giá cho phiên đã diễn ra.',
-  '**Cộng đồng**\nDùng `/cenar-cong-dong` để xem cấp, điểm danh, nhiệm vụ và các trò chơi.',
-];
 
 export function parseBookingTime(value, now = Date.now()) {
   const parts = /^(\d{1,2})\/(\d{1,2})\/(20\d{2})\s+(\d{1,2}):(\d{2})$/.exec(value.trim());
@@ -37,13 +31,14 @@ export function parseBookingTime(value, now = Date.now()) {
   return timestamp > now ? Math.floor(timestamp / 1000) : null;
 }
 
-export function bookingForm(service) {
+export function bookingForm(service, { preferredHost } = {}) {
   const modal = new ModalBuilder().setCustomId(`booking:form:${service}`).setTitle(bookingServices[service]);
-  const field = (id, label, max, { required = true, long = false, placeholder } = {}) => {
+  const field = (id, label, max, { required = true, long = false, placeholder, value } = {}) => {
     const input = new TextInputBuilder().setCustomId(id).setLabel(label)
       .setStyle(long ? TextInputStyle.Paragraph : TextInputStyle.Short)
       .setMaxLength(max).setRequired(required);
     if (placeholder) input.setPlaceholder(placeholder);
+    if (value) input.setValue(value.slice(0, max));
     return new ActionRowBuilder().addComponents(input);
   };
   if (service === 'apply') {
@@ -55,7 +50,9 @@ export function bookingForm(service) {
     );
   }
   return modal.addComponents(
-    field('host', 'Host hoặc nhóm bạn muốn gặp', 80, { required: false, placeholder: 'Để trống nếu muốn staff gợi ý' }),
+    field('host', 'Host hoặc nhóm bạn muốn gặp', 80, {
+      required: false, placeholder: 'Để trống nếu muốn staff gợi ý', value: preferredHost,
+    }),
     field('start', 'Ngày giờ (dd/mm/yyyy HH:mm, UTC+7)', 18, { placeholder: 'Ví dụ 28/11/2026 20:30' }),
     field('duration', 'Thời lượng (phút)', 4, { placeholder: 'Ví dụ 60' }),
     field('details', service === 'game' ? 'Tên game và ghi chú' : 'Chủ đề hoặc ghi chú', 300,
@@ -193,6 +190,21 @@ export async function handleBookingInteraction(interaction) {
     return true;
   }
   const [, operation, value, id] = interaction.customId.split(':');
+  if (interaction.customId === 'booking:dashboard:hosts' || operation === 'hosts') {
+    const { handleBookingHostDirectoryInteraction } = await import('./bookingHostDirectoryHandlers.js');
+    return handleBookingHostDirectoryInteraction(interaction, { portal, bookingForm });
+  }
+  if (operation === 'shortcut') {
+    const message = interaction.message;
+    if (interaction.isButton() && interaction.channelId === portal.games && interaction.customId === `booking:shortcut:${value}`
+      && message?.author?.id === BOOKING_APP_ID && message.components?.some(component =>
+        (component.id ?? component.data?.id) === BOOKING_PANEL_IDS.games)) {
+      const { openBookingCommunityShortcut } = await import('../commands/cenar-cong-dong.js');
+      if (await openBookingCommunityShortcut(interaction, value)) return true;
+    }
+    await respond('Mở bảng trò chơi mới nhất trong Cenar Booking.');
+    return true;
+  }
   if (operation === 'community') {
     const { handleBookingCommunityInteraction } = await import('../commands/cenar-cong-dong.js');
     return handleBookingCommunityInteraction(interaction);
@@ -222,22 +234,14 @@ export async function handleBookingInteraction(interaction) {
     } else await respond('Mở bảng đặt lịch mới nhất trong máy chủ.');
     return true;
   }
-  if (operation === 'dashboard' && interaction.channelId === portal.request && !id && interaction.isButton()) {
-    const { ledgerCard, showSessions } = await import('../commands/cenar-booking.js');
-    if (value === 'my' || value === 'help') {
-      const mine = value === 'my';
-      await safeReply(interaction, { ...ledgerCard(mine ? 'Lịch của bạn' : 'Trợ giúp Cenar Booking', mine
-        ? showSessions(createBookingLedger(db), interaction.guildId, interaction.user.id) : bookingHelp, portal.emoji.calendar),
-      flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral });
-    }
-    return true;
-  }
   if (operation === 'state' && Object.hasOwn(nextStates, value) && interaction.isButton()) {
     await changeState(interaction, value, id, portal);
     return true;
   }
   const expectedChannel = value === 'apply' ? portal.apply : portal.request;
-  if (!Object.hasOwn(bookingServices, value) || interaction.channelId !== expectedChannel || id) {
+  const fromWelcomeDirectory = operation === 'form' && ['game', 'voice'].includes(value) && interaction.channelId === portal.welcome
+    && interaction.message?.author?.id === BOOKING_APP_ID && interaction.message.flags?.has(MessageFlags.Ephemeral);
+  if (!Object.hasOwn(bookingServices, value) || (interaction.channelId !== expectedChannel && !fromWelcomeDirectory) || id) {
     await respond('Vui lòng mở bảng đặt lịch hoặc tuyển host mới nhất.');
     return true;
   }
