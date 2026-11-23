@@ -71,12 +71,14 @@ export function bookingPanels(guildId, channels, emoji) {
   const request = panel(title('calendar', 'Đặt phiên cùng Cenar'), 'Chọn một dịch vụ bên dưới để mở phiếu riêng.', indigo)
     .addSeparatorComponents(split())
     .addSectionComponents(
+      section('**Đặt theo ca có sẵn**\nXem giờ của host, thời lượng và tổng tiền trước khi xác nhận.',
+        action('calendar', 'Đặt lịch tự động', 'booking:dashboard:auto', true)),
       section('**Chơi game**\nGhi tên game, giờ bắt đầu và thời lượng.', action('game', 'Chọn game', 'booking:open:game', true)),
       section('**Trò chuyện qua voice**\nChọn host hoặc nhờ staff gợi ý theo chủ đề bạn thích.', action('voice', 'Chọn voice', 'booking:open:voice', true)),
     )
     .addSeparatorComponents(split())
     .addActionRowComponents(row(action('reviews', 'Lịch của bạn', 'booking:dashboard:my'), hostBrowser(), help()))
-    .addTextDisplayComponents(text('-# Ban vận hành xác nhận host, giờ và chi phí ngay trong phiếu.'));
+    .addTextDisplayComponents(text('-# Staff xác nhận riêng đối với yêu cầu game hoặc voice ngoài danh sách ca có sẵn.'));
 
   const handbook = panel(title('rules', 'Cẩm nang Booking'), 'Chọn một chủ đề để xem hướng dẫn riêng.', blue)
     .addSeparatorComponents(split())

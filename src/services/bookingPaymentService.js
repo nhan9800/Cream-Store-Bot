@@ -1,21 +1,28 @@
 import { assertPaymentConfig, config } from '../config.js';
 import { createOrder } from './orderService.js';
 import { sendOrRefreshPaymentQr, syncPaymentStatusFromPayOS } from './paymentService.js';
+import { STORE_TWO_GUILD_ID } from '../utils/locale.js';
 
 const disabled = () => Object.assign(new Error('Booking PayOS is disabled'), { code: 'BOOKING_PAYMENTS_DISABLED' });
 
-export async function quoteBooking({ interaction, ledger, ticketId, hourlyPrice, hourlyWage, durationMinutes }) {
-  const guildId = interaction.guildId;
-  const actorId = interaction.user.id;
-  if (hourlyPrice > 0) {
-    if (process.env.BOOKING_PAYOS_ENABLED !== 'true' || config.paymentProvider !== 'PAYOS') throw disabled();
-    try { assertPaymentConfig(); } catch { throw disabled(); }
-  }
-  const createPaymentOrder = ({ customerId, ticketChannelId, amount, invoiceId }) => createOrder({
+export function bookingPayosAvailable(guildId) {
+  if (guildId !== STORE_TWO_GUILD_ID || process.env.BOOKING_PAYOS_ENABLED !== 'true' || config.paymentProvider !== 'PAYOS') return false;
+  try { assertPaymentConfig(); return true; } catch { return false; }
+}
+
+export function createBookingPaymentOrder(guildId, ticketId, actorId) {
+  return ({ customerId, ticketChannelId, amount, invoiceId }) => createOrder({
     guildId, ticketId, ticketChannelId, customerId, quantity: 1,
     productName: `Phiên Cenar Booking #${ticketId}`, serviceType: 'service', note: `BOOKING_INVOICE:${invoiceId}`,
     totalAmount: amount, orderLogChannelId: ticketChannelId, createdById: actorId,
   });
+}
+
+export async function quoteBooking({ interaction, ledger, ticketId, hourlyPrice, hourlyWage, durationMinutes }) {
+  const guildId = interaction.guildId;
+  const actorId = interaction.user.id;
+  if (hourlyPrice > 0 && !bookingPayosAvailable(guildId)) throw disabled();
+  const createPaymentOrder = createBookingPaymentOrder(guildId, ticketId, actorId);
   const input = { guildId, actorId, ticketId, hourlyPrice, hourlyWage, createPaymentOrder };
   const invoice = durationMinutes == null ? ledger.createInvoice(input)
     : ledger.extendSession({ ...input, durationMinutes, requestKey: interaction.id });

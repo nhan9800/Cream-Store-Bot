@@ -3,12 +3,15 @@ import {
 } from 'discord.js';
 import { db } from '../database/db.js';
 import { createBookingLedger } from '../services/bookingLedgerService.js';
+import { bookingReceiptPreview, createBookingReceiptService } from '../services/bookingReceiptService.js';
+import { createBookingSelfService } from '../services/bookingSelfService.js';
 import { BOOKING_APP_ID, bookingPortal } from '../services/bookingStoreSetupService.js';
 import { getGuildConfig } from '../services/guildConfigService.js';
 import { getTicketByChannelId } from '../services/ticketService.js';
 import { createBookingVoiceStore } from '../services/bookingVoiceService.js';
 import { STORE_TWO_GUILD_ID } from '../utils/locale.js';
 import { bookingScheduleCard } from '../utils/bookingPortalViews.js';
+import { buildBookingReceiptCard } from '../utils/bookingReceiptViews.js';
 import { isManager, isSupport } from '../utils/permissions.js';
 import { addBookingTicketSection, bookingTicketCard, bookingTicketPayload, buildBookingBillReview, buildBookingFreeQuote } from '../utils/bookingTicketUi.js';
 
@@ -19,6 +22,22 @@ const hourlyWage = option => option.setName('luong_gio').setDescription('Tiền 
 
 export const data = new SlashCommandBuilder().setName('cenar-booking').setDescription('Lịch và vận hành Cenar Booking')
   .addSubcommand(cmd => cmd.setName('lich').setDescription('Xem các phiên booking của bạn'))
+  .addSubcommand(cmd => cmd.setName('hoa-don').setDescription('Xem riêng hóa đơn đã lưu của một phiếu booking')
+    .addStringOption(o => o.setName('ma_phieu').setDescription('Để trống khi đang trong phiếu').setMaxLength(32))
+    .addIntegerOption(o => o.setName('so_hoa_don').setDescription('Số hóa đơn cụ thể, mặc định là hóa đơn mới nhất').setMinValue(1)))
+  .addSubcommand(cmd => cmd.setName('mau-hoa-don').setDescription('Quản lý xem mẫu hóa đơn Booking, nạp, ủng hộ hoặc hoàn tiền')
+    .addStringOption(o => o.setName('loai').setDescription('Chọn mẫu').setRequired(true).addChoices(
+      { name: 'Booking', value: 'BOOKING' }, { name: 'Nạp tiền', value: 'DEPOSIT' },
+      { name: 'Ủng hộ', value: 'DONATION' }, { name: 'Hoàn tiền', value: 'REFUND' })))
+  .addSubcommand(cmd => cmd.setName('mo-ca').setDescription('Quản lý mở ca tự đặt sau khi host đồng ý')
+    .addUserOption(o => o.setName('host').setDescription('Host đã duyệt hồ sơ và đồng ý giờ lẫn giá').setRequired(true))
+    .addStringOption(o => o.setName('dich_vu').setDescription('Dịch vụ của ca').setRequired(true).addChoices(
+      { name: 'Chơi game', value: 'game' }, { name: 'Trò chuyện', value: 'voice' }))
+    .addStringOption(o => o.setName('gio').setDescription('Giờ Việt Nam, dd/mm/yyyy HH:mm').setRequired(true).setMaxLength(18))
+    .addIntegerOption(o => o.setName('phut').setDescription('Thời lượng cố định của ca').setRequired(true).setMinValue(1).setMaxValue(1440))
+    .addIntegerOption(hourlyPrice).addIntegerOption(hourlyWage))
+  .addSubcommand(cmd => cmd.setName('dong-ca').setDescription('Quản lý đóng ca tự đặt, phiên đã giữ tiếp tục được theo dõi')
+    .addIntegerOption(o => o.setName('ma_ca').setDescription('Mã ca đã hiển thị khi mở').setRequired(true).setMinValue(1)))
   .addSubcommand(cmd => cmd.setName('phan-host').setDescription('Gán host cho phiếu booking này')
     .addUserOption(o => o.setName('host').setDescription('Host đã đồng ý nhận lịch').setRequired(true)))
   .addSubcommand(cmd => cmd.setName('bao-gia').setDescription('Gửi báo giá và QR trong phiếu booking này')
@@ -102,9 +121,52 @@ export async function execute(interaction) {
     manager_role_id: cfg?.manager_role_id === guildId ? null : cfg?.manager_role_id,
     support_role_id: cfg?.support_role_id === guildId ? null : cfg?.support_role_id,
   };
+  const manager = isManager(member, roles);
+  if (operation === 'hoa-don') {
+    const code = interaction.options.getString('ma_phieu')?.trim();
+    const reference = code && /^[A-Za-z0-9_-]{1,32}$/u.test(code)
+      ? db.prepare('SELECT id FROM tickets WHERE guild_id=? AND ticket_code=? AND ticket_type=\'BOOKING\'').get(guildId, code.toUpperCase())
+      : code ? null : getTicketByChannelId(interaction.channelId);
+    const receipt = reference && createBookingReceiptService(db).getForTicket({ guildId, ticketId: reference.id, viewerId: actorId,
+      canManage: manager, invoiceId: interaction.options.getInteger('so_hoa_don') ?? undefined });
+    if (!receipt) { await interaction.editReply('Không tìm thấy hóa đơn mà bạn có quyền xem. Nhập mã phiếu hoặc dùng lệnh trong phiếu.'); return; }
+    await interaction.editReply(await buildBookingReceiptCard({ ...receipt, emoji: portal.emoji.calendar, ephemeral: false }));
+    return;
+  }
+  if (['mau-hoa-don', 'mo-ca', 'dong-ca'].includes(operation)) {
+    if (!manager) { await interaction.editReply('Chỉ quản lý Cenar Booking có thể dùng lệnh này.'); return; }
+    if (operation === 'mau-hoa-don') {
+      const sample = bookingReceiptPreview(interaction.options.getString('loai', true));
+      await interaction.editReply(await buildBookingReceiptCard({ ...sample, emoji: portal.emoji.calendar, ephemeral: false }));
+      return;
+    }
+    try {
+      const selfService = createBookingSelfService(db);
+      if (operation === 'dong-ca') {
+        const closed = selfService.closeSlot({ guildId, actorId, slotId: interaction.options.getInteger('ma_ca', true) });
+        await interaction.editReply(closed ? 'Đã đóng ca để dừng nhận đặt mới.' : 'Ca không tồn tại hoặc đã đóng.');
+        return;
+      }
+      const host = interaction.options.getUser('host', true);
+      const { parseBookingTime } = await import('../events/bookingHandlers.js');
+      const start = parseBookingTime(interaction.options.getString('gio', true), Date.now() + 60_000);
+      if (!start || host.bot) { await interaction.editReply('Chọn host thật và nhập giờ tương lai theo dd/mm/yyyy HH:mm (giờ Việt Nam).'); return; }
+      await interaction.guild.members.fetch({ user: host.id, force: true });
+      const slot = selfService.addSlot({ guildId, actorId, hostId: host.id, startsAt: start * 1000,
+        service: interaction.options.getString('dich_vu', true), durationMinutes: interaction.options.getInteger('phut', true),
+        hourlyPrice: interaction.options.getInteger('gia_gio', true), hourlyWage: interaction.options.getInteger('luong_gio', true) });
+      const { bookingPayosAvailable } = await import('../services/bookingPaymentService.js');
+      const detail = slot.amount > 0 && !bookingPayosAvailable(guildId) ? '\nCa có phí sẽ xuất hiện khi PayOS Booking của Store 2 sẵn sàng.' : '';
+      await interaction.editReply(`Đã mở ca **#${slot.id}** · ${time(slot.startsAt)} · ${slot.durationMinutes} phút.${detail}`);
+    } catch (error) {
+      console.warn('[BOOKING-SLOT]', operation, error.code || error.name);
+      await interaction.editReply(error.name === 'BookingLedgerError' ? error.message : 'Không thể cập nhật ca. Kiểm tra host và thử lại.');
+    }
+    return;
+  }
   if (operation === 'hoi') {
     const { answerBookingQuestion } = await import('../services/bookingReportService.js');
-    const result = await answerBookingQuestion(ledger, interaction.options.getString('cau_hoi', true), isManager(member, roles));
+    const result = await answerBookingQuestion(ledger, interaction.options.getString('cau_hoi', true), manager);
     await interaction.editReply(ledgerCard('Trợ lý Cenar Booking', result, portal.emoji.calendar));
     return;
   }
@@ -125,7 +187,7 @@ export async function execute(interaction) {
       return;
     }
     if (operation === 'bao-cao') {
-      if (!isManager(member, roles)) { await interaction.editReply('Báo cáo lương chỉ hiển thị cho quản lý.'); return; }
+      if (!manager) { await interaction.editReply('Báo cáo lương chỉ hiển thị cho quản lý.'); return; }
       const { getBookingReport } = await import('../services/bookingReportService.js');
       const [summary, amounts, ...hosts] = getBookingReport(ledger);
       const report = bookingTicketCard({ section: 'BÁO CÁO QUẢN LÝ', title: 'Kết quả 7 ngày', subtitle: summary, emoji: portal.emoji.calendar });

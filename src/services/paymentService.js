@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import { AttachmentBuilder, EmbedBuilder, ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, SeparatorSpacingSize, ActionRowBuilder, ButtonBuilder, ButtonStyle, MessageFlags } from 'discord.js';
+import { AttachmentBuilder, EmbedBuilder, ContainerBuilder, TextDisplayBuilder, SeparatorBuilder, SeparatorSpacingSize, ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, MessageFlags } from 'discord.js';
 import QRCode from 'qrcode';
 import { assertPaymentConfig, config, getPayOSCancelUrl, getPayOSReturnUrl, getWebhookUrl } from '../config.js';
 import {
@@ -31,8 +31,9 @@ import { db } from '../database/db.js';
 import { startSupplierPaymentEffects } from './supplierAutobuyPaymentNoticeService.js';
 import { getPayOSReceivedAmount } from '../utils/payosReceipt.js';
 import { createBookingLedger, getBookingInvoiceForOrder, isBookingPayOSReceipt } from './bookingLedgerService.js';
+import { createBookingReceiptService } from './bookingReceiptService.js';
 import { bookingPortal } from './bookingStoreSetupService.js';
-import { buildBookingPayOSCard } from '../utils/bookingTicketUi.js';
+import { buildBookingReceiptCard } from '../utils/bookingReceiptViews.js';
 
 export { getPayOSReceivedAmount };
 
@@ -119,7 +120,7 @@ export function verifyPayOSWebhookSignature(data, signature) {
   return matched;
 }
 
-function buildPayOSRequestPayload(order) {
+function buildPayOSRequestPayload(order, bookingDeadline) {
   const returnUrl = getPayOSReturnUrl();
   const cancelUrl = getPayOSCancelUrl();
   if (!returnUrl || !cancelUrl) {
@@ -141,7 +142,8 @@ function buildPayOSRequestPayload(order) {
   if (!Number.isFinite(orderCode) || orderCode <= 0) {
     throw new Error(`Đơn ${order_code} chưa có payos_order_code hợp lệ để tạo checkout PayOS.`);
   }
-  const expiredAt = Math.floor(Date.now() / 1000) + (Math.max(1, config.payosExpireMinutes) * 60);
+  const normalExpiry = Math.floor(Date.now() / 1000) + (Math.max(1, config.payosExpireMinutes) * 60);
+  const expiredAt = bookingDeadline ? Math.min(normalExpiry, Math.floor(bookingDeadline / 1000)) : normalExpiry;
 
   return {
     orderCode,
@@ -226,7 +228,7 @@ function applyPayOSTerminalInfo(order, info, state) {
       && (!fresh.payment_link_id || String(fresh.payment_link_id) === String(info.id || ''));
     if (!matches) return null;
     if (Number(getPayOSReceivedAmount(info)) > 0) return null;
-    if (state === 'EXPIRED' && fresh.fulfillment_mode !== 'SUPPLIER') {
+    if (state === 'EXPIRED' && fresh.fulfillment_mode !== 'SUPPLIER' && !getBookingInvoiceForOrder(db, fresh)?.checkout_expires_at) {
       const created = Date.parse(fresh.created_at);
       const expires = Date.parse(fresh.payment_expired_at);
       const orderDeadline = created + config.unpaidOrderTicketHours * 3600_000;
@@ -245,9 +247,8 @@ function applyPayOSTerminalInfo(order, info, state) {
   }).immediate();
 }
 
-async function renderPaymentQrImage(order, bookingInvoice) {
-  const qrData = bookingInvoice ? order.payment_qr_code
-    : order.payment_qr_code || order.payment_checkout_url || order.payment_code || order.order_code;
+async function renderPaymentQrImage(order) {
+  const qrData = order.payment_qr_code || order.payment_checkout_url || order.payment_code || order.order_code;
   if (!qrData) return null;
   return QRCode.toBuffer(qrData, {
     type: 'png',
@@ -270,6 +271,20 @@ export async function createOrLoadPayOSLink(order) {
 
   const supplierCode = order.orderCode ?? order.order_code;
   const persisted = typeof supplierCode === 'string' ? getOrderByCode(supplierCode) : null;
+  const booking = getBookingInvoiceForOrder(db, persisted);
+  const bookingDeadline = booking?.checkout_expires_at;
+  const clearToOfferBooking = () => !bookingDeadline || bookingDeadline > Date.now();
+  if (booking) {
+    if (!clearToOfferBooking()) throw new OrderPaymentError('BOOKING_HOLD_EXPIRED', 'Ca tự đặt đã hết thời gian giữ chỗ.');
+    if (bookingDeadline && process.env.BOOKING_PAYOS_ENABLED !== 'true') {
+      throw new OrderPaymentError('BOOKING_PAYMENTS_DISABLED', 'Thanh toán Booking đang tạm đóng.');
+    }
+    // Keep the invoice amount and provider payment identity from the ledger.
+    if (booking.status !== 'PENDING' || persisted.payos_order_code !== booking.provider_order_code || persisted.total_amount !== booking.amount) {
+      throw new OrderPaymentError('PAYMENT_IDENTITY_MISMATCH', 'Hóa đơn Booking cần đối soát.');
+    }
+    order = persisted;
+  }
   if (order.fulfillment_mode === 'SUPPLIER' || persisted?.fulfillment_mode === 'SUPPLIER') {
     const methodTable = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='supplier_autobuy_payment_methods'").get();
     const chosen = methodTable && db.prepare('SELECT method FROM supplier_autobuy_payment_methods WHERE order_code=?').get(supplierCode);
@@ -301,11 +316,12 @@ export async function createOrLoadPayOSLink(order) {
     }
     const state = typeof info.status === 'string' ? info.status.toUpperCase() : '';
     const rawExpiry = info.expiredAt ?? fallbackExpiry;
-    const expiry = rawExpiry === undefined || rawExpiry === null ? order.payment_expired_at ?? order.paymentExpiredAt ?? null
+    let expiry = rawExpiry === undefined || rawExpiry === null ? order.payment_expired_at ?? order.paymentExpiredAt ?? null
       : new Date(Number(rawExpiry) * 1000);
     if (expiry instanceof Date && !Number.isFinite(expiry.getTime())) {
       throw new OrderPaymentError('PAYMENT_RECONCILIATION_REQUIRED', 'Hóa đơn cần được đối soát. Vui lòng kiểm tra trạng thái đơn trước khi thanh toán.');
     }
+    if (bookingDeadline) expiry = new Date(Math.min(expiry instanceof Date ? expiry.getTime() : Date.parse(expiry) || bookingDeadline, bookingDeadline));
     const saved = db.transaction(() => {
       const fresh = getOrderByCode(order_code);
       assertInvoiceOrderSnapshot(persisted ?? lookupOrder, fresh, info.id);
@@ -314,7 +330,7 @@ export async function createOrLoadPayOSLink(order) {
         throw new OrderPaymentError('PAYMENT_IDENTITY_MISMATCH', 'Thông tin PayOS không khớp đơn cần đối soát.');
       }
       assertPayOSLookupIdentity(fresh, info);
-      const offerable = state === 'PENDING' && !invoiceExpiryHasPassed(expiry)
+      const offerable = state === 'PENDING' && clearToOfferBooking() && !invoiceExpiryHasPassed(expiry)
         && fresh.status === 'PENDING_PAYMENT' && fresh.payment_status === 'UNPAID';
       const checkoutUrl = offerable ? payment_checkout_url ?? buildCheckoutUrlFromLinkId(info.id) : null;
       return savePaymentLinkData(order_code, {
@@ -336,12 +352,13 @@ export async function createOrLoadPayOSLink(order) {
   }
 
   if (payment_link_id && payment_checkout_url && !invoiceExpiryHasPassed(order.payment_expired_at ?? order.paymentExpiredAt)
+    && (!bookingDeadline || Date.parse(order.payment_expired_at) <= bookingDeadline)
     && (!persisted || (persisted.status === 'PENDING_PAYMENT' && persisted.payment_status === 'UNPAID'))) {
     return order;
   }
   if (payment_link_id) return recoverKnownInvoice(await getPayOSPaymentInfo(payment_link_id));
 
-  const payload = buildPayOSRequestPayload(order);
+  const payload = buildPayOSRequestPayload(order, bookingDeadline);
 
   try {
     const created = await callPayOSApi('POST', '/v2/payment-requests', payload);
@@ -355,9 +372,10 @@ export async function createOrLoadPayOSLink(order) {
         throw new OrderPaymentError('PAYMENT_IDENTITY_MISMATCH', 'Thông tin PayOS không khớp đơn cần đối soát.');
       }
       if (created.orderCode !== undefined) assertPayOSLookupIdentity(fresh, { ...created, id: invoiceId });
-      const expiredAt = new Date(Number(created.expiredAt ?? payload.expiredAt) * 1000).toISOString();
+      const providerExpiry = Number(created.expiredAt ?? payload.expiredAt) * 1000;
+      const expiredAt = new Date(bookingDeadline ? Math.min(providerExpiry, bookingDeadline) : providerExpiry).toISOString();
       const offerable = fresh.status === 'PENDING_PAYMENT' && fresh.payment_status === 'UNPAID'
-        && !invoiceExpiryHasPassed(expiredAt);
+        && clearToOfferBooking() && !invoiceExpiryHasPassed(expiredAt);
       const checkoutUrl = offerable ? created.checkoutUrl ?? buildCheckoutUrlFromLinkId(invoiceId) : null;
       return savePaymentLinkData(order_code, {
         paymentLinkId: invoiceId, checkoutUrl, qrCode: offerable ? created.qrCode ?? null : null,
@@ -535,6 +553,14 @@ export async function sendVietQRPayment({ guild, orderCode }) {
   return { order: saved, message: sentMessage, vietqrUrl };
 }
 
+const privateBookingChannel = (channel, guild) => channel?.type === ChannelType.GuildText && channel.guildId === guild.id
+  && channel.permissionsFor(guild.roles.everyone)?.has('ViewChannel') === false;
+
+function bookingReceiptData(order, invoice) {
+  return createBookingReceiptService(db).getForTicket({ guildId: order.guild_id, ticketId: invoice.ticket_id,
+    viewerId: order.customer_id, invoiceId: invoice.id });
+}
+
 export async function sendOrRefreshPaymentQr({ guild, orderCode }) {
   assertPaymentConfig();
 
@@ -551,27 +577,33 @@ export async function sendOrRefreshPaymentQr({ guild, orderCode }) {
     throw new Error('Đơn này đã thanh toán rồi.');
   }
 
+  const booking = getBookingInvoiceForOrder(db, current);
+  let ticketChannel = booking ? await guild.channels.fetch(current.ticket_channel_id).catch(() => null) : null;
+  if (booking && (guild.id !== current.guild_id || !privateBookingChannel(ticketChannel, guild))) {
+    throw new OrderPaymentError('BOOKING_PRIVATE_TICKET_REQUIRED', 'Cần mở QR trong phiếu Booking riêng.');
+  }
+
   const order = await createOrLoadPayOSLink(current);
-  const ticketChannel = await guild.channels.fetch(order.ticket_channel_id).catch(() => null);
+  ticketChannel ??= await guild.channels.fetch(order.ticket_channel_id).catch(() => null);
   if (!ticketChannel?.isTextBased()) {
     throw new Error('Ticket của đơn hàng không còn khả dụng.');
   }
 
-  const attachmentName = `payos-${order.order_code}.png`;
-  const booking = getBookingInvoiceForOrder(db, order);
-  const bookingHasPayOS = booking?.status === 'PENDING' && order.payment_link_id && order.payos_order_code === booking.provider_order_code
-    && order.total_amount === booking.amount;
-  const imageBuffer = !booking || bookingHasPayOS ? await renderPaymentQrImage(order, booking) : null;
-  const files = imageBuffer ? [new AttachmentBuilder(imageBuffer, { name: attachmentName })] : [];
-
   let messagePayload;
   if (booking) {
-    messagePayload = {
-      ...buildBookingPayOSCard({ order, invoice: booking, attachmentName: imageBuffer ? attachmentName : null,
-        checkoutUrl: bookingHasPayOS ? order.payment_checkout_url : null, emoji: bookingPortal(guild.client)?.emoji?.calendar }),
-      files,
-    };
+    const receipt = bookingReceiptData(order, booking);
+    if (receipt?.status !== 'PENDING' || !order.payment_link_id || order.payos_order_code !== booking.provider_order_code
+      || order.total_amount !== booking.amount) {
+      throw new OrderPaymentError('PAYMENT_RECONCILIATION_REQUIRED', 'Hóa đơn Booking cần đối soát.');
+    }
+    messagePayload = await buildBookingReceiptCard({ ...receipt, ephemeral: false, emoji: bookingPortal(guild.client)?.emoji?.calendar,
+      payment: { qrPayload: order.payment_qr_code, checkoutUrl: order.payment_checkout_url,
+        transferCode: order.payment_code, expiresAt: order.payment_expired_at },
+    });
   } else {
+    const attachmentName = `payos-${order.order_code}.png`;
+    const imageBuffer = await renderPaymentQrImage(order);
+    const files = imageBuffer ? [new AttachmentBuilder(imageBuffer, { name: attachmentName })] : [];
     const { container, actionRow, flags } = buildPaymentQrV2({
       order, attachmentName, checkoutUrl: order.payment_checkout_url, hasImage: Boolean(imageBuffer),
     });
@@ -581,16 +613,21 @@ export async function sendOrRefreshPaymentQr({ guild, orderCode }) {
   let sentMessage = null;
   if (order.payment_message_id) {
     const existing = await ticketChannel.messages.fetch(order.payment_message_id).catch(() => null);
-    if (existing) {
-      sentMessage = await existing.edit(messagePayload).catch(() => null);
+    if (existing && (!booking || existing.author?.id === guild.client.user.id)) {
+      sentMessage = await existing.edit(booking ? { ...messagePayload, attachments: [] } : messagePayload).catch(() => null);
     }
   }
 
   if (!sentMessage) {
-    sentMessage = await ticketChannel.send(messagePayload);
+    sentMessage = await ticketChannel.send(booking
+      ? { ...messagePayload, nonce: `bookbill-${order.order_code}`, enforceNonce: true } : messagePayload);
   }
 
   const updated = savePaymentMessage(order.order_code, sentMessage.id);
+  if (booking && updated.payment_status === 'PAID') {
+    void refreshSettledBookingReceipt(guild.client, updated, booking).catch(error =>
+      console.warn('[BOOKING-RECEIPT]', error.code || error.name));
+  }
   return {
     order: updated,
     message: sentMessage,
@@ -598,11 +635,26 @@ export async function sendOrRefreshPaymentQr({ guild, orderCode }) {
   };
 }
 
+async function refreshSettledBookingReceipt(client, order, invoice) {
+  if (!order.payment_message_id) return;
+  const receipt = bookingReceiptData(order, invoice);
+  if (receipt?.status !== 'PAID' && receipt?.status !== 'NEEDS_REVIEW') return;
+  const guild = await client.guilds.fetch(order.guild_id);
+  const channel = await guild.channels.fetch(order.ticket_channel_id);
+  if (!privateBookingChannel(channel, guild)) return;
+  const message = await channel.messages.fetch(order.payment_message_id);
+  if (message?.author?.id !== client.user.id) return;
+  const payload = await buildBookingReceiptCard({ ...receipt, ephemeral: false, emoji: bookingPortal(client)?.emoji?.calendar });
+  await message.edit({ ...payload, attachments: [] });
+}
+
 export async function regeneratePaymentQr({ guild, orderCode }) {
   assertPaymentConfig();
 
   const current = getOrderByCode(orderCode);
   if (!current) throw new Error('Không tìm thấy đơn hàng.');
+  // Booking invoices freeze the provider order code for signed reconciliation.
+  if (getBookingInvoiceForOrder(db, current)) return sendOrRefreshPaymentQr({ guild, orderCode });
   // An uncertain supplier invoice must retain its existing payment identity.
   // The dedicated checkout can reload it after checking source funds.
   if (current.fulfillment_mode === 'SUPPLIER') {
@@ -667,6 +719,8 @@ export async function finalizePaidOrder(client, order, paymentData, transactionI
   const booking = getBookingInvoiceForOrder(db, payment.updated);
   if (booking) {
     createBookingLedger(db).syncInvoicePayment(payment.updated.guild_id, booking.id);
+    if (!payment.duplicate) void refreshSettledBookingReceipt(client, payment.updated, booking).catch(error =>
+      console.warn('[BOOKING-RECEIPT]', error.code || error.name));
     return { updated: payment.updated, duplicate: payment.duplicate, repairedNotification: false };
   }
   if (payment.updated.fulfillment_mode === 'SUPPLIER') {

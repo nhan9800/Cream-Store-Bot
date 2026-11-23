@@ -190,6 +190,10 @@ export async function handleBookingInteraction(interaction) {
     return true;
   }
   const [, operation, value, id] = interaction.customId.split(':');
+  if (interaction.customId === 'booking:dashboard:auto' || operation === 'auto') {
+    const { handleBookingAutoCheckout } = await import('./bookingAutoCheckout.js');
+    return handleBookingAutoCheckout(interaction, portal);
+  }
   if (interaction.customId === 'booking:dashboard:hosts' || operation === 'hosts') {
     const { handleBookingHostDirectoryInteraction } = await import('./bookingHostDirectoryHandlers.js');
     return handleBookingHostDirectoryInteraction(interaction, { portal, bookingForm });
