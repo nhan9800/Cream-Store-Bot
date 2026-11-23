@@ -1,11 +1,11 @@
 import { STORE_TWO_GUILD_ID } from '../utils/locale.js';
-import { getStoredPayOSReceivedAmount } from '../utils/payosReceipt.js';
+import { getVerifiedBookingPaymentEvent, isBookingOrderForSession, isPaidBookingInvoice,
+  SETTLED_BOOKING_ORDER_STATES as SETTLED_ORDER_STATES } from './bookingPaymentEvidence.js';
 
 const MINUTE = 60_000;
 const MAX_MINUTES = 1440;
 const MAX_RATE = 100_000_000;
 const STATUSES = new Set(['REQUESTED', 'CONFIRMED', 'ACTIVE', 'COMPLETED', 'DECLINED', 'NEEDS_REVIEW']);
-const SETTLED_ORDER_STATES = new Set(['PROCESSING', 'COMPLETED']);
 export const BOOKING_HOST_START_NOTICE_WINDOW_MS = 15 * MINUTE;
 
 export function getBookingInvoiceForOrder(db, order) {
@@ -269,10 +269,7 @@ export function createBookingLedger(db, { now = Date.now } = {}) {
   }
 
   function isOrderForSession(order, session, amount) {
-    return order?.guild_id === session.guild_id && order.ticket_id === session.ticket_id
-      && order.ticket_channel_id === session.ticket_channel_id && order.customer_id === session.customer_id
-      && order.total_amount === amount && order.payment_provider === 'PAYOS'
-      && isInteger(order.payos_order_code, 1) && typeof order.order_code === 'string' && Boolean(order.order_code);
+    return isBookingOrderForSession(order, session, amount);
   }
 
   function bindNewPaymentOrder(guildId, invoiceId, session, amount, createPaymentOrder) {
@@ -343,27 +340,14 @@ export function createBookingLedger(db, { now = Date.now } = {}) {
   }
 
   function findReceipt(order, invoice, session) {
-    if (!(isOrderForSession(order, session, invoice.amount) && order.order_code === invoice.order_code
-      && order.payos_order_code === invoice.provider_order_code && order.payment_status === 'PAID'
-      && Number.isSafeInteger(order.amount_paid) && order.amount_paid >= invoice.amount
-      && order.payment_link_id && order.paid_transaction_id)) return null;
-
-    const receipt = db.prepare(`SELECT id, amount, raw_payload FROM payment_events
-      WHERE order_code = ? AND provider = 'PAYOS' AND transaction_id = ?`)
-      .get(invoice.order_code, order.paid_transaction_id);
-    if (!receipt || receipt.amount !== order.amount_paid
-      || Number(getStoredPayOSReceivedAmount(receipt.raw_payload)) !== order.amount_paid) return null;
-    const data = JSON.parse(receipt.raw_payload);
-    return Number(data.orderCode) === invoice.provider_order_code
-      && (data.paymentLinkId ?? data.id) === order.payment_link_id ? receipt : null;
+    return getVerifiedBookingPaymentEvent(db, order, invoice, session);
   }
 
   function isSettled(invoice, session) {
     if (invoice?.status === 'FREE') return true;
     if (invoice?.status !== 'PAID') return false;
     const order = orderById.get(invoice.order_id);
-    return SETTLED_ORDER_STATES.has(order?.status) && order.amount_paid === invoice.amount
-      && findReceipt(order, invoice, session)?.id === invoice.payment_event_id;
+    return isPaidBookingInvoice(db, order, invoice, session);
   }
 
   // Claim the attempt before Discord sends the DM so closed DMs or a restart cannot cause repeat notifications.
