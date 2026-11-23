@@ -13,6 +13,8 @@ const bookingMint = 0x65c4b0;
 const publishingHosts = new Set();
 const hostHeadline = '-# HỒ SƠ HOST · ';
 const reviewHeadline = '-# PHIÊN ĐÃ HOÀN THÀNH · ĐÁNH GIÁ ẨN DANH';
+const portraitSide = 154;
+const portraitMask = Buffer.from(`<svg xmlns="http://www.w3.org/2000/svg" width="${portraitSide}" height="${portraitSide}"><rect width="${portraitSide}" height="${portraitSide}" rx="27" fill="white"/></svg>`);
 
 export async function withBookingHostUpdate(hostId, update) {
   if (publishingHosts.has(hostId)) throw new BookingProfileError('Đang cập nhật nội dung này. Vui lòng thử lại sau.');
@@ -53,6 +55,7 @@ export async function renderBookingHostCard(profile, rating, template) {
   const limit = wideName ? 11 : 19;
   const displayName = short(name, limit);
   const nameSize = nameParts.length <= 12 && !wideName ? 56 : 41;
+  const hasPhoto = profile.approved.consent === true && Boolean(profile.approvedPhoto);
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 384" width="960" height="384">
     <defs>
       <linearGradient id="sky" x1="0" y1="0" x2="1" y2="1" gradientUnits="objectBoundingBox">
@@ -73,7 +76,8 @@ export async function renderBookingHostCard(profile, rating, template) {
       <path d="M778 104q18 0 86 62v55q-44 40-86 62-42-22-86-62v-55q68-62 86-62z" fill="url(#crest)" stroke="url(#edge)" stroke-width="1.5"/>
       <circle cx="883" cy="101" r="4.5" fill="#b9f3e6"/><circle cx="662" cy="276" r="3.5" fill="#c6bbff"/>
       <path d="M903 188v20m-10-10h20M643 100v14m-7-7h14" stroke="#d0c9ff" stroke-width="1.5" stroke-linecap="round"/>
-      <text x="778" y="215" fill="#f6f5ff" text-anchor="middle" font-family="Georgia, DejaVu Serif, serif" font-size="65" font-weight="bold">${xml(initials)}</text>
+      ${hasPhoto ? '<rect x="695" y="110" width="166" height="166" rx="32" fill="#221d46" stroke="#a6a0ef" stroke-width="2"/>'
+        : `<text x="778" y="215" fill="#f6f5ff" text-anchor="middle" font-family="Georgia, DejaVu Serif, serif" font-size="65" font-weight="bold">${xml(initials)}</text>`}
       <rect x="58" y="48" width="38" height="3" rx="1.5" fill="#b8f0e1"/>
       <text x="58" y="88" fill="#c9c2ff" font-family="Arial, DejaVu Sans, sans-serif" font-size="23" font-weight="bold">${xml(short(template.title, 30))}</text>
       <text x="58" y="190" fill="#f7f8ff" clip-path="url(#name)" font-family="Georgia, DejaVu Serif, serif" font-size="${nameSize}" font-weight="bold">${xml(displayName)}</text>
@@ -84,7 +88,13 @@ export async function renderBookingHostCard(profile, rating, template) {
     </g>
     <rect x="9" y="9" width="942" height="366" rx="25" fill="none" stroke="url(#edge)" stroke-width="2"/>
   </svg>`;
-  return sharp(Buffer.from(svg)).png().toBuffer();
+  const card = sharp(Buffer.from(svg));
+  if (hasPhoto) {
+    const portrait = await sharp(profile.approvedPhoto, { limitInputPixels: 40_000 }).resize(portraitSide, portraitSide)
+      .ensureAlpha().composite([{ input: portraitMask, blend: 'dest-in' }]).png().toBuffer();
+    card.composite([{ input: portrait, left: 701, top: 116 }]);
+  }
+  return card.png().toBuffer();
 }
 
 const safeMentions = { parse: [], repliedUser: false };
@@ -114,10 +124,11 @@ export async function buildBookingProfilePost(profile, rating, template, emoji, 
   const { name, tagline, service, games, availability } = profile.approved;
   const number = hostNumber(profile.profile_number);
   const image = await renderBookingHostCard(profile, rating, template);
+  const imageDescription = profile.approved.consent && profile.approvedPhoto ? 'ảnh host đã được duyệt' : 'chữ viết tắt của biệt danh';
   const card = new ContainerBuilder().setAccentColor(parseInt(template.accent.slice(1), 16))
     .addTextDisplayComponents(block(`${hostHeadline}#${number}\n## ${marker(emoji, 'profiles')}${bookingProfileText(name)}\n${bookingProfileText(tagline)}`))
     .addMediaGalleryComponents(new MediaGalleryBuilder().addItems(item =>
-      item.setURL(`attachment://${fileName}`).setDescription(`Thẻ nhận diện Cenar số ${number}, có chữ viết tắt của biệt danh.`)))
+      item.setURL(`attachment://${fileName}`).setDescription(`Thẻ nhận diện Cenar số ${number}, có ${imageDescription}.`)))
     .addSeparatorComponents(divider())
     .addTextDisplayComponents(block(`### ${marker(emoji, service === 'game' ? 'game' : 'voice')}${bookingProfileServices[service]}\n${bookingProfileText(games)}`))
     .addTextDisplayComponents(block(`**Giờ thường rảnh**\n${bookingProfileText(availability)} (UTC+7)`))
@@ -195,6 +206,18 @@ export function publishBookingHost({ guild, portal, profile, rating, template })
       { guildId: guild.id, request: portal.request, reviews: portal.reviews }) });
 }
 
+export async function syncBookingPhotoRemoval({ guild, portal, profiles, hostId }) {
+  const profile = profiles.get(hostId);
+  if (!profile?.approved || !profile.profile_number) return false;
+  const thread = await findOrUpdatePost({ guild, forumId: portal.profiles, threadId: profile.forum_thread_id,
+    name: artworkName(profile.profile_number), existingOnly: true, service: profile.approved.service,
+    makePayload: () => buildBookingProfilePost(profiles.withApprovedPhoto(profile), profiles.ratingFor(hostId), profiles.getTemplate(), portal.emoji,
+      { guildId: guild.id, request: portal.request, reviews: portal.reviews }) });
+  if (thread) profiles.setHostThread(hostId, thread.id);
+  profiles.markPhotoSynced(hostId);
+  return Boolean(thread);
+}
+
 export function unpublishBookingHost({ guild, portal, profile }) {
   return findOrUpdatePost({ guild, forumId: portal.profiles, threadId: profile.forum_thread_id,
     name: artworkName(profile.profile_number), existingOnly: true, makePayload: () => ({
@@ -232,6 +255,15 @@ export async function refreshPublishedBookingProfileLayouts({ guild, portal, db 
   if (guild?.id !== STORE_TWO_GUILD_ID || !guild.client?.user?.id || !portal?.profiles || !portal?.reviews) return report;
   const profiles = createBookingProfileService(db);
   const template = profiles.getTemplate();
+  const pendingPhotos = db.prepare('SELECT host_id FROM booking_host_profile_photos WHERE sync_removal=1 ORDER BY host_id LIMIT 20').all();
+  for (const { host_id: hostId } of pendingPhotos) {
+    try {
+      const synced = await withBookingHostUpdate(hostId, () => syncBookingPhotoRemoval({ guild, portal, profiles, hostId }));
+      report[synced ? 'updated' : 'skipped'] += 1;
+    } catch (error) {
+      report[error instanceof BookingProfileError ? 'skipped' : 'failed'] += 1;
+    }
+  }
   const hosts = db.prepare(`SELECT host_id FROM booking_host_profiles WHERE approved IS NOT NULL AND forum_thread_id IS NOT NULL
     ORDER BY profile_number LIMIT 20`).all();
   const reviews = db.prepare(`SELECT host_id, ticket_id FROM booking_host_reviews WHERE consent=1 AND forum_thread_id IS NOT NULL
@@ -245,7 +277,7 @@ export async function refreshPublishedBookingProfileLayouts({ guild, portal, db 
         if (target.ticket_id == null) {
           return refreshExistingPost(guild, { forumId: portal.profiles, threadId: profile.forum_thread_id,
             name: artworkName(profile.profile_number), headline: hostHeadline,
-            makePayload: () => buildBookingProfilePost(profile, profiles.ratingFor(target.host_id), template, portal.emoji,
+            makePayload: () => buildBookingProfilePost(profiles.withApprovedPhoto(profile), profiles.ratingFor(target.host_id), template, portal.emoji,
               { guildId: guild.id, request: portal.request, reviews: portal.reviews }) });
         }
         const review = profiles.getReview(target.ticket_id);

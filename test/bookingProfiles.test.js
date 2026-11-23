@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3';
 import { ChannelType, MessageFlags } from 'discord.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import sharp from 'sharp';
 import { bookingProfileTemplate, createBookingProfileService } from '../src/services/bookingProfileService.js';
 import { buildBookingProfilePost, buildBookingReviewPost, publishBookingHost, refreshPublishedBookingProfileLayouts,
   unpublishBookingHost } from '../src/services/bookingProfilePublication.js';
@@ -53,6 +54,59 @@ describe('Cenar host profiles and completed booking reviews', () => {
     expect(profiles.get('host').approved.name).toBe(validDraft.name);
     expect(profiles.get('host').draft.name).toBe('Tên mới');
     expect(profiles.approve('host', 3).profile_number).toBe(1);
+  });
+
+  it('keeps host images private until their reviewed revision and draws only the approved portrait', async () => {
+    const makePhoto = background => sharp({ create: { width: 192, height: 192, channels: 3, background } }).webp().toBuffer();
+    const first = await makePhoto('#dd7700');
+    const replacement = await makePhoto('#2255bb');
+    profiles.saveDraft('host', validDraft);
+    profiles.approve('host', 1);
+    profiles.setHostThread('host', 'threadId');
+
+    const submitted = profiles.stagePhoto('host', first);
+    expect(submitted.draft_revision).toBe(2);
+    expect(profiles.getDraftPhoto('host')).toEqual(first);
+    expect(profiles.getPublished(1)).not.toHaveProperty('approvedPhoto');
+    expect(() => profiles.approve('host', 1)).toThrow(/Bản nháp/);
+    profiles.approve('host', 2);
+    profiles.stagePhoto('host', replacement);
+    expect(createBookingProfileService(db).publishedPage(1).profile.approvedPhoto).toEqual(first);
+    expect(profiles.hasPendingPhoto('host')).toBe(true);
+
+    const card = await buildBookingProfilePost(profiles.getPublished(1), { count: 0 }, bookingProfileTemplate, {});
+    const pixel = await sharp(card.files[0].attachment).extract({ left: 778, top: 192, width: 1, height: 1 }).raw().toBuffer();
+    expect([pixel[0], pixel[1], pixel[2]]).toEqual([221, 119, 0].map(value => expect.closeTo(value, -1)));
+    expect(JSON.stringify(card.components[0].toJSON())).toContain('ảnh host đã được duyệt');
+    expect(card.files).toHaveLength(1);
+    profiles.hide('host');
+    expect(profiles.getDraftPhoto('host')).toBeNull();
+    expect(profiles.getPublished(1)).toBeNull();
+  });
+
+  it('retries removing private photo bytes from a previously published card without replacing the thread', async () => {
+    const { guild, forum, portal, starter } = forumFixture();
+    const photo = await sharp({ create: { width: 192, height: 192, channels: 3, background: '#cc5633' } }).webp().toBuffer();
+    profiles.saveDraft('host', validDraft);
+    profiles.stagePhoto('host', photo);
+    const approved = profiles.approve('host', 2);
+    const thread = await publishBookingHost({ guild, portal, profile: profiles.withApprovedPhoto(approved), rating: { count: 0 }, template: bookingProfileTemplate });
+    profiles.setHostThread('host', thread.id);
+    expect(profiles.removePhoto('host')).toEqual({ removed: true, sync: true });
+    expect(profiles.getDraftPhoto('host')).toBeNull();
+    expect(profiles.publishedPage(1).profile.approvedPhoto).toBeUndefined();
+    expect(profiles.removePhoto('host')).toEqual({ removed: false, sync: true });
+
+    const args = { guild, portal: { ...portal, reviews: 'reviewsId' }, db };
+    starter.edit.mockRejectedValueOnce(new Error('Discord busy'));
+    starter.components = forum.threads.create.mock.calls[0][0].message.components.map(component => component.toJSON());
+    expect((await refreshPublishedBookingProfileLayouts(args)).failed).toBe(1);
+    expect(profiles.removePhoto('host').sync).toBe(true);
+    expect((await refreshPublishedBookingProfileLayouts(args)).updated).toBe(1);
+    expect(starter.edit.mock.lastCall[0].attachments).toEqual([]);
+    expect(JSON.stringify(starter.edit.mock.lastCall[0].components)).not.toContain('ảnh host đã được duyệt');
+    expect(profiles.removePhoto('host').sync).toBe(false);
+    expect(forum.threads.create).toHaveBeenCalledTimes(1);
   });
 
   it('allocates the smallest available host number and reloads persisted data', () => {

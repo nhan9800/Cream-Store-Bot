@@ -185,4 +185,54 @@ describe('Store2 opt-in automatic reservations', () => {
     time = start;
     expect(() => ledger.startSession({ guildId, ticketId: 1, actorId })).toThrow(expect.objectContaining({ code: 'INVOICE_NOT_SETTLED' }));
   });
+
+  it('shows held and settled slots without leaking the customer or cancelling their booking when closed', () => {
+    const offer = slot({ hourlyPrice: 80_000, hourlyWage: 50_000 });
+    const free = slot({ hostId: otherHostId, startsAt: start + minute });
+    const input = { guildId, fromAt: start, untilAt: start + 60 * minute };
+    expect(selfService.listManagerSlots(input).slots).toMatchObject([
+      { id: offer.id, state: 'PAYMENT_OFF', hourlyPrice: 80_000, amount: 40_000 }, { id: free.id, state: 'AVAILABLE' },
+    ]);
+    expect(selfService.listManagerSlots({ ...input, paymentAvailable: true }).slots[0]).toMatchObject({ state: 'AVAILABLE' });
+    const paid = reserve(offer.id, { paymentAvailable: true, createPaymentOrder: orderFactory });
+    expect(selfService.listManagerSlots(input).slots[0]).toMatchObject({ state: 'HELD', holdUntil: paid.checkoutExpiresAt, closedAt: null });
+    expect(selfService.closeSlot({ guildId, slotId: offer.id, actorId })).toBe(true);
+    expect(selfService.listManagerSlots(input).slots[0]).toMatchObject({ state: 'HELD', closedAt: time });
+    commitReceipt(paid.invoice);
+    expect(ledger.syncInvoicePayment(guildId, paid.invoice.id).status).toBe('PAID');
+    const result = selfService.listManagerSlots(input);
+    expect(result.slots[0]).toMatchObject({ state: 'BOOKED', sessionStatus: 'CONFIRMED', closedAt: time });
+    expect(JSON.stringify(result)).not.toMatch(new RegExp(`${customerId}|customer|ticket|hourlyWage|provider`));
+    expect(ledger.getSession(guildId, 1).status).toBe('CONFIRMED');
+  });
+
+  it('uses the checkout deadline, existing staff bookings and profile consent when showing availability', () => {
+    const paid = slot({ hourlyPrice: 80_000, hourlyWage: 50_000 });
+    const free = slot({ hostId: otherHostId });
+    const input = { guildId, fromAt: start, untilAt: start + minute, paymentAvailable: true };
+    const held = reserve(paid.id, { paymentAvailable: true, createPaymentOrder: orderFactory });
+    time = held.checkoutExpiresAt;
+    expect(selfService.listManagerSlots({ ...input, hostId }).slots).toMatchObject([{ id: paid.id, state: 'AVAILABLE' }]);
+    ticket(2, otherCustomer);
+    ledger.createSession({ guildId, ticketId: 2, service: 'game', startsAt: start, durationMinutes: 30 });
+    ledger.assignHost({ guildId, ticketId: 2, hostId, actorId });
+    profiles.hide(otherHostId);
+    expect(selfService.listManagerSlots(input).slots).toMatchObject([
+      { id: paid.id, state: 'OCCUPIED' }, { id: free.id, state: 'HOST_HIDDEN', hostName: null },
+    ]);
+    time = start;
+    expect(selfService.listManagerSlots(input).slots[0]).toMatchObject({ state: 'PAST' });
+  });
+
+  it('pages ordered slots and keeps date boundaries and stores exact', () => {
+    for (let index = 0; index < 10; index += 1) slot({ startsAt: start + index * minute });
+    const range = { guildId, fromAt: start, untilAt: start + 9 * minute };
+    expect(selfService.listManagerSlots(range)).toMatchObject({ slots: expect.any(Array), total: 9, page: 1, pageCount: 2 });
+    expect(selfService.listManagerSlots(range).slots).toHaveLength(8);
+    expect(selfService.listManagerSlots({ ...range, page: 3 })).toMatchObject({ total: 9, page: 2, pageCount: 2,
+      slots: [{ startsAt: start + 8 * minute }] });
+    expect(() => selfService.listManagerSlots({ ...range, guildId: STORE_ONE_GUILD_ID }))
+      .toThrow(expect.objectContaining({ code: 'WRONG_STORE' }));
+    expect(() => selfService.listManagerSlots({ ...range, untilAt: start })).toThrow(expect.objectContaining({ code: 'INVALID_FILTER' }));
+  });
 });

@@ -234,19 +234,21 @@ export function createBookingLedger(db, { now = Date.now } = {}) {
     }).immediate();
   }
 
-  function listSessions(guildId, { status, customerId, hostId, dueBefore, startAscending = false, limit = 20 } = {}) {
+  function listSessions(guildId, { status, customerId, hostId, dueBefore, endsAfter, endsBy, startAscending = false, limit = 20 } = {}) {
     requireStore(guildId);
     requireBooking((status === undefined || STATUSES.has(status)) && isInteger(limit, 1, 100)
       && (dueBefore === undefined || isInteger(dueBefore, 1)) && typeof startAscending === 'boolean'
+      && (endsAfter === undefined || isInteger(endsAfter, 1)) && (endsBy === undefined || isInteger(endsBy, 1))
       && (customerId === undefined || isId(customerId)) && (hostId === undefined || isId(hostId)),
     'INVALID_FILTER', 'Bộ lọc danh sách lịch không hợp lệ.');
     const order = startAscending ? 'ASC' : 'DESC';
     return db.prepare(`SELECT * FROM booking_sessions WHERE guild_id = @guildId
       AND (@status IS NULL OR status = @status) AND (@customerId IS NULL OR customer_id = @customerId)
       AND (@hostId IS NULL OR host_id = @hostId) AND (@dueBefore IS NULL OR starts_at <= @dueBefore)
+      AND (@endsAfter IS NULL OR ends_at > @endsAfter) AND (@endsBy IS NULL OR ends_at <= @endsBy)
       ORDER BY starts_at ${order}, ticket_id ${order} LIMIT @limit`)
       .all({ guildId, status: status ?? null, customerId: customerId ?? null, hostId: hostId ?? null,
-        dueBefore: dueBefore ?? null, limit });
+        dueBefore: dueBefore ?? null, endsAfter: endsAfter ?? null, endsBy: endsBy ?? null, limit });
   }
 
   function assignHost({ guildId, ticketId, hostId, actorId }) {

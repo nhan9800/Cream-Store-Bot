@@ -5,9 +5,13 @@ import { hostNumber } from '../services/bookingProfilePublication.js';
 import { bookingHostDirectoryCard } from '../utils/bookingHostDirectoryViews.js';
 import { safeReply } from './shared.js';
 
-const directoryControl = /^booking:hosts:(previous|next|game|voice):(\d{17,20}):([1-9]\d{0,14})$/;
+const directoryControl = /^booking:hosts:(previous|next|game|voice|slots):(\d{17,20}):([1-9]\d{0,14})$/;
 
-export async function handleBookingHostDirectoryInteraction(interaction, { portal, bookingForm, profiles }) {
+export async function handleBookingHostDirectoryInteraction(interaction, { portal, bookingForm, profiles,
+  slotList = async (source, layout, host) => {
+    const { bookingSlotListForHost } = await import('./bookingAutoCheckout.js');
+    return bookingSlotListForHost(source, layout, host);
+  } }) {
   const reply = content => safeReply(interaction, { content, flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } });
   const launch = interaction.customId === 'booking:dashboard:hosts';
   const ownerId = interaction.user.id;
@@ -23,6 +27,15 @@ export async function handleBookingHostDirectoryInteraction(interaction, { porta
   const action = control?.[1];
   const target = Number(control?.[3] ?? 1);
   const directory = profiles ?? createBookingProfileService(db);
+  if (action === 'slots') {
+    const profile = directory.getPublished(target);
+    if (!profile) {
+      await reply('Hồ sơ này đã ngừng hiển thị. Mở lại danh sách để chọn host khác.');
+      return true;
+    }
+    await interaction.reply(await slotList(interaction, portal, profile));
+    return true;
+  }
   if (action === 'game' || action === 'voice') {
     const profile = directory.getPublished(target);
     if (!profile || !canRequestHostService(profile, action)) {

@@ -3,6 +3,8 @@ import { BookingLedgerError, createBookingLedger, quoteBookingRates } from './bo
 import { canRequestHostService, createBookingProfileService } from './bookingProfileService.js';
 
 const MINUTE = 60_000;
+const DAY = 24 * 60 * MINUTE;
+const MANAGER_PAGE_SIZE = 8;
 export const BOOKING_AUTO_PAYMENT_HOLD_MS = 15 * MINUTE;
 const SERVICES = new Set(['game', 'voice']);
 const SNOWFLAKE = /^\d{17,20}$/;
@@ -36,6 +38,20 @@ export function createBookingSelfService(db, { now = Date.now, ledger = createBo
     AND starts_at > @earliestFree AND (hourly_price = 0 OR (@paymentAvailable = 1 AND starts_at >= @earliestPaid))
     AND (@hostId IS NULL OR host_id = @hostId) AND (@service IS NULL OR service = @service)
     ORDER BY starts_at, id`);
+  const managerRange = `FROM booking_auto_slots WHERE guild_id = @guildId AND starts_at >= @fromAt
+    AND starts_at < @untilAt AND (@hostId IS NULL OR host_id = @hostId)`;
+  const countManagerSlots = db.prepare(`SELECT COUNT(*) AS total ${managerRange}`);
+  const managerSlots = db.prepare(`SELECT * ${managerRange} ORDER BY starts_at, id LIMIT @limit OFFSET @offset`);
+  const currentReservations = db.prepare(`SELECT s.status AS session_status, b.status AS invoice_status, r.checkout_expires_at
+    FROM booking_auto_reservations r JOIN booking_sessions s ON s.ticket_id = r.ticket_id
+    JOIN booking_invoices b ON b.ticket_id = s.ticket_id AND b.kind = 'BASE' AND b.host_id = s.host_id
+    JOIN tickets t ON t.id = s.ticket_id AND t.guild_id = s.guild_id AND t.customer_id = s.customer_id
+      AND t.channel_id = s.ticket_channel_id AND t.ticket_type = 'BOOKING'
+    WHERE r.slot_id = @slotId AND s.guild_id = @guildId AND s.host_id = @hostId
+      AND (s.status IN ('ACTIVE', 'COMPLETED') OR (s.status = 'CONFIRMED' AND t.status = 'OPEN'))
+      AND (b.status IN ('FREE', 'PAID') OR (b.status = 'PENDING' AND r.checkout_expires_at > @at))
+    ORDER BY CASE WHEN b.status IN ('FREE', 'PAID') THEN 0 ELSE 1 END, r.checkout_expires_at DESC
+    LIMIT 1`);
   const insertSlot = db.prepare(`INSERT INTO booking_auto_slots
     (guild_id,host_id,service,starts_at,duration_minutes,hourly_price,hourly_wage,created_by_id,created_at)
     VALUES (@guildId,@hostId,@service,@startsAt,@durationMinutes,@hourlyPrice,@hourlyWage,@actorId,@at)
@@ -58,6 +74,44 @@ export function createBookingSelfService(db, { now = Date.now, ledger = createBo
   function available(guildId, row, customerId) {
     return ledger.isReservationSlotAvailable({ guildId, hostId: row.host_id, customerId,
       startsAt: row.starts_at, endsAt: row.starts_at + row.duration_minutes * MINUTE });
+  }
+
+  function managerState(row, profile, paymentAvailable, at) {
+    const reservation = currentReservations.get({ slotId: row.id, guildId: row.guild_id, hostId: row.host_id, at });
+    if (reservation?.invoice_status === 'PENDING') return { state: 'HELD', holdUntil: reservation.checkout_expires_at };
+    if (reservation) return { state: 'BOOKED', sessionStatus: reservation.session_status };
+    if (row.closed_at !== null) return { state: 'CLOSED' };
+    if (row.starts_at <= at) return { state: 'PAST' };
+    if (!profile) return { state: 'HOST_HIDDEN' };
+    if (row.hourly_price > 0 && !paymentAvailable) return { state: 'PAYMENT_OFF' };
+    if (row.starts_at <= at + MINUTE || (row.hourly_price > 0 && row.starts_at < at + BOOKING_AUTO_PAYMENT_HOLD_MS)) {
+      return { state: 'TOO_SOON' };
+    }
+    return { state: available(row.guild_id, row, null) ? 'AVAILABLE' : 'OCCUPIED' };
+  }
+
+  const readManagerSchedule = db.transaction(({ guildId, hostId, fromAt, untilAt, page, paymentAvailable }) => {
+    const filter = { guildId, hostId: hostId ?? null, fromAt, untilAt };
+    const { total } = countManagerSlots.get(filter);
+    const pageCount = Math.max(1, Math.ceil(total / MANAGER_PAGE_SIZE));
+    const currentPage = Math.min(page, pageCount);
+    const at = now();
+    const slots = managerSlots.all({ ...filter, limit: MANAGER_PAGE_SIZE, offset: (currentPage - 1) * MANAGER_PAGE_SIZE })
+      .map(row => {
+        const profile = publishedProfile(row.host_id, row.service);
+        return { id: row.id, hostName: profile?.approved.name ?? null, service: row.service, startsAt: row.starts_at,
+          durationMinutes: row.duration_minutes, hourlyPrice: row.hourly_price,
+          amount: quoteBookingRates(row.duration_minutes, row.hourly_price, row.hourly_wage).amount, closedAt: row.closed_at,
+          ...managerState(row, profile, paymentAvailable, at) };
+      });
+    return { slots, page: currentPage, pageCount, total, fromAt, untilAt };
+  });
+
+  function listManagerSlots({ guildId, hostId, fromAt, untilAt, page = 1, paymentAvailable = false }) {
+    requireStore(guildId);
+    requireValue((hostId === undefined || validId(hostId)) && positiveInteger(fromAt) && positiveInteger(untilAt)
+      && untilAt > fromAt && untilAt - fromAt <= 7 * DAY && positiveInteger(page), 'INVALID_FILTER', 'Bộ lọc lịch ca không hợp lệ.');
+    return readManagerSchedule({ guildId, hostId, fromAt, untilAt, page, paymentAvailable: paymentAvailable === true });
   }
 
   function eligibleSlot({ guildId, slotId, customerId, paymentAvailable, at }) {
@@ -170,5 +224,5 @@ export function createBookingSelfService(db, { now = Date.now, ledger = createBo
     return reserveTransaction.immediate(options);
   }
 
-  return { addSlot, closeSlot, listSlots, quoteSlot, reserveSlot, getReservation };
+  return { addSlot, closeSlot, listSlots, listManagerSlots, quoteSlot, reserveSlot, getReservation };
 }

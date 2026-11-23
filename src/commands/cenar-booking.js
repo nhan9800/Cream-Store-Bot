@@ -3,6 +3,7 @@ import {
 } from 'discord.js';
 import { db } from '../database/db.js';
 import { createBookingLedger } from '../services/bookingLedgerService.js';
+import { bookingMemberSchedule } from '../services/bookingMemberSchedule.js';
 import { bookingReceiptPreview, createBookingReceiptService } from '../services/bookingReceiptService.js';
 import { createBookingSelfService } from '../services/bookingSelfService.js';
 import { BOOKING_APP_ID, bookingPortal } from '../services/bookingStoreSetupService.js';
@@ -11,6 +12,7 @@ import { getTicketByChannelId } from '../services/ticketService.js';
 import { createBookingVoiceStore } from '../services/bookingVoiceService.js';
 import { STORE_TWO_GUILD_ID } from '../utils/locale.js';
 import { bookingScheduleCard } from '../utils/bookingPortalViews.js';
+import { bookingManagerScheduleView, bookingManagerSlotRange } from '../utils/bookingManagerScheduleView.js';
 import { buildBookingReceiptCard } from '../utils/bookingReceiptViews.js';
 import { isManager, isSupport } from '../utils/permissions.js';
 import { addBookingTicketSection, bookingTicketCard, bookingTicketPayload, buildBookingBillReview, buildBookingFreeQuote } from '../utils/bookingTicketUi.js';
@@ -38,6 +40,10 @@ export const data = new SlashCommandBuilder().setName('cenar-booking').setDescri
     .addIntegerOption(hourlyPrice).addIntegerOption(hourlyWage))
   .addSubcommand(cmd => cmd.setName('dong-ca').setDescription('Quản lý đóng ca tự đặt, phiên đã giữ tiếp tục được theo dõi')
     .addIntegerOption(o => o.setName('ma_ca').setDescription('Mã ca đã hiển thị khi mở').setRequired(true).setMinValue(1)))
+  .addSubcommand(cmd => cmd.setName('quan-ly-ca').setDescription('Quản lý xem lịch ca và tình trạng giữ chỗ của host')
+    .addStringOption(o => o.setName('ngay').setDescription('Ngày Việt Nam dd/mm/yyyy, mặc định 7 ngày từ hôm nay').setMaxLength(10))
+    .addUserOption(o => o.setName('host').setDescription('Chỉ xem ca của host này'))
+    .addIntegerOption(o => o.setName('trang').setDescription('Trang cần xem').setMinValue(1)))
   .addSubcommand(cmd => cmd.setName('phan-host').setDescription('Gán host cho phiếu booking này')
     .addUserOption(o => o.setName('host').setDescription('Host đã đồng ý nhận lịch').setRequired(true)))
   .addSubcommand(cmd => cmd.setName('bao-gia').setDescription('Gửi báo giá và QR trong phiếu booking này')
@@ -58,8 +64,6 @@ export const data = new SlashCommandBuilder().setName('cenar-booking').setDescri
   .addSubcommand(cmd => cmd.setName('hoi').setDescription('Hỏi về Cenar Booking hoặc yêu cầu số liệu được cấp quyền')
     .addStringOption(o => o.setName('cau_hoi').setDescription('Câu hỏi, ví dụ Tổng doanh thu tuần này?').setRequired(true).setMaxLength(200)));
 
-const statusLabels = { REQUESTED: 'Chờ xếp host', CONFIRMED: 'Đã xếp host', ACTIVE: 'Đang diễn ra',
-  COMPLETED: 'Đã hoàn thành', DECLINED: 'Đã từ chối', NEEDS_REVIEW: 'Chờ staff kiểm tra' };
 const time = ms => `<t:${Math.floor(ms / 1000)}:f>`;
 
 export function ledgerCard(title, lines, emoji) {
@@ -72,16 +76,7 @@ export function ledgerCard(title, lines, emoji) {
 }
 
 export function showSessions(ledger, guildId, userId) {
-  const owned = [ledger.listSessions(guildId, { customerId: userId, limit: 8 }), ledger.listSessions(guildId, { hostId: userId, limit: 8 })];
-  const unique = new Map(owned.flat().map(session => [session.ticket_id, session]));
-  if (!unique.size) return ['Bạn chưa có phiên booking nào. Mở kênh đặt lịch để gửi yêu cầu.'];
-  const voice = createBookingVoiceStore(db);
-  return [...unique.values()].sort((a, b) => b.starts_at - a.starts_at).slice(0, 8).map(session => {
-    const room = session.status === 'ACTIVE' ? voice.get(session.ticket_id) : null;
-    const link = room?.room_id && !room.released ? ` · <#${room.room_id}>`
-      : session.customer_id === userId ? ` · <#${session.ticket_channel_id}>` : '';
-    return `**${session.service === 'game' ? 'Chơi game' : 'Trò chuyện'} · ${statusLabels[session.status]}**\n${time(session.starts_at)} · ${session.duration_minutes} phút${link}`;
-  });
+  return bookingMemberSchedule({ ledger, guildId, userId, receipts: createBookingReceiptService(db), voice: createBookingVoiceStore(db) });
 }
 
 function requirePrivateTicket(interaction) {
@@ -133,7 +128,7 @@ export async function execute(interaction) {
     await interaction.editReply(await buildBookingReceiptCard({ ...receipt, emoji: portal.emoji.calendar, ephemeral: false }));
     return;
   }
-  if (['mau-hoa-don', 'mo-ca', 'dong-ca'].includes(operation)) {
+  if (['mau-hoa-don', 'mo-ca', 'dong-ca', 'quan-ly-ca'].includes(operation)) {
     if (!manager) { await interaction.editReply('Chỉ quản lý Cenar Booking có thể dùng lệnh này.'); return; }
     if (operation === 'mau-hoa-don') {
       const sample = bookingReceiptPreview(interaction.options.getString('loai', true));
@@ -142,6 +137,18 @@ export async function execute(interaction) {
     }
     try {
       const selfService = createBookingSelfService(db);
+      if (operation === 'quan-ly-ca') {
+        const date = interaction.options.getString('ngay')?.trim();
+        const { parseBookingTime } = await import('../events/bookingHandlers.js');
+        const selected = date ? parseBookingTime(`${date} 00:00`, 0) : null;
+        if (date && selected === null) { await interaction.editReply('Nhập ngày hợp lệ theo dd/mm/yyyy.'); return; }
+        const { bookingPayosAvailable } = await import('../services/bookingPaymentService.js');
+        const range = bookingManagerSlotRange(selected === null ? null : selected * 1000);
+        const schedule = selfService.listManagerSlots({ guildId, ...range, hostId: interaction.options.getUser('host')?.id,
+          page: interaction.options.getInteger('trang') ?? 1, paymentAvailable: bookingPayosAvailable(guildId) });
+        await interaction.editReply(bookingManagerScheduleView(schedule, portal.emoji.calendar));
+        return;
+      }
       if (operation === 'dong-ca') {
         const closed = selfService.closeSlot({ guildId, actorId, slotId: interaction.options.getInteger('ma_ca', true) });
         await interaction.editReply(closed ? 'Đã đóng ca để dừng nhận đặt mới.' : 'Ca không tồn tại hoặc đã đóng.');

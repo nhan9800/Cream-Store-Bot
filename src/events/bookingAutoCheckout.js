@@ -5,6 +5,7 @@ import {
 import { db } from '../database/db.js';
 import { BookingLedgerError } from '../services/bookingLedgerService.js';
 import { bookingPayosAvailable, createBookingPaymentOrder } from '../services/bookingPaymentService.js';
+import { createBookingProfileService } from '../services/bookingProfileService.js';
 import { createBookingSelfService } from '../services/bookingSelfService.js';
 import { sendOrRefreshPaymentQr } from '../services/paymentService.js';
 import { getOpenTicketByCustomer, getTicketByChannelId } from '../services/ticketService.js';
@@ -28,23 +29,36 @@ const action = (id, label, style = ButtonStyle.Secondary, emoji) => {
   return button;
 };
 
-function showSlots(slots, userId, emoji) {
-  const card = bookingTicketCard({ section: 'ĐẶT LỊCH TỰ ĐỘNG', title: 'Chọn giờ cùng host',
+function showSlots(slots, userId, emoji, host) {
+  const card = bookingTicketCard({ section: 'ĐẶT LỊCH TỰ ĐỘNG', title: host ? `Ca trống của ${escapeMarkdown(host.approved.name)}` : 'Chọn giờ cùng host',
     subtitle: 'Giờ Việt Nam · Lịch do ban vận hành mở', emoji });
   if (!slots.length) {
-    addBookingTicketSection(card, 'Chưa có ca tự đặt đang mở. Chọn **Chơi game** hoặc **Voice** trên bảng đặt lịch để gửi yêu cầu cho staff.');
-    return privatePayload(card);
+    addBookingTicketSection(card, host ? 'Host này chưa có ca để tự đặt. Bạn có thể xem ca của host khác hoặc gửi yêu cầu riêng ở thẻ hồ sơ.'
+      : 'Chưa có ca tự đặt đang mở. Chọn **Chơi game** hoặc **Voice** trên bảng đặt lịch để gửi yêu cầu cho staff.');
+  } else {
+    const filter = host ? `:${host.profile_number}` : '';
+    const menu = new StringSelectMenuBuilder().setCustomId(`booking:auto:select:${userId}${filter}`)
+      .setPlaceholder('Chọn một ca để xem giá và xác nhận')
+      .addOptions(slots.map(slot => ({ value: String(slot.id), label: `${slot.hostName} · ${mode(slot.service)}`.slice(0, 100),
+        description: `${localTime.format(slot.startsAt)} · ${slot.durationMinutes} phút · ${formatCurrency(slot.amount)}`.slice(0, 100),
+      })));
+    card.addActionRowComponents(new ActionRowBuilder().addComponents(menu));
   }
-  const menu = new StringSelectMenuBuilder().setCustomId(`booking:auto:select:${userId}`)
-    .setPlaceholder('Chọn một ca để xem giá và xác nhận')
-    .addOptions(slots.map(slot => ({ value: String(slot.id), label: `${slot.hostName} · ${mode(slot.service)}`.slice(0, 100),
-      description: `${localTime.format(slot.startsAt)} · ${slot.durationMinutes} phút · ${formatCurrency(slot.amount)}`.slice(0, 100),
-    })));
-  card.addActionRowComponents(new ActionRowBuilder().addComponents(menu));
+  if (host) card.addActionRowComponents(new ActionRowBuilder().addComponents(
+    action(`booking:auto:list:${userId}`, 'Xem ca của mọi host'),
+  ));
   return privatePayload(card);
 }
 
-function showQuote(slot, userId, emoji) {
+export function bookingSlotListForHost(interaction, portal, host, service = createBookingSelfService(db)) {
+  const guildId = interaction.guildId;
+  const customerId = interaction.user.id;
+  const slots = service.listSlots({ guildId, customerId, hostId: host.host_id,
+    paymentAvailable: bookingPayosAvailable(guildId), limit: 20 });
+  return showSlots(slots, customerId, portal.emoji.calendar, host);
+}
+
+function showQuote(slot, userId, emoji, hostNumber) {
   const card = bookingTicketCard({ section: 'KIỂM TRA LỊCH', title: 'Xác nhận ca của bạn', emoji });
   addBookingTicketSection(card, describeSlot(slot));
   addBookingTicketSection(card, slot.amount > 0
@@ -52,7 +66,7 @@ function showQuote(slot, userId, emoji) {
     : 'Ca miễn phí được xác nhận khi giữ chỗ. Phòng riêng sẽ xuất hiện trong phiếu khi đến giờ.');
   card.addActionRowComponents(new ActionRowBuilder().addComponents(
     action(`booking:auto:confirm:${userId}:${slot.id}`, 'Xác nhận giữ chỗ', ButtonStyle.Primary, emoji),
-    action(`booking:auto:list:${userId}`, 'Chọn ca khác'),
+    action(hostNumber ? `booking:hosts:slots:${userId}:${hostNumber}` : `booking:auto:list:${userId}`, 'Chọn ca khác'),
   ));
   return privatePayload(card);
 }
@@ -118,7 +132,9 @@ async function reserve(interaction, portal, service, initialSlot, paymentAvailab
   if (reservation) await sendInvoice(interaction, paymentAvailable, reservation);
 }
 
-export async function handleBookingAutoCheckout(interaction, portal, { createService = () => createBookingSelfService(db) } = {}) {
+export async function handleBookingAutoCheckout(interaction, portal, {
+  createService = () => createBookingSelfService(db), getPublishedHost = number => createBookingProfileService(db).getPublished(number),
+} = {}) {
   const reject = content => safeReply(interaction, { content, flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } });
   const launch = interaction.customId === 'booking:dashboard:auto';
   const resume = resumeControl.exec(interaction.customId);
@@ -147,10 +163,11 @@ export async function handleBookingAutoCheckout(interaction, portal, { createSer
     return true;
   }
   const allowedSource = launch
-    ? interaction.isButton() && message?.components?.some(component => (component.id ?? component.data?.id) === BOOKING_PANEL_IDS.request)
-    : control?.[2] === customerId && message?.flags?.has(MessageFlags.Ephemeral)
+    ? interaction.channelId === portal.request && interaction.isButton()
+      && message?.components?.some(component => (component.id ?? component.data?.id) === BOOKING_PANEL_IDS.request)
+    : [portal.request, portal.welcome].includes(interaction.channelId) && control?.[2] === customerId && message?.flags?.has(MessageFlags.Ephemeral)
       && (operation === 'select' ? interaction.isStringSelectMenu() : interaction.isButton());
-  if (interaction.channelId !== portal.request || !ownMessage || !allowedSource) {
+  if (!ownMessage || !allowedSource) {
     await reject('Mở bảng đặt lịch của bạn tại Cenar Booking.');
     return true;
   }
@@ -170,7 +187,13 @@ export async function handleBookingAutoCheckout(interaction, portal, { createSer
       return true;
     }
     if (operation === 'select') {
-      await interaction.reply(showQuote(service.quoteSlot({ ...input, slotId }), customerId, emoji));
+      const slot = service.quoteSlot({ ...input, slotId });
+      const hostNumber = slotNumber(control[3]);
+      if (hostNumber && getPublishedHost(hostNumber)?.host_id !== slot.hostId) {
+        await reject('Hồ sơ hoặc ca đã thay đổi. Hãy mở lại danh sách ca của host.');
+        return true;
+      }
+      await interaction.reply(showQuote(slot, customerId, emoji, hostNumber));
     } else {
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
       // A retained quote can reopen its existing invoice after a timed-out Discord or PayOS send.

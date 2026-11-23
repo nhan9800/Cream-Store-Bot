@@ -81,8 +81,9 @@ describe('Cenar Booking host directory', () => {
       const payload = interaction.editReply.mock.lastCall[0];
       const card = payload.components[0].toJSON();
       const actions = card.components.filter(item => item.type === 1);
-      expect(actions[0].components[0]).toMatchObject({ style: 1, custom_id: `booking:hosts:${service}:${member}:${page}` });
-      expect(actions[0].components[1]).toMatchObject({ label: 'Bài hồ sơ' });
+      expect(actions[0].components[0]).toMatchObject({ style: 1, custom_id: `booking:hosts:slots:${member}:${page}` });
+      expect(actions[0].components[1]).toMatchObject({ style: 2, custom_id: `booking:hosts:${service}:${member}:${page}` });
+      expect(actions[0].components[2]).toMatchObject({ label: 'Bài hồ sơ' });
       expect(actions[1].components.map(button => button.disabled)).toEqual([page === 1, page === 2]);
       expect(card.components.find(item => item.content?.includes(`Hồ sơ ${page}/2`))).toBeDefined();
       expect(JSON.stringify(card)).toContain(prefix);
@@ -104,23 +105,38 @@ describe('Cenar Booking host directory', () => {
     await handle(launch);
     const card = launch.editReply.mock.lastCall[0].components[0].toJSON();
     const actions = card.components.find(item => item.type === 1).components;
-    expect(actions.slice(0, 2).map(button => button.label)).toEqual(['Đặt chơi game', 'Đặt trò chuyện']);
-    const voice = component(actions[1].custom_id);
+    expect(actions.slice(1, 3).map(button => button.label)).toEqual(['Đặt chơi game', 'Đặt trò chuyện']);
+    const voice = component(actions[2].custom_id);
     bookingForm.mockReturnValue('prefilled-form');
     await handle(voice);
     expect(voice.showModal).toHaveBeenCalledWith('prefilled-form');
     expect(bookingForm).toHaveBeenCalledWith('voice', { preferredHost: '#0001 Ánh' });
     profiles.saveDraft('first', draft);
     profiles.approve('first', 2);
-    const obsoleteVoice = component(actions[1].custom_id);
+    const obsoleteVoice = component(actions[2].custom_id);
     await handle(obsoleteVoice);
     expect(obsoleteVoice.showModal).not.toHaveBeenCalled();
     expect(obsoleteVoice.reply).toHaveBeenCalledWith(expect.objectContaining({ flags: MessageFlags.Ephemeral }));
     profiles.hide('first');
-    const hidden = component(actions[0].custom_id);
+    const hidden = component(actions[1].custom_id);
     await handle(hidden);
     expect(hidden.showModal).not.toHaveBeenCalled();
     expect(hidden.reply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringMatching(/đã thay đổi/) }));
+  });
+
+  it('opens only the selected published host’s slot list in the viewer’s context', async () => {
+    publish('first', {}, threadId);
+    const payload = { flags: MessageFlags.Ephemeral };
+    const slotList = vi.fn(async () => payload);
+    const own = component(`booking:hosts:slots:${member}:1`);
+    await handleBookingHostDirectoryInteraction(own, { portal, profiles, bookingForm, slotList });
+    expect(own.reply).toHaveBeenCalledWith(payload);
+    expect(slotList).toHaveBeenCalledWith(own, portal, expect.objectContaining({ host_id: 'first' }));
+    profiles.hide('first');
+    const stale = component(`booking:hosts:slots:${member}:1`);
+    await handleBookingHostDirectoryInteraction(stale, { portal, profiles, bookingForm, slotList });
+    expect(slotList).toHaveBeenCalledOnce();
+    expect(stale.reply).toHaveBeenCalledWith(expect.objectContaining({ content: expect.stringContaining('ngừng hiển thị') }));
   });
 
   it.each([{ userId: 'other' }, { channel: 'other' }, { author: 'other' }, { ephemeral: false }, { button: false }])(
