@@ -3,6 +3,16 @@ import { STORE_TWO_GUILD_ID } from '../utils/locale.js';
 export class BookingProfileError extends Error {}
 
 export const bookingProfileTemplate = Object.freeze({ title: 'Cenar Booking', accent: '#8176e9' });
+const publishedProfiles = 'FROM booking_host_profiles WHERE approved IS NOT NULL AND forum_thread_id IS NOT NULL';
+const publishedFields = 'host_id, profile_number, approved, forum_thread_id';
+
+function readPublished(row) {
+  return row ? { ...row, approved: JSON.parse(row.approved) } : null;
+}
+
+export function canRequestHostService(profile, service) {
+  return (service === 'game' || service === 'voice') && (profile.approved.service === service || profile.approved.service === 'both');
+}
 
 function boundedText(value, max, required = true) {
   const text = String(value ?? '').replace(/\s+/gu, ' ').replace(/\p{Cc}/gu, '').trim();
@@ -89,6 +99,17 @@ export function createBookingProfileService(db) {
       FROM booking_host_reviews WHERE host_id=?`).get(hostId);
   }
 
+  const publishedPage = db.transaction(requestedPage => {
+    const { total } = db.prepare(`SELECT COUNT(*) AS total ${publishedProfiles}`).get();
+    const page = Math.max(1, Math.min(requestedPage, total));
+    const row = db.prepare(`SELECT ${publishedFields} ${publishedProfiles} ORDER BY profile_number LIMIT 1 OFFSET ?`).get(page - 1);
+    return { profile: readPublished(row), page, total };
+  });
+
+  function getPublished(profileNumber) {
+    return readPublished(db.prepare(`SELECT ${publishedFields} ${publishedProfiles} AND profile_number = ?`).get(profileNumber));
+  }
+
   function getReview(ticketId) {
     return db.prepare('SELECT * FROM booking_host_reviews WHERE ticket_id = ?').get(ticketId) ?? null;
   }
@@ -118,7 +139,8 @@ export function createBookingProfileService(db) {
   }
 
   return {
-    get, saveDraft, approve: approve.immediate, hide, ratingFor, getReview, createReview, getTemplate, setTemplate,
+    get, saveDraft, approve: approve.immediate, hide, ratingFor, publishedPage, getPublished,
+    getReview, createReview, getTemplate, setTemplate,
     setHostThread: (hostId, threadId) => db.prepare('UPDATE booking_host_profiles SET forum_thread_id=? WHERE host_id=?').run(threadId, hostId),
     setReviewThread: (ticketId, threadId) => db.prepare('UPDATE booking_host_reviews SET forum_thread_id=? WHERE ticket_id=?').run(threadId, ticketId),
   };

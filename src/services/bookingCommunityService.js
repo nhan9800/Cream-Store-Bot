@@ -1,3 +1,7 @@
+import {
+  isWordGridLanguage, normalizeWordGridGuess, scoreWordGridGuess, WORD_GRID_ATTEMPTS, wordGridSolution,
+} from './bookingWordGrid.js';
+
 export const COMMUNITY_VOICE_INTERVAL_MS = 60_000;
 export const MAX_CONNECTIONS = 10;
 
@@ -56,6 +60,15 @@ export function createBookingCommunityService(database, { clock = Date.now } = {
       inventory TEXT NOT NULL DEFAULT '{}'
     );
     CREATE INDEX IF NOT EXISTS booking_community_rank ON booking_community_profiles(xp DESC, user_id);
+    CREATE TABLE IF NOT EXISTS booking_community_word_grids (
+      user_id TEXT NOT NULL REFERENCES booking_community_profiles(user_id),
+      language TEXT NOT NULL CHECK (language IN ('vi', 'en')),
+      day TEXT NOT NULL,
+      solution TEXT NOT NULL,
+      guesses TEXT NOT NULL,
+      points INTEGER NOT NULL DEFAULT 0,
+      PRIMARY KEY (user_id, language)
+    );
     CREATE TABLE IF NOT EXISTS booking_community_pairs (
       first_user_id TEXT NOT NULL REFERENCES booking_community_profiles(user_id),
       second_user_id TEXT NOT NULL REFERENCES booking_community_profiles(user_id),
@@ -83,6 +96,12 @@ export function createBookingCommunityService(database, { clock = Date.now } = {
       SET points = points + ?, games = min(games + 1, ?), last_game_at = ? WHERE user_id = ?`),
     'noi-tu': database.prepare('UPDATE booking_community_profiles SET last_word_chain_day = ? WHERE user_id = ?'),
     'doan-tu': database.prepare('UPDATE booking_community_profiles SET last_word_guess_day = ? WHERE user_id = ?'),
+    wordGrid: database.prepare(`SELECT * FROM booking_community_word_grids
+      WHERE user_id = ? AND language = ? AND day = ?`),
+    saveWordGrid: database.prepare(`INSERT INTO booking_community_word_grids
+      (user_id, language, day, solution, guesses, points) VALUES (?, ?, ?, ?, ?, ?)
+      ON CONFLICT (user_id, language) DO UPDATE
+      SET day = excluded.day, solution = excluded.solution, guesses = excluded.guesses, points = excluded.points`),
     checkIn: database.prepare(`UPDATE booking_community_profiles
       SET points = points + ?, checked_in = ?, streak = ? WHERE user_id = ?`),
     claim: database.prepare(`UPDATE booking_community_profiles SET points = points + 25, daily_claimed = 1 WHERE user_id = ?`),
@@ -124,6 +143,12 @@ export function createBookingCommunityService(database, { clock = Date.now } = {
       return change(getDailyUser(id, now), now, ...args);
     });
     return (...args) => transaction.immediate(...args);
+  }
+
+  function recordGame(user, now, won) {
+    const points = user.games < DAILY_GAME_REWARDS ? (won ? 4 : 1) : 0;
+    statements.play.run(points, DAILY_GAME_REWARDS, now, user.user_id);
+    return points;
   }
 
   function getPairs(id) {
@@ -187,10 +212,37 @@ export function createBookingCommunityService(database, { clock = Date.now } = {
       if ((word === 'noi-tu' && user.last_word_chain_day === user.day)
         || (word === 'doan-tu' && user.last_word_guess_day === user.day)) return { status: 'already-played' };
       const result = resultFactory(now);
-      const points = user.games < DAILY_GAME_REWARDS ? (result.won ? 4 : 1) : 0;
-      statements.play.run(points, DAILY_GAME_REWARDS, now, user.user_id);
+      const points = recordGame(user, now, result.won);
       if (word === 'noi-tu' || word === 'doan-tu') statements[word].run(user.day, user.user_id);
       return { ...result, points, status: 'played' };
+    }),
+    wordGrid: forUser((user, now, language, { answer, day: submittedDay, turn } = {}) => {
+      if (!isWordGridLanguage(language)) throw new RangeError('Unknown word grid language');
+      const day = communityDay(now);
+      const stored = statements.wordGrid.get(user.user_id, language, day);
+      const solution = stored?.solution ?? wordGridSolution(language, day);
+      const secret = normalizeWordGridGuess(solution, language);
+      const guesses = stored ? JSON.parse(stored.guesses) : [];
+      const respond = (notice, points = stored?.points ?? 0) => {
+        const won = guesses.at(-1) === secret;
+        const done = won || guesses.length >= WORD_GRID_ATTEMPTS;
+        return {
+          language, day, now, notice, won, done,
+          rows: guesses.map(guess => ({ guess, marks: scoreWordGridGuess(secret, guess) })),
+          ...(done ? { answer: solution, points } : {}),
+        };
+      };
+      if (submittedDay !== undefined && (submittedDay !== day || turn !== guesses.length)) return respond('stale');
+      if (answer === undefined || guesses.length >= WORD_GRID_ATTEMPTS || guesses.at(-1) === secret) return respond();
+      const guess = normalizeWordGridGuess(answer, language);
+      if (!guess) return respond('invalid');
+      if (guesses.includes(guess)) return respond('duplicate');
+      guesses.push(guess);
+      const won = guess === secret;
+      const done = won || guesses.length === WORD_GRID_ATTEMPTS;
+      const points = done ? recordGame(user, now, won) : 0;
+      statements.saveWordGrid.run(user.user_id, language, day, solution, JSON.stringify(guesses), points);
+      return respond(undefined, points);
     }),
     rank: () => statements.rank.all(),
     checkIn: forUser((user, now) => {

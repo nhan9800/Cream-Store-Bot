@@ -98,6 +98,35 @@ describe('Store2 booking sessions and billing', () => {
     expect(() => assign(3)).toThrow(expect.objectContaining({ code: 'TICKET_CLOSED' }));
   });
 
+  it('claims pre-start reminders only for settled open bookings, once across ledger instances', () => {
+    const window = { after: start - MINUTE, through: start + 13 * MINUTE };
+    const free = ticketId => quote(ticketId, { hourlyPrice: 0, hourlyWage: 0, createPaymentOrder: undefined });
+    for (let ticketId = 1; ticketId <= 9; ticketId += 1) {
+      const offset = ticketId === 8 ? 20 : ticketId === 9 ? -1 : ticketId;
+      booking(ticketId, { startsAt: start + offset * MINUTE, durationMinutes: 1 });
+      if (ticketId !== 5) assign(ticketId);
+    }
+    for (const ticketId of [1, 4, 8, 9]) free(ticketId);
+    const paid = quote(2);
+    commitReceipt(paid);
+    expect(ledger.syncInvoicePayment(guildId, paid.id).status).toBe('PAID');
+    quote(3);
+    db.prepare("UPDATE tickets SET status = 'CLOSED' WHERE id = 4").run();
+    ledger.declineSession({ guildId, ticketId: 6, actorId });
+    const refunded = quote(7);
+    commitReceipt(refunded, { transactionId: 'receipt-43' });
+    expect(ledger.syncInvoicePayment(guildId, refunded.id).status).toBe('PAID');
+    db.prepare("UPDATE orders SET status = 'REFUNDED' WHERE id = ?").run(refunded.order_id);
+
+    expect(() => ledger.claimUpcomingHostStart(STORE_ONE_GUILD_ID, window))
+      .toThrow(expect.objectContaining({ code: 'WRONG_STORE' }));
+    expect(ledger.claimUpcomingHostStart(guildId, window)).toEqual({ hostId, startsAt: start + MINUTE });
+    const restarted = createBookingLedger(db);
+    expect(restarted.claimUpcomingHostStart(guildId, window)).toEqual({ hostId, startsAt: start + 2 * MINUTE });
+    expect(ledger.claimUpcomingHostStart(guildId, window)).toBeNull();
+    expect(db.prepare('SELECT ticket_id FROM booking_host_start_notices ORDER BY ticket_id').pluck().all()).toEqual([1, 2]);
+  });
+
   it('freezes booked price and binds a dedicated unpaid order once in the same transaction', () => {
     booking(1, { durationMinutes: 31 });
     assign(1);

@@ -1,10 +1,12 @@
 import { ChannelType, PermissionFlagsBits as P } from 'discord.js';
-import { buildBookingVoiceNotice } from '../utils/bookingTicketUi.js';
+import { addBookingTicketSection, bookingTicketCard, bookingTicketPayload, buildBookingVoiceNotice } from '../utils/bookingTicketUi.js';
 import { STORE_TWO_GUILD_ID } from '../utils/locale.js';
+import { BOOKING_HOST_START_NOTICE_WINDOW_MS } from './bookingLedgerService.js';
 
 const REASON = 'Cenar Booking · Phòng theo lịch';
 const UNKNOWN_CHANNEL = 10003;
 const MINUTE = 60_000;
+const START_NOTICES_PER_TICK = 5;
 
 export function createBookingVoiceStore(db) {
   db.exec(`CREATE TABLE IF NOT EXISTS booking_voice_rooms (
@@ -40,9 +42,12 @@ async function getRoom(guild, roomId) {
   });
 }
 
+function canManageRooms(guild) {
+  return guild.members.me?.permissions?.has([P.ManageChannels, P.MoveMembers, P.ManageRoles]);
+}
+
 async function openRoom(guild, session, categoryId, state, voiceStore) {
-  const permissions = guild.members.me?.permissions;
-  if (!permissions?.has([P.ManageChannels, P.MoveMembers, P.ManageRoles])) return null;
+  if (!canManageRooms(guild)) return null;
   if (state?.released) return null;
   let room = state?.room_id && await getRoom(guild, state.room_id);
   if (room) return isManagedRoom(room, guild, session, categoryId) ? room : null;
@@ -87,6 +92,26 @@ async function closeRoom(guild, session, categoryId, state, voiceStore) {
   }
   voiceStore.release(session.ticket_id);
   return true;
+}
+
+async function remindUpcomingHosts(guild, ledger, now, onError) {
+  if (!canManageRooms(guild)) return;
+  for (let attempt = 0; attempt < START_NOTICES_PER_TICK; attempt += 1) {
+    const after = now();
+    const next = ledger.claimUpcomingHostStart(guild.id, { after, through: after + BOOKING_HOST_START_NOTICE_WINDOW_MS });
+    if (!next) return;
+    try {
+      const host = await guild.members.fetch({ user: next.hostId, force: true });
+      if (now() >= next.startsAt) continue;
+      const start = Math.floor(next.startsAt / 1000);
+      const card = bookingTicketCard({ section: 'LỊCH CỦA HOST', title: 'Phiên của bạn sắp bắt đầu',
+        subtitle: `<t:${start}:f> · <t:${start}:R>` });
+      addBookingTicketSection(card, 'Mở **Lịch của bạn** bằng `/cenar-booking lich`. Đường dẫn phòng sẽ hiện khi đến giờ.');
+      await host.send(bookingTicketPayload(card));
+    } catch {
+      onError('BOOKING_HOST_PRESTART_DM_UNAVAILABLE');
+    }
+  }
 }
 
 export function createBookingVoiceTick({ db, ledger, voiceStore = createBookingVoiceStore(db), now = Date.now, onError = () => {} }) {
@@ -171,6 +196,7 @@ export function createBookingVoiceTick({ db, ledger, voiceStore = createBookingV
           onError(error.code || error.name);
         }
       }
+      await remindUpcomingHosts(guild, ledger, now, onError);
     } finally {
       checking = false;
     }

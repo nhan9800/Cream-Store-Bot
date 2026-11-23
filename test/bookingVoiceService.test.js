@@ -2,7 +2,7 @@ import Database from 'better-sqlite3';
 import { ChannelType, Collection } from 'discord.js';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createBookingVoiceStore, createBookingVoiceTick } from '../src/services/bookingVoiceService.js';
-import { STORE_TWO_GUILD_ID } from '../src/utils/locale.js';
+import { STORE_ONE_GUILD_ID, STORE_TWO_GUILD_ID } from '../src/utils/locale.js';
 
 const start = 1_900_000_000_000;
 const ninety = 90 * 60_000;
@@ -16,7 +16,8 @@ function fixture() {
     starts_at: start, ends_at: start + ninety, duration_minutes: 90, status: 'CONFIRMED' };
   let invoice = { kind: 'BASE', status: 'FREE' };
   const ledger = {
-    listSessions: vi.fn((guildId, { status }) => session.status === status ? [session] : []),
+    listSessions: vi.fn((guildId, { status, dueBefore }) => session.status === status && session.starts_at <= dueBefore ? [session] : []),
+    claimUpcomingHostStart: vi.fn(() => null),
     getSession: vi.fn(() => session), listInvoices: vi.fn(() => [invoice]), syncInvoicePayment: vi.fn(),
     startSession: vi.fn(() => { session.status = 'ACTIVE'; return session; }),
     completeSession: vi.fn(() => { session.status = 'COMPLETED'; return session; }),
@@ -42,6 +43,58 @@ function fixture() {
 afterEach(() => db?.close());
 
 describe('Cenar Booking private voice', () => {
+  it('sends the upcoming reminder privately, before any room or ticket announcement', async () => {
+    const f = fixture();
+    const reminderAt = start - 15 * 60_000;
+    f.setTime(reminderAt);
+    f.ledger.claimUpcomingHostStart.mockReturnValueOnce({ hostId: 'host', startsAt: start });
+    await f.tick();
+    const restarted = f.getTick();
+    await restarted(f.guild, 'category');
+    expect(f.ledger.claimUpcomingHostStart).toHaveBeenCalledWith(STORE_TWO_GUILD_ID, { after: reminderAt, through: start });
+    expect(f.guild.members.fetch.mock.calls).toEqual([[{ user: 'host', force: true }]]);
+    expect(f.host.send).toHaveBeenCalledOnce();
+    const reminder = f.host.send.mock.lastCall[0];
+    expect(reminder.allowedMentions).toEqual({ parse: [] });
+    expect(reminder.components[0].toJSON().components[0].content).toContain(`<t:${Math.floor(start / 1000)}:f>`);
+    expect(f.ticket.send).not.toHaveBeenCalled();
+    expect(f.guild.channels.create).not.toHaveBeenCalled();
+    expect(f.ledger.startSession).not.toHaveBeenCalled();
+  });
+
+  it('caps private pre-start sends within one pass', async () => {
+    const f = fixture();
+    f.setTime(start - 10 * 60_000);
+    let claim = 0;
+    f.ledger.claimUpcomingHostStart.mockImplementation(() => ({ hostId: `host-${++claim}`, startsAt: start }));
+    await f.tick();
+    expect(f.ledger.claimUpcomingHostStart).toHaveBeenCalledTimes(5);
+    expect(f.host.send).toHaveBeenCalledTimes(5);
+    expect(f.ticket.send).not.toHaveBeenCalled();
+  });
+
+  it('reports a blocked DM without repeating the same reminder or falling back to a channel', async () => {
+    const f = fixture();
+    f.setTime(start - 10 * 60_000);
+    f.ledger.claimUpcomingHostStart.mockReturnValueOnce({ hostId: 'host', startsAt: start });
+    f.host.send.mockRejectedValue(new Error('DISCORD_CANNOT_MESSAGE_USER'));
+    await f.tick();
+    await f.getTick()(f.guild, 'category');
+    expect(f.host.send).toHaveBeenCalledOnce();
+    expect(f.error.mock.calls).toEqual([['BOOKING_HOST_PRESTART_DM_UNAVAILABLE']]);
+    expect(f.ticket.send).not.toHaveBeenCalled();
+  });
+
+  it('does not claim a reminder in Store 1 or without voice permissions', async () => {
+    const f = fixture();
+    f.setTime(start - 10 * 60_000);
+    await f.getTick()({ ...f.guild, id: STORE_ONE_GUILD_ID }, 'category');
+    f.guild.members.me.permissions.has = () => false;
+    await f.tick();
+    expect(f.ledger.claimUpcomingHostStart).not.toHaveBeenCalled();
+    expect(f.host.send).not.toHaveBeenCalled();
+  });
+
   it('does not provision an unpaid room', async () => {
     const f = fixture();
     f.setInvoice({ kind: 'BASE', status: 'PENDING', id: 2, order_code: 'ORDER' });

@@ -3,9 +3,11 @@ import { bookingCommunity, isBookingCommunityGuild } from '../events/bookingComm
 import { bookingPortal } from '../services/bookingStoreSetupService.js';
 import { COMMUNITY_GAMES, communityWordPuzzle, playCommunityGame } from '../services/bookingCommunityGames.js';
 import { COMMUNITY_SHOP, MAX_CONNECTIONS, communityDay } from '../services/bookingCommunityService.js';
+import { isWordGridLanguage, WORD_GRID_ATTEMPTS } from '../services/bookingWordGrid.js';
 import {
   communityButton, communityCard, communityCheckInCard, communityColors, communityConnectionsCard,
   communityMissionCard, communityNumber, communityPlayNote, communityProfileCard, communityResetTime, communityShopCard,
+  communityWordGridCard,
 } from '../utils/bookingCommunityViews.js';
 
 export const bookingOnly = true;
@@ -45,6 +47,7 @@ const gameRules = {
   'ba-o': 'Mở ba ô. Bạn thắng nếu cả ba ô hiện cùng một biểu tượng.',
 };
 const wordGames = { 'noi-tu': 'Nối từ', 'doan-tu': 'Đoán từ' };
+const wordGridModes = { 'xep-o-vi': 'vi', 'xep-o-en': 'en' };
 const latestShop = new Map();
 const SHOP_VIEW_TTL_MS = 15 * 60_000;
 const MAX_SHOP_VIEWS = 2000;
@@ -58,7 +61,7 @@ const sections = [
   ['cua-hang', 'Xem và mua vật phẩm cộng đồng bằng điểm'],
   ['mo-qua', 'Nhận một phần quà miễn phí mỗi ngày'],
   ['choi', 'Chơi một trong sáu trò miễn phí'],
-  ['tro-tu', 'Chơi Nối từ hoặc Đoán từ hằng ngày'],
+  ['tro-tu', 'Chơi Nối từ, Đoán từ hoặc Ô chữ hằng ngày'],
   ['ket-noi', 'Chọn tham gia hoặc rời khu kết nối'],
   ['ban-be', 'Xem lời mời và các kết nối của riêng bạn'],
   ['tuong-tac', 'Mời, chấp nhận, tương tác hoặc chăm thú cưng'],
@@ -79,7 +82,10 @@ for (const [name, description] of sections) {
           ['Ngửa', 'ngua'], ['Rút bài', 'rut'], ['Dừng', 'dung'],
         ].map(([name, value]) => ({ name, value }))));
     if (name === 'tro-tu') subcommand.addStringOption(option => option.setName('tro').setDescription('Chọn trò chơi chữ')
-      .addChoices({ name: 'Nối từ', value: 'noi-tu' }, { name: 'Đoán từ', value: 'doan-tu' }).setRequired(true))
+      .addChoices(
+        { name: 'Nối từ', value: 'noi-tu' }, { name: 'Đoán từ', value: 'doan-tu' },
+        { name: 'Ô chữ · Tiếng Việt', value: 'xep-o-vi' }, { name: 'Ô chữ · English', value: 'xep-o-en' },
+      ).setRequired(true))
       .addStringOption(option => option.setName('dap-an').setDescription('Để trống để xem đề').setMaxLength(40));
     if (name === 'ket-noi') subcommand.addBooleanOption(option => option.setName('bat').setDescription('Cho phép lời mời kết nối').setRequired(true));
     if (name === 'tuong-tac') subcommand.addStringOption(option => option.setName('hanh-dong').setDescription('Chọn hành động')
@@ -122,6 +128,29 @@ function viewGift(context, community) {
 function viewMissions(context, community) {
   const result = community.claimDaily(context.owner);
   return communityMissionCard(context, community.profile(context.owner).daily, result);
+}
+
+function viewLeaderboard(context, community) {
+  const board = community.rank();
+  return communityCard(context, { title: 'Bảng xếp hạng XP', color: communityColors.copper, fields: [
+    { body: board.length ? board.map((entry, index) => `**${String(index + 1).padStart(2, '0')}** · <@${entry.user_id}> · **${communityNumber(entry.xp)} XP**`).join('\n')
+      : 'Bảng xếp hạng chưa có kết quả.' },
+  ] });
+}
+
+const communityShortcuts = {
+  checkin: (context, community) => communityCheckInCard(context, community.checkIn(context.owner)),
+  missions: viewMissions,
+  shop: viewShop,
+  leaderboard: viewLeaderboard,
+  'words-vi': (context, community) => communityWordGridCard(context, community.wordGrid(context.owner, 'vi')),
+  'words-en': (context, community) => communityWordGridCard(context, community.wordGrid(context.owner, 'en')),
+};
+
+export async function openBookingCommunityShortcut(interaction, action) {
+  if (!isBookingCommunityGuild(interaction.client, interaction.guildId) || !Object.hasOwn(communityShortcuts, action)) return false;
+  await interaction.reply(communityShortcuts[action](contextFor(interaction), bookingCommunity()));
+  return true;
 }
 
 function gameControls(context, game) {
@@ -197,13 +226,8 @@ export async function execute(interaction) {
       return open(communityCheckInCard(context, community.checkIn(id)));
     case 'nhiem-vu':
       return open(viewMissions(context, community));
-    case 'xep-hang': {
-      const board = community.rank();
-      return show({ title: 'Bảng xếp hạng XP', color: communityColors.copper, fields: [
-        { body: board.length ? board.map((entry, index) => `**${String(index + 1).padStart(2, '0')}** · <@${entry.user_id}> · **${communityNumber(entry.xp)} XP**`).join('\n')
-          : 'Bảng xếp hạng chưa có kết quả.' },
-      ] });
-    }
+    case 'xep-hang':
+      return open(viewLeaderboard(context, community));
     case 'cua-hang': {
       const sku = options.getString('mua');
       const notice = sku ? feedbackFromPurchase(community.buy(id, sku)) : undefined;
@@ -222,8 +246,9 @@ export async function execute(interaction) {
     }
     case 'tro-tu': {
       const game = options.getString('tro', true);
-      if (!Object.hasOwn(wordGames, game)) return show({ title: 'Trò chơi chữ', lead: 'Hãy chọn Nối từ hoặc Đoán từ.' });
       const answer = options.getString('dap-an')?.trim();
+      if (Object.hasOwn(wordGridModes, game)) return open(communityWordGridCard(context, community.wordGrid(id, wordGridModes[game], { answer })));
+      if (!Object.hasOwn(wordGames, game)) return show({ title: 'Trò chơi chữ', lead: 'Hãy chọn một trò trong danh sách.' });
       if (!answer) return open(viewWordPrompt(context, game));
       const result = community.play(id, now => communityWordPuzzle(game, answer, now), game);
       return open(viewWordResult(context, game, result));
@@ -271,6 +296,31 @@ export async function handleBookingCommunityInteraction(interaction) {
   }
   const context = contextFor(interaction);
   const community = bookingCommunity();
+  if (action === 'grid' && isWordGridLanguage(option)) {
+    const match = /^(\d{4}-\d{2}-\d{2})\.(\d)$/u.exec(value ?? '');
+    if (!match || Number(match[2]) >= WORD_GRID_ATTEMPTS) {
+      await reject('Mở `/cenar-cong-dong tro-tu` để lấy đề mới.');
+      return true;
+    }
+    const [, day, tryNumber] = match;
+    const turn = Number(tryNumber);
+    if (interaction.isModalSubmit()) {
+      const answer = interaction.fields.getTextInputValue('answer');
+      await interaction.reply(communityWordGridCard(context, community.wordGrid(owner, option, { answer, day, turn })));
+      return true;
+    }
+    if (interaction.isButton()) {
+      const grid = community.wordGrid(owner, option, { day, turn });
+      if (grid.done || grid.notice === 'stale') {
+        await interaction.update({ ...communityWordGridCard(context, grid), flags: MessageFlags.IsComponentsV2 });
+      } else {
+        await interaction.showModal(new ModalBuilder().setCustomId(interaction.customId).setTitle('Ô chữ Cenar')
+          .addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('answer').setLabel('Từ gồm 5 chữ cái')
+            .setStyle(TextInputStyle.Short).setRequired(true).setMaxLength(30))));
+      }
+      return true;
+    }
+  }
   if (action === 'answer' && Object.hasOwn(wordGames, option)) {
     const today = communityDay(Date.now());
     if (value !== today) {

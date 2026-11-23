@@ -79,9 +79,9 @@ function setupGuild() {
   guild.channels = {
     cache, fetch: async () => new Collection(cache).set(unrepresented.id, null),
     create: vi.fn(async options => channel(options)),
-    setPositions: async positions => {
+    setPositions: vi.fn(async positions => {
       for (const { channel: channelId, position } of positions) cache.get(channelId).rawPosition = position;
-    },
+    }),
   };
   guild.setName = async name => Object.assign(guild, { name });
   client.guilds = { fetch: vi.fn(async () => guild) };
@@ -95,29 +95,41 @@ function setupGuild() {
   support.permissionOverwrites.cache.set(guild.id, {
     id: guild.id, type: 0, allow: { bitfield: 0n }, deny: { bitfield: 1024n },
   });
-  return { client, guild, cache, support, emojis };
+  const oldCommunity = channel({ name: '04 · CỘNG ĐỒNG & VOICE', type: ChannelType.GuildCategory });
+  const oldLobby = channel({ name: 'Sảnh chờ', type: ChannelType.GuildVoice, parent: oldCommunity.id });
+  oldLobby.permissionOverwrites.cache.set(guild.id, {
+    id: guild.id, type: 0, allow: { bitfield: 0n }, deny: { bitfield: 1048576n },
+  });
+  return { client, guild, cache, support, emojis, oldLobby };
 }
 
 describe('Store 2 booking layout', () => {
   it('publishes only from the expected bot and keeps old channel IDs and permissions across repeated runs', async () => {
-    const { client, guild, cache, support } = setupGuild();
+    const { client, guild, cache, support, oldLobby } = setupGuild();
     expect(await setupBookingStore({ ...client, user: { id: 'not-booking-bot' } }, guild.id)).toEqual({ status: 'not_configured' });
     expect(guild.channels.create).not.toHaveBeenCalled();
     const before = [...cache.keys()];
     const result = await setupBookingStore(client, guild.id);
-    expect(result).toMatchObject({ status: 'ready', existingChannelsRetained: before.length + 1, bookingChannels: 9,
-      guidesPinned: 6, forums: 2, customEmoji: 12 });
+    expect(result).toMatchObject({ status: 'ready', revision: 'CENAR-BOOKING-MEMBER-20261123',
+      existingChannelsRetained: before.length + 1, bookingChannels: 11, guidesPinned: 8, forums: 2, customEmoji: 12 });
     expect(bookingStoreSetupStatus(client)).toBe(result);
     expect(guild.name).toBe('Cenar Booking');
     expect(before.every(channelId => cache.has(channelId))).toBe(true);
     expect(support.permissionOverwrites.cache.get(guild.id).deny.bitfield).toBe(1024n);
+    expect(oldLobby.permissionOverwrites.cache.get(guild.id).deny.bitfield).toBe(1048576n);
+    expect(cache.get(oldLobby.parentId).name).toContain('𝐕𝐨𝐢𝐜𝐞');
+    expect(bookingPortal(client).voiceChannels).toContain(oldLobby.id);
+    expect(cache.get(cache.get(bookingPortal(client).games).parentId).name).toContain('𝐆𝐚𝐦𝐞𝐬');
     const directory = cache.find(channel => channel.name === '✰・𝑽𝑰𝑷-𝑷𝑹𝑶𝑭𝑰𝑳𝑬');
     expect(directory.availableTags.map(tag => tag.name)).toEqual(['Nam', 'Nữ', 'Chơi game', 'Trò chuyện']);
     expect(directory.availableTags.every(tag => /^\d+$/.test(tag.emoji.id))).toBe(true);
     const firstChannelCount = cache.size;
+    expect(guild.channels.setPositions).toHaveBeenCalledOnce();
+    for (const channel of cache.values()) channel.rawPosition = channel.rawPosition * 2 + 3;
     await setupBookingStore(client, guild.id);
     expect(cache.size).toBe(firstChannelCount);
-    expect([...cache.values()].reduce((n, channel) => n + channel.send.mock.calls.length, 0)).toBe(6);
+    expect(guild.channels.setPositions).toHaveBeenCalledOnce();
+    expect([...cache.values()].reduce((n, channel) => n + channel.send.mock.calls.length, 0)).toBe(8);
     const ticketCategory = cache.get(bookingPortal(client).tickets);
     expect(ticketCategory.name).toBe('----- ☬ 𝐏𝐡𝐢ế𝐮 𝐁𝐨𝐨𝐤𝐢𝐧𝐠 ☬ ------');
     const creation = guild.channels.create.mock.calls.find(([options]) => options.name === ticketCategory.name)[0];
@@ -125,7 +137,7 @@ describe('Store 2 booking layout', () => {
   });
 
   it('omits missing emoji and opens service-specific booking forms', () => {
-    const channels = Object.fromEntries(['profiles', 'request', 'rules', 'welcome', 'support', 'handbook', 'apply'].map((key, i) => [
+    const channels = Object.fromEntries(['profiles', 'request', 'rules', 'welcome', 'support', 'handbook', 'apply', 'games', 'events'].map((key, i) => [
       key, { id: String(1500000000000000000n + BigInt(i)) },
     ]));
     const panels = bookingPanels(STORE_TWO_GUILD_ID, channels, {});
@@ -134,6 +146,10 @@ describe('Store 2 booking layout', () => {
     expect(game.custom_id).toBe('booking:open:game');
     expect(voice.custom_id).toBe('booking:open:voice');
     expect(game.emoji).toBeUndefined();
+    expect(content.components.flatMap(item => item.components ?? []).map(item => item.custom_id)).toContain('booking:dashboard:hosts');
+    const shortcuts = panels.games.components[0].toJSON().components.flatMap(item => item.components ?? []);
+    expect(shortcuts.map(item => item.custom_id)).toEqual(['words-vi', 'words-en', 'checkin', 'missions', 'shop', 'leaderboard']
+      .map(action => `booking:shortcut:${action}`));
     expect(JSON.stringify(content)).not.toMatch(/\p{Extended_Pictographic}|<a?:\w+:\d+>/u);
     expect(panels.welcome.components[0].toJSON().components[0].items[0]).toMatchObject({
       media: { url: 'attachment://cenar-booking-header.webp' }, description: expect.stringContaining('Cenar Booking'),

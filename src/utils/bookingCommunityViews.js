@@ -3,6 +3,7 @@ import {
   SeparatorBuilder, SeparatorSpacingSize, TextDisplayBuilder,
 } from 'discord.js';
 import { COMMUNITY_SHOP, MAX_CONNECTIONS, communityDay } from '../services/bookingCommunityService.js';
+import { WORD_GRID_ATTEMPTS, WORD_GRID_SIZE } from '../services/bookingWordGrid.js';
 
 export const communityColors = Object.freeze({ indigo: 0x7167db, mint: 0x50c8a2, blue: 0x556ed5, copper: 0xd49b57 });
 export const communityPlayNote = 'Trò chơi miễn phí. Điểm chỉ dùng cho vật phẩm cộng đồng.';
@@ -106,6 +107,36 @@ export function communityMissionCard(context, tasks, result, now) {
     })),
     footnote: `Tiến độ làm mới <t:${communityResetTime(now)}:R>.`,
     buttons: [communityButton(context, 'missions', 'Cập nhật tiến độ')],
+  });
+}
+
+const gridMarks = { exact: '✓', present: '~', absent: '·' };
+const gridNotices = {
+  invalid: 'Hãy nhập từ hoặc cụm từ đủ 5 chữ cái.',
+  duplicate: 'Bạn đã thử từ này. Hãy chọn một từ khác.',
+  stale: 'Lượt đó đã qua. Bảng dưới đây đã cập nhật.',
+};
+
+export function communityWordGridCard(context, grid) {
+  const { language, day, now, rows, won, done, answer, notice, points } = grid;
+  const formatRow = (row, index) => {
+    const cells = row ? [...row.guess.toUpperCase()].map((letter, column) => `${letter}${gridMarks[row.marks[column]]}`).join(' ')
+      : Array(WORD_GRID_SIZE).fill('__').join(' ');
+    return `${index + 1}  ${cells}`;
+  };
+  const board = Array.from({ length: WORD_GRID_ATTEMPTS }, (_, index) => formatRow(rows[index], index)).join('\n');
+  const status = done ? `${won ? '**Đoán đúng!**' : '**Đã hết lượt.**'} Đáp án là **${answer}**.\n**+${communityNumber(points)} điểm** cộng đồng.`
+    : `**${rows.length}/${WORD_GRID_ATTEMPTS} lượt đã dùng** · ${WORD_GRID_SIZE} chữ cái`;
+  return communityCard(context, {
+    title: `Ô chữ Cenar · ${language === 'vi' ? 'Tiếng Việt' : 'English'}`,
+    lead: [gridNotices[notice], status].filter(Boolean).join('\n'),
+    icon: 'game', color: won ? communityColors.mint : done ? communityColors.copper : communityColors.blue,
+    fields: [
+      { body: `\`\`\`\n${board}\n\`\`\`\n\`✓\` Đúng vị trí   \`~\` Sai vị trí   \`·\` Không có` },
+      ...(!done && language === 'vi' ? [{ body: 'Có thể nhập có dấu hoặc không dấu. Khoảng trắng không tính vào 5 chữ cái.' }] : []),
+    ],
+    footnote: `Đề mới <t:${communityResetTime(now)}:R>. ${communityPlayNote}`,
+    buttons: done ? [] : [communityButton(context, `grid:${language}:${day}.${rows.length}`, 'Nhập từ', { style: ButtonStyle.Primary, icon: 'game' })],
   });
 }
 

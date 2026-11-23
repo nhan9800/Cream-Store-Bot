@@ -3,6 +3,7 @@ import { Events, MessageFlags } from 'discord.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { communityWordPuzzle, playCommunityGame } from '../src/services/bookingCommunityGames.js';
 import { communityDay, createBookingCommunityService, MAX_CONNECTIONS } from '../src/services/bookingCommunityService.js';
+import { normalizeWordGridGuess, scoreWordGridGuess, wordGridSolution, WORD_GRID_ATTEMPTS } from '../src/services/bookingWordGrid.js';
 import { STORE_ONE_GUILD_ID, STORE_TWO_GUILD_ID } from '../src/utils/locale.js';
 
 vi.mock('../src/database/db.js', async () => {
@@ -13,7 +14,7 @@ vi.mock('../src/services/bookingStoreSetupService.js', () => ({
   BOOKING_APP_ID: '1139187282075721768',
   bookingPortal: () => ({ chat: 'room', voiceChannels: ['voice'], emoji: { reviews: { id: '1234567890123456789', name: 'cenar_book' } } }),
 }));
-import { data, execute, bookingOnly, handleBookingCommunityInteraction } from '../src/commands/cenar-cong-dong.js';
+import { data, execute, bookingOnly, handleBookingCommunityInteraction, openBookingCommunityShortcut } from '../src/commands/cenar-cong-dong.js';
 import { bookingCommunity, eligibleVoiceMembers, registerBookingCommunity } from '../src/events/bookingCommunityEvents.js';
 import { communityCheckInCard, communityMissionCard } from '../src/utils/bookingCommunityViews.js';
 
@@ -92,6 +93,44 @@ describe('Cenar Booking community persistence', () => {
     expect(service.play(first, moon, 'doan-tu').status).toBe('played');
     time += 60_000;
     expect(service.play(first, moon, 'noi-tu').status).toBe('played');
+  });
+
+  it('preserves attempts across restarts and awards each language at most once', () => {
+    const day = communityDay(time);
+    const answer = wordGridSolution('vi', day);
+    const guess = ['aaaaa', 'zzzzz'].find(value => value !== normalizeWordGridGuess(answer, 'vi'));
+    expect(service.wordGrid(first, 'vi')).not.toHaveProperty('answer');
+    expect(service.wordGrid(first, 'vi', { answer: 'quá ngắn!' })).toMatchObject({ notice: 'invalid', rows: [] });
+    expect(service.wordGrid(first, 'vi', { answer: guess, day, turn: 0 })).toMatchObject({ done: false, rows: [{ guess }] });
+    service = createBookingCommunityService(database, { clock: () => time });
+    expect(service.wordGrid(first, 'vi', { answer, day, turn: 0 })).toMatchObject({ notice: 'stale', done: false, rows: [{ guess }] });
+    expect(service.wordGrid(first, 'vi', { answer: guess, day, turn: 1 })).toMatchObject({ notice: 'duplicate', rows: [{ guess }] });
+    expect(service.wordGrid(first, 'vi', { answer, day, turn: 1 })).toMatchObject({ answer, won: true, done: true, points: 4 });
+    expect(service.wordGrid(first, 'vi', { answer, day, turn: 1 })).toMatchObject({ notice: 'stale', done: true, points: 4 });
+    expect(service.wordGrid(first, 'en')).toMatchObject({ rows: [] });
+    expect(service.wordGrid(second, 'vi')).toMatchObject({ rows: [] });
+    expect(service.profile(first).points).toBe(4);
+    time += 60_000;
+    expect(service.wordGrid(first, 'vi', { answer, day, turn: 2 })).toMatchObject({ notice: 'stale', done: false, rows: [] });
+  });
+
+  it('ends the grid after six valid guesses and shares the existing game reward cap', () => {
+    time += 60_000;
+    const win = () => ({ won: true });
+    for (let index = 0; index < 6; index += 1) {
+      expect(service.play(first, win).points).toBe(4);
+      time += 10_000;
+    }
+    const answer = wordGridSolution('en', communityDay(time));
+    expect(service.wordGrid(first, 'en', { answer })).toMatchObject({ done: true, won: true, points: 0 });
+    expect(service.profile(first).points).toBe(24);
+    const guesses = ['zzzzz', 'aaaaa', 'ooooo', 'uuuuu', 'ttttt', 'rrrrr'];
+    let grid;
+    for (const guess of guesses) grid = service.wordGrid(second, 'en', { answer: guess });
+    expect(grid).toMatchObject({ done: true, won: false, answer, points: 1 });
+    expect(grid.rows).toHaveLength(WORD_GRID_ATTEMPTS);
+    expect(service.wordGrid(second, 'en', { answer }).rows).toHaveLength(WORD_GRID_ATTEMPTS);
+    expect(service.profile(second).points).toBe(1);
   });
 
   it('keeps purchases and giveaways virtual, durable and bounded by the balance', () => {
@@ -185,6 +224,18 @@ describe('Cenar Booking community Discord surface', () => {
     expect(communityWordPuzzle('doan-tu', '', baseTime).prompt).toContain('chữ cái');
   });
 
+  it('scores exact matches first and never counts a repeated letter more than the answer allows', () => {
+    expect(scoreWordGridGuess('apple', 'poppy')).toEqual(['present', 'absent', 'exact', 'absent', 'absent']);
+    expect(normalizeWordGridGuess(' ĐẬU ĐỎ ', 'vi')).toBe('daudo');
+    expect(normalizeWordGridGuess(' ĐẬU ĐỎ ', 'en')).toBeNull();
+    for (const language of ['vi', 'en']) {
+      for (let index = 0; index < 31; index += 1) {
+        const day = communityDay(baseTime + index * dayMs);
+        expect(normalizeWordGridGuess(wordGridSolution(language, day), language)).toMatch(/^[a-z]{5}$/u);
+      }
+    }
+  });
+
   it('credits only eligible humans with a human peer within configured community voice', () => {
     const make = (id, channelId, { bot = false, deaf = false } = {}) => ({ id, channelId, deaf, member: { user: { id, bot } } });
     const states = [make('a', 'voice'), make('b', 'voice'), make('c', 'voice', { deaf: true }),
@@ -265,6 +316,42 @@ describe('Cenar Booking community Discord surface', () => {
     await handleBookingCommunityInteraction(answer);
     expect(answer.showModal.mock.lastCall[0].toJSON()).toMatchObject({ custom_id: answerAction.custom_id, title: 'Nối từ' });
     expect(answer.update).not.toHaveBeenCalled();
+  });
+
+  it('opens the private word grid via the public shortcut and guards stale or duplicate Discord submissions', async () => {
+    const player = memberId(95);
+    const shortcut = makeButton(player, memberId(920), 'booking:dashboard:words-en');
+    expect(await openBookingCommunityShortcut(shortcut, 'unknown')).toBe(false);
+    expect(await openBookingCommunityShortcut({ ...shortcut, guildId: STORE_ONE_GUILD_ID }, 'words-en')).toBe(false);
+    expect(shortcut.reply).not.toHaveBeenCalled();
+    expect(await openBookingCommunityShortcut(shortcut, 'words-en')).toBe(true);
+    const [card] = shortcut.reply.mock.lastCall;
+    expect(card.flags & MessageFlags.Ephemeral).toBeTruthy();
+    expect(tree(card)[0].content).toContain('Ô chữ Cenar · English');
+    const field = tree(card).find(component => component.content?.includes('Đúng vị trí')).content;
+    expect(field).toContain('6  __ __ __ __ __');
+    const guessButton = tree(card).at(-1).components[0];
+    const outsider = makeButton(memberId(96), memberId(921), guessButton.custom_id);
+    await handleBookingCommunityInteraction(outsider);
+    expect(outsider.showModal).not.toHaveBeenCalled();
+    const own = makeButton(player, memberId(922), guessButton.custom_id);
+    await handleBookingCommunityInteraction(own);
+    expect(own.showModal.mock.lastCall[0].toJSON()).toMatchObject({ custom_id: guessButton.custom_id, title: 'Ô chữ Cenar' });
+
+    const makeModal = (id, guess) => ({ ...makeButton(player, memberId(id), guessButton.custom_id),
+      isButton: () => false, isModalSubmit: () => true, fields: { getTextInputValue: () => guess } });
+    const firstAttempt = makeModal(923, 'zzzzz');
+    const duplicate = makeModal(924, 'xxxxx');
+    await Promise.all([handleBookingCommunityInteraction(firstAttempt), handleBookingCommunityInteraction(duplicate)]);
+    expect(tree(firstAttempt.reply.mock.lastCall[0]).find(component => component.content?.includes('Đúng vị trí')).content).toContain('1  Z·');
+    expect(tree(duplicate.reply.mock.lastCall[0])[0].content).toContain('1/6 lượt đã dùng');
+    expect(tree(duplicate.reply.mock.lastCall[0])[0].content).toContain('đã cập nhật');
+    expect(bookingCommunity().wordGrid(player, 'en').rows).toHaveLength(1);
+
+    const viaSlash = makeSlash(player, memberId(925), 'tro-tu', { tro: 'xep-o-vi', 'dap-an': 'zzzzz' });
+    await execute(viaSlash);
+    expect(tree(viaSlash.reply.mock.lastCall[0])[0].content).toContain('Ô chữ Cenar · Tiếng Việt');
+    expect(tree(viaSlash.reply.mock.lastCall[0])[0].content).toContain('1/6 lượt đã dùng');
   });
 
   it('registers once and awards text XP only in the intended guild, bot and channel', () => {
