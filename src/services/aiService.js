@@ -388,8 +388,10 @@ export async function requestAiCompletion(input, { timeoutMs = 20_000 } = {}) {
   const deadline = Date.now() + timeoutMs;
   let lastError = null;
   for (const provider of providers) {
-    if (Date.now() >= deadline) break;
-    const signal = AbortSignal.timeout(Math.max(1, Math.min(10_000, deadline - Date.now())));
+    const remaining = deadline - Date.now();
+    if (remaining <= 0) break;
+    const attemptDuration = Math.min(10_000, remaining);
+    const signal = AbortSignal.timeout(attemptDuration);
     try {
       const result = provider === 'groq' ? await requestGroq({ ...input, signal }) : await requestGemini({ ...input, signal });
       if (!String(result.content || '').trim() && !result.toolCall) throw new Error('EMPTY_AI_RESPONSE');
@@ -397,6 +399,8 @@ export async function requestAiCompletion(input, { timeoutMs = 20_000 } = {}) {
     } catch (error) {
       lastError = error;
       console.error(`[AI ${provider.toUpperCase()}]`, { code: error?.status || error?.name || 'REQUEST_FAILED' });
+      // A provider given the entire remaining budget used it when this timer fired.
+      if (signal.aborted && attemptDuration === remaining) break;
     }
   }
   throw lastError || new Error('Chưa cấu hình nhà cung cấp AI.');

@@ -52,7 +52,10 @@ export function createBookingReceiptService(db, { now = Date.now } = {}) {
     const order = invoice.order_id === null ? null : db.prepare(`SELECT id, guild_id, ticket_id, ticket_channel_id,
       customer_id, total_amount, payment_provider, payos_order_code, order_code, status, payment_status,
       amount_paid, payment_link_id, paid_transaction_id FROM orders WHERE id = ?`).get(invoice.order_id);
-    const status = receiptStatus(db, order, invoice, session, now());
+    const hasAutoReservations = invoice.kind === 'BASE'
+      && db.prepare("SELECT 1 FROM sqlite_schema WHERE type='table' AND name='booking_auto_reservations'").get();
+    const autoCheckout = hasAutoReservations && db.prepare('SELECT checkout_expires_at FROM booking_auto_reservations WHERE ticket_id=?').get(ticketId);
+    const status = receiptStatus(db, order, { ...invoice, checkout_expires_at: autoCheckout?.checkout_expires_at }, session, now());
     const bound = isBoundBookingOrder(order, invoice, session);
     return {
       kind: 'BOOKING', status, code: bound && /^[A-Za-z0-9_-]{1,60}$/u.test(order.order_code) ? order.order_code : `BK-${invoice.id}`,

@@ -123,6 +123,17 @@ describe('Cenar Booking receipt evidence', () => {
     expect(get(2)).toMatchObject({ status: 'EXPIRED', paidAt: null });
   });
 
+  it('shows an expired self-service hold before the original session starts', () => {
+    addBooking(1);
+    db.prepare(`INSERT INTO booking_auto_slots(id,guild_id,host_id,service,starts_at,duration_minutes,
+      hourly_price,hourly_wage,created_by_id,created_at) VALUES (1,?,?,'voice',?,60,90000,0,?,?)`)
+      .run(guildId, hostId, startsAt, managerId, now);
+    db.prepare('INSERT INTO booking_auto_reservations VALUES (1,1,?,?,?)').run(channelFor(20), now + 30_000, now);
+    expect(get(1)).toMatchObject({ status: 'PENDING' });
+    now += 30_000;
+    expect(get(1)).toMatchObject({ status: 'EXPIRED' });
+  });
+
   it('offers presentation-only examples for all four kinds and rejects unknown kinds', () => {
     for (const kind of ['BOOKING', 'DEPOSIT', 'DONATION', 'REFUND']) {
       expect(bookingReceiptPreview(kind)).toMatchObject({ kind, code: expect.stringMatching(/^MAU-/u), status: 'PREVIEW',
