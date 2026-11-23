@@ -25,16 +25,19 @@ export function playCommunityGame(id, choice, draw = randomInt) {
     const dice = Array.from({ length: 3 }, () => draw(6) + 1);
     const total = dice.reduce((a, b) => a + b, 0);
     const side = total >= 11 ? 'cao' : 'thap';
-    return { description: `Xúc xắc **${dice.join(' + ')} = ${total}** · ${side === 'cao' ? 'Cao' : 'Thấp'}`, won: choice === side };
+    return { description: `Xúc xắc **${dice.join(' + ')} = ${total}** · ${side === 'cao' ? 'Cao' : 'Thấp'}`, won: choice === side,
+      display: [{ label: 'Ba viên xúc xắc', body: `${dice.map(value => `\` ${value} \``).join('  ')}\nTổng **${total}** · ${side === 'cao' ? 'Cao' : 'Thấp'}` }] };
   }
   if (id === 'hai-cua') {
     const sand = draw(10) + 1;
     const sea = draw(10) + 1;
-    return { description: `Cát **${sand}** · Biển **${sea}**${sand === sea ? ' · Hòa' : ''}`, won: choice === (sand > sea ? 'cat' : sea > sand ? 'bien' : null) };
+    return { description: `Cát **${sand}** · Biển **${sea}**${sand === sea ? ' · Hòa' : ''}`, won: choice === (sand > sea ? 'cat' : sea > sand ? 'bien' : null),
+      display: [{ label: 'Điểm hai cửa', body: `**Cát** \` ${sand} \`   **Biển** \` ${sea} \`${sand === sea ? '\nHai cửa hòa.' : ''}` }], tied: sand === sea };
   }
   if (id === 'tung-xu') {
     const side = draw(2) ? 'ngua' : 'sap';
-    return { description: `Đồng xu rơi **${side === 'ngua' ? 'mặt ngửa' : 'mặt sấp'}**.`, won: choice === side };
+    return { description: `Đồng xu rơi **${side === 'ngua' ? 'mặt ngửa' : 'mặt sấp'}**.`, won: choice === side,
+      display: [{ label: 'Đồng xu', body: side === 'ngua' ? '**Mặt ngửa**' : '**Mặt sấp**' }] };
   }
   if (id === 'bai-21') {
     const card = () => draw(13) + 1;
@@ -45,16 +48,21 @@ export function playCommunityGame(id, choice, draw = randomInt) {
     const playerTotal = handTotal(mine);
     const dealerTotal = handTotal(dealer);
     const won = playerTotal <= 21 && (dealerTotal > 21 || playerTotal > dealerTotal);
-    return { description: `Bạn **${playerTotal}** điểm · Bot **${dealerTotal}** điểm${playerTotal === dealerTotal ? ' · Hòa' : ''}`, won };
+    const ranks = hand => hand.map(rank => `\` ${['A', '2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K'][rank - 1]} \``).join(' ');
+    return { description: `Bạn **${playerTotal}** điểm · Bot **${dealerTotal}** điểm${playerTotal === dealerTotal ? ' · Hòa' : ''}`, won,
+      display: [{ label: `Bài của bạn · ${playerTotal} điểm`, body: ranks(mine) },
+        { label: `Bài của bot · ${dealerTotal} điểm`, body: ranks(dealer) }], tied: playerTotal === dealerTotal && playerTotal <= 21 };
   }
   if (id === 'cau-ca') {
     const catches = ['Cá bống', 'Cá rô', 'Cá chép', 'Rong biển', 'Móc câu trống'];
     const it = draw(catches.length);
-    return { description: `Bạn kéo lên **${catches[it]}**.`, won: it < 3 };
+    return { description: `Bạn kéo lên **${catches[it]}**.`, won: it < 3,
+      display: [{ label: 'Mẻ câu', body: `**${catches[it]}**` }] };
   }
   const symbols = ['Sao', 'Trăng', 'Mây'];
   const stop = Array.from({ length: 3 }, () => draw(symbols.length));
-  return { description: `**${stop.map(symbol => symbols[symbol]).join(' · ')}**`, won: stop.every(symbol => symbol === stop[0]) };
+  return { description: `**${stop.map(symbol => symbols[symbol]).join(' · ')}**`, won: stop.every(symbol => symbol === stop[0]),
+    display: [{ label: 'Ba ô kết quả', body: stop.map(symbol => `\` ${symbols[symbol]} \``).join('  ') }] };
 }
 
 const wordChains = [

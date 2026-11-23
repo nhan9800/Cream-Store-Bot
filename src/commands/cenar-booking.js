@@ -8,7 +8,9 @@ import { getGuildConfig } from '../services/guildConfigService.js';
 import { getTicketByChannelId } from '../services/ticketService.js';
 import { createBookingVoiceStore } from '../services/bookingVoiceService.js';
 import { STORE_TWO_GUILD_ID } from '../utils/locale.js';
+import { bookingScheduleCard } from '../utils/bookingPortalViews.js';
 import { isManager, isSupport } from '../utils/permissions.js';
+import { addBookingTicketSection, bookingTicketCard, bookingTicketPayload, buildBookingBillReview, buildBookingFreeQuote } from '../utils/bookingTicketUi.js';
 
 export const bookingOnly = true;
 
@@ -91,7 +93,7 @@ export async function execute(interaction) {
   const operation = interaction.options.getSubcommand();
   const ledger = createBookingLedger(db);
   if (operation === 'lich') {
-    await interaction.editReply(ledgerCard('Lịch của bạn', showSessions(ledger, guildId, actorId), portal.emoji.calendar));
+    await interaction.editReply(bookingScheduleCard(guildId, portal, showSessions(ledger, guildId, actorId)));
     return;
   }
   const member = await interaction.guild.members.fetch({ user: actorId, force: true });
@@ -125,7 +127,11 @@ export async function execute(interaction) {
     if (operation === 'bao-cao') {
       if (!isManager(member, roles)) { await interaction.editReply('Báo cáo lương chỉ hiển thị cho quản lý.'); return; }
       const { getBookingReport } = await import('../services/bookingReportService.js');
-      await interaction.editReply(ledgerCard('Báo cáo booking · 7 ngày', getBookingReport(ledger), portal.emoji.calendar));
+      const [summary, amounts, ...hosts] = getBookingReport(ledger);
+      const report = bookingTicketCard({ section: 'BÁO CÁO QUẢN LÝ', title: 'Kết quả 7 ngày', subtitle: summary, emoji: portal.emoji.calendar });
+      addBookingTicketSection(report, `### Doanh thu và tiền công\n${amounts}`);
+      if (hosts.length) addBookingTicketSection(report, `### Theo host\n${hosts.join('\n\n')}`);
+      await interaction.editReply(bookingTicketPayload(report));
       return;
     }
     const ticket = requirePrivateTicket(interaction);
@@ -155,9 +161,7 @@ export async function execute(interaction) {
     const { quoteBooking, syncBookingBills } = await import('../services/bookingPaymentService.js');
     if (operation === 'kiem-tra-bill') {
       const items = await syncBookingBills({ interaction, ledger, ticketId });
-      const labels = { FREE: 'Miễn phí', PAID: 'Đã đối soát PayOS', PENDING: 'Chưa xác nhận', NEEDS_REVIEW: 'Cần đối soát với quản lý' };
-      await interaction.editReply(ledgerCard('Đối chiếu hóa đơn', items.length ? items.slice(-12).map(i =>
-        `**${i.kind === 'BASE' ? 'Phiên gốc' : 'Gia hạn'}** · ${labels[i.status] || 'Đang kiểm tra'}`) : ['Chưa có báo giá.'], portal.emoji.calendar));
+      await interaction.editReply(buildBookingBillReview(items, ticket.ticket_code, portal.emoji.calendar));
       return;
     }
     const extending = operation === 'gia-han';
@@ -166,9 +170,7 @@ export async function execute(interaction) {
       durationMinutes: extending ? interaction.options.getInteger('phut', true) : null,
     });
     if (invoice.status === 'FREE') {
-      await interaction.channel.send(ledgerCard(extending ? 'Đã gia hạn phiên' : 'Báo giá booking', [
-        '**Phiên miễn phí** · 0đ', 'Bot mở phòng riêng khi đến giờ nếu máy chủ đã cấp quyền cần thiết.',
-      ], portal.emoji.calendar));
+      await interaction.channel.send(buildBookingFreeQuote(invoice, ticket.ticket_code, portal.emoji.calendar));
     }
     await interaction.editReply('Đã cập nhật báo giá trong phiếu.');
   } catch (error) {

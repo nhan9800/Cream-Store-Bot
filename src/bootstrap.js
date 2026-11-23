@@ -350,6 +350,9 @@ export async function buildClient() {
             const guild = readyClient.guilds.cache.get(STORE_TWO_GUILD_ID);
             const run = () => { void tick(guild, portal.voiceCategory).catch(error => console.warn('[BOOKING-VOICE]', error.code || error.name)); };
             registerBookingCommunity(readyClient);
+            const { refreshPublishedBookingProfileLayouts } = await import('./services/bookingProfilePublication.js');
+            const refresh = await refreshPublishedBookingProfileLayouts({ guild, portal, db: db }).catch(error => ({ failed: [error.code || error.name] }));
+            console.log(`[BOOKING-PROFILES] updated=${refresh.updated || 0} skipped=${refresh.skipped || 0} failed=${refresh.failed?.length || 0}`);
             run();
             setInterval(run, 30_000).unref();
             markBookingOperationsReady(readyClient, {

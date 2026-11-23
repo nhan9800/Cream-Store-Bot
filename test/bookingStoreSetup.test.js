@@ -59,11 +59,15 @@ function setupGuild() {
       }),
       messages: { fetch: async () => messages },
       send: vi.fn(async payload => {
+        const attachments = new Collection((payload.files ?? []).map(file => [file.name, { id: id(), name: file.name }]));
         const message = {
-          ...payload, id: id(), author: client.user, attachments: new Collection(),
+          ...payload, id: id(), author: client.user, attachments,
           pinned: false, flags: new Set([MessageFlags.IsComponentsV2]),
           pin: async () => Object.assign(message, { pinned: true }),
-          edit: vi.fn(async value => Object.assign(message, { components: value.components })),
+          edit: vi.fn(async value => {
+            for (const file of value.files ?? []) attachments.set(file.name, { id: id(), name: file.name });
+            return Object.assign(message, { components: value.components });
+          }),
         };
         messages.set(message.id, message);
         return message;
@@ -121,16 +125,20 @@ describe('Store 2 booking layout', () => {
   });
 
   it('omits missing emoji and opens service-specific booking forms', () => {
-    const channels = Object.fromEntries(['profiles', 'request', 'rules', 'welcome', 'support', 'handbook'].map((key, i) => [
+    const channels = Object.fromEntries(['profiles', 'request', 'rules', 'welcome', 'support', 'handbook', 'apply'].map((key, i) => [
       key, { id: String(1500000000000000000n + BigInt(i)) },
     ]));
     const panels = bookingPanels(STORE_TWO_GUILD_ID, channels, {});
     const content = panels.request.components[0].toJSON();
-    const [game, voice] = content.components.find(item => item.type === 1).components;
+    const [game, voice] = content.components.filter(item => item.type === 9).map(item => item.accessory);
     expect(game.custom_id).toBe('booking:open:game');
     expect(voice.custom_id).toBe('booking:open:voice');
     expect(game.emoji).toBeUndefined();
     expect(JSON.stringify(content)).not.toMatch(/\p{Extended_Pictographic}|<a?:\w+:\d+>/u);
+    expect(panels.welcome.components[0].toJSON().components[0].items[0]).toMatchObject({
+      media: { url: 'attachment://cenar-booking-header.webp' }, description: expect.stringContaining('Cenar Booking'),
+    });
+    expect(fs.statSync(panels.welcome.files[0].attachment).size).toBeLessThan(100_000);
   });
 
   it('styles previously published panels and forum tags using available server emoji on a full server', async () => {
@@ -170,5 +178,23 @@ describe('Store 2 booking layout', () => {
     expect(message.pinned).toBe(true);
     expect(message.edit).toHaveBeenCalledTimes(1);
     expect(request.send).toHaveBeenCalledTimes(1);
+  });
+
+  it('repairs a missing banner once and accepts the resolved Discord attachment URL', async () => {
+    const { client, guild, cache } = setupGuild();
+    await setupBookingStore(client, guild.id);
+    const welcome = cache.get('1514604934245384233');
+    const message = (await welcome.messages.fetch()).first();
+    const content = message.components.map(component => component.toJSON());
+    content[0].components[0].items[0].media.url = `https://cdn.discordapp.com/attachments/${welcome.id}/${message.id}/cenar-booking-header.webp?ex=fixture`;
+    message.components = content;
+    await setupBookingStore(client, guild.id);
+    expect(message.edit).not.toHaveBeenCalled();
+    message.attachments.clear();
+    await setupBookingStore(client, guild.id);
+    expect(message.edit).toHaveBeenCalledWith(expect.objectContaining({ files: [expect.objectContaining({ name: 'cenar-booking-header.webp' })] }));
+    await setupBookingStore(client, guild.id);
+    expect(message.edit).toHaveBeenCalledTimes(1);
+    expect(welcome.send).toHaveBeenCalledTimes(1);
   });
 });

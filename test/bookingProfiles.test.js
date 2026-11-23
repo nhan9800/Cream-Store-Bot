@@ -2,7 +2,8 @@ import Database from 'better-sqlite3';
 import { ChannelType, MessageFlags } from 'discord.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { bookingProfileTemplate, createBookingProfileService } from '../src/services/bookingProfileService.js';
-import { buildBookingProfilePost, publishBookingHost, unpublishBookingHost } from '../src/services/bookingProfilePublication.js';
+import { buildBookingProfilePost, buildBookingReviewPost, publishBookingHost, refreshPublishedBookingProfileLayouts,
+  unpublishBookingHost } from '../src/services/bookingProfilePublication.js';
 import { STORE_TWO_GUILD_ID } from '../src/utils/locale.js';
 
 const validDraft = { name: 'Ánh <@123>', tagline: 'Chơi vui & lịch sự', games: 'Valorant', availability: '21–23h', service: 'game', consent: true };
@@ -12,7 +13,7 @@ function forumFixture() {
   const threads = new Map();
   const starter = { author: { id: 'bot' }, edit: vi.fn() };
   const makeThread = (name, appliedTags) => ({
-    id: 'threadId', ownerId: 'bot', parentId: 'forumId', name, archived: false, appliedTags,
+    id: 'threadId', type: ChannelType.PublicThread, ownerId: 'bot', parentId: 'forumId', name, archived: false, appliedTags,
     fetchStarterMessage: async () => starter,
   });
   const forum = {
@@ -94,14 +95,37 @@ describe('Cenar host profiles and completed booking reviews', () => {
     const profile = profiles.approve('host', 1);
     profiles.setTemplate('Cenar · Thẻ host', '#685acd');
     expect(() => profiles.setTemplate('Cenar', 'blue')).toThrow(/dạng/);
-    const payload = await buildBookingProfilePost(profile, { count: 1, average: 5 }, profiles.getTemplate(), {});
+    const bookingChannel = '1573607352555405365';
+    const reviewChannel = '1573607355235434537';
+    const payload = await buildBookingProfilePost(profile, { count: 1, average: 5 }, profiles.getTemplate(), {},
+      { guildId: STORE_TWO_GUILD_ID, request: bookingChannel, reviews: reviewChannel });
     const card = payload.components[0].toJSON();
     expect(card.accent_color).toBe(0x685acd);
     expect(payload.flags).toBe(MessageFlags.IsComponentsV2);
     expect(payload.allowedMentions.parse).toEqual([]);
     expect(JSON.stringify(card)).not.toContain('<@123>');
     expect(JSON.stringify(card)).toContain('5/5');
+    expect(card.components.at(-1).components.map(button => [button.label, button.url])).toEqual([
+      ['Đặt lịch', `https://discord.com/channels/${STORE_TWO_GUILD_ID}/${bookingChannel}`],
+      ['Xem đánh giá', `https://discord.com/channels/${STORE_TWO_GUILD_ID}/${reviewChannel}`],
+    ]);
     expect(payload.files[0].attachment.subarray(1, 4).toString()).toBe('PNG');
+    expect(payload.files[0].attachment.readUInt32BE(16)).toBe(960);
+    expect(payload.files[0].attachment.readUInt32BE(20)).toBe(384);
+  });
+
+  it('shows a published review and profile link without rendering private identities', () => {
+    const privateCustomer = '1555111888222666333';
+    const forumThread = '1573607342555405365';
+    const review = { ...session, customer_id: privateCustomer, rating: 4, feedback: 'Cùng chơi tốt <@1555111888222666333>' };
+    const payload = buildBookingReviewPost(review, { profile_number: 7, forum_thread_id: forumThread }, {}, STORE_TWO_GUILD_ID);
+    const card = payload.components[0].toJSON();
+    expect(card.components[0].content).toContain('ĐÁNH GIÁ ẨN DANH');
+    expect(card.components[0].content).toContain('4/5');
+    expect(card.components[0].content).toContain('#0007');
+    expect(JSON.stringify(card)).not.toContain(privateCustomer);
+    expect(payload.allowedMentions.parse).toEqual([]);
+    expect(card.components.at(-1).components[0].url).toBe(`https://discord.com/channels/${STORE_TWO_GUILD_ID}/${forumThread}`);
   });
 
   it('reuses a bot-owned thread after a lost acknowledgement and strips attachments when hidden', async () => {
@@ -127,6 +151,26 @@ describe('Cenar host profiles and completed booking reviews', () => {
     const unrelated = await forum.threads.create({ name: 'Bài đăng khác', appliedTags: [] });
     await expect(publishBookingHost({ guild, portal, profile: { ...profile, forum_thread_id: unrelated.id },
       rating: { count: 0 }, template: bookingProfileTemplate })).rejects.toThrow(/liên kết hoặc tiêu đề/);
+    expect(forum.threads.create).toHaveBeenCalledTimes(1);
+  });
+
+  it('refreshes an old layout in place and skips current or archived posts', async () => {
+    const { guild, forum, portal, starter } = forumFixture();
+    profiles.saveDraft('host', validDraft);
+    const profile = profiles.approve('host', 1);
+    const thread = await publishBookingHost({ guild, portal, profile, rating: { count: 0 }, template: bookingProfileTemplate });
+    profiles.setHostThread('host', thread.id);
+    const args = { guild, portal: { ...portal, reviews: 'reviewsId' }, db };
+    thread.archived = true;
+    expect(await refreshPublishedBookingProfileLayouts(args)).toEqual({ updated: 0, skipped: 1, failed: 0 });
+    expect(starter.edit).not.toHaveBeenCalled();
+    thread.archived = false;
+    expect(await refreshPublishedBookingProfileLayouts(args)).toEqual({ updated: 1, skipped: 0, failed: 0 });
+    const [update] = starter.edit.mock.lastCall;
+    expect(update.attachments).toEqual([]);
+    starter.components = update.components.map(component => component.toJSON());
+    expect(await refreshPublishedBookingProfileLayouts(args)).toEqual({ updated: 0, skipped: 1, failed: 0 });
+    expect(starter.edit).toHaveBeenCalledTimes(1);
     expect(forum.threads.create).toHaveBeenCalledTimes(1);
   });
 });

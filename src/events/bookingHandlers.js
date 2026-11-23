@@ -1,6 +1,6 @@
 import {
-  ActionRowBuilder, ButtonBuilder, ButtonStyle, ContainerBuilder, escapeMarkdown,
-  MessageFlags, ModalBuilder, SeparatorBuilder, TextDisplayBuilder, TextInputBuilder, TextInputStyle,
+  ActionRowBuilder, ButtonBuilder, ButtonStyle, escapeMarkdown,
+  MessageFlags, ModalBuilder, TextInputBuilder, TextInputStyle,
 } from 'discord.js';
 import { bookingPortal, BOOKING_APP_ID } from '../services/bookingStoreSetupService.js';
 import { db } from '../database/db.js';
@@ -9,6 +9,8 @@ import { getGuildConfig } from '../services/guildConfigService.js';
 import { getTicketByChannelId } from '../services/ticketService.js';
 import { STORE_TWO_GUILD_ID } from '../utils/locale.js';
 import { isSupport } from '../utils/permissions.js';
+import { bookingHelpCard, bookingScheduleCard } from '../utils/bookingPortalViews.js';
+import { addBookingTicketSection, bookingTicketCard } from '../utils/bookingTicketUi.js';
 import { safeReply } from './shared.js';
 import { handleTicketCreate } from './ticketHandlers.js';
 
@@ -76,23 +78,24 @@ function stateButtons(ticketId, emoji, actions) {
 }
 
 function bookingReceipt(ticket, service, details, emoji, schedule) {
-  const artwork = emoji[service];
-  const titleIcon = artwork ? `<${artwork.animated ? 'a' : ''}:${artwork.name}:${artwork.id}> ` : '';
   const isApply = service === 'apply';
-  const container = new ContainerBuilder().setAccentColor(isApply ? 0xbf6c8e : 0x556ed5)
-    .addTextDisplayComponents(new TextDisplayBuilder().setContent(`## ${titleIcon}${bookingServices[service]}\nMã phiếu \`${ticket.ticket_code}\``))
-    .addSeparatorComponents(new SeparatorBuilder())
-    .addTextDisplayComponents(new TextDisplayBuilder().setContent(details))
-    .addSeparatorComponents(new SeparatorBuilder())
-    .addTextDisplayComponents(new TextDisplayBuilder().setContent(isApply
-      ? 'Staff sẽ liên hệ trong phiếu này để duyệt hồ sơ.'
-      : '### Trạng thái\nChờ xác nhận\n-# Staff xác nhận sau khi hai bên chốt host, giờ và chi phí.'));
+  const container = bookingTicketCard({
+    section: isApply ? 'TUYỂN HOST' : 'PHIẾU RIÊNG', title: bookingServices[service],
+    subtitle: `Mã phiếu \`${ticket.ticket_code}\``, emoji: emoji[service],
+  });
+  if (schedule) {
+    const start = Math.floor(schedule.startsAt / 1000);
+    addBookingTicketSection(container,
+      `### Khung giờ đề xuất\n<t:${start}:F> · <t:${start}:R>\n**Thời lượng** · ${schedule.durationMinutes} phút`);
+  }
+  addBookingTicketSection(container, `${isApply ? '### Hồ sơ ứng tuyển' : '### Yêu cầu của bạn'}\n${details}`);
+  addBookingTicketSection(container, isApply
+    ? '### Trạng thái\n**Chờ duyệt hồ sơ**\nStaff sẽ trao đổi với bạn trong phiếu này.'
+    : '### Trạng thái\nChờ xác nhận\nStaff sẽ trao đổi để chốt host, giờ và chi phí.');
   if (!isApply && !schedule) container.addActionRowComponents(stateButtons(ticket.id, emoji, ['confirm', 'decline']));
   if (schedule) {
     createBookingLedger(db).createSession({ guildId: ticket.guild_id, ticketId: ticket.id, service, ...schedule });
-    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
-      '**Theo dõi phiên**\nDùng `/cenar-booking lich` để xem lịch của bạn. Staff dùng `/cenar-booking phan-host` rồi `/cenar-booking bao-gia` trong phiếu này.',
-    ));
+    addBookingTicketSection(container, '**Theo dõi phiên**\nDùng `/cenar-booking lich` để xem lịch của bạn.');
   }
   return { container, flags: MessageFlags.IsComponentsV2 };
 }
@@ -190,8 +193,33 @@ export async function handleBookingInteraction(interaction) {
     return true;
   }
   const [, operation, value, id] = interaction.customId.split(':');
+  if (operation === 'community') {
+    const { handleBookingCommunityInteraction } = await import('../commands/cenar-cong-dong.js');
+    return handleBookingCommunityInteraction(interaction);
+  }
+  const guideChannel = interaction.channelId === portal.request || interaction.channelId === portal.handbook;
+  if (operation === 'guide' && value === 'topic' && guideChannel && interaction.isStringSelectMenu()) {
+    if (id !== interaction.user.id || !interaction.message?.flags?.has(MessageFlags.Ephemeral)
+      || interaction.message.author?.id !== BOOKING_APP_ID) {
+      await respond('Mở hướng dẫn của bạn trong cổng đặt lịch hoặc cẩm nang.');
+    } else {
+      const { flags, ...update } = bookingHelpCard({ userId: id, emoji: portal.emoji, topic: interaction.values[0] });
+      await interaction.update(update);
+    }
+    return true;
+  }
   if (operation === 'extension' && id) {
     await askExtension(interaction, value, id);
+    return true;
+  }
+  if (operation === 'dashboard' && !id && interaction.isButton()) {
+    if (value === 'help' && guideChannel) {
+      await safeReply(interaction, bookingHelpCard({ userId: interaction.user.id, emoji: portal.emoji }));
+    } else if (value === 'my' && interaction.channelId === portal.request) {
+      const { showSessions } = await import('../commands/cenar-booking.js');
+      await safeReply(interaction, bookingScheduleCard(interaction.guildId, portal,
+        showSessions(createBookingLedger(db), interaction.guildId, interaction.user.id), true));
+    } else await respond('Mở bảng đặt lịch mới nhất trong máy chủ.');
     return true;
   }
   if (operation === 'dashboard' && interaction.channelId === portal.request && !id && interaction.isButton()) {
@@ -235,7 +263,7 @@ export async function handleBookingInteraction(interaction) {
       return true;
     }
     schedule = { startsAt: start * 1000, durationMinutes: duration };
-    details = `**Host** · ${clean('host') || 'Nhờ staff gợi ý'}\n**Giờ đề xuất** · <t:${start}:F>\n**Thời lượng** · ${duration} phút\n**Ghi chú** · ${clean('details') || 'Không có'}`;
+    details = `**Host mong muốn**\n${clean('host') || 'Nhờ staff gợi ý'}\n\n**${value === 'game' ? 'Game và ghi chú' : 'Chủ đề và ghi chú'}**\n${clean('details') || 'Không có'}`;
   }
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   await handleTicketCreate(interaction, value === 'apply' ? 'HOST_APPLICATION' : 'BOOKING', null, {

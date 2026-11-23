@@ -1,16 +1,15 @@
 import { fileURLToPath } from 'node:url';
-import {
-  ActionRowBuilder, ButtonBuilder, ButtonStyle, ChannelType, ContainerBuilder,
-  MessageFlags, PermissionFlagsBits as P, Routes, SeparatorBuilder, TextDisplayBuilder,
-} from 'discord.js';
+import { ChannelType, MessageFlags, PermissionFlagsBits as P, Routes } from 'discord.js';
 import { db } from '../database/db.js';
 import { STORE_TWO_GUILD_ID } from '../utils/locale.js';
+import { BOOKING_BANNER_NAME, BOOKING_PANEL_IDS, BOOKING_PANEL_MARKER, bookingPanels } from '../utils/bookingPortalViews.js';
 import { getGuildConfig } from './guildConfigService.js';
 import { resolveVerificationRole } from './verificationRoleService.js';
 
+export { bookingPanels } from '../utils/bookingPortalViews.js';
 export const BOOKING_APP_ID = '1139187282075721768';
-const REVISION = 'CENAR-BOOKING-20261121';
-const LAYOUT = 'CENAR-BOOKING-OPERATIONS-20261123';
+const LAYOUT = 'CENAR-BOOKING-VISUAL-20261123';
+const LEGACY_PANEL_MARKERS = ['CENAR-BOOKING-LOBBY-20261122', 'CENAR-BOOKING-OPERATIONS-20261123'];
 const reason = 'Cenar Booking channel setup';
 const glyphs = /[\p{Extended_Pictographic}\p{Regional_Indicator}\u200d\ufe0f\u20e3]/u;
 const statuses = new WeakMap();
@@ -113,66 +112,6 @@ async function loadIcons(guild) {
   return result;
 }
 
-export function bookingPanels(guildId, channels, emoji) {
-  const intro = (key, title) => {
-    const item = emoji[key];
-    return item ? `<${item.animated ? 'a' : ''}:${item.name}:${item.id}> ${title}` : title;
-  };
-  const button = (key, name, target, action = 'ticket:create:SUPPORT') => {
-    const value = new ButtonBuilder().setLabel(name);
-    if (emoji[key]) value.setEmoji(emoji[key]);
-    return target
-      ? value.setStyle(ButtonStyle.Link).setURL(`https://discord.com/channels/${guildId}/${channels[target].id}`)
-      : value.setStyle(ButtonStyle.Primary).setCustomId(action);
-  };
-  const panel = (key, style, title, notes, actions = []) => {
-    const card = new ContainerBuilder().setAccentColor(style)
-      .addTextDisplayComponents(new TextDisplayBuilder().setContent(`# ${intro(key === 'request' ? 'calendar' : key, title)}`));
-    notes.forEach((note) => card.addSeparatorComponents(new SeparatorBuilder().setDivider(true))
-      .addTextDisplayComponents(new TextDisplayBuilder().setContent(note)));
-    if (actions.length) card.addSeparatorComponents(new SeparatorBuilder())
-      .addActionRowComponents(new ActionRowBuilder().addComponents(actions));
-    card.addTextDisplayComponents(new TextDisplayBuilder().setContent(`-# ${REVISION} · ${key}`));
-    return { components: [card], flags: MessageFlags.IsComponentsV2, allowedMentions: { parse: [] } };
-  };
-  return {
-    welcome: panel('welcome', 0x7167db, 'Cenar Booking', [
-      'Tìm host chơi game hoặc trò chuyện qua voice.',
-      `${intro('profiles', '**Hồ sơ host**')}\nXem dịch vụ và giờ rảnh trong hồ sơ đã duyệt.\n\n${intro('calendar', '**Đặt lịch**')}\nChọn dịch vụ, gửi giờ mong muốn và nhận phản hồi trong phiếu riêng.`,
-    ], [
-      button('profiles', 'Xem hồ sơ host', 'profiles'),
-      button('calendar', 'Đặt lịch', 'request'),
-      button('rules', 'Cách đặt lịch', 'handbook'),
-    ]),
-    rules: panel('rules', 0x3d9a88, 'Nội quy Cenar', [
-      'Tôn trọng ranh giới và thời gian của nhau. Chỉ đặt lịch chơi game và giao lưu qua voice phù hợp với nội quy Discord.',
-      'Chốt host, giờ, thời lượng và chi phí trong phiếu. Khi cần đổi lịch hoặc báo quấy rối, hãy liên hệ staff trong phiếu riêng.',
-    ], [button('support', 'Liên hệ hỗ trợ')]),
-    request: panel('request', 0x556ed5, 'Chọn phiên booking', [
-      `${intro('game', '**Chơi game**')}\nGhi tên game và khung giờ bạn muốn.\n\n${intro('voice', '**Trò chuyện qua voice**')}\nChọn host hoặc để staff gợi ý.`,
-      'Khi gửi biểu mẫu, bot mở phiếu riêng để xác nhận host, giờ và chi phí. Bạn có thể xem trạng thái đã lưu bằng nút Lịch của bạn.',
-    ], [
-      button('game', 'Đặt phiên chơi game', null, 'booking:open:game'),
-      button('voice', 'Đặt phiên trò chuyện', null, 'booking:open:voice'),
-      button('profiles', 'Xem hồ sơ host', 'profiles'),
-      button('reviews', 'Lịch của bạn', null, 'booking:dashboard:my'),
-      button('rules', 'Trợ giúp', null, 'booking:dashboard:help'),
-    ]),
-    handbook: panel('handbook', 0x3d9a88, 'Cách đặt lịch', [
-      '1. Xem hồ sơ host theo dịch vụ hoặc nhờ staff gợi ý.\n2. Chọn dịch vụ và nhập ngày giờ theo giờ Việt Nam (UTC+7).\n3. Theo dõi phiếu riêng để nhận xác nhận và thống nhất chi phí.',
-      'Khi cần đổi lịch, nhắn ngay trong phiếu. Sau phiên, gửi phản hồi cho staff để đăng ở forum đánh giá.',
-    ], [button('calendar', 'Bắt đầu đặt lịch', 'request'), button('rules', 'Đọc nội quy', 'rules')]),
-    apply: panel('apply', 0xbf6c8e, 'Đăng ký làm host', [
-      'Cho Cenar biết biệt danh, dịch vụ bạn nhận và giờ rảnh theo UTC+7. Staff sẽ trao đổi riêng trước khi đăng hồ sơ.',
-      'Hồ sơ công khai gồm chủ đề hoặc game, khung giờ, thời lượng và giá đã chốt. Nhóm Nam/Nữ do bạn tự chọn.',
-    ], [button('apply', 'Gửi hồ sơ', null, 'booking:open:apply')]),
-    news: panel('news', 0x7167db, 'Tin từ Cenar', ['Lịch hoạt động và cập nhật booking được đăng tại đây. Nếu cần hỗ trợ với đơn cũ, mở kênh hỗ trợ bên dưới.'], [
-      button('calendar', 'Xem khu booking', 'welcome'),
-      button('support', 'Hỗ trợ đơn cũ', 'support'),
-    ]),
-  };
-}
-
 function textOnMessage(message) {
   const inspect = rows => rows.flatMap(row => [row.content || row.data?.content || '', ...inspect(row.components ?? [])]);
   return [message.content || '', ...inspect(message.components ?? [])].join('\n');
@@ -184,23 +123,47 @@ function panelSignature(components) {
     return [
       row.type, row.content, row.label, row.custom_id, row.url, row.style, row.emoji?.id,
       row.accent_color, row.type === 14 ? (row.divider ?? true) : null, panelSignature(row.components ?? []),
+      row.accessory ? panelSignature([row.accessory]) : null,
+      row.items?.map(item => [bannerSignature(item.media?.url), item.description]),
     ];
   });
 }
 
+function bannerSignature(url) {
+  if (url === `attachment://${BOOKING_BANNER_NAME}`) return BOOKING_BANNER_NAME;
+  if (/^https:\/\/(?:cdn\.discordapp\.com|media\.discordapp\.net)\/attachments\//.test(url || '')
+    && url.split('?')[0].endsWith(`/${BOOKING_BANNER_NAME}`)) return BOOKING_BANNER_NAME;
+  return url;
+}
+
 async function ensurePanel(channel, key, payload) {
   const messages = await channel.messages.fetch({ limit: 50 });
-  const marker = `${REVISION} · ${key}`;
+  const marker = `${BOOKING_PANEL_MARKER} · ${key}`;
   const oldMarker = { welcome: 'CENAR GLOBAL • INTERNATIONAL STORE', rules: 'CENAR GLOBAL • STORE RULES' }[key];
-  const candidates = messages.filter(message => message.author.id === channel.client.user.id);
-  const saved = candidates.find(message => textOnMessage(message).includes(marker));
+  const owned = message => message.author.id === channel.client.user.id;
+  const hasIdentity = message => owned(message) && (message.components.some(component =>
+    (component.id ?? component.data?.id) === BOOKING_PANEL_IDS[key]) || textOnMessage(message).includes(marker));
+  const candidates = messages.filter(owned);
+  let saved = candidates.find(hasIdentity)
+    ?? candidates.find(message => LEGACY_PANEL_MARKERS.some(version => textOnMessage(message).includes(`${version} · ${key}`)));
+  if (!saved && channel.messages.fetchPins) {
+    const pins = await channel.messages.fetchPins({ limit: 50 });
+    saved = pins.items.map(item => item.message).find(hasIdentity);
+  }
   const replaced = saved || (oldMarker && candidates.find(message =>
     !message.attachments.size && message.flags.has(MessageFlags.IsComponentsV2) && textOnMessage(message).includes(oldMarker)));
   const message = replaced || await channel.send({
     ...payload, nonce: `cenar-bk-261121-${key}`, enforceNonce: true,
   });
-  if (replaced && JSON.stringify(panelSignature(replaced.components)) !== JSON.stringify(panelSignature(payload.components))) {
-    await replaced.edit(payload);
+  if (replaced) {
+    const { files, ...content } = payload;
+    const pendingUploads = files?.filter(file => !replaced.attachments.some(existing => existing.name === file.name));
+    if (pendingUploads?.length || JSON.stringify(panelSignature(replaced.components)) !== JSON.stringify(panelSignature(payload.components))) {
+      await replaced.edit({ ...content, ...(pendingUploads?.length ? {
+        files: pendingUploads,
+        attachments: replaced.attachments.map(existing => ({ id: existing.id })),
+      } : {}) });
+    }
   }
   if (!message.pinned) await message.pin(reason);
 }
@@ -239,7 +202,7 @@ async function applyBookingLayout(client, guildId) {
     guild.channels.fetch(), channelSnapshot(guild), guild.roles.fetch(),
   ]);
   if (!requiredExisting.every(key => existingChannels.get(oldChannels[key][0]))) throw new Error('BOOKING_BASELINE_MISSING');
-  const key = `booking_discord_snapshot:${guildId}:${REVISION}`;
+  const key = `booking_discord_snapshot:${guildId}:${BOOKING_PANEL_MARKER}`;
   db.prepare('INSERT OR IGNORE INTO system_settings (key,value) VALUES (?,?)').run(key, JSON.stringify(original));
   const proof = JSON.parse(db.prepare('SELECT value FROM system_settings WHERE key=?').get(key).value);
   const verified = resolveVerificationRole(guild);
@@ -355,7 +318,7 @@ async function applyBookingLayout(client, guildId) {
     throw new Error('BOOKING_LEGACY_ACCESS_MISMATCH');
   }
   portals.set(client, {
-    request: channels.request.id, apply: channels.apply.id, tickets: categories.tickets.id,
+    request: channels.request.id, apply: channels.apply.id, handbook: channels.handbook.id, tickets: categories.tickets.id,
     profiles: channels.profiles.id, reviews: channels.reviews.id, chat: channels.chat.id,
     voiceChannels: [channels.lobby.id, channels.game.id, channels.voice.id],
     voiceCategory: categories.tickets.id, emoji,

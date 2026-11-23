@@ -16,7 +16,7 @@ import { db, initDatabase } from '../src/database/db.js';
 import { createTicket } from '../src/services/ticketService.js';
 import { createOrder, getOrderByCode, markOrderPaid, payOrderWithWallet, recordOrderPayment } from '../src/services/orderService.js';
 import { addWalletBalance } from '../src/services/walletService.js';
-import { finalizePaidOrder, getPayOSReceivedAmount, syncPaymentStatusFromPayOS } from '../src/services/paymentService.js';
+import { finalizePaidOrder, getPayOSReceivedAmount, sendOrRefreshPaymentQr, syncPaymentStatusFromPayOS } from '../src/services/paymentService.js';
 import { auditOrderPayment } from '../src/services/paymentIncidentAuditService.js';
 import { registerBotApiRoutes } from '../src/services/botApiRoutes.js';
 import { createBookingLedger } from '../src/services/bookingLedgerService.js';
@@ -31,6 +31,24 @@ function pendingOrder() {
     ticketChannelId: ticket.channel_id, customerId: ticket.customer_id, productName: 'Locket Gold',
     quantity: 1, totalAmount: 150_000, durationMonths: 12, orderLogChannelId: 'unavailable',
     createdById: ticket.customer_id });
+}
+
+function pendingBooking() {
+  const guildId = STORE_TWO_GUILD_ID;
+  const customerId = '123456789012345678';
+  const actorId = '123456789012345679';
+  const ticket = createTicket({ guildId, channelId: String(123456789012348000n + BigInt(++sequence)), customerId,
+    openedById: customerId, ticketType: 'BOOKING' });
+  const ledger = createBookingLedger(db);
+  ledger.createSession({ guildId, ticketId: ticket.id, service: 'voice', startsAt: Date.now() + 60_000, durationMinutes: 30 });
+  ledger.assignHost({ guildId, ticketId: ticket.id, actorId, hostId: '123456789012345681' });
+  const invoice = ledger.createInvoice({ guildId, ticketId: ticket.id, actorId, hourlyPrice: 100_000, hourlyWage: 60_000,
+    createPaymentOrder: ({ amount, ticketChannelId }) => createOrder({ guildId, ticketId: ticket.id, ticketChannelId, customerId,
+      orderCode: 'CN_938155', productName: 'Cenar Booking', serviceType: 'service', quantity: 1, totalAmount: amount,
+      orderLogChannelId: ticketChannelId, createdById: actorId }),
+  });
+  db.prepare('UPDATE orders SET payment_link_id=? WHERE id=?').run('booking-pay-link', invoice.order_id);
+  return { guildId, customerId, ticket, ledger, invoice, order: getOrderByCode(invoice.order_code) };
 }
 
 function mockPayOS(order, overrides = {}) {
@@ -108,20 +126,7 @@ describe('real receipt required before confirming an order', () => {
   });
 
   it('settles a dedicated booking from its exact PayOS link without enqueuing commerce delivery', async () => {
-    const guildId = STORE_TWO_GUILD_ID;
-    const customerId = '123456789012345678';
-    const actorId = '123456789012345679';
-    const ticket = createTicket({ guildId, channelId: '123456789012345680', customerId, openedById: customerId, ticketType: 'BOOKING' });
-    const ledger = createBookingLedger(db);
-    ledger.createSession({ guildId, ticketId: ticket.id, service: 'voice', startsAt: Date.now() + 60_000, durationMinutes: 30 });
-    ledger.assignHost({ guildId, ticketId: ticket.id, actorId, hostId: '123456789012345681' });
-    const invoice = ledger.createInvoice({ guildId, ticketId: ticket.id, actorId, hourlyPrice: 100_000, hourlyWage: 60_000,
-      createPaymentOrder: ({ amount, ticketChannelId }) => createOrder({ guildId, ticketId: ticket.id, ticketChannelId, customerId,
-        orderCode: 'CN_938155', productName: 'Cenar Booking', serviceType: 'service', quantity: 1, totalAmount: amount,
-        orderLogChannelId: ticketChannelId, createdById: actorId }),
-    });
-    db.prepare('UPDATE orders SET payment_link_id=? WHERE id=?').run('booking-pay-link', invoice.order_id);
-    const order = getOrderByCode(invoice.order_code);
+    const { guildId, customerId, ticket, ledger, order } = pendingBooking();
     const receipt = { amount: 50_000, orderCode: order.payos_order_code, paymentLinkId: 'booking-pay-link' };
     const client = { guilds: { fetch: vi.fn() }, users: { fetch: vi.fn() } };
     await expect(finalizePaidOrder(client, order, { ...receipt, paymentLinkId: 'unrelated' }, 'wrong', 'bank'))
@@ -133,6 +138,42 @@ describe('real receipt required before confirming an order', () => {
     expect(ledger.listInvoices(guildId, ticket.id)[0].status).toBe('PAID');
     expect(db.prepare('SELECT COUNT(*) AS count FROM order_fulfillments').get().count).toBe(0);
     expect(client.guilds.fetch).not.toHaveBeenCalled();
+  });
+
+  it('renders the private booking invoice without fabricating a QR from an order reference', async () => {
+    const { guildId, ticket, invoice, order } = pendingBooking();
+    const checkout = 'https://pay.payos.vn/web/test-booking';
+    db.prepare('UPDATE orders SET payment_checkout_url=?, payment_expired_at=? WHERE id=?')
+      .run(checkout, new Date(Date.now() + 30 * 60_000).toISOString(), invoice.order_id);
+    const posted = { id: 'booking-invoice-message', edit: vi.fn() };
+    const channel = { isTextBased: () => true, send: vi.fn(async () => posted),
+      messages: { fetch: vi.fn(async () => posted) } };
+    posted.edit.mockResolvedValue(posted);
+    const guild = { id: guildId, client: {}, channels: { fetch: vi.fn(async () => channel) } };
+    const noNetwork = vi.spyOn(globalThis, 'fetch').mockRejectedValue(new Error('Unexpected provider call'));
+
+    await sendOrRefreshPaymentQr({ guild, orderCode: order.order_code });
+    expect(guild.channels.fetch).toHaveBeenCalledWith(ticket.channel_id);
+    const first = channel.send.mock.lastCall[0];
+    expect(first.files).toHaveLength(0);
+    expect(first.allowedMentions).toEqual({ parse: [] });
+    const components = first.components[0].toJSON().components;
+    expect(components[0].content).toContain('50.000 VND');
+    expect(components.find(item => item.type === 1).components).toEqual([
+      expect.objectContaining({ url: checkout, label: 'Mở thanh toán PayOS' }),
+    ]);
+    expect(JSON.stringify(components)).not.toMatch(/attachment:\/\/|payment:regen|queue:view/);
+
+    db.prepare('UPDATE orders SET payment_qr_code=? WHERE id=?').run('payment-test-fixture', invoice.order_id);
+    await sendOrRefreshPaymentQr({ guild, orderCode: order.order_code });
+    const refreshed = posted.edit.mock.lastCall[0];
+    expect(refreshed.files[0].name).toBe(`payos-${order.order_code}.png`);
+    expect(refreshed.components[0].toJSON().components.find(item => item.type === 12).items[0]).toMatchObject({
+      media: { url: `attachment://payos-${order.order_code}.png` }, description: 'Mã QR thanh toán PayOS của hóa đơn Booking',
+    });
+    expect(channel.send).toHaveBeenCalledTimes(1);
+    expect(noNetwork).not.toHaveBeenCalled();
+    expect(getOrderByCode(order.order_code).payment_status).toBe('UNPAID');
   });
 
   it('does not re-deliver a legacy paid order on replay of its short receipt', async () => {
