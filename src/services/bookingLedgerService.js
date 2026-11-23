@@ -5,6 +5,7 @@ const MINUTE = 60_000;
 const MAX_MINUTES = 1440;
 const MAX_RATE = 100_000_000;
 const STATUSES = new Set(['REQUESTED', 'CONFIRMED', 'ACTIVE', 'COMPLETED', 'DECLINED']);
+const SETTLED_ORDER_STATES = new Set(['PROCESSING', 'COMPLETED']);
 
 export class BookingLedgerError extends Error {
   constructor(code, message) {
@@ -273,7 +274,7 @@ export function createBookingLedger(db, { now = Date.now } = {}) {
   function findReceipt(order, invoice, session) {
     if (!(isOrderForSession(order, session, invoice.amount) && order.order_code === invoice.order_code
       && order.payos_order_code === invoice.provider_order_code && order.payment_status === 'PAID'
-      && ['PROCESSING', 'COMPLETED'].includes(order.status) && order.amount_paid === invoice.amount
+      && order.amount_paid === invoice.amount
       && order.payment_link_id && order.paid_transaction_id)) return null;
 
     const receipt = db.prepare(`SELECT id, amount, raw_payload FROM payment_events
@@ -289,7 +290,8 @@ export function createBookingLedger(db, { now = Date.now } = {}) {
   function isSettled(invoice, session) {
     if (invoice?.status === 'FREE') return true;
     if (invoice?.status !== 'PAID') return false;
-    return findReceipt(orderById.get(invoice.order_id), invoice, session)?.id === invoice.payment_event_id;
+    const order = orderById.get(invoice.order_id);
+    return SETTLED_ORDER_STATES.has(order?.status) && findReceipt(order, invoice, session)?.id === invoice.payment_event_id;
   }
 
   // Only the canonical PAYOS receipt committed by the existing verification path is accepted.
@@ -301,12 +303,14 @@ export function createBookingLedger(db, { now = Date.now } = {}) {
       requireBooking(invoice, 'INVOICE_NOT_FOUND', 'Không tìm thấy hóa đơn booking.');
       if (invoice.status !== 'PENDING') return invoice;
       const session = getSession(guildId, invoice.ticket_id);
-      const receipt = findReceipt(orderById.get(invoice.order_id), invoice, session);
+      const order = orderById.get(invoice.order_id);
+      const receipt = findReceipt(order, invoice, session);
       if (!receipt) return invoice;
       const at = now();
       const extension = invoice.kind === 'EXTENSION';
       const ticketOpen = openTicket.get(session.ticket_id, guildId);
-      const applicable = ticketOpen && ['CONFIRMED', 'ACTIVE'].includes(session.status) && at < session.ends_at
+      const applicable = SETTLED_ORDER_STATES.has(order.status) && ticketOpen
+        && ['CONFIRMED', 'ACTIVE'].includes(session.status) && at < session.ends_at
         && (!extension || isSlotAvailable(session, session.host_id, session.started_at ?? session.starts_at,
           session.ends_at + invoice.minutes * MINUTE));
       db.prepare(`UPDATE booking_invoices SET status = ?, payment_event_id = ?, paid_at = ? WHERE id = ?`)

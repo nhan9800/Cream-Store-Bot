@@ -222,4 +222,15 @@ describe('Store2 booking sessions and billing', () => {
       .toThrow(expect.objectContaining({ code: 'INVOICE_NOT_SETTLED' }));
     expect(ledger.getWages(guildId)).toEqual([]);
   });
+
+  it('marks a real late receipt on a cancelled canonical order for review', () => {
+    booking(1);
+    assign(1);
+    const invoice = quote(1);
+    commitReceipt(invoice);
+    db.prepare("UPDATE orders SET status = 'CANCELLED' WHERE id = ?").run(invoice.order_id);
+    expect(ledger.syncInvoicePayment(guildId, invoice.id)).toMatchObject({ status: 'NEEDS_REVIEW', payment_event_id: 1 });
+    clock = start;
+    expect(() => ledger.startSession({ guildId, ticketId: 1, actorId })).toThrow(expect.objectContaining({ code: 'INVOICE_NOT_SETTLED' }));
+  });
 });
