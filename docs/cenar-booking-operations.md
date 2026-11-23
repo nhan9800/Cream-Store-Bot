@@ -23,6 +23,7 @@ Các lệnh booking được đăng ký cho Store 2. Mở `#dat-lich` để đ�
 ## Hồ sơ, đánh giá và cộng đồng
 
 - `/cenar-ho-so` tạo bản nháp host, duyệt đúng phiên bản trước khi đăng thẻ và cập nhật lại bài cũ khi cần. Khách trong phiên hoàn thành được đánh giá 1–5 sao một lần và có thể đồng ý đăng nhận xét ẩn danh.
+- Host đã tạo hồ sơ có thể gửi JPG, PNG hoặc WebP tối đa 3 MB bằng `/cenar-ho-so doi-anh` và đồng ý công khai. Xem trước riêng với `/cenar-ho-so xem-ban-nhap`. Quản lý dùng `duyet` với đúng phiên bản trước khi ảnh xuất hiện trên thẻ và diễn đàn. `go-anh` gỡ ảnh khỏi thẻ hiện tại. `an-ho-so` thu hồi cả hồ sơ. Bot resize ảnh về 192 × 192 px và giới hạn kho ảnh trong SQLite ở 16 MiB.
 - Nút **Duyệt hồ sơ** ở Sảnh và Đặt lịch mở thẻ riêng chỉ gồm hồ sơ đã duyệt và đăng. Nút **Xem ca trống** lọc ca khả dụng của host đó và đưa khách đến bước xem giá trước khi xác nhận. Khách có thể chọn game hoặc voice để gửi giờ khác cho staff.
 - `/cenar-cong-dong` có điểm danh, XP chat và voice cộng đồng, nhiệm vụ, bảng xếp hạng, vật phẩm, sáu trò chơi miễn phí, Nối từ, Đoán từ và hai chế độ Ô chữ. Điểm cộng đồng dùng trong bot và không quy đổi ra tiền. Kết nối, kết hôn và thú cưng chung cần hai bên đồng ý.
 - Kênh **trò-chơi-cenar** mở riêng Ô chữ tiếng Việt và tiếng Anh, Điểm danh, Nhiệm vụ, Cửa hàng và Bảng xếp hạng. Ô chữ có năm chữ cái, sáu lượt và lưu tiến độ đến nửa đêm giờ Việt Nam. Kênh **sự-kiện-cenar** dành cho lịch cộng đồng và `/giveaway start` của quản trị viên. Voice công cộng có danh mục riêng, phiếu và phòng theo lịch vẫn ở khu vực riêng.
