@@ -19,6 +19,8 @@ import { addWalletBalance } from '../src/services/walletService.js';
 import { finalizePaidOrder, getPayOSReceivedAmount, syncPaymentStatusFromPayOS } from '../src/services/paymentService.js';
 import { auditOrderPayment } from '../src/services/paymentIncidentAuditService.js';
 import { registerBotApiRoutes } from '../src/services/botApiRoutes.js';
+import { createBookingLedger } from '../src/services/bookingLedgerService.js';
+import { STORE_TWO_GUILD_ID } from '../src/utils/locale.js';
 
 let sequence = 0;
 function pendingOrder() {
@@ -53,6 +55,9 @@ describe('real receipt required before confirming an order', () => {
   beforeAll(() => initDatabase());
   beforeEach(() => {
     vi.restoreAllMocks();
+    if (db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='booking_invoices'").get()) {
+      db.exec('DELETE FROM booking_invoices; DELETE FROM booking_sessions;');
+    }
     db.exec(`DELETE FROM order_delivery_items; DELETE FROM order_fulfillments;
       DELETE FROM payment_events; DELETE FROM staff_logs; DELETE FROM wallet_transactions; DELETE FROM wallet_topup_orders; DELETE FROM orders;
       DELETE FROM customer_role_sync_jobs; DELETE FROM customer_profiles; DELETE FROM product_catalog;`);
@@ -100,6 +105,34 @@ describe('real receipt required before confirming an order', () => {
       transactionId: 'overpaid', amount: 160_000, rawPayload: { amount: 160_000 } });
     expect(result.updated).toMatchObject({ payment_status: 'PAID', amount_paid: 160_000 });
     expect(db.prepare('SELECT amount FROM payment_events WHERE order_code = ?').get(order.order_code).amount).toBe(160_000);
+  });
+
+  it('settles a dedicated booking from its exact PayOS link without enqueuing commerce delivery', async () => {
+    const guildId = STORE_TWO_GUILD_ID;
+    const customerId = '123456789012345678';
+    const actorId = '123456789012345679';
+    const ticket = createTicket({ guildId, channelId: '123456789012345680', customerId, openedById: customerId, ticketType: 'BOOKING' });
+    const ledger = createBookingLedger(db);
+    ledger.createSession({ guildId, ticketId: ticket.id, service: 'voice', startsAt: Date.now() + 60_000, durationMinutes: 30 });
+    ledger.assignHost({ guildId, ticketId: ticket.id, actorId, hostId: '123456789012345681' });
+    const invoice = ledger.createInvoice({ guildId, ticketId: ticket.id, actorId, hourlyPrice: 100_000, hourlyWage: 60_000,
+      createPaymentOrder: ({ amount, ticketChannelId }) => createOrder({ guildId, ticketId: ticket.id, ticketChannelId, customerId,
+        orderCode: 'CN_938155', productName: 'Cenar Booking', serviceType: 'service', quantity: 1, totalAmount: amount,
+        orderLogChannelId: ticketChannelId, createdById: actorId }),
+    });
+    db.prepare('UPDATE orders SET payment_link_id=? WHERE id=?').run('booking-pay-link', invoice.order_id);
+    const order = getOrderByCode(invoice.order_code);
+    const receipt = { amount: 50_000, orderCode: order.payos_order_code, paymentLinkId: 'booking-pay-link' };
+    const client = { guilds: { fetch: vi.fn() }, users: { fetch: vi.fn() } };
+    await expect(finalizePaidOrder(client, order, { ...receipt, paymentLinkId: 'unrelated' }, 'wrong', 'bank'))
+      .rejects.toMatchObject({ code: 'BOOKING_PAYMENT_IDENTITY_MISMATCH' });
+    assertUntouched(order, client);
+    expect(() => payOrderWithWallet({ guildId, customerId, orderCode: order.order_code, amount: 50_000 }))
+      .toThrow(expect.objectContaining({ code: 'PAYMENT_METHOD_LOCKED' }));
+    await expect(finalizePaidOrder(client, order, receipt, 'correct', 'bank')).resolves.toMatchObject({ duplicate: false });
+    expect(ledger.listInvoices(guildId, ticket.id)[0].status).toBe('PAID');
+    expect(db.prepare('SELECT COUNT(*) AS count FROM order_fulfillments').get().count).toBe(0);
+    expect(client.guilds.fetch).not.toHaveBeenCalled();
   });
 
   it('does not re-deliver a legacy paid order on replay of its short receipt', async () => {

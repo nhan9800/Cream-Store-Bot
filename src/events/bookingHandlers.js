@@ -3,6 +3,8 @@ import {
   MessageFlags, ModalBuilder, SeparatorBuilder, TextDisplayBuilder, TextInputBuilder, TextInputStyle,
 } from 'discord.js';
 import { bookingPortal, BOOKING_APP_ID } from '../services/bookingStoreSetupService.js';
+import { db } from '../database/db.js';
+import { createBookingLedger } from '../services/bookingLedgerService.js';
 import { getGuildConfig } from '../services/guildConfigService.js';
 import { getTicketByChannelId } from '../services/ticketService.js';
 import { STORE_TWO_GUILD_ID } from '../utils/locale.js';
@@ -15,6 +17,12 @@ const bookingServices = { game: 'Chơi game', voice: 'Trò chuyện qua voice', 
 const nextStates = {
   confirm: 'Đã xác nhận lịch', complete: 'Đã diễn ra', decline: 'Không thể nhận lịch',
 };
+
+const bookingHelp = [
+  '**Đặt lịch và theo dõi**\nGửi lịch từ bảng này. Dùng `/cenar-booking lich` để xem tiến độ và mở lại phiếu.',
+  '**Hồ sơ và đánh giá**\nDùng `/cenar-ho-so` để chuẩn bị hồ sơ host hoặc gửi đánh giá cho phiên đã diễn ra.',
+  '**Cộng đồng**\nDùng `/cenar-cong-dong` để xem cấp, điểm danh, nhiệm vụ và các trò chơi.',
+];
 
 export function parseBookingTime(value, now = Date.now()) {
   const parts = /^(\d{1,2})\/(\d{1,2})\/(20\d{2})\s+(\d{1,2}):(\d{2})$/.exec(value.trim());
@@ -67,7 +75,7 @@ function stateButtons(ticketId, emoji, actions) {
   }));
 }
 
-function bookingReceipt(ticket, service, details, emoji) {
+function bookingReceipt(ticket, service, details, emoji, schedule) {
   const artwork = emoji[service];
   const titleIcon = artwork ? `<${artwork.animated ? 'a' : ''}:${artwork.name}:${artwork.id}> ` : '';
   const isApply = service === 'apply';
@@ -79,7 +87,13 @@ function bookingReceipt(ticket, service, details, emoji) {
     .addTextDisplayComponents(new TextDisplayBuilder().setContent(isApply
       ? 'Staff sẽ liên hệ trong phiếu này để duyệt hồ sơ.'
       : '### Trạng thái\nChờ xác nhận\n-# Staff xác nhận sau khi hai bên chốt host, giờ và chi phí.'));
-  if (!isApply) container.addActionRowComponents(stateButtons(ticket.id, emoji, ['confirm', 'decline']));
+  if (!isApply && !schedule) container.addActionRowComponents(stateButtons(ticket.id, emoji, ['confirm', 'decline']));
+  if (schedule) {
+    createBookingLedger(db).createSession({ guildId: ticket.guild_id, ticketId: ticket.id, service, ...schedule });
+    container.addTextDisplayComponents(new TextDisplayBuilder().setContent(
+      '**Theo dõi phiên**\nDùng `/cenar-booking lich` để xem lịch của bạn. Staff dùng `/cenar-booking phan-host` rồi `/cenar-booking bao-gia` trong phiếu này.',
+    ));
+  }
   return { container, flags: MessageFlags.IsComponentsV2 };
 }
 
@@ -127,6 +141,46 @@ async function changeState(interaction, action, id, portal) {
   }
 }
 
+async function askExtension(interaction, action, ticketId) {
+  const reply = content => safeReply(interaction, { content, flags: MessageFlags.Ephemeral });
+  const current = () => {
+    const ticket = getTicketByChannelId(interaction.channelId);
+    if (!ticket || ticket.guild_id !== STORE_TWO_GUILD_ID || ticket.ticket_type !== 'BOOKING'
+      || ticket.status !== 'OPEN' || String(ticket.id) !== ticketId || ticket.customer_id !== interaction.user.id) return null;
+    const booked = createBookingLedger(db).getSession(interaction.guildId, ticket.id);
+    return booked?.status === 'ACTIVE' && booked.ends_at > Date.now() ? booked : null;
+  };
+  const session = current();
+  if (!session) { await reply('Chỉ khách trong phiên đang diễn ra có thể yêu cầu gia hạn.'); return; }
+  if (action === 'open' && interaction.isButton()) {
+    await interaction.showModal(new ModalBuilder().setTitle('Yêu cầu gia hạn booking')
+      .setCustomId(`booking:extension:submit:${ticketId}`).addComponents(new ActionRowBuilder().addComponents(
+        new TextInputBuilder().setCustomId('minutes').setLabel('Số phút muốn gia hạn').setStyle(TextInputStyle.Short)
+          .setRequired(true).setMinLength(1).setMaxLength(4),
+      )));
+  } else if (action === 'submit' && interaction.isModalSubmit()) {
+    const raw = interaction.fields.getTextInputValue('minutes').trim();
+    const minutes = Number(raw);
+    if (!/^\d{1,4}$/.test(raw) || minutes < 1 || minutes > 1440) {
+      await reply('Nhập số phút từ 1 đến 1440.'); return;
+    }
+    // The customer requests time only. Staff quotes the extension separately.
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const key = `booking_extension_requested:${ticketId}:${session.ends_at}`;
+    if (!db.prepare('INSERT OR IGNORE INTO system_settings (key,value) VALUES (?,?)').run(key, String(minutes)).changes) {
+      await reply('Yêu cầu cho thời điểm kết thúc này đã có trong phiếu.'); return;
+    }
+    try {
+      await interaction.channel.send({ content: `**Khách yêu cầu gia hạn ${minutes} phút.**\nStaff lấy xác nhận của host rồi dùng \`/cenar-booking gia-han\` để báo giá.`,
+        allowedMentions: { parse: [] } });
+    } catch (error) {
+      db.prepare('DELETE FROM system_settings WHERE key=?').run(key);
+      throw error;
+    }
+    await reply('Đã gửi yêu cầu. Hãy chờ xác nhận của staff trong phiếu.');
+  }
+}
+
 export async function handleBookingInteraction(interaction) {
   if (!interaction.customId?.startsWith('booking:')) return false;
   const respond = content => safeReply(interaction, { content, flags: MessageFlags.Ephemeral });
@@ -136,6 +190,20 @@ export async function handleBookingInteraction(interaction) {
     return true;
   }
   const [, operation, value, id] = interaction.customId.split(':');
+  if (operation === 'extension' && id) {
+    await askExtension(interaction, value, id);
+    return true;
+  }
+  if (operation === 'dashboard' && interaction.channelId === portal.request && !id && interaction.isButton()) {
+    const { ledgerCard, showSessions } = await import('../commands/cenar-booking.js');
+    if (value === 'my' || value === 'help') {
+      const mine = value === 'my';
+      await safeReply(interaction, { ...ledgerCard(mine ? 'Lịch của bạn' : 'Trợ giúp Cenar Booking', mine
+        ? showSessions(createBookingLedger(db), interaction.guildId, interaction.user.id) : bookingHelp, portal.emoji.calendar),
+      flags: MessageFlags.IsComponentsV2 | MessageFlags.Ephemeral });
+    }
+    return true;
+  }
   if (operation === 'state' && Object.hasOwn(nextStates, value) && interaction.isButton()) {
     await changeState(interaction, value, id, portal);
     return true;
@@ -152,7 +220,7 @@ export async function handleBookingInteraction(interaction) {
   if (operation !== 'form' || !interaction.isModalSubmit()) return true;
   const raw = key => interaction.fields.getTextInputValue(key).trim();
   const clean = key => escapeMarkdown(raw(key));
-  let details;
+  let details, schedule;
   if (value === 'apply') {
     if (!raw('name') || !raw('skills') || !raw('availability')) {
       await respond('Nhập biệt danh, dịch vụ bạn nhận và giờ rảnh rồi gửi lại nhé.');
@@ -160,19 +228,20 @@ export async function handleBookingInteraction(interaction) {
     }
     details = `**Biệt danh** · ${clean('name')}\n**Nhóm hồ sơ** · ${clean('group') || 'Chưa chọn'}\n**Dịch vụ** · ${clean('skills')}\n**Giờ rảnh** · ${clean('availability')}`;
   } else {
-    const start = parseBookingTime(raw('start'));
+    const start = parseBookingTime(raw('start'), Date.now() + 60_000);
     const duration = Number(raw('duration'));
     if (!start || !/^\d{1,4}$/.test(raw('duration')) || duration < 1 || duration > 1440 || (value === 'game' && !raw('details'))) {
-      await respond('Nhập giờ trong tương lai theo dd/mm/yyyy HH:mm (UTC+7), thời lượng từ 1 đến 1440 phút và tên game nếu đặt phiên chơi game.');
+      await respond('Chọn giờ sau ít nhất 1 phút theo dd/mm/yyyy HH:mm (UTC+7), thời lượng từ 1 đến 1440 phút và tên game nếu đặt phiên chơi game.');
       return true;
     }
+    schedule = { startsAt: start * 1000, durationMinutes: duration };
     details = `**Host** · ${clean('host') || 'Nhờ staff gợi ý'}\n**Giờ đề xuất** · <t:${start}:F>\n**Thời lượng** · ${duration} phút\n**Ghi chú** · ${clean('details') || 'Không có'}`;
   }
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   await handleTicketCreate(interaction, value === 'apply' ? 'HOST_APPLICATION' : 'BOOKING', null, {
     booking: {
       title: bookingServices[value], categoryId: portal.tickets,
-      render: ticket => bookingReceipt(ticket, value, details, portal.emoji),
+      render: ticket => bookingReceipt(ticket, value, details, portal.emoji, schedule),
     },
   });
   return true;

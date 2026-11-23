@@ -1,6 +1,6 @@
-import { Client, Events, REST, Routes } from 'discord.js';
-import { assertRuntimeConfig, config } from './config.js';
-import { initDatabase } from './database/db.js';
+import { Client, Events, PermissionFlagsBits, REST, Routes } from 'discord.js';
+import { assertRuntimeConfig, collectPaymentConfigIssues, config } from './config.js';
+import { db, initDatabase } from './database/db.js';
 import { getClientOptions, loadCommands, registerInteractionHandler } from './events/interactionCreate.js';
 import { startScheduler } from './services/schedulerService.js';
 import { adoptStoreOneReminderRouting } from './services/reminderRoutingService.js';
@@ -28,7 +28,7 @@ import { resetLegacyWarrantyAgingStateOnce } from './services/adminOrderCenterSe
 
 import { initErrorLogger } from './services/errorLogService.js';
 import { autoSetupDiscountBoard } from './services/autoSetupDiscountBoardService.js';
-import { isInternationalGuild, STORE_ONE_GUILD_ID } from './utils/locale.js';
+import { isInternationalGuild, STORE_ONE_GUILD_ID, STORE_TWO_GUILD_ID } from './utils/locale.js';
 import { localizeCommandsForInternationalStore } from './utils/internationalCommands.js';
 import { initializeMusicPlayer } from './services/musicPlayerService.js';
 import { installDiscordEmojiBoundary } from './utils/discordEmojiBoundary.js';
@@ -47,6 +47,17 @@ import { installDiscordRateLimitHealth } from './services/discordRateLimitHealth
 import { runDopermindCatalogReview } from './services/dopermindCatalogReview20261114.js';
 import { runNitroPriceUpdate } from './services/nitroPriceUpdateService.js';
 import { startVinhDanhMaintenance } from './services/vinhDanhService.js';
+
+function commandDefinitions(commands) {
+  const found = [...commands.values()].filter(command => !command.bookingOnly || String(config.guildId) === STORE_TWO_GUILD_ID);
+  const base = found.map(command => command.data.toJSON());
+  if (!isInternationalGuild(config.guildId)) return base;
+  // Keep the Cenar Booking UI in Vietnamese, including the slash command descriptions.
+  return [
+    ...localizeCommandsForInternationalStore(found.filter(command => !command.bookingOnly).map(command => command.data.toJSON())),
+    ...found.filter(command => command.bookingOnly).map(command => command.data.toJSON()),
+  ];
+}
 
 export async function buildClient() {
   initDatabase();
@@ -287,10 +298,7 @@ export async function buildClient() {
     // Republish them on every production restart so newly added options (for
     // example so_ngay on /order and /oder) always match the deployed source.
     try {
-      const baseCommandData = [...commands.values()].map((command) => command.data.toJSON());
-      const commandData = isInternationalGuild(config.guildId)
-        ? localizeCommandsForInternationalStore(baseCommandData)
-        : baseCommandData;
+      const commandData = commandDefinitions(commands);
       const rest = new REST({ version: '10' }).setToken(config.botToken);
       await rest.put(Routes.applicationGuildCommands(config.clientId, config.guildId), { body: commandData });
       console.log(`[COMMANDS] Published ${commandData.length} guild commands from the active source revision.`);
@@ -328,9 +336,30 @@ export async function buildClient() {
       const { autoSetupPartnerAndCtv } = await import('./services/autoSetupService.js');
       await autoSetupPartnerAndCtv(readyClient);
       if (isInternationalGuild(config.guildId)) {
-        const { setupBookingStore } = await import('./services/bookingStoreSetupService.js');
+        const { BOOKING_APP_ID, bookingPortal, markBookingOperationsReady, setupBookingStore } = await import('./services/bookingStoreSetupService.js');
         void setupBookingStore(readyClient, config.guildId)
-          .then(result => console.log('[BOOKING-SETUP]', result))
+          .then(async result => {
+            console.log('[BOOKING-SETUP]', result);
+            const portal = bookingPortal(readyClient);
+            if (!portal || readyClient.user?.id !== BOOKING_APP_ID) return;
+            const [{ createBookingLedger }, { createBookingVoiceTick }, { registerBookingCommunity }] = await Promise.all([
+              import('./services/bookingLedgerService.js'), import('./services/bookingVoiceService.js'), import('./events/bookingCommunityEvents.js'),
+            ]);
+            const ledger = createBookingLedger(db);
+            const tick = createBookingVoiceTick({ db, ledger, onError: code => console.warn('[BOOKING-VOICE]', code) });
+            const guild = readyClient.guilds.cache.get(STORE_TWO_GUILD_ID);
+            const run = () => { void tick(guild, portal.voiceCategory).catch(error => console.warn('[BOOKING-VOICE]', error.code || error.name)); };
+            registerBookingCommunity(readyClient);
+            run();
+            setInterval(run, 30_000).unref();
+            markBookingOperationsReady(readyClient, {
+              voicePermissions: Boolean(guild?.members.me?.permissions.has([
+                PermissionFlagsBits.ManageChannels, PermissionFlagsBits.ManageRoles, PermissionFlagsBits.MoveMembers,
+              ])),
+              payosEnabled: process.env.BOOKING_PAYOS_ENABLED === 'true' && config.paymentProvider === 'PAYOS'
+                && collectPaymentConfigIssues().length === 0,
+            });
+          })
           .catch(error => console.error('[BOOKING-SETUP]', error.code || error.message));
       }
 
@@ -457,10 +486,7 @@ export async function deployCommands() {
   initDatabase();
 
   const commands = await loadCommands();
-  const baseCommandData = [...commands.values()].map((command) => command.data.toJSON());
-  const commandData = isInternationalGuild(config.guildId)
-    ? localizeCommandsForInternationalStore(baseCommandData)
-    : baseCommandData;
+  const commandData = commandDefinitions(commands);
 
   const rest = new REST({ version: '10' }).setToken(config.botToken);
   await rest.put(Routes.applicationGuildCommands(config.clientId, config.guildId), {

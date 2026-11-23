@@ -30,6 +30,7 @@ import { deliverPaidOrder } from './autoDeliveryService.js';
 import { db } from '../database/db.js';
 import { startSupplierPaymentEffects } from './supplierAutobuyPaymentNoticeService.js';
 import { getPayOSReceivedAmount } from '../utils/payosReceipt.js';
+import { createBookingLedger, getBookingInvoiceForOrder, isBookingPayOSReceipt } from './bookingLedgerService.js';
 
 export { getPayOSReceivedAmount };
 
@@ -658,6 +659,11 @@ export async function finalizePaidOrder(client, order, paymentData, transactionI
     assertPayOSLookupIdentity(fresh, invoiceGuard.info);
     return recordPayment();
   }).immediate() : recordPayment();
+  const booking = getBookingInvoiceForOrder(db, payment.updated);
+  if (booking) {
+    createBookingLedger(db).syncInvoicePayment(payment.updated.guild_id, booking.id);
+    return { updated: payment.updated, duplicate: payment.duplicate, repairedNotification: false };
+  }
   if (payment.updated.fulfillment_mode === 'SUPPLIER') {
     // The bank receipt is already durable. Supplier work, Discord roles and
     // optional receipts must not keep a webhook/status request waiting behind
@@ -818,6 +824,10 @@ export async function handlePayOSWebhook({ client, body }) {
   if (!isSuccess || resultCode !== '00') {
     return { ok: true, status: 200, body: { ok: true, message: 'Ignored non-success event' } };
   }
+  const booking = getBookingInvoiceForOrder(db, order);
+  if (booking && !isBookingPayOSReceipt(order, booking, payload.data)) {
+    return { ok: true, status: 200, body: { ok: true, message: 'Ignored mismatched booking invoice identity' } };
+  }
 
   if (Number(payload.data.amount ?? 0) < Number(order.total_amount ?? 0)) {
     return { ok: true, status: 200, body: { ok: true, message: 'Ignored insufficient amount' } };
@@ -854,8 +864,9 @@ export async function syncPaymentStatusFromPayOS({ client, orderCode = null, pay
   const state = String(info.status ?? '').toUpperCase();
   assertPayOSLookupIdentity(order, info);
 
+  const booking = getBookingInvoiceForOrder(db, order);
   const needsNotificationRepair = order.payment_status === 'PAID'
-    && !hasPaymentConfirmationLog(order.order_code);
+    && (booking ? booking.status === 'PENDING' : !hasPaymentConfirmationLog(order.order_code));
 
   if (state === 'PAID' && (order.payment_status !== 'PAID' || needsNotificationRepair)) {
     const transaction = Array.isArray(info.transactions) ? info.transactions[0] : null;
@@ -896,6 +907,8 @@ export async function reconcileRecentPayOSPayments(client, { limit = 20, lookbac
   const actionPlaceholders = PAYMENT_CONFIRMATION_ACTIONS.map(() => '?').join(',');
   let supplierInvoiceFilter = '';
   let supplierNoticeFilter = '';
+  const bookingInvoiceFilter = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='booking_invoices'").get()
+    ? "AND NOT EXISTS (SELECT 1 FROM booking_invoices i WHERE i.order_id=o.id AND i.status IN ('PAID','NEEDS_REVIEW'))" : '';
   try {
     const table = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='supplier_autobuy_payment_notices'").get();
     if (table && db.prepare('PRAGMA table_info(supplier_autobuy_payment_notices)').all().some(column => column.name === 'order_code')) {
@@ -924,6 +937,7 @@ export async function reconcileRecentPayOSPayments(client, { limit = 20, lookbac
         OR (
           o.payment_status = 'PAID'
           ${supplierNoticeFilter}
+          ${bookingInvoiceFilter}
           AND NOT EXISTS (
             SELECT 1 FROM staff_logs l
             WHERE l.related_order_code = o.order_code
@@ -951,6 +965,9 @@ export async function confirmOrderPaidManually(guild, orderCode, amount = null) 
   const order = getOrderByCode(orderCode);
   if (!order) {
     throw new Error('Không tìm thấy đơn hàng.');
+  }
+  if (getBookingInvoiceForOrder(db, order)) {
+    throw new Error('Hóa đơn booking cần xác minh qua PayOS. Trong phiếu dùng /cenar-booking kiem-tra-bill.');
   }
 
   const transactionId = `MANUAL_${Date.now()}`;
