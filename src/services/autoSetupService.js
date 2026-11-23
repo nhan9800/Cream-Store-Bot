@@ -55,16 +55,10 @@ const localNames = Object.freeze({
 
 const internationalNames = Object.freeze({
   partnerCategory: 'PARTNER NETWORK',
-  ctvCategory: 'AFFILIATE PROGRAM',
   partnerRecruit: 'partner-apply',
   partnerDirectory: 'verified-partners',
   partnerReview: 'partner-review',
   partnerBroadcast: 'partner-media',
-  ctvRecruit: 'affiliate-apply',
-  ctvReview: 'affiliate-review',
-  ctvChat: 'affiliate-lounge',
-  ctvOrderLog: 'affiliate-order-log',
-  ctvPrice: 'affiliate-pricing',
 });
 
 const VIEW = PermissionFlagsBits.ViewChannel;
@@ -453,7 +447,8 @@ export async function autoSetupPartnerAndCtv(client) {
   for (const guild of client.guilds.cache.values()) {
     try {
       await guild.roles.fetch().catch(() => null);
-      const names = isInternationalGuild(guild.id) ? internationalNames : localNames;
+      const isBookingStore = isInternationalGuild(guild.id);
+      const names = isBookingStore ? internationalNames : localNames;
       const settings = db.prepare('SELECT support_role_id, manager_role_id FROM guild_settings WHERE guild_id = ?').get(guild.id) || {};
       const staffRoles = [...new Set([
         settings.support_role_id,
@@ -467,16 +462,17 @@ export async function autoSetupPartnerAndCtv(client) {
         iconUrl: storeOne ? storeRoleIconUrl(IDS.partnerRole) : ROLE_ICON_URLS.partner, mentionable: false,
         legacyIds: ['1367138153735131176'],
       });
-      const ctvRole = await ensureRole(guild, client, IDS.ctvRole, {
-        name: isInternationalGuild(guild.id) ? 'Cenar Affiliate' : 'Cenar CTV',
+      // Cenar Booking retired its Affiliate workspace. Keep its saved settings,
+      // financial records and roles, and continue provisioning Partner.
+      const ctvRole = isBookingStore ? null : await ensureRole(guild, client, IDS.ctvRole, {
+        name: 'Cenar CTV',
         colors: roleColorsFor(IDS.ctvRole, { enhanced: enhancedRoleColors, storeOne }),
         iconUrl: storeOne ? storeRoleIconUrl(IDS.ctvRole) : ROLE_ICON_URLS.ctv, mentionable: false,
         legacyIds: ['1514858684151369832'],
       });
 
       const partnerCategory = await ensureCategory(guild, IDS.partnerCategory, names.partnerCategory);
-      const ctvSettings = getCtvSettings(guild.id);
-      const ctvCategory = await ensureCategory(guild, ctvSettings.category_id, names.ctvCategory);
+      const ctvCategory = ctvRole ? await ensureCategory(guild, getCtvSettings(guild.id).category_id, names.ctvCategory) : null;
       const botId = client.user.id;
 
       const partnerRecruit = await ensureChannel(guild, { id: IDS.partnerRecruit, name: names.partnerRecruit, parent: partnerCategory, overwrites: publicReadOverrides(guild, botId, staffRoles) });
@@ -484,11 +480,15 @@ export async function autoSetupPartnerAndCtv(client) {
       const partnerReview = await ensureChannel(guild, { id: IDS.partnerReview, name: names.partnerReview, parent: partnerCategory, overwrites: staffOverrides(guild, botId, staffRoles) });
       const partnerBroadcast = await ensureChannel(guild, { id: IDS.partnerBroadcast, name: names.partnerBroadcast, parent: partnerCategory, overwrites: restrictedOverrides(guild, botId, partnerRole.id, staffRoles, { allowMention: false }) });
 
-      const ctvRecruit = await ensureChannel(guild, { id: IDS.ctvRecruit, name: names.ctvRecruit, parent: ctvCategory, overwrites: publicReadOverrides(guild, botId, staffRoles) });
-      const ctvReview = await ensureChannel(guild, { name: names.ctvReview, parent: ctvCategory, overwrites: staffOverrides(guild, botId, staffRoles) });
-      const ctvChat = await ensureChannel(guild, { name: names.ctvChat, parent: ctvCategory, overwrites: restrictedOverrides(guild, botId, ctvRole.id, staffRoles) });
-      const ctvOrderLog = await ensureChannel(guild, { name: names.ctvOrderLog, parent: ctvCategory, overwrites: restrictedOverrides(guild, botId, ctvRole.id, staffRoles) });
-      const ctvPrice = await ensureChannel(guild, { name: names.ctvPrice, parent: ctvCategory, overwrites: restrictedOverrides(guild, botId, ctvRole.id, staffRoles) });
+      let ctvChannels;
+      if (ctvCategory) {
+        const recruit = await ensureChannel(guild, { id: IDS.ctvRecruit, name: names.ctvRecruit, parent: ctvCategory, overwrites: publicReadOverrides(guild, botId, staffRoles) });
+        const review = await ensureChannel(guild, { name: names.ctvReview, parent: ctvCategory, overwrites: staffOverrides(guild, botId, staffRoles) });
+        const chat = await ensureChannel(guild, { name: names.ctvChat, parent: ctvCategory, overwrites: restrictedOverrides(guild, botId, ctvRole.id, staffRoles) });
+        const orderLog = await ensureChannel(guild, { name: names.ctvOrderLog, parent: ctvCategory, overwrites: restrictedOverrides(guild, botId, ctvRole.id, staffRoles) });
+        const price = await ensureChannel(guild, { name: names.ctvPrice, parent: ctvCategory, overwrites: restrictedOverrides(guild, botId, ctvRole.id, staffRoles) });
+        ctvChannels = { recruit, review, chat, orderLog, price };
+      }
 
       upsertPartnerSettings({
         guild_id: guild.id,
@@ -498,32 +498,36 @@ export async function autoSetupPartnerAndCtv(client) {
         directory_channel_id: partnerDirectory.id,
         partner_channel_id: partnerBroadcast.id,
       });
-      upsertCtvSettings({
-        guild_id: guild.id,
-        recruit_channel_id: ctvRecruit.id,
-        approve_channel_id: ctvReview.id,
-        ctv_role_id: ctvRole.id,
-        category_id: ctvCategory.id,
-        chat_channel_id: ctvChat.id,
-        order_log_channel_id: ctvOrderLog.id,
-        price_channel_id: ctvPrice.id,
-      });
+      if (ctvChannels) {
+        upsertCtvSettings({
+          guild_id: guild.id,
+          recruit_channel_id: ctvChannels.recruit.id,
+          approve_channel_id: ctvChannels.review.id,
+          ctv_role_id: ctvRole.id,
+          category_id: ctvCategory.id,
+          chat_channel_id: ctvChannels.chat.id,
+          order_log_channel_id: ctvChannels.orderLog.id,
+          price_channel_id: ctvChannels.price.id,
+        });
+      }
 
       await postRecruitmentPanel(partnerRecruit, 'partner', guild.id, {
         partnerBroadcast: partnerBroadcast.id,
         partnerDirectory: partnerDirectory.id,
       });
       await publishPartnerBroadcastGuide(partnerBroadcast, guild.id, { partner_role_id: partnerRole.id });
-      if (guild.id === '1282637033340403754') {
-        ensureCtvRecruitmentCampaign(guild.id, 3);
-        await publishCtvRecruitmentPanel(guild);
-      } else {
-        await postRecruitmentPanel(ctvRecruit, 'ctv', guild.id, { ctvChat: ctvChat.id, ctvOrderLog: ctvOrderLog.id });
+      if (ctvChannels) {
+        if (storeOne) {
+          ensureCtvRecruitmentCampaign(guild.id, 3);
+          await publishCtvRecruitmentPanel(guild);
+        } else {
+          await postRecruitmentPanel(ctvChannels.recruit, 'ctv', guild.id, { ctvChat: ctvChannels.chat.id, ctvOrderLog: ctvChannels.orderLog.id });
+        }
+        await publishCtvPricePanel(guild).catch((error) => {
+          console.warn(`[AUTO-SETUP] CTV price panel ${guild.id}: ${error.message}`);
+        });
       }
-      await publishCtvPricePanel(guild).catch((error) => {
-        console.warn(`[AUTO-SETUP] CTV price panel ${guild.id}: ${error.message}`);
-      });
-      console.log(`[AUTO-SETUP] Partner/CTV workspace ready: ${guild.name}`);
+      console.log(`[AUTO-SETUP] ${ctvChannels ? 'Partner/CTV' : 'Partner'} workspace ready: ${guild.name}`);
     } catch (error) {
       console.error(`[AUTO-SETUP] ${guild.name}: ${error.message}`);
     }
