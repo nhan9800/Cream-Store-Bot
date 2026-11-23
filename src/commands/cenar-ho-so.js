@@ -5,8 +5,8 @@ import { isManager, isSupport } from '../utils/permissions.js';
 import { BOOKING_APP_ID, bookingPortal } from '../services/bookingStoreSetupService.js';
 import { getGuildConfig } from '../services/guildConfigService.js';
 import { BookingProfileError, createBookingProfileService } from '../services/bookingProfileService.js';
-import { bookingProfileServices, bookingProfileText, hostNumber, publishBookingHost,
-  publishBookingReview, unpublishBookingHost } from '../services/bookingProfilePublication.js';
+import { bookingProfileServices, bookingProfileText, buildBookingProfileResponse, hostNumber, publishBookingHost,
+  publishBookingReview, unpublishBookingHost, withBookingHostUpdate } from '../services/bookingProfilePublication.js';
 
 export const bookingOnly = true;
 const privateReply = { flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } };
@@ -44,19 +44,6 @@ export const data = new SlashCommandBuilder()
   .addSubcommand(command => command.setName('dang-danh-gia').setDescription('Staff đăng nhận xét ẩn danh đã được khách cho phép')
     .addStringOption(ticketOption));
 
-const hostUpdates = new Set();
-const reviewUpdates = new Set();
-
-async function withUpdate(active, key, update) {
-  if (active.has(key)) throw new BookingProfileError('Đang cập nhật nội dung này. Vui lòng thử lại sau.');
-  active.add(key);
-  try {
-    return await update();
-  } finally {
-    active.delete(key);
-  }
-}
-
 async function assertStaff(interaction, managerOnly) {
   const member = await interaction.guild.members.fetch({ user: interaction.user.id, force: true });
   const cfg = getGuildConfig(interaction.guildId);
@@ -69,14 +56,18 @@ async function assertStaff(interaction, managerOnly) {
   }
 }
 
-function draftSummary(profile) {
+function draftSummary(profile, saved = false) {
   if (!profile) throw new BookingProfileError('Chưa có bản nháp hồ sơ.');
   const { name, tagline, service, games, availability, consent } = profile.draft;
-  return [`**Bản nháp v${profile.draft_revision}**`, `**Biệt danh** · ${bookingProfileText(name)}`,
-    `**Giới thiệu** · ${bookingProfileText(tagline)}`,
-    `**Dịch vụ** · ${bookingProfileServices[service]}`, `**Game / chủ đề** · ${bookingProfileText(games)}`,
-    `**Giờ rảnh (UTC+7)** · ${bookingProfileText(availability)}`,
-    consent ? 'Host đã đồng ý công khai sau khi staff duyệt.' : 'Host lưu bản nháp riêng.'].join('\n');
+  return {
+    title: saved ? 'Đã lưu bản nháp' : `Bản nháp v${profile.draft_revision}`,
+    detail: saved ? `Phiên bản v${profile.draft_revision}` : undefined,
+    sections: [
+      `**${bookingProfileText(name)}**\n${bookingProfileText(tagline)}`,
+      `### ${bookingProfileServices[service]}\n${bookingProfileText(games)}\n\n**Giờ thường rảnh**\n${bookingProfileText(availability)} (UTC+7)`,
+      consent ? '**Quyền công khai**\nCó thể đăng sau khi staff duyệt.' : '**Quyền công khai**\nBản nháp riêng tư.',
+    ],
+  };
 }
 
 function ticketId(guildId, code) {
@@ -93,18 +84,18 @@ export async function execute(interaction) {
     return;
   }
   await interaction.deferReply({ flags: privateReply.flags });
-  const reply = content => interaction.editReply({ content, allowedMentions: privateReply.allowedMentions });
+  const reply = card => interaction.editReply(buildBookingProfileResponse(card));
   const { guild, guildId, options, user } = interaction;
   const action = options.getSubcommand();
   const profiles = createBookingProfileService(db);
   const value = key => options.getString(key, true);
   try {
     if (action === 'gui-ban-nhap') {
-      const profile = await withUpdate(hostUpdates, user.id, () => profiles.saveDraft(user.id, {
+      const profile = await withBookingHostUpdate(user.id, () => profiles.saveDraft(user.id, {
         name: value('biet_danh'), tagline: value('gioi_thieu'), service: value('dich_vu'), games: value('chu_de'),
         availability: value('gio_ranh'), consent: options.getBoolean('dong_y', true),
       }));
-      await reply(`Đã lưu hồ sơ.\n\n${draftSummary(profile)}`);
+      await reply(draftSummary(profile, true));
       return;
     }
     if (action === 'xem-ban-nhap') {
@@ -116,29 +107,29 @@ export async function execute(interaction) {
     if (action === 'mau-the') {
       await assertStaff(interaction, true);
       profiles.setTemplate(value('tieu_de'), value('mau'));
-      await reply('Đã lưu mẫu. Dùng `/cenar-ho-so lam-moi` để áp dụng vào một thẻ đã đăng.');
+      await reply({ title: 'Đã lưu mẫu thẻ', detail: 'Dùng `/cenar-ho-so lam-moi` để áp dụng vào một thẻ đã đăng.' });
       return;
     }
     if (action === 'duyet' || action === 'lam-moi') {
       await assertStaff(interaction);
       const host = options.getUser('host', true);
-      const published = await withUpdate(hostUpdates, host.id, async () => {
+      const published = await withBookingHostUpdate(host.id, async () => {
         const profile = action === 'duyet' ? profiles.approve(host.id, options.getInteger('phien_ban', true)) : profiles.get(host.id);
         if (!profile?.approved) throw new BookingProfileError('Chưa có hồ sơ đã duyệt.');
         const thread = await publishBookingHost({ guild, portal, profile, rating: profiles.ratingFor(host.id), template: profiles.getTemplate() });
         profiles.setHostThread(host.id, thread.id);
         return { thread, profile };
       });
-      await reply(`Đã cập nhật [hồ sơ #${hostNumber(published.profile.profile_number)}](${published.thread.url}).`);
+      await reply({ title: 'Hồ sơ đã cập nhật', detail: `[Mở hồ sơ #${hostNumber(published.profile.profile_number)}](${published.thread.url})` });
       return;
     }
     if (action === 'an-ho-so') {
-      const changed = await withUpdate(hostUpdates, user.id, async () => {
+      const changed = await withBookingHostUpdate(user.id, async () => {
         const profile = profiles.get(user.id);
         if (profile?.approved) await unpublishBookingHost({ guild, portal, profile });
         return profiles.hide(user.id);
       });
-      await reply(changed ? 'Đã ẩn nội dung và thu hồi đồng ý công khai hồ sơ.' : 'Bạn chưa có hồ sơ Cenar.');
+      await reply(changed ? { title: 'Hồ sơ đã ẩn', detail: 'Quyền công khai của hồ sơ đã được thu hồi.' } : { title: 'Bạn chưa có hồ sơ Cenar' });
       return;
     }
     const code = value('phieu');
@@ -148,7 +139,8 @@ export async function execute(interaction) {
       const review = profiles.createReview(session, user.id, {
         rating: options.getInteger('diem', true), feedback: options.getString('nhan_xet'), consent: options.getBoolean('dong_y'),
       });
-      await reply(`Đã ghi nhận **${review.rating}/5**. ${review.consent ? 'Staff có thể duyệt để đăng nhận xét ẩn danh.' : 'Nhận xét của bạn được lưu riêng.'}`);
+      await reply({ title: `Đã ghi nhận ${review.rating}/5`, detail: review.consent
+        ? 'Staff có thể duyệt để đăng nhận xét ẩn danh.' : 'Nhận xét của bạn được lưu riêng.' });
       return;
     }
     await assertStaff(interaction);
@@ -156,19 +148,22 @@ export async function execute(interaction) {
     const review = profiles.getReview(id);
     if (!review?.consent) throw new BookingProfileError('Chưa có nhận xét được khách cho phép đăng.');
     if (action === 'xem-danh-gia') {
-      await reply(`**Đánh giá ${review.rating}/5**\n${bookingProfileText(review.feedback)}`);
+      await reply({ title: `Đánh giá ${review.rating}/5`, detail: 'Khách cho phép đăng ẩn danh.',
+        sections: [`### Nhận xét của khách\n> ${bookingProfileText(review.feedback)}`] });
       return;
     }
-    const thread = await withUpdate(reviewUpdates, id, () => withUpdate(hostUpdates, review.host_id, async () => {
+    const thread = await withBookingHostUpdate(review.host_id, async () => {
       const profile = profiles.get(review.host_id);
       if (!profile?.approved || !profile.forum_thread_id) throw new BookingProfileError('Host cần có hồ sơ đã công khai trước khi đăng đánh giá.');
       const post = await publishBookingReview({ guild, portal, review, profile });
       profiles.setReviewThread(id, post.id);
       return post;
-    }));
-    await reply(`Đã đăng [đánh giá](${thread.url}). Dùng /cenar-ho-so lam-moi để cập nhật điểm trên thẻ host.`);
+    });
+    await reply({ title: 'Đánh giá đã đăng', detail: `[Mở đánh giá ẩn danh](${thread.url})`,
+      sections: ['Dùng `/cenar-ho-so lam-moi` để cập nhật điểm trên thẻ host.'] });
   } catch (error) {
     if (!(error instanceof BookingProfileError)) console.warn('[BOOKING-PROFILES]', error.code || error.name);
-    await reply(error instanceof BookingProfileError ? error.message : 'Chưa đồng bộ được với Discord. Thử lại cùng lệnh để kiểm tra bản đã lưu.');
+    await reply({ title: 'Chưa cập nhật được hồ sơ', detail: error instanceof BookingProfileError ? error.message
+      : 'Chưa đồng bộ được với Discord. Thử lại cùng lệnh để kiểm tra bản đã lưu.', accent: 0xbd7d9c });
   }
 }
