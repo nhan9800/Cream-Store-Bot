@@ -71,4 +71,14 @@ describe('Components V2 layout policy', () => {
       global.discordClient = client;
     }
   });
+
+  it('puts submitted purchase details directly below the customer and ticket metadata', () => {
+    const purchaseRequest = '### Yêu cầu mua hàng của khách\n\n**Sản phẩm khách muốn mua**\nSpotify Premium';
+    const view = buildTicketWelcomeV2('CN_TEST', '123', 'ORDER', null, null, STORE_ONE_GUILD_ID, { purchaseRequest });
+    const blocks = textBlocks(view.container);
+    expect(blocks[0]).toContain('<@123>');
+    expect(blocks[1]).toContain('CN_TEST');
+    expect(blocks[2]).toBe(purchaseRequest);
+    expect(blocks.join('\n')).not.toMatch(/Hướng dẫn xử lý|giao hàng qua DM/);
+  });
 });

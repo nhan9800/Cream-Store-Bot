@@ -46,8 +46,13 @@ describe('Store 1 ticket intake', () => {
     const order = interaction('ticket:intake:form:order', { product: '**Netflix**', duration: '1 tháng', payment: 'MoMo' });
     await handleTicketIntakeInteraction(order);
     expect(order.deferReply).toHaveBeenCalledWith({ flags: 64 });
-    expect(mocks.create).toHaveBeenCalledWith(order, 'ORDER', null, { intake: { title: 'Mua hàng',
-      text: '### Mua hàng\n**Sản phẩm** · \\*\\*Netflix\\*\\*\n**Thời hạn** · 1 tháng\n**Thanh toán mong muốn** · MoMo' } });
+    expect(mocks.create).toHaveBeenCalledWith(order, 'ORDER', null, { intake: { title: 'Mua hàng', text: [
+      '### Yêu cầu mua hàng của khách',
+      '**Sản phẩm khách muốn mua**\n\\*\\*Netflix\\*\\*',
+      '**Thời hạn gói**\n1 tháng',
+      '**Phương thức thanh toán mong muốn**\nMoMo',
+      '-# Staff sẽ xác nhận gói, giá và cách thanh toán ngay trong ticket này.',
+    ].join('\n\n') } });
 
     const support = interaction('ticket:intake:form:support', { topic: 'Đăng nhập', issue: 'Cần hướng dẫn' });
     await handleTicketIntakeInteraction(support);
