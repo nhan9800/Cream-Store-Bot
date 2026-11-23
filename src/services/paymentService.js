@@ -30,6 +30,7 @@ import { deliverPaidOrder } from './autoDeliveryService.js';
 import { db } from '../database/db.js';
 import { startSupplierPaymentEffects } from './supplierAutobuyPaymentNoticeService.js';
 import { getPayOSReceivedAmount } from '../utils/payosReceipt.js';
+import { STORE_TWO_GUILD_ID } from '../utils/locale.js';
 
 export { getPayOSReceivedAmount };
 
@@ -658,6 +659,15 @@ export async function finalizePaidOrder(client, order, paymentData, transactionI
     assertPayOSLookupIdentity(fresh, invoiceGuard.info);
     return recordPayment();
   }).immediate() : recordPayment();
+  if (payment.updated.guild_id === STORE_TWO_GUILD_ID) {
+    const { isBookingPaymentOrder } = await import('./bookingPaymentService.js');
+    if (isBookingPaymentOrder(db, payment.updated)) {
+      const { createBookingLedger } = await import('./bookingLedgerService.js');
+      const invoice = db.prepare('SELECT id FROM booking_invoices WHERE order_id = ?').get(payment.updated.id);
+      createBookingLedger(db).syncInvoicePayment(STORE_TWO_GUILD_ID, invoice.id);
+      return { updated: payment.updated, duplicate: payment.duplicate, repairedNotification: false };
+    }
+  }
   if (payment.updated.fulfillment_mode === 'SUPPLIER') {
     // The bank receipt is already durable. Supplier work, Discord roles and
     // optional receipts must not keep a webhook/status request waiting behind
@@ -951,6 +961,12 @@ export async function confirmOrderPaidManually(guild, orderCode, amount = null) 
   const order = getOrderByCode(orderCode);
   if (!order) {
     throw new Error('Không tìm thấy đơn hàng.');
+  }
+  if (order.guild_id === STORE_TWO_GUILD_ID) {
+    const { isBookingPaymentOrder } = await import('./bookingPaymentService.js');
+    if (isBookingPaymentOrder(db, order)) {
+      throw new Error('Hóa đơn booking cần xác minh qua PayOS. Trong phiếu dùng /cenar-booking kiem-tra-bill.');
+    }
   }
 
   const transactionId = `MANUAL_${Date.now()}`;

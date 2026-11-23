@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { STORE_TWO_GUILD_ID } from '../src/utils/locale.js';
 
 const mocks = vi.hoisted(() => ({
-  open: vi.fn(), reply: vi.fn(), ticket: vi.fn(), config: vi.fn(),
+  open: vi.fn(), reply: vi.fn(), ticket: vi.fn(), config: vi.fn(), createSession: vi.fn(),
   portal: { request: 'request', apply: 'apply', tickets: 'private-category', emoji: {} },
 }));
 vi.mock('../src/services/bookingStoreSetupService.js', () => ({
@@ -12,6 +12,7 @@ vi.mock('../src/services/guildConfigService.js', () => ({ getGuildConfig: mocks.
 vi.mock('../src/services/ticketService.js', () => ({ getTicketByChannelId: mocks.ticket }));
 vi.mock('../src/events/shared.js', () => ({ safeReply: mocks.reply }));
 vi.mock('../src/events/ticketHandlers.js', () => ({ handleTicketCreate: mocks.open }));
+vi.mock('../src/services/bookingLedgerService.js', () => ({ createBookingLedger: () => ({ createSession: mocks.createSession }) }));
 
 import { bookingForm, handleBookingInteraction, parseBookingTime } from '../src/events/bookingHandlers.js';
 
@@ -56,9 +57,12 @@ describe('Cenar Booking intake and private ticket controls', () => {
     await handleBookingInteraction(submitted);
     expect(submitted.deferReply).toHaveBeenCalledWith({ flags: 64 });
     expect(mocks.open).toHaveBeenCalledWith(submitted, 'BOOKING', null, { booking: expect.objectContaining({ categoryId: 'private-category' }) });
-    const data = mocks.open.mock.lastCall[3].booking.render({ id: 19, ticket_code: 'TKT_001' }).container.toJSON();
+    const data = mocks.open.mock.lastCall[3].booking.render({ id: 19, ticket_code: 'TKT_001', guild_id: STORE_TWO_GUILD_ID }).container.toJSON();
     expect(data.components.find(component => component.content?.includes('Thời lượng')).content).toContain('**Thời lượng** · 60 phút');
-    expect(data.components.find(component => component.type === 1).components[0].custom_id).toBe('booking:state:confirm:19');
+    expect(data.components.find(component => component.content?.includes('Theo dõi phiên')).content).toContain('/cenar-booking lich');
+    expect(data.components.some(component => component.type === 1)).toBe(false);
+    expect(mocks.createSession).toHaveBeenCalledWith({ guildId: STORE_TWO_GUILD_ID, ticketId: 19,
+      service: 'game', startsAt: Date.parse('2026-11-23T13:30:00Z'), durationMinutes: 60 });
   });
 
   it('blocks wrong guild or channel and invalid form data without opening a ticket', async () => {

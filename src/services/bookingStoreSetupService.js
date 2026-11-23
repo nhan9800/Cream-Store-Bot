@@ -10,7 +10,7 @@ import { resolveVerificationRole } from './verificationRoleService.js';
 
 export const BOOKING_APP_ID = '1139187282075721768';
 const REVISION = 'CENAR-BOOKING-20261121';
-const LAYOUT = 'CENAR-BOOKING-LOBBY-20261122';
+const LAYOUT = 'CENAR-BOOKING-OPERATIONS-20261123';
 const reason = 'Cenar Booking channel setup';
 const glyphs = /[\p{Extended_Pictographic}\p{Regional_Indicator}\u200d\ufe0f\u20e3]/u;
 const statuses = new WeakMap();
@@ -52,6 +52,12 @@ const requiredExisting = ['welcome', 'rules', 'news', 'verify', 'support'];
 
 export function bookingStoreSetupStatus(client) {
   return statuses.get(client) ?? { status: 'not_started' };
+}
+
+export function markBookingOperationsReady(client, { voicePermissions, payosEnabled }) {
+  const setup = statuses.get(client);
+  if (setup?.status !== 'ready' || !bookingPortal(client)) return;
+  statuses.set(client, { ...setup, operations: { status: 'ready', voicePermissions, payosEnabled } });
 }
 
 export function bookingPortal(client) {
@@ -144,11 +150,13 @@ export function bookingPanels(guildId, channels, emoji) {
     ], [button('support', 'Liên hệ hỗ trợ')]),
     request: panel('request', 0x556ed5, 'Chọn phiên booking', [
       `${intro('game', '**Chơi game**')}\nGhi tên game và khung giờ bạn muốn.\n\n${intro('voice', '**Trò chuyện qua voice**')}\nChọn host hoặc để staff gợi ý.`,
-      'Khi gửi biểu mẫu, bot mở phiếu riêng cho bạn và staff. Staff sẽ xác nhận giờ và chi phí trong phiếu.',
+      'Khi gửi biểu mẫu, bot mở phiếu riêng để xác nhận host, giờ và chi phí. Bạn có thể xem trạng thái đã lưu bằng nút Lịch của bạn.',
     ], [
       button('game', 'Đặt phiên chơi game', null, 'booking:open:game'),
       button('voice', 'Đặt phiên trò chuyện', null, 'booking:open:voice'),
       button('profiles', 'Xem hồ sơ host', 'profiles'),
+      button('reviews', 'Lịch của bạn', null, 'booking:dashboard:my'),
+      button('rules', 'Trợ giúp', null, 'booking:dashboard:help'),
     ]),
     handbook: panel('handbook', 0x3d9a88, 'Cách đặt lịch', [
       '1. Xem hồ sơ host theo dịch vụ hoặc nhờ staff gợi ý.\n2. Chọn dịch vụ và nhập ngày giờ theo giờ Việt Nam (UTC+7).\n3. Theo dõi phiếu riêng để nhận xác nhận và thống nhất chi phí.',
@@ -346,7 +354,12 @@ async function applyBookingLayout(client, guildId) {
   if (!original.every(channel => live.has(channel.id) && JSON.stringify(live.get(channel.id).acl) === JSON.stringify(channel.acl))) {
     throw new Error('BOOKING_LEGACY_ACCESS_MISMATCH');
   }
-  portals.set(client, { request: channels.request.id, apply: channels.apply.id, tickets: categories.tickets.id, emoji });
+  portals.set(client, {
+    request: channels.request.id, apply: channels.apply.id, tickets: categories.tickets.id,
+    profiles: channels.profiles.id, reviews: channels.reviews.id, chat: channels.chat.id,
+    voiceChannels: [channels.lobby.id, channels.game.id, channels.voice.id],
+    voiceCategory: categories.tickets.id, emoji,
+  });
   return {
     status: 'ready', revision: LAYOUT,
     existingChannelsRetained: proof.filter(channel => live.has(channel.id)).length,
