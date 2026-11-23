@@ -1,12 +1,13 @@
-import { MessageFlags, SlashCommandBuilder } from 'discord.js';
+import { AttachmentBuilder, MediaGalleryBuilder, MessageFlags, SlashCommandBuilder } from 'discord.js';
 import { db } from '../database/db.js';
 import { STORE_TWO_GUILD_ID } from '../utils/locale.js';
 import { isManager, isSupport } from '../utils/permissions.js';
 import { BOOKING_APP_ID, bookingPortal } from '../services/bookingStoreSetupService.js';
 import { getGuildConfig } from '../services/guildConfigService.js';
 import { BookingProfileError, createBookingProfileService } from '../services/bookingProfileService.js';
+import { BookingPhotoError, importBookingProfilePhoto } from '../services/bookingProfilePhoto.js';
 import { bookingProfileServices, bookingProfileText, buildBookingProfileResponse, hostNumber, publishBookingHost,
-  publishBookingReview, unpublishBookingHost, withBookingHostUpdate } from '../services/bookingProfilePublication.js';
+  publishBookingReview, syncBookingPhotoRemoval, unpublishBookingHost, withBookingHostUpdate } from '../services/bookingProfilePublication.js';
 
 export const bookingOnly = true;
 const privateReply = { flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] } };
@@ -25,6 +26,10 @@ export const data = new SlashCommandBuilder()
     .addBooleanOption(o => o.setName('dong_y').setDescription('Đồng ý cho staff đăng hồ sơ này vào forum Cenar').setRequired(true)))
   .addSubcommand(command => command.setName('xem-ban-nhap').setDescription('Xem bản nháp của bạn hoặc xem với quyền staff')
     .addUserOption(o => o.setName('host').setDescription('Bỏ trống để xem bản nháp của bạn')))
+  .addSubcommand(command => command.setName('doi-anh').setDescription('Gửi ảnh hồ sơ của bạn để quản lý duyệt')
+    .addAttachmentOption(o => o.setName('anh').setDescription('Ảnh tĩnh JPG, PNG hoặc WebP tối đa 3 MB').setRequired(true))
+    .addBooleanOption(o => o.setName('dong_y').setDescription('Đồng ý công khai ảnh của mình sau khi quản lý duyệt').setRequired(true)))
+  .addSubcommand(command => command.setName('go-anh').setDescription('Gỡ ảnh của bạn khỏi bản nháp và thẻ công khai'))
   .addSubcommand(command => command.setName('duyet').setDescription('Staff duyệt và đăng đúng phiên bản bản nháp')
     .addUserOption(hostOption)
     .addIntegerOption(o => o.setName('phien_ban').setDescription('Số phiên bản thấy trong bản nháp').setMinValue(1).setRequired(true)))
@@ -56,7 +61,7 @@ async function assertStaff(interaction, managerOnly) {
   }
 }
 
-function draftSummary(profile, saved = false) {
+function draftSummary(profile, saved = false, hasPhoto = false, photoPending = false) {
   if (!profile) throw new BookingProfileError('Chưa có bản nháp hồ sơ.');
   const { name, tagline, service, games, availability, consent } = profile.draft;
   return {
@@ -66,8 +71,23 @@ function draftSummary(profile, saved = false) {
       `**${bookingProfileText(name)}**\n${bookingProfileText(tagline)}`,
       `### ${bookingProfileServices[service]}\n${bookingProfileText(games)}\n\n**Giờ thường rảnh**\n${bookingProfileText(availability)} (UTC+7)`,
       consent ? '**Quyền công khai**\nCó thể đăng sau khi staff duyệt.' : '**Quyền công khai**\nBản nháp riêng tư.',
+      ...(hasPhoto ? [photoPending ? '**Ảnh hồ sơ**\nQuản lý duyệt đúng phiên bản trước khi ảnh này xuất hiện.'
+        : '**Ảnh hồ sơ**\nẢnh đã được duyệt cùng hồ sơ.'] : []),
     ],
   };
+}
+
+function draftPayload(profile, profiles, saved = false) {
+  if (!profile) throw new BookingProfileError('Chưa có bản nháp hồ sơ.');
+  const photo = profiles.getDraftPhoto(profile.host_id);
+  const payload = buildBookingProfileResponse(draftSummary(profile, saved, Boolean(photo), profiles.hasPendingPhoto(profile.host_id)));
+  if (photo) {
+    const name = 'cenar-anh-ho-so.webp';
+    payload.components[0].addMediaGalleryComponents(new MediaGalleryBuilder().addItems(item =>
+      item.setURL(`attachment://${name}`).setDescription('Ảnh hồ sơ trong bản xem riêng.')));
+    payload.files = [new AttachmentBuilder(photo, { name })];
+  }
+  return payload;
 }
 
 function ticketId(guildId, code) {
@@ -95,13 +115,37 @@ export async function execute(interaction) {
         name: value('biet_danh'), tagline: value('gioi_thieu'), service: value('dich_vu'), games: value('chu_de'),
         availability: value('gio_ranh'), consent: options.getBoolean('dong_y', true),
       }));
-      await reply(draftSummary(profile, true));
+      await interaction.editReply(draftPayload(profile, profiles, true));
       return;
     }
     if (action === 'xem-ban-nhap') {
       const hostId = options.getUser('host')?.id ?? user.id;
       if (hostId !== user.id) await assertStaff(interaction);
-      await reply(draftSummary(profiles.get(hostId)));
+      await interaction.editReply(draftPayload(profiles.get(hostId), profiles));
+      return;
+    }
+    if (action === 'doi-anh') {
+      if (!options.getBoolean('dong_y', true)) throw new BookingProfileError('Chọn đồng ý nếu muốn gửi ảnh để duyệt công khai.');
+      const profile = await withBookingHostUpdate(user.id, async () => {
+        if (!profiles.get(user.id)) throw new BookingProfileError('Dùng /cenar-ho-so gui-ban-nhap để tạo hồ sơ trước.');
+        return profiles.stagePhoto(user.id, await importBookingProfilePhoto(options.getAttachment('anh', true)));
+      });
+      await interaction.editReply(draftPayload(profile, profiles, true));
+      return;
+    }
+    if (action === 'go-anh') {
+      const removed = await withBookingHostUpdate(user.id, async () => {
+        const removal = profiles.removePhoto(user.id);
+        if (!removal?.sync) return Boolean(removal?.removed);
+        try {
+          await syncBookingPhotoRemoval({ guild, portal, profiles, hostId: user.id });
+        } catch (error) {
+          console.warn('[BOOKING-PHOTO-REMOVE]', error.code || error.name);
+          throw new BookingProfileError('Đã gỡ ảnh khỏi kho. Bài Discord đang chờ đồng bộ. Dùng lại /cenar-ho-so go-anh để thử lại.');
+        }
+        return true;
+      });
+      await reply({ title: removed ? 'Đã gỡ ảnh hồ sơ' : 'Hồ sơ của bạn chưa có ảnh' });
       return;
     }
     if (action === 'mau-the') {
@@ -114,10 +158,13 @@ export async function execute(interaction) {
       await assertStaff(interaction);
       const host = options.getUser('host', true);
       const published = await withBookingHostUpdate(host.id, async () => {
+        if (action === 'duyet' && profiles.hasPendingPhoto(host.id)) await assertStaff(interaction, true);
         const profile = action === 'duyet' ? profiles.approve(host.id, options.getInteger('phien_ban', true)) : profiles.get(host.id);
         if (!profile?.approved) throw new BookingProfileError('Chưa có hồ sơ đã duyệt.');
-        const thread = await publishBookingHost({ guild, portal, profile, rating: profiles.ratingFor(host.id), template: profiles.getTemplate() });
+        const thread = await publishBookingHost({ guild, portal, profile: profiles.withApprovedPhoto(profile),
+          rating: profiles.ratingFor(host.id), template: profiles.getTemplate() });
         profiles.setHostThread(host.id, thread.id);
+        profiles.markPhotoSynced(host.id);
         return { thread, profile };
       });
       await reply({ title: 'Hồ sơ đã cập nhật', detail: `[Mở hồ sơ #${hostNumber(published.profile.profile_number)}](${published.thread.url})` });
@@ -162,8 +209,9 @@ export async function execute(interaction) {
     await reply({ title: 'Đánh giá đã đăng', detail: `[Mở đánh giá ẩn danh](${thread.url})`,
       sections: ['Dùng `/cenar-ho-so lam-moi` để cập nhật điểm trên thẻ host.'] });
   } catch (error) {
-    if (!(error instanceof BookingProfileError)) console.warn('[BOOKING-PROFILES]', error.code || error.name);
-    await reply({ title: 'Chưa cập nhật được hồ sơ', detail: error instanceof BookingProfileError ? error.message
+    const expected = error instanceof BookingProfileError || error instanceof BookingPhotoError;
+    if (!expected) console.warn('[BOOKING-PROFILES]', error.code || error.name);
+    await reply({ title: 'Chưa cập nhật được hồ sơ', detail: expected ? error.message
       : 'Chưa đồng bộ được với Discord. Thử lại cùng lệnh để kiểm tra bản đã lưu.', accent: 0xbd7d9c });
   }
 }
