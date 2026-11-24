@@ -1,7 +1,7 @@
 import { ChannelType, MessageFlags } from 'discord.js';
 import { STORE_ONE_GUILD_ID } from '../utils/locale.js';
 import {
-  buildLienQuanQuoteText, lienQuanImageName, LIEN_QUAN_ACCOUNTS, LIEN_QUAN_ATTACHMENT_LIMIT,
+  buildLienQuanQuoteText, lienQuanImageName, lienQuanImageUrl, readLienQuanImage, LIEN_QUAN_ACCOUNTS,
   LIEN_QUAN_BUTTON_PREFIX, LIEN_QUAN_CATEGORY_ID, LIEN_QUAN_CHANNEL,
 } from '../utils/lienQuanCatalog.js';
 import { handleTicketCreate } from './ticketHandlers.js';
@@ -18,10 +18,8 @@ export async function handleLienQuanQuote(interaction) {
   }
 
   const name = lienQuanImageName(account);
-  const photo = interaction.message.attachments?.find(file => file.name === name && file.contentType === 'image/jpeg'
-    && Number.isSafeInteger(file.size) && file.size > 0 && file.size <= LIEN_QUAN_ATTACHMENT_LIMIT);
-  const url = URL.parse(photo?.url ?? '');
-  if (!photo || url?.origin !== 'https://cdn.discordapp.com' || url.pathname !== `/attachments/${source.id}/${photo.id}/${name}`) {
+  const url = lienQuanImageUrl(interaction.message.components.map(part => part.toJSON()), source.id, account);
+  if (!url) {
     await interaction.reply({ content: `Ảnh của mã ${account.code} chưa có trên bài. Báo shop để kiểm tra.`, flags: MessageFlags.Ephemeral });
     return;
   }
@@ -29,10 +27,7 @@ export async function handleLienQuanQuote(interaction) {
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   let attachment;
   try {
-    const response = await fetch(url, { redirect: 'error', signal: AbortSignal.timeout(7_000) });
-    if (!response.ok) throw new Error('LIEN_QUAN_IMAGE_UNAVAILABLE');
-    attachment = Buffer.from(await response.arrayBuffer());
-    if (attachment.length !== photo.size) throw new Error('LIEN_QUAN_IMAGE_SIZE_MISMATCH');
+    attachment = await readLienQuanImage(url);
   } catch (error) {
     console.warn('[LIEN_QUAN_QUOTE]', error.code || error.name);
     await interaction.editReply({ content: `Discord chưa tải được ảnh của ${account.code}. Vui lòng thử lại sau ít phút.` });

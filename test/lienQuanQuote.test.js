@@ -1,9 +1,9 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ChannelType, Collection } from 'discord.js';
+import { ChannelType, Collection, ComponentType, ContainerComponent } from 'discord.js';
 import { STORE_ONE_GUILD_ID, STORE_TWO_GUILD_ID } from '../src/utils/locale.js';
 import {
   buildLienQuanAccountCard, lienQuanImageName, LIEN_QUAN_ACCOUNTS, LIEN_QUAN_BUTTON_PREFIX,
-  LIEN_QUAN_CATEGORY_ID, LIEN_QUAN_CHANNEL, LIEN_QUAN_PRICE,
+  LIEN_QUAN_ATTACHMENT_LIMIT, LIEN_QUAN_CATEGORY_ID, LIEN_QUAN_CHANNEL, LIEN_QUAN_PRICE,
 } from '../src/utils/lienQuanCatalog.js';
 
 const mockTicket = vi.hoisted(() => vi.fn());
@@ -11,15 +11,19 @@ vi.mock('../src/events/ticketHandlers.js', () => ({ handleTicketCreate: mockTick
 import { handleLienQuanQuote } from '../src/events/lienQuanQuoteHandler.js';
 
 const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
+const attachmentId = '1574741468852260894';
 function button(account, { guildId = STORE_ONE_GUILD_ID, author = 'bot', photoName = lienQuanImageName(account),
   origin = 'https://cdn.discordapp.com', parentId = LIEN_QUAN_CATEGORY_ID } = {}) {
-  const photo = { id: 'image', name: photoName, contentType: 'image/jpeg', size: jpeg.length,
-    url: `${origin}/attachments/shop/image/${photoName}?signature=example` };
+  const photo = { attachment_id: attachmentId, content_type: 'image/jpeg',
+    url: `${origin}/attachments/shop/${attachmentId}/${photoName}?signature=example` };
+  const container = new ContainerComponent({ type: ComponentType.Container, components: [{
+    type: ComponentType.MediaGallery, items: [{ media: photo }],
+  }] });
   return {
     customId: LIEN_QUAN_BUTTON_PREFIX + account.code,
     guildId, client: { user: { id: 'bot' } }, isButton: () => true,
     channel: { id: 'shop', name: LIEN_QUAN_CHANNEL, parentId, type: ChannelType.GuildText },
-    message: { author: { id: author }, attachments: new Collection([['image', photo]]) },
+    message: { author: { id: author }, attachments: new Collection(), components: [container] },
     deferReply: vi.fn(), reply: vi.fn(), editReply: vi.fn(),
   };
 }
@@ -41,7 +45,7 @@ describe('Liên Quân purchase cards', () => {
     vi.stubGlobal('fetch', fetch);
     await handleLienQuanQuote(source);
     expect(source.deferReply).toHaveBeenCalledWith({ flags: 64 });
-    expect(fetch.mock.lastCall[0].href).toBe(source.message.attachments.first().url);
+    expect(fetch.mock.lastCall[0].href).toBe(source.message.components[0].components[0].items[0].media.url);
     expect(mockTicket).toHaveBeenCalledWith(source, 'ORDER', null, { intake: {
       title: `Acc Liên Quân · ${account.code}`,
       text: expect.stringContaining(`${account.heroes} tướng`),
@@ -62,8 +66,12 @@ describe('Liên Quân purchase cards', () => {
     expect(mockTicket).not.toHaveBeenCalled();
   });
 
-  it('returns a private retry prompt instead of opening a ticket when the photo is unavailable', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response(null, { status: 404 })));
+  it.each([
+    ['unavailable', () => new Response(null, { status: 404 })],
+    ['oversized', () => new Response(Buffer.alloc(LIEN_QUAN_ATTACHMENT_LIMIT + 1))],
+    ['invalid', () => new Response('not a JPEG')],
+  ])('returns a private retry prompt when the photo is %s', async (_reason, response) => {
+    vi.stubGlobal('fetch', vi.fn(async () => response()));
     const target = button(LIEN_QUAN_ACCOUNTS[0]);
     await handleLienQuanQuote(target);
     expect(target.editReply.mock.lastCall[0].content).toContain('LQ-01');
