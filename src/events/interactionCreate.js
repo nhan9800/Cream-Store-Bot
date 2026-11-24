@@ -340,6 +340,12 @@ export function registerInteractionHandler(client, commands) {
         if (await handleTicketIntakeInteraction(interaction)) return;
       }
 
+      if (interaction.isButton() && interaction.customId.startsWith('lien-quan:quote:')) {
+        const { handleLienQuanQuote } = await import('./lienQuanQuoteHandler.js');
+        await handleLienQuanQuote(interaction);
+        return;
+      }
+
       // ── Autocomplete handler ──
       if (interaction.isAutocomplete()) {
         const command = commands.get(interaction.commandName);
