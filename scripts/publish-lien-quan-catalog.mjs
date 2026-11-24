@@ -7,7 +7,7 @@ import dotenv from 'dotenv';
 import { ChannelType, REST, Routes } from 'discord.js';
 import { STORE_ONE_GUILD_ID } from '../src/utils/locale.js';
 import {
-  buildLienQuanAccountCard, buildLienQuanGuide, lienQuanImageName, LIEN_QUAN_ACCOUNTS,
+  buildLienQuanAccountCard, buildLienQuanGuide, lienQuanImageName, lienQuanImageUrl, readLienQuanImage, LIEN_QUAN_ACCOUNTS,
   LIEN_QUAN_ATTACHMENT_LIMIT, LIEN_QUAN_BUTTON_PREFIX, LIEN_QUAN_CATEGORY_ID,
   LIEN_QUAN_CHANNEL, LIEN_QUAN_TOPIC,
 } from '../src/utils/lienQuanCatalog.js';
@@ -54,8 +54,8 @@ async function publish() {
 
   const usable = icons.filter(icon => icon.available !== false && !icon.roles?.length);
   const pick = names => names.map(name => usable.find(icon => icon.name === name)).find(Boolean);
-  const buy = pick(['cenar_ticket_open', 'cenar_order_created', 'cr_muahang', 'cenar_order_product']);
-  const heading = pick(['cenar_icon_game', 'cenar_order_product', 'cenar_panel_shop']) ?? buy;
+  const buy = pick(['cenar_muahang', 'cenar_carttt', 'cenar_board26_cart']);
+  const heading = pick(['cenar_shop', 'cenar_icon_game']) ?? buy;
   const emoji = { buyId: buy?.id, header: heading ? `<${heading.animated ? 'a' : ''}:${heading.name}:${heading.id}>` : '' };
   const route = Routes.channelMessages(channel.id);
   const options = { query: new URLSearchParams({ limit: '100' }) };
@@ -84,18 +84,13 @@ async function publish() {
   const verified = await Promise.all(images.map(async ({ account, name, sha256 }) => {
     const message = findOwned(posted, parts => parts.some(c => c.custom_id === LIEN_QUAN_BUTTON_PREFIX + account.code));
     assert(message && !message.mention_everyone);
-    const part = message.attachments.find(attachment => attachment.filename === name);
-    assert.equal(message.attachments.length, 1);
-    assert.equal(part?.content_type, 'image/jpeg');
-    const url = new URL(part.url);
-    assert.equal(url.origin, 'https://cdn.discordapp.com');
-    const response = await fetch(url, { redirect: 'error', signal: AbortSignal.timeout(12_000) });
-    assert(response.ok);
-    assert.equal(hash(Buffer.from(await response.arrayBuffer())), sha256);
+    const url = lienQuanImageUrl(message.components, channel.id, account);
+    assert(url, `No gallery photo found for ${account.code}`);
+    assert.equal(hash(await readLienQuanImage(url)), sha256);
     return { code: account.code, messageId: message.id, image: name, sha256 };
   }));
   console.log(JSON.stringify({ guild: STORE_ONE_GUILD_ID, channel: channel.id, guide: guide.id,
-    permissionsMatchSalesChannel: true, customButtonEmoji: Boolean(buy), cards: verified }, null, 2));
+    permissionsMatchSalesChannel: true, cards: verified }, null, 2));
 }
 
 publish().catch(error => {

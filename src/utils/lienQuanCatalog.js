@@ -1,5 +1,5 @@
 import {
-  ActionRowBuilder, ButtonBuilder, ButtonStyle, ContainerBuilder, MediaGalleryBuilder,
+  ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType, ContainerBuilder, MediaGalleryBuilder,
   MessageFlags, SeparatorBuilder, SeparatorSpacingSize, TextDisplayBuilder,
 } from 'discord.js';
 
@@ -24,6 +24,39 @@ export const LIEN_QUAN_ACCOUNTS = [
 ];
 
 export const lienQuanImageName = account => `acc-lien-quan-${account.code.slice(3)}.jpg`;
+
+export function lienQuanImageUrl(components, channelId, account) {
+  // Discord returns a V2 gallery upload in media.attachment_id, with an
+  // empty message.attachments array. Use the original CDN URL of that item.
+  const items = components.flatMap(part => part.components ?? [])
+    .filter(part => part.type === ComponentType.MediaGallery)
+    .flatMap(part => part.items ?? []);
+  if (items.length !== 1) return null;
+  const media = items[0].media;
+  if (!media) return null;
+  const url = URL.parse(media.url ?? '');
+  const filename = lienQuanImageName(account);
+  if (media.content_type !== 'image/jpeg' || !/^\d{17,22}$/.test(media.attachment_id ?? '')
+    || url?.origin !== 'https://cdn.discordapp.com'
+    || url.pathname !== `/attachments/${channelId}/${media.attachment_id}/${filename}`) return null;
+  return url;
+}
+
+export async function readLienQuanImage(url) {
+  const response = await fetch(url, { redirect: 'error', signal: AbortSignal.timeout(7_000) });
+  if (!response.ok || !response.body) throw new Error('LIEN_QUAN_IMAGE_UNAVAILABLE');
+  const parts = [];
+  let size = 0;
+  for await (const part of response.body) {
+    size += part.byteLength;
+    if (size > LIEN_QUAN_ATTACHMENT_LIMIT) throw new Error('LIEN_QUAN_IMAGE_TOO_LARGE');
+    parts.push(part);
+  }
+  const jpeg = Buffer.concat(parts, size);
+  if (jpeg[0] !== 0xff || jpeg[1] !== 0xd8) throw new Error('LIEN_QUAN_IMAGE_NOT_JPEG');
+  return jpeg;
+}
+
 const divider = () => new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small);
 const block = content => new TextDisplayBuilder().setContent(content);
 const image = account => new MediaGalleryBuilder().addItems({

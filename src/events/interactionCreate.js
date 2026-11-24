@@ -340,12 +340,6 @@ export function registerInteractionHandler(client, commands) {
         if (await handleTicketIntakeInteraction(interaction)) return;
       }
 
-      if (interaction.isButton() && interaction.customId.startsWith('lien-quan:quote:')) {
-        const { handleLienQuanQuote } = await import('./lienQuanQuoteHandler.js');
-        await handleLienQuanQuote(interaction);
-        return;
-      }
-
       // ── Autocomplete handler ──
       if (interaction.isAutocomplete()) {
         const command = commands.get(interaction.commandName);
@@ -2052,6 +2046,12 @@ export function registerInteractionHandler(client, commands) {
       }
 
       ensureRateLimit({ guildId: interaction.guildId, userId: interaction.user.id, action: `BUTTON_${interaction.customId.split(':')[0]}`, limit: 1, windowSeconds: config.buttonCooldownSeconds, message: 'Bạn bấm nút quá nhanh, vui lòng chờ vài giây.' });
+
+      if (interaction.customId.startsWith('lien-quan:quote:')) {
+        const { handleLienQuanQuote } = await import('./lienQuanQuoteHandler.js');
+        await handleLienQuanQuote(interaction);
+        return;
+      }
 
       if (interaction.customId === 'oauth:verify:button') {
         await handleVerificationInteraction(interaction);
