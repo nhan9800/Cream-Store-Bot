@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { STORE_ONE_GUILD_ID, STORE_TWO_GUILD_ID } from '../src/utils/locale.js';
+import { storefrontEmoji as icon } from '../src/utils/storefrontEmoji.js';
 
 const mocks = vi.hoisted(() => ({ create: vi.fn(), warranty: vi.fn(), order: vi.fn(), flag: vi.fn(), mute: vi.fn() }));
 vi.mock('../src/events/ticketHandlers.js', () => ({ handleTicketCreate: mocks.create }));
@@ -47,17 +48,17 @@ describe('Store 1 ticket intake', () => {
     await handleTicketIntakeInteraction(order);
     expect(order.deferReply).toHaveBeenCalledWith({ flags: 64 });
     expect(mocks.create).toHaveBeenCalledWith(order, 'ORDER', null, { intake: { title: 'Mua hàng', text: [
-      '### Yêu cầu mua hàng của khách',
-      '**Sản phẩm khách muốn mua**\n\\*\\*Netflix\\*\\*',
-      '**Thời hạn gói**\n1 tháng',
-      '**Phương thức thanh toán mong muốn**\nMoMo',
-      '-# Staff sẽ xác nhận gói, giá và cách thanh toán ngay trong ticket này.',
+      `### ${icon('ticket_open')} Yêu cầu mua hàng của khách`,
+      `**${icon('product')} Sản phẩm khách muốn mua**\n> \\*\\*Netflix\\*\\*`,
+      `**${icon('calendar')} Thời hạn gói**\n> 1 tháng`,
+      `**${icon('payos')} Phương thức thanh toán mong muốn**\n> MoMo`,
+      `-# ${icon('details')} Shop sẽ xác nhận gói, giá và cách thanh toán ngay trong ticket này.`,
     ].join('\n\n') } });
 
     const support = interaction('ticket:intake:form:support', { topic: 'Đăng nhập', issue: 'Cần hướng dẫn' });
     await handleTicketIntakeInteraction(support);
     expect(mocks.create).toHaveBeenCalledWith(support, 'SUPPORT', null, { intake: { title: 'Hỗ trợ',
-      text: '### Hỗ trợ\n**Chủ đề** · Đăng nhập\n**Nội dung** · Cần hướng dẫn' } });
+      text: `### ${icon('support')} Hỗ trợ\n${icon('details')} **Chủ đề** · Đăng nhập\n${icon('document')} **Nội dung** · Cần hướng dẫn` } });
   });
 
   it('accepts a warranty request only for the current guild and customer and preserves the issue', async () => {

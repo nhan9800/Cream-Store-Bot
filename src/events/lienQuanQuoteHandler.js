@@ -2,7 +2,7 @@ import { ChannelType, MessageFlags } from 'discord.js';
 import { STORE_ONE_GUILD_ID } from '../utils/locale.js';
 import {
   buildLienQuanQuoteText, lienQuanImageName, lienQuanImageUrl, readLienQuanImage, LIEN_QUAN_ACCOUNTS,
-  LIEN_QUAN_BUTTON_PREFIX, LIEN_QUAN_CATEGORY_ID, LIEN_QUAN_CHANNEL,
+  LIEN_QUAN_BUTTON_PREFIX, LIEN_QUAN_CATEGORY_ID, LIEN_QUAN_CHANNEL_NAMES,
 } from '../utils/lienQuanCatalog.js';
 import { handleTicketCreate } from './ticketHandlers.js';
 
@@ -10,7 +10,7 @@ export async function handleLienQuanQuote(interaction) {
   const account = LIEN_QUAN_ACCOUNTS.find(({ code }) => interaction.customId === LIEN_QUAN_BUTTON_PREFIX + code);
   const source = interaction.channel;
   if (!interaction.isButton() || !account || interaction.guildId !== STORE_ONE_GUILD_ID
-    || source?.type !== ChannelType.GuildText || source?.name !== LIEN_QUAN_CHANNEL
+    || source?.type !== ChannelType.GuildText || !LIEN_QUAN_CHANNEL_NAMES.includes(source?.name)
     || source.parentId !== LIEN_QUAN_CATEGORY_ID
     || interaction.message?.author?.id !== interaction.client.user.id) {
     await interaction.reply({ content: 'Hãy mở đúng bài acc trong kênh Acc Liên Quân của Cenar Store.', flags: MessageFlags.Ephemeral });

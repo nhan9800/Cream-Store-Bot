@@ -9,8 +9,9 @@ import { STORE_ONE_GUILD_ID } from '../src/utils/locale.js';
 import {
   buildLienQuanAccountCard, buildLienQuanGuide, lienQuanImageName, lienQuanImageUrl, readLienQuanImage, LIEN_QUAN_ACCOUNTS,
   LIEN_QUAN_ATTACHMENT_LIMIT, LIEN_QUAN_BUTTON_PREFIX, LIEN_QUAN_CATEGORY_ID,
-  LIEN_QUAN_CHANNEL, LIEN_QUAN_TOPIC,
+  LIEN_QUAN_CHANNEL, LIEN_QUAN_CHANNEL_NAMES, LIEN_QUAN_TOPIC,
 } from '../src/utils/lienQuanCatalog.js';
+import { storefrontComponentEmoji } from '../src/utils/storefrontEmoji.js';
 
 const BOT_ID = '1382729296724099132';
 const SALES_CHANNEL_ID = '1515008584549797979';
@@ -36,27 +37,23 @@ async function publish() {
   assert.equal(me.id, BOT_ID);
   const [channels, icons] = await Promise.all([
     rest.get(Routes.guildChannels(STORE_ONE_GUILD_ID)),
-    rest.get(Routes.guildEmojis(STORE_ONE_GUILD_ID)),
+    rest.get(Routes.applicationEmojis(BOT_ID)),
   ]);
   assert(channels.some(c => c.id === LIEN_QUAN_CATEGORY_ID && c.type === ChannelType.GuildCategory));
   const reference = channels.find(c => c.id === SALES_CHANNEL_ID && c.parent_id === LIEN_QUAN_CATEGORY_ID);
   assert(reference?.permission_overwrites?.length);
-  const matches = channels.filter(c => c.name === LIEN_QUAN_CHANNEL || c.topic === LIEN_QUAN_TOPIC);
+  const matches = channels.filter(c => LIEN_QUAN_CHANNEL_NAMES.includes(c.name) || c.topic === LIEN_QUAN_TOPIC);
   assert(matches.length <= 1, 'Duplicate catalog channels need review.');
   const channel = matches[0] ?? await rest.post(Routes.guildChannels(STORE_ONE_GUILD_ID), { body: {
     name: LIEN_QUAN_CHANNEL, type: ChannelType.GuildText, topic: LIEN_QUAN_TOPIC, parent_id: LIEN_QUAN_CATEGORY_ID,
     permission_overwrites: reference.permission_overwrites,
   }, reason: 'Cenar Store Liên Quân quote catalog' });
-  assert.equal(channel.name, LIEN_QUAN_CHANNEL);
+  assert(LIEN_QUAN_CHANNEL_NAMES.includes(channel.name));
   assert.equal(channel.topic, LIEN_QUAN_TOPIC);
   assert.equal(channel.parent_id, LIEN_QUAN_CATEGORY_ID);
   assert.deepEqual(permissions(channel), permissions(reference));
 
-  const usable = icons.filter(icon => icon.available !== false && !icon.roles?.length);
-  const pick = names => names.map(name => usable.find(icon => icon.name === name)).find(Boolean);
-  const buy = pick(['cenar_muahang', 'cenar_carttt', 'cenar_board26_cart']);
-  const heading = pick(['cenar_shop', 'cenar_icon_game']) ?? buy;
-  const emoji = { buyId: buy?.id, header: heading ? `<${heading.animated ? 'a' : ''}:${heading.name}:${heading.id}>` : '' };
+  assert(icons.items.some(emoji => emoji.id === storefrontComponentEmoji('cart').id && emoji.available !== false));
   const route = Routes.channelMessages(channel.id);
   const options = { query: new URLSearchParams({ limit: '100' }) };
   const existing = await rest.get(route, options);
@@ -68,12 +65,12 @@ async function publish() {
   }
   const guideSelector = parts => parts.some(c => c.content?.includes('## ') && c.content.includes('Acc Liên Quân Mobile'));
   const guide = findOwned(existing, guideSelector) ?? await rest.post(route, {
-    body: { ...buildLienQuanGuide(emoji), nonce: 'cenar-lienquan-guide-v1', enforce_nonce: true },
+    body: { ...buildLienQuanGuide(), nonce: 'cenar-lienquan-guide-v1', enforce_nonce: true },
   });
   for (const { account, name, data } of images) {
     const selector = parts => parts.some(c => c.custom_id === LIEN_QUAN_BUTTON_PREFIX + account.code);
     if (!findOwned(existing, selector)) await rest.post(route, {
-      body: { ...buildLienQuanAccountCard(account, emoji), nonce: `cenar-lienquan-${account.code}-v1`, enforce_nonce: true,
+      body: { ...buildLienQuanAccountCard(account), nonce: `cenar-lienquan-${account.code}-v1`, enforce_nonce: true,
         attachments: [{ id: 0, filename: name, description: `Bộ tướng và trang phục của ${account.code}` }] },
       files: [{ name, data, contentType: 'image/jpeg' }],
     });

@@ -38,6 +38,8 @@ import { ensureRateLimit } from '../services/abuseService.js';
 import { sendTicketAiWelcome } from '../services/aiSupportAutomationService.js';
 import { getCenarHub } from '../services/cenarHub.js';
 import { buildTicketChannelName } from '../utils/formatters.js';
+import { STORE_ONE_GUILD_ID } from '../utils/locale.js';
+import { storefrontComponentEmoji } from '../utils/storefrontEmoji.js';
 import {
   buildTicketWelcomeV2,
   buildTicketControlComponents,
@@ -386,10 +388,13 @@ export async function handleTicketCreate(interaction, ticketType = 'ORDER', gmai
         }));
       }
       
-      const components = [
-        welcomeV2,
-        ...buildTicketControlComponents(ticket.id, interaction.user.id)
-      ];
+      const controls = buildTicketControlComponents(ticket.id, interaction.user.id);
+      if (intake && interaction.guildId === STORE_ONE_GUILD_ID) {
+        const [close, mute] = controls[0].components;
+        close.setEmoji(storefrontComponentEmoji('lock'));
+        mute.setEmoji(storefrontComponentEmoji('pause'));
+      }
+      const components = [welcomeV2, ...controls];
 
       if (normalizedType === 'ORDER' && !intake?.attachment) {
         const profile = db.prepare('SELECT * FROM customer_profiles WHERE guild_id = ? AND customer_id = ?').get(interaction.guildId, interaction.user.id);

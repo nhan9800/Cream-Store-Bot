@@ -3,6 +3,8 @@ import { getCustomerFlag, getTicketMuteStatus } from '../services/blacklistServi
 import { getOrderByCode } from '../services/orderService.js';
 import { openWarrantyTicket } from '../services/warrantyService.js';
 import { STORE_ONE_GUILD_ID } from '../utils/locale.js';
+import { buildPurchaseIntake } from '../utils/ticketIntakeView.js';
+import { storefrontEmoji as icon } from '../utils/storefrontEmoji.js';
 import { handleTicketCreate } from './ticketHandlers.js';
 
 const forms = {
@@ -118,15 +120,11 @@ export async function handleTicketIntakeInteraction(interaction) {
   }
 
   const text = type === 'order'
-    ? [
-      '### Yêu cầu mua hàng của khách',
-      `**Sản phẩm khách muốn mua**\n${escapeMarkdown(data.product)}`,
-      `**Thời hạn gói**\n${escapeMarkdown(data.duration)}`,
-      `**Phương thức thanh toán mong muốn**\n${escapeMarkdown(data.payment)}`,
-      '-# Staff sẽ xác nhận gói, giá và cách thanh toán ngay trong ticket này.',
-    ].join('\n\n')
-    : [`### ${title}`, ...[['Chủ đề', data.topic], ['Mã đơn', data.code], ['Nội dung', data.issue]]
-      .filter(([, value]) => value).map(([label, value]) => `**${label}** · ${escapeMarkdown(value)}`)].join('\n');
+    ? buildPurchaseIntake(data)
+    : [`### ${icon('support')} ${title}`, ...[
+      ['details', 'Chủ đề', data.topic], ['reference', 'Mã đơn', data.code], ['document', 'Nội dung', data.issue],
+    ].filter(([, , value]) => value)
+      .map(([key, label, value]) => `${icon(key)} **${label}** · ${escapeMarkdown(value)}`)].join('\n');
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
   await handleTicketCreate(interaction, type.toUpperCase(), null, { intake: { title, text } });
   return true;

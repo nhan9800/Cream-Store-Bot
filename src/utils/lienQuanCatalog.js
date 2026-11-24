@@ -2,8 +2,10 @@ import {
   ActionRowBuilder, ButtonBuilder, ButtonStyle, ComponentType, ContainerBuilder, MediaGalleryBuilder,
   MessageFlags, SeparatorBuilder, SeparatorSpacingSize, TextDisplayBuilder,
 } from 'discord.js';
+import { storefrontComponentEmoji, storefrontEmoji as icon } from './storefrontEmoji.js';
 
-export const LIEN_QUAN_CHANNEL = 'acc-lien-quan';
+export const LIEN_QUAN_CHANNEL = '🎮・acc-lien-quan';
+export const LIEN_QUAN_CHANNEL_NAMES = [LIEN_QUAN_CHANNEL, 'acc-lien-quan'];
 export const LIEN_QUAN_CATEGORY_ID = '1514606994256957600';
 export const LIEN_QUAN_TOPIC = 'Acc Liên Quân · 80.000–100.000đ tùy acc · Bấm Mua acc để hỏi giá trong ticket riêng.';
 export const LIEN_QUAN_BUTTON_PREFIX = 'lien-quan:quote:';
@@ -64,51 +66,63 @@ const image = account => new MediaGalleryBuilder().addItems({
   description: `Ảnh ${account.code}, cấp ${account.level}, ${account.heroes} tướng và ${account.skins} trang phục`,
 });
 
-function accountDetails(account) {
+function accountStats(account) {
   return [
-    `**Cấp ${account.level}** · **${account.heroes} tướng** · **${account.skins} trang phục**`,
-    `${account.matches} trận · Thắng **${account.winRate}**${account.reputation ? ` · Uy tín ${account.reputation}` : ''}`,
-    `**Trang phục nổi bật**\n${account.featured.join(' · ')}`,
+    `> ${icon('chart')} **Cấp ${account.level}** · **${account.heroes} tướng** · **${account.skins} trang phục**`,
+    `> ${icon('target')} ${account.matches} trận · Thắng **${account.winRate}**${account.reputation ? ` · Uy tín **${account.reputation}**` : ''}`,
   ].join('\n');
+}
+
+function featuredSkins(account) {
+  return `### ${icon('art')} Trang phục nổi bật\n${account.featured.join(' · ')}`;
+}
+
+function priceAndInfo() {
+  return `> ${icon('price')} **${LIEN_QUAN_PRICE}** tùy acc\n> ${icon('verified')} Trắng toàn bộ thông tin`;
 }
 
 export function buildLienQuanQuoteText(account) {
   return [
-    `### Báo giá acc Liên Quân · ${account.code}`,
-    `**${account.title}**\n${accountDetails(account)}`,
-    `**Tình trạng shop công bố** · Trắng toàn bộ thông tin\n**Khoảng giá** · ${LIEN_QUAN_PRICE}`,
-    'Shop kiểm tra acc còn hay không, tình trạng liên kết và báo giá chính xác ngay trong ticket này.',
+    `### ${icon('ticket')} Báo giá acc Liên Quân · \`${account.code}\``,
+    `**${account.title}**\n${accountStats(account)}`,
+    priceAndInfo(),
+    featuredSkins(account),
+    `-# ${icon('details')} Shop kiểm tra còn hàng, tình trạng liên kết và chốt giá trong ticket này.`,
   ].join('\n\n');
 }
 
-export function buildLienQuanAccountCard(account, emoji = {}) {
+export function buildLienQuanAccountCard(account) {
   const button = new ButtonBuilder().setCustomId(LIEN_QUAN_BUTTON_PREFIX + account.code)
-    .setLabel(`Mua acc ${account.code}`).setStyle(ButtonStyle.Primary);
-  if (emoji.buyId) button.setEmoji({ id: emoji.buyId });
+    .setLabel(`Mua acc ${account.code}`).setStyle(ButtonStyle.Primary)
+    .setEmoji(storefrontComponentEmoji('cart'));
   const card = new ContainerBuilder().setAccentColor(account.color)
     .addTextDisplayComponents(block([
-      `-# CENAR STORE  /  LIÊN QUÂN MOBILE  /  ${account.code}`,
-      `## ${account.title}`,
-      `**${LIEN_QUAN_PRICE}** · Trắng toàn bộ thông tin`,
+      `-# ${icon('reference')} LIÊN QUÂN MOBILE · \`${account.code}\``,
+      `## ${icon('fire')} ${account.title}`,
     ].join('\n')))
     .addSeparatorComponents(divider())
-    .addTextDisplayComponents(block(accountDetails(account)))
+    .addTextDisplayComponents(block(priceAndInfo()))
+    .addTextDisplayComponents(block(accountStats(account)))
+    .addSeparatorComponents(divider())
+    .addTextDisplayComponents(block(featuredSkins(account)))
     .addMediaGalleryComponents(image(account))
     .addSeparatorComponents(divider())
-    .addTextDisplayComponents(block('-# Bấm Mua acc để gửi đúng ảnh vào ticket riêng. Shop kiểm tra còn hàng và chốt giá.'))
+    .addTextDisplayComponents(block(`-# ${icon('ticket_open')} Bấm Mua acc để gửi đúng ảnh vào ticket riêng và nhận giá chốt.`))
     .addActionRowComponents(new ActionRowBuilder().addComponents(button));
   return { components: [card.toJSON()], flags: MessageFlags.IsComponentsV2, allowed_mentions: { parse: [] } };
 }
 
-export function buildLienQuanGuide(emoji = {}) {
-  const header = emoji.header ? `${emoji.header} ` : '';
+export function buildLienQuanGuide() {
   const card = new ContainerBuilder().setAccentColor(0x7766D2)
-    .addTextDisplayComponents(block(`## ${header}Acc Liên Quân Mobile\n**${LIEN_QUAN_PRICE} tùy acc** · Trắng toàn bộ thông tin`))
+    .addTextDisplayComponents(block(`## ${icon('store')} Acc Liên Quân Mobile\n${priceAndInfo()}`))
     .addSeparatorComponents(divider())
     .addTextDisplayComponents(block([
-      'Chọn mã bên dưới và bấm **Mua acc**. Bot chuyển ảnh và thông số của đúng mã vào ticket riêng với shop.',
-      'Shop kiểm tra tình trạng liên kết và còn hàng, sau đó báo giá chính xác. Thanh toán sau khi shop đã chốt trong ticket.',
-      '-# Số liệu trên thẻ lấy từ ảnh đăng lúc lên danh sách.',
-    ].join('\n\n')));
+      `### ${icon('book')} Cách mua acc`,
+      `- ${icon('cart')} **Chọn acc** · Bấm nút Mua acc trên thẻ bạn thích.`,
+      `- ${icon('ticket')} **Mở ticket** · Bot chuyển ảnh và thông số đúng mã vào ticket riêng.`,
+      `- ${icon('search')} **Chốt giá** · Shop kiểm tra còn hàng, liên kết và báo giá trước khi thanh toán.`,
+    ].join('\n')))
+    .addSeparatorComponents(divider())
+    .addTextDisplayComponents(block(`-# ${icon('details')} Thông số được ghi theo ảnh của từng acc.`));
   return { components: [card.toJSON()], flags: MessageFlags.IsComponentsV2, allowed_mentions: { parse: [] } };
 }
