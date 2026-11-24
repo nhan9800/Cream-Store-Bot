@@ -7,6 +7,8 @@ export const ORDER_PROGRESS_STAGES = {
   DELIVERING: 'Đang bàn giao',
 };
 
+const STOPPED_OR_WARRANTY = ['CANCELLED', 'REFUND_PENDING', 'REFUNDED', 'FAILED', 'WARRANTY', 'WARRANTY_OPEN'];
+
 export class OrderProgressError extends Error {
   constructor(message, status = 409) { super(message); this.status = status; }
 }
@@ -29,19 +31,19 @@ export function getOrderProgress(order, database = db) {
   let stage = ['PAID', 'FREE'].includes(order.payment_status) ? last?.stage || 'QUEUED' : 'WAITING_PAYMENT';
   if (order.status === 'COMPLETED') stage = 'COMPLETED';
   else if (['WARRANTY', 'WARRANTY_OPEN'].includes(order.status)) stage = 'WARRANTY';
-  else if (['CANCELLED', 'REFUNDED', 'FAILED'].includes(order.status)) stage = order.status;
+  else if (STOPPED_OR_WARRANTY.includes(order.status)) stage = order.status;
   const labels = { ...ORDER_PROGRESS_STAGES, WAITING_PAYMENT: 'Chờ thanh toán', COMPLETED: 'Đã hoàn thành',
-    WARRANTY: 'Đang hỗ trợ bảo hành', CANCELLED: 'Đã huỷ', REFUNDED: 'Đã hoàn tiền', FAILED: 'Cần hỗ trợ' };
+    WARRANTY: 'Đang hỗ trợ bảo hành', CANCELLED: 'Đã huỷ', REFUND_PENDING: 'Chờ hoàn tiền', REFUNDED: 'Đã hoàn tiền', FAILED: 'Cần hỗ trợ' };
   const timeline = [
     { id: 'created', stage: 'CREATED', label: 'Đã tạo đơn', note: '', timestamp: order.created_at },
     ...(order.paid_at ? [{ id: 'paid', stage: 'PAID', label: 'Đã xác nhận thanh toán', note: '', timestamp: order.paid_at }] : []),
     ...events.map(e => ({ id: `progress-${e.id}`, stage: e.stage, label: labels[e.stage], note: e.note, timestamp: e.created_at })),
     ...(order.completed_at ? [{ id: 'completed', stage: 'COMPLETED', label: 'Đã hoàn thành', note: '', timestamp: order.completed_at }] : []),
-    ...(['CANCELLED', 'REFUNDED', 'FAILED', 'WARRANTY', 'WARRANTY_OPEN'].includes(order.status) && order.status_changed_at
+    ...(STOPPED_OR_WARRANTY.includes(order.status) && order.status_changed_at
       ? [{ id: 'state', stage, label: labels[stage], note: '', timestamp: order.status_changed_at }] : []),
   ].filter(e => e.timestamp).sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp));
   return { stage, label: labels[stage], note: last?.note || '', version: last?.id || 0,
-    updatedAt: ['COMPLETED', 'CANCELLED', 'REFUNDED', 'FAILED', 'WARRANTY', 'WARRANTY_OPEN'].includes(order.status)
+    updatedAt: (order.status === 'COMPLETED' || STOPPED_OR_WARRANTY.includes(order.status))
       ? order.status_changed_at || order.completed_at || order.created_at : last?.created_at || order.paid_at || order.created_at,
     writable: writable(order, database), ticketClosed: ticketStatus(order, database) === 'CLOSED', timeline };
 }

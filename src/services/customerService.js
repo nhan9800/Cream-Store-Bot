@@ -65,11 +65,9 @@ function statsStmt() {
       COUNT(*) AS total_orders,
       SUM(CASE WHEN status IN ('PENDING_PAYMENT', 'PROCESSING', 'WARRANTY_OPEN') THEN 1 ELSE 0 END) AS total_open_orders,
       SUM(CASE WHEN status = 'COMPLETED' THEN 1 ELSE 0 END) AS total_completed_orders,
-      SUM(CASE WHEN payment_status = 'PAID' AND status != 'CANCELLED' THEN 1 ELSE 0 END) AS total_paid_orders,
-      -- total_spent = tổng giá trị các đơn KHÔNG bị hủy (không tính đơn cancelled)
-      COALESCE(SUM(CASE WHEN status != 'CANCELLED' THEN total_amount ELSE 0 END), 0) AS total_spent,
-      -- total_paid_amount = tổng tiền khách thực sự đã trả (chỉ tính đơn đã thanh toán + không bị hủy)
-      COALESCE(SUM(CASE WHEN payment_status = 'PAID' AND status != 'CANCELLED' THEN amount_paid ELSE 0 END), 0) AS total_paid_amount,
+      SUM(CASE WHEN payment_status = 'PAID' AND status NOT IN ('CANCELLED', 'REFUNDED') THEN 1 ELSE 0 END) AS total_paid_orders,
+      COALESCE(SUM(CASE WHEN status NOT IN ('CANCELLED', 'REFUNDED') THEN total_amount ELSE 0 END), 0) AS total_spent,
+      COALESCE(SUM(CASE WHEN payment_status = 'PAID' AND status NOT IN ('CANCELLED', 'REFUNDED') THEN amount_paid ELSE 0 END), 0) AS total_paid_amount,
       MIN(created_at) AS first_seen_at,
       MAX(updated_at) AS last_seen_at,
       MAX(CASE WHEN status = 'COMPLETED' THEN completed_at END) AS last_completed_at

@@ -102,7 +102,7 @@ export async function execute(interaction) {
     return;
   }
 
-  if (['CANCELLED', 'REFUNDED', 'FAILED'].includes(order.status)) {
+  if (['CANCELLED', 'REFUND_PENDING', 'REFUNDED', 'FAILED'].includes(order.status)) {
     await interaction.editReply({ content: `${E('status_warn')} Đơn đã dừng xử lý nên không thể giao hàng.`, ephemeral: true });
     return;
   }
@@ -129,7 +129,7 @@ export async function execute(interaction) {
   if (!preparedOrder || preparedOrder.guild_id !== order.guild_id || preparedOrder.customer_id !== order.customer_id
     || preparedOrder.ticket_channel_id !== order.ticket_channel_id
     || DELIVERY_SNAPSHOT_FIELDS.some(key => preparedOrder[key] !== order[key])
-    || ['CANCELLED', 'REFUNDED', 'FAILED'].includes(preparedOrder.status)
+    || ['CANCELLED', 'REFUND_PENDING', 'REFUNDED', 'FAILED'].includes(preparedOrder.status)
     || ['CANCELLED', 'REFUNDED'].includes(preparedOrder.payment_status)
     || (preparedOrder.status !== 'COMPLETED' && preparedOrder.total_amount > 0 && !['PAID', 'FREE'].includes(preparedOrder.payment_status))) {
     await interaction.editReply({ content: `${E('status_warn')} Đơn vừa đổi trạng thái hoặc chủ sở hữu nên bot đã dừng giao hàng. Vui lòng kiểm tra lại.`, ephemeral: true });

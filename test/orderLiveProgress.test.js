@@ -13,11 +13,13 @@ const databasePath = vi.hoisted(() => {
 import { db, initDatabase } from '../src/database/db.js';
 import { config } from '../src/config.js';
 import { createTicket, closeTicket } from '../src/services/ticketService.js';
-import { createOrder, getOrderByCode, queueOrderDelivery, recordOrderPayment } from '../src/services/orderService.js';
+import { createOrder, getOrderByCode, queueOrderDelivery, recordOrderPayment, markOrderCompleted, setOrderStatus } from '../src/services/orderService.js';
 import { getOrderProgress, updateOrderProgress } from '../src/services/orderProgressService.js';
 import { registerAdminRoutes } from '../src/services/adminApiRoutes.js';
 import { deliverPaidOrder } from '../src/services/autoDeliveryService.js';
 import { execute as deliverManually } from '../src/commands/giaohang.js';
+import { execute as manageOrder } from '../src/commands/quanly-don.js';
+import { getOrderTimeline } from '../src/services/orderStateMachine.js';
 import { encrypt } from '../src/utils/crypto.js';
 import { buildCustomerOrderView } from '../src/services/orderCustomerView.js';
 
@@ -36,6 +38,20 @@ function fixture(paid = true) {
 }
 const change = (order, extra = {}) => ({ orderCode: order.order_code, guildId: guild, actorId: 'admin-progress',
   stage: 'PREPARING', note: 'Đang kiểm tra gói của bạn.', requestId: `request_${order.order_code}`, expectedVersion: 0, ...extra });
+
+async function manage(order, action, { amount = null, guildId = guild, manager = true } = {}) {
+  const interaction = {
+    guildId, user: { id: 'admin-progress' }, deferReply: vi.fn(), editReply: vi.fn(),
+    guild: { members: { fetch: vi.fn().mockResolvedValue({ permissions: { has: () => manager } }) },
+      channels: { fetch: vi.fn().mockResolvedValue(null) } },
+    client: { users: { fetch: vi.fn() } },
+    options: { getString: key => ({ ma_don: order.order_code, hanh_dong: action })[key] || null,
+      getInteger: () => amount },
+  };
+  await manageOrder(interaction);
+  expect(interaction.client.users.fetch).not.toHaveBeenCalled();
+  return interaction.editReply.mock.lastCall[0];
+}
 
 beforeAll(async () => {
   initDatabase(); oldGuild = config.guildId; config.guildId = guild;
@@ -137,5 +153,52 @@ describe('live order progress', () => {
       expect(getOrderByCode(order.order_code).status).toBe('PROCESSING');
       expect(getOrderByCode(order.order_code).completed_at).toBeNull();
     }
+  });
+});
+
+describe('Discord paid-order refund', () => {
+  it('replaces paid cancellation with a reversible hold and records an actual partial refund once', async () => {
+    const order = fixture();
+    expect(await manage(order, 'CANCELLED')).toContain('Ghi nhận yêu cầu hoàn tiền');
+    expect(await manage(order, 'REFUNDED', { amount: 50_000 })).toContain('trước');
+    expect(await manage(order, 'REFUND_PENDING', { guildId: 'other-shop' })).toContain('Không tìm thấy');
+    expect(await manage(order, 'REFUND_PENDING', { manager: false })).toContain('mới được dùng');
+    expect(getOrderByCode(order.order_code)).toEqual(order);
+
+    expect(await manage(order, 'REFUND_PENDING')).toContain('/close');
+    expect(await manage(order, 'REFUND_PENDING')).toContain('từ trước');
+    expect(getOrderProgress(getOrderByCode(order.order_code))).toMatchObject({ stage: 'REFUND_PENDING', writable: false });
+    expect(() => markOrderCompleted(order.order_code, 'admin-progress')).toThrow('chờ hoàn tiền');
+    expect(setOrderStatus(order.order_code, 'COMPLETED')).toBeNull();
+    expect(await manage(order, 'COMPLETED')).toContain('chờ hoàn tiền');
+    expect(await manage(order, 'REFUNDED', { amount: 110_000 })).toContain('số đã nhận');
+    expect(await manage(order, 'REFUNDED')).toContain('số đã nhận');
+    expect(await manage(order, 'WITHDRAW_REFUND')).toContain('trạng thái trước');
+    expect(getOrderByCode(order.order_code).status).toBe('PROCESSING');
+
+    await manage(order, 'REFUND_PENDING');
+    closeTicket(order.ticket_id, 'admin-progress');
+    expect(await manage(order, 'REFUNDED', { amount: 50_000 })).toContain('50.000');
+    expect(await manage(order, 'REFUNDED', { amount: 50_000 })).toContain('từ trước');
+    const after = getOrderByCode(order.order_code);
+    expect(after).toMatchObject({ status: 'REFUNDED', payment_status: 'PAID', amount_paid: order.amount_paid,
+      paid_at: order.paid_at, completed_at: null, delivered_at: null });
+    const events = getOrderTimeline(db, order.order_code).filter(row => row.new_status === 'REFUNDED');
+    expect(events).toHaveLength(1);
+    expect(JSON.parse(events[0].metadata)).toEqual({ amount: 50_000, currency: 'VND' });
+  });
+
+  it('supports an already completed order and rejects unpaid and supplier orders', async () => {
+    expect(await manage(fixture(false), 'REFUND_PENDING')).toContain('chưa có số tiền');
+    const supplier = fixture();
+    db.prepare("UPDATE orders SET fulfillment_mode='SUPPLIER' WHERE order_code=?").run(supplier.order_code);
+    expect(await manage(supplier, 'REFUND_PENDING')).toContain('luồng riêng');
+    const completed = fixture();
+    const before = markOrderCompleted(completed.order_code, 'admin-progress');
+    expect(await manage(completed, 'REFUND_PENDING')).toContain('Chờ hoàn tiền');
+    expect(await manage(completed, 'REFUNDED', { amount: 100_000 })).toContain('100.000');
+    expect(getOrderByCode(completed.order_code)).toMatchObject({ status: 'REFUNDED',
+      completed_at: before.completed_at, payment_status: 'PAID', amount_paid: 100_000 });
+    expect(setOrderStatus(completed.order_code, 'COMPLETED')).toBeNull();
   });
 });
