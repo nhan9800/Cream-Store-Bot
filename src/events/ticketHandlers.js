@@ -391,8 +391,8 @@ export async function handleTicketCreate(interaction, ticketType = 'ORDER', gmai
       const controls = buildTicketControlComponents(ticket.id, interaction.user.id);
       if (intake && interaction.guildId === STORE_ONE_GUILD_ID) {
         const [close, mute] = controls[0].components;
-        close.setEmoji(storefrontComponentEmoji('lock'));
-        mute.setEmoji(storefrontComponentEmoji('pause'));
+        close.setEmoji(storefrontComponentEmoji('cancel'));
+        mute.setEmoji(storefrontComponentEmoji('disconnect'));
       }
       const components = [welcomeV2, ...controls];
 

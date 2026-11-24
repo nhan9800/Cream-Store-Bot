@@ -3,13 +3,14 @@ import { ChannelType, Collection, ComponentType, ContainerComponent } from 'disc
 import { STORE_ONE_GUILD_ID, STORE_TWO_GUILD_ID } from '../src/utils/locale.js';
 import { storefrontComponentEmoji, storefrontEmoji } from '../src/utils/storefrontEmoji.js';
 import {
-  buildLienQuanAccountCard, lienQuanImageName, LIEN_QUAN_ACCOUNTS, LIEN_QUAN_BUTTON_PREFIX,
+  buildLienQuanAccountCard, buildLienQuanGuide, lienQuanImageName, LIEN_QUAN_ACCOUNTS, LIEN_QUAN_BUTTON_PREFIX,
   LIEN_QUAN_ATTACHMENT_LIMIT, LIEN_QUAN_CATEGORY_ID, LIEN_QUAN_CHANNEL, LIEN_QUAN_PRICE,
 } from '../src/utils/lienQuanCatalog.js';
 
 const mockTicket = vi.hoisted(() => vi.fn());
 vi.mock('../src/events/ticketHandlers.js', () => ({ handleTicketCreate: mockTicket }));
 import { handleLienQuanQuote } from '../src/events/lienQuanQuoteHandler.js';
+import { buildPurchaseIntake } from '../src/utils/ticketIntakeView.js';
 
 const jpeg = Buffer.from([0xff, 0xd8, 0xff, 0xd9]);
 const attachmentId = '1574741468852260894';
@@ -40,10 +41,10 @@ describe('Liên Quân purchase cards', () => {
     const source = button(account);
     const parts = card.components[0].components;
     expect(parts.flatMap(p => p.components || []).map(c => c.custom_id)).toEqual([source.customId]);
-    expect(parts.flatMap(p => p.components || [])[0].emoji).toMatchObject(storefrontComponentEmoji('cart'));
+    expect(parts.flatMap(p => p.components || [])[0].emoji).toMatchObject(storefrontComponentEmoji(account.icons.buy));
     expect(parts.flatMap(p => p.items || [])[0].media.url).toBe(`attachment://${lienQuanImageName(account)}`);
     expect(parts.map(p => p.content).join('\n')).toContain(LIEN_QUAN_PRICE);
-    expect(parts.map(p => p.content).join('\n')).toContain(`## ${storefrontEmoji('fire')}`);
+    expect(parts.map(p => p.content).join('\n')).toContain(`## ${storefrontEmoji(account.icons.title)}`);
     const fetch = vi.fn(async () => new Response(jpeg));
     vi.stubGlobal('fetch', fetch);
     await handleLienQuanQuote(source);
@@ -54,6 +55,21 @@ describe('Liên Quân purchase cards', () => {
       text: expect.stringContaining(`${account.heroes} tướng`),
       attachment: { attachment: jpeg, name: lienQuanImageName(account), description: expect.any(String) },
     } });
+  });
+
+  it('uses a distinct sourced emoji for every catalog and purchase-intake position', () => {
+    const flatten = parts => parts.flatMap(part => [part, ...flatten(part.components ?? [])]);
+    const customIds = text => [...text.matchAll(/<a?:\w+:(\d+)>/g)].map(match => match[1]);
+    const posted = [buildLienQuanGuide(), ...LIEN_QUAN_ACCOUNTS.map(buildLienQuanAccountCard)];
+    const ids = [
+      ...posted.flatMap(message => flatten(message.components).flatMap(part => [
+        ...customIds(part.content ?? ''), ...(part.emoji ? [part.emoji.id] : []),
+      ])),
+      ...customIds(buildPurchaseIntake({ product: 'Nitro', duration: '2 tháng', payment: 'MoMo' })),
+      ...['cancel', 'disconnect'].map(key => storefrontComponentEmoji(key).id),
+    ];
+    expect(ids).toHaveLength(38);
+    expect(new Set(ids).size).toBe(ids.length);
   });
 
   it('keeps the original channel name usable during the live rename', async () => {

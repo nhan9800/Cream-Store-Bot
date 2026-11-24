@@ -53,7 +53,9 @@ async function publish() {
   assert.equal(channel.parent_id, LIEN_QUAN_CATEGORY_ID);
   assert.deepEqual(permissions(channel), permissions(reference));
 
-  assert(icons.items.some(emoji => emoji.id === storefrontComponentEmoji('cart').id && emoji.available !== false));
+  for (const account of LIEN_QUAN_ACCOUNTS) {
+    assert(icons.items.some(emoji => emoji.id === storefrontComponentEmoji(account.icons.buy).id && emoji.available !== false));
+  }
   const route = Routes.channelMessages(channel.id);
   const options = { query: new URLSearchParams({ limit: '100' }) };
   const existing = await rest.get(route, options);

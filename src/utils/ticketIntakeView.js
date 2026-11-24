@@ -7,10 +7,10 @@ function field(key, label, value) {
 
 export function buildPurchaseIntake(data) {
   return [
-    `### ${icon('ticket_open')} Yêu cầu mua hàng của khách`,
-    field('product', 'Sản phẩm khách muốn mua', data.product),
-    field('calendar', 'Thời hạn gói', data.duration),
-    field('payos', 'Phương thức thanh toán mong muốn', data.payment),
-    `-# ${icon('details')} Shop sẽ xác nhận gói, giá và cách thanh toán ngay trong ticket này.`,
+    `### ${icon('created')} Yêu cầu mua hàng của khách`,
+    field('clipboard', 'Sản phẩm khách muốn mua', data.product),
+    field('expiry', 'Thời hạn gói', data.duration),
+    field('receipt', 'Phương thức thanh toán mong muốn', data.payment),
+    `-# ${icon('reminder')} Shop sẽ xác nhận gói, giá và cách thanh toán ngay trong ticket này.`,
   ].join('\n\n');
 }

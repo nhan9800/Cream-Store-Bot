@@ -121,8 +121,8 @@ export async function handleTicketIntakeInteraction(interaction) {
 
   const text = type === 'order'
     ? buildPurchaseIntake(data)
-    : [`### ${icon('support')} ${title}`, ...[
-      ['details', 'Chủ đề', data.topic], ['reference', 'Mã đơn', data.code], ['document', 'Nội dung', data.issue],
+    : [`### ${icon('mic')} ${title}`, ...[
+      ['location', 'Chủ đề', data.topic], ['link', 'Mã đơn', data.code], ['edit', 'Nội dung', data.issue],
     ].filter(([, , value]) => value)
       .map(([key, label, value]) => `${icon(key)} **${label}** · ${escapeMarkdown(value)}`)].join('\n');
   await interaction.deferReply({ flags: MessageFlags.Ephemeral });
