@@ -14,6 +14,7 @@ import {
   TextInputStyle,
   EmbedBuilder,
   ContainerBuilder,
+  MediaGalleryBuilder,
   TextDisplayBuilder,
   SeparatorBuilder,
   SeparatorSpacingSize,
@@ -160,7 +161,10 @@ export async function handleTicketCreate(interaction, ticketType = 'ORDER', gmai
       if (existingChannel) {
         if (intake && existingChannel.isTextBased()
           && existingChannel.permissionsFor(interaction.guild.roles.everyone)?.has(PermissionFlagsBits.ViewChannel) === false) {
-          await existingChannel.send({ content: intake.text, allowedMentions: { parse: [] }, nonce: interaction.id, enforceNonce: true });
+          await existingChannel.send({
+            content: intake.text, allowedMentions: { parse: [] }, nonce: interaction.id, enforceNonce: true,
+            ...(intake.attachment ? { files: [intake.attachment] } : {}),
+          });
           await safeReply(interaction, { content: `${E('status_check')} Đã chuyển yêu cầu vào ticket đang mở: ${existingChannel}.`, ephemeral: true });
           return;
         }
@@ -376,13 +380,18 @@ export async function handleTicketCreate(interaction, ticketType = 'ORDER', gmai
         welcomeV2.addSeparatorComponents(new SeparatorBuilder().setSpacing(SeparatorSpacingSize.Small))
           .addTextDisplayComponents(new TextDisplayBuilder().setContent(intake.text));
       }
+      if (intake?.attachment) {
+        welcomeV2.addMediaGalleryComponents(new MediaGalleryBuilder().addItems({
+          media: { url: `attachment://${intake.attachment.name}` }, description: intake.attachment.description,
+        }));
+      }
       
       const components = [
         welcomeV2,
         ...buildTicketControlComponents(ticket.id, interaction.user.id)
       ];
 
-      if (normalizedType === 'ORDER') {
+      if (normalizedType === 'ORDER' && !intake?.attachment) {
         const profile = db.prepare('SELECT * FROM customer_profiles WHERE guild_id = ? AND customer_id = ?').get(interaction.guildId, interaction.user.id);
         if (profile && profile.total_completed_orders >= 5 && profile.total_spent >= 1000000) {
           if (!profile.credit_limit || profile.credit_limit === 0) {
@@ -405,6 +414,7 @@ export async function handleTicketCreate(interaction, ticketType = 'ORDER', gmai
       await sendTicketComponents(channel, {
         components: components,
         flags: welcomeV2Flags,
+        ...(intake?.attachment ? { files: [intake.attachment] } : {}),
         ...(booking || intake ? { allowedMentions: { parse: [] } } : {}),
       });
       await channel.send({ content: `<@${interaction.user.id}> — Ticket của bạn đã được tạo!` }).catch(() => null);
@@ -414,7 +424,7 @@ export async function handleTicketCreate(interaction, ticketType = 'ORDER', gmai
           allowedMentions: { parse: [] },
         }).catch(() => null);
       }
-      if (!booking) await sendTicketAiWelcome({
+      if (!booking && !intake?.attachment) await sendTicketAiWelcome({
         channel,
         ticket,
         guildId: interaction.guildId,
