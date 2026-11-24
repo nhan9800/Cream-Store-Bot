@@ -14,15 +14,20 @@ export const LIEN_QUAN_ATTACHMENT_LIMIT = 1024 * 1024;
 
 export const LIEN_QUAN_ACCOUNTS = [
   { code: 'LQ-01', level: 30, heroes: 91, skins: 95, matches: '2.917', winRate: '54,0%', title: 'Hai trang phục EVO',
-    featured: ['Nhóc tỳ bá đạo (EVO II)', 'Xạ thần Kagutsuchi (EVO I)', 'Phù Thủy Bóng Đêm', 'Sứ giả tận thế', 'Thần Long tỷ tỷ'], color: 0x7766D2 },
+    featured: ['Nhóc tỳ bá đạo (EVO II)', 'Xạ thần Kagutsuchi (EVO I)', 'Phù Thủy Bóng Đêm', 'Sứ giả tận thế', 'Thần Long tỷ tỷ'],
+    color: 0xA78BFA, icons: { title: 'crown', price: 'received', stats: 'number', skins: 'sparkles', buy: 'next' } },
   { code: 'LQ-02', level: 30, heroes: 58, skins: 74, matches: '616', winRate: '58,8%', reputation: 100, title: 'ECHO và Attack on Titan',
-    featured: ['ECHO', 'Kỷ Nguyên Hổ Phách', 'Nghịch Thiên long đế', 'Annie Leonhart', 'Scout Regiment'], color: 0xB34C6B },
+    featured: ['ECHO', 'Kỷ Nguyên Hổ Phách', 'Nghịch Thiên long đế', 'Annie Leonhart', 'Scout Regiment'],
+    color: 0xF472B6, icons: { title: 'heart', price: 'wallet', stats: 'group', skins: 'gold', buy: 'add' } },
   { code: 'LQ-03', level: 30, heroes: 65, skins: 110, matches: '1.327', winRate: '61,0%', title: 'Bộ sưu tập 110 trang phục',
-    featured: ['Vợ người ta (SS hữu hạn)', 'Thần Long tỷ tỷ', 'Đệ nhất thần thám', 'Thánh nữ Khởi nguyên', 'Quán quân (FMVP)'], color: 0x438FBD },
+    featured: ['Vợ người ta (SS hữu hạn)', 'Thần Long tỷ tỷ', 'Đệ nhất thần thám', 'Thánh nữ Khởi nguyên', 'Quán quân (FMVP)'],
+    color: 0x22D3EE, icons: { title: 'diamond', price: 'money', stats: 'queue', skins: 'gift', buy: 'play' } },
   { code: 'LQ-04', level: 28, heroes: 53, skins: 82, matches: '507', winRate: '63,5%', title: 'Bình Minh Tận Thế EVO II',
-    featured: ['Bình Minh Tận Thế (EVO II)', 'ECHO', 'WaVe', 'Sứ giả tận thế', 'Đao phủ tận thế', 'Mèo công nghệ'], color: 0x467A9D },
+    featured: ['Bình Minh Tận Thế (EVO II)', 'ECHO', 'WaVe', 'Sứ giả tận thế', 'Đao phủ tận thế', 'Mèo công nghệ'],
+    color: 0x60A5FA, icons: { title: 'trophy', price: 'bank', stats: 'position', skins: 'up', buy: 'claim' } },
   { code: 'LQ-05', level: 25, heroes: 53, skins: 95, matches: '232', winRate: '67,2%', title: 'Pháo hoa Neon và bộ SS',
-    featured: ['Pháo hoa Neon', 'Ngạo Hổ Hàn Đao', 'Siêu việt', 'Tư lệnh Robot', 'Tiệc bãi biển'], color: 0xB78043 },
+    featured: ['Pháo hoa Neon', 'Ngạo Hổ Hàn Đao', 'Siêu việt', 'Tư lệnh Robot', 'Tiệc bãi biển'],
+    color: 0xFBBF24, icons: { title: 'celebrate', price: 'checkout', stats: 'tracking', skins: 'music', buy: 'approve' } },
 ];
 
 export const lienQuanImageName = account => `acc-lien-quan-${account.code.slice(3)}.jpg`;
@@ -68,61 +73,61 @@ const image = account => new MediaGalleryBuilder().addItems({
 
 function accountStats(account) {
   return [
-    `> ${icon('chart')} **Cấp ${account.level}** · **${account.heroes} tướng** · **${account.skins} trang phục**`,
-    `> ${icon('target')} ${account.matches} trận · Thắng **${account.winRate}**${account.reputation ? ` · Uy tín **${account.reputation}**` : ''}`,
+    `> ${icon(account.icons.stats)} **Cấp ${account.level}** · **${account.heroes} tướng** · **${account.skins} trang phục**`,
+    `> ${account.matches} trận · Thắng **${account.winRate}**${account.reputation ? ` · Uy tín **${account.reputation}**` : ''}`,
   ].join('\n');
 }
 
 function featuredSkins(account) {
-  return `### ${icon('art')} Trang phục nổi bật\n${account.featured.join(' · ')}`;
+  return `### ${icon(account.icons.skins)} Trang phục nổi bật\n${account.featured.join(' · ')}`;
 }
 
-function priceAndInfo() {
-  return `> ${icon('price')} **${LIEN_QUAN_PRICE}** tùy acc\n> ${icon('verified')} Trắng toàn bộ thông tin`;
+function priceAndInfo(priceIcon) {
+  return `> ${icon(priceIcon)} **${LIEN_QUAN_PRICE}** tùy acc\n> Trắng toàn bộ thông tin`;
 }
 
 export function buildLienQuanQuoteText(account) {
   return [
-    `### ${icon('ticket')} Báo giá acc Liên Quân · \`${account.code}\``,
+    `### ${icon(account.icons.title)} Báo giá acc Liên Quân · \`${account.code}\``,
     `**${account.title}**\n${accountStats(account)}`,
-    priceAndInfo(),
+    priceAndInfo(account.icons.price),
     featuredSkins(account),
-    `-# ${icon('details')} Shop kiểm tra còn hàng, tình trạng liên kết và chốt giá trong ticket này.`,
+    '-# Shop kiểm tra còn hàng, tình trạng liên kết và chốt giá trong ticket này.',
   ].join('\n\n');
 }
 
 export function buildLienQuanAccountCard(account) {
   const button = new ButtonBuilder().setCustomId(LIEN_QUAN_BUTTON_PREFIX + account.code)
     .setLabel(`Mua acc ${account.code}`).setStyle(ButtonStyle.Primary)
-    .setEmoji(storefrontComponentEmoji('cart'));
+    .setEmoji(storefrontComponentEmoji(account.icons.buy));
   const card = new ContainerBuilder().setAccentColor(account.color)
     .addTextDisplayComponents(block([
-      `-# ${icon('reference')} LIÊN QUÂN MOBILE · \`${account.code}\``,
-      `## ${icon('fire')} ${account.title}`,
+      `-# LIÊN QUÂN MOBILE · \`${account.code}\``,
+      `## ${icon(account.icons.title)} ${account.title}`,
     ].join('\n')))
     .addSeparatorComponents(divider())
-    .addTextDisplayComponents(block(priceAndInfo()))
+    .addTextDisplayComponents(block(priceAndInfo(account.icons.price)))
     .addTextDisplayComponents(block(accountStats(account)))
     .addSeparatorComponents(divider())
     .addTextDisplayComponents(block(featuredSkins(account)))
     .addMediaGalleryComponents(image(account))
     .addSeparatorComponents(divider())
-    .addTextDisplayComponents(block(`-# ${icon('ticket_open')} Bấm Mua acc để gửi đúng ảnh vào ticket riêng và nhận giá chốt.`))
+    .addTextDisplayComponents(block('-# Bấm Mua acc để gửi đúng ảnh vào ticket riêng và nhận giá chốt.'))
     .addActionRowComponents(new ActionRowBuilder().addComponents(button));
   return { components: [card.toJSON()], flags: MessageFlags.IsComponentsV2, allowed_mentions: { parse: [] } };
 }
 
 export function buildLienQuanGuide() {
-  const card = new ContainerBuilder().setAccentColor(0x7766D2)
-    .addTextDisplayComponents(block(`## ${icon('store')} Acc Liên Quân Mobile\n${priceAndInfo()}`))
+  const card = new ContainerBuilder().setAccentColor(0x34D399)
+    .addTextDisplayComponents(block(`## ${icon('home')} Acc Liên Quân Mobile\n${priceAndInfo('transaction')}`))
     .addSeparatorComponents(divider())
     .addTextDisplayComponents(block([
-      `### ${icon('book')} Cách mua acc`,
-      `- ${icon('cart')} **Chọn acc** · Bấm nút Mua acc trên thẻ bạn thích.`,
-      `- ${icon('ticket')} **Mở ticket** · Bot chuyển ảnh và thông số đúng mã vào ticket riêng.`,
-      `- ${icon('search')} **Chốt giá** · Shop kiểm tra còn hàng, liên kết và báo giá trước khi thanh toán.`,
+      `### ${icon('tip')} Cách mua acc`,
+      `- ${icon('folder')} **Chọn acc** · Bấm nút Mua acc trên thẻ bạn thích.`,
+      `- ${icon('feedback')} **Mở ticket** · Bot chuyển ảnh và thông số đúng mã vào ticket riêng.`,
+      `- ${icon('scan')} **Chốt giá** · Shop kiểm tra còn hàng, liên kết và báo giá trước khi thanh toán.`,
     ].join('\n')))
     .addSeparatorComponents(divider())
-    .addTextDisplayComponents(block(`-# ${icon('details')} Thông số được ghi theo ảnh của từng acc.`));
+    .addTextDisplayComponents(block('-# Thông số được ghi theo ảnh của từng acc.'));
   return { components: [card.toJSON()], flags: MessageFlags.IsComponentsV2, allowed_mentions: { parse: [] } };
 }

@@ -48,17 +48,17 @@ describe('Store 1 ticket intake', () => {
     await handleTicketIntakeInteraction(order);
     expect(order.deferReply).toHaveBeenCalledWith({ flags: 64 });
     expect(mocks.create).toHaveBeenCalledWith(order, 'ORDER', null, { intake: { title: 'Mua hàng', text: [
-      `### ${icon('ticket_open')} Yêu cầu mua hàng của khách`,
-      `**${icon('product')} Sản phẩm khách muốn mua**\n> \\*\\*Netflix\\*\\*`,
-      `**${icon('calendar')} Thời hạn gói**\n> 1 tháng`,
-      `**${icon('payos')} Phương thức thanh toán mong muốn**\n> MoMo`,
-      `-# ${icon('details')} Shop sẽ xác nhận gói, giá và cách thanh toán ngay trong ticket này.`,
+      `### ${icon('created')} Yêu cầu mua hàng của khách`,
+      `**${icon('clipboard')} Sản phẩm khách muốn mua**\n> \\*\\*Netflix\\*\\*`,
+      `**${icon('expiry')} Thời hạn gói**\n> 1 tháng`,
+      `**${icon('receipt')} Phương thức thanh toán mong muốn**\n> MoMo`,
+      `-# ${icon('reminder')} Shop sẽ xác nhận gói, giá và cách thanh toán ngay trong ticket này.`,
     ].join('\n\n') } });
 
     const support = interaction('ticket:intake:form:support', { topic: 'Đăng nhập', issue: 'Cần hướng dẫn' });
     await handleTicketIntakeInteraction(support);
     expect(mocks.create).toHaveBeenCalledWith(support, 'SUPPORT', null, { intake: { title: 'Hỗ trợ',
-      text: `### ${icon('support')} Hỗ trợ\n${icon('details')} **Chủ đề** · Đăng nhập\n${icon('document')} **Nội dung** · Cần hướng dẫn` } });
+      text: `### ${icon('mic')} Hỗ trợ\n${icon('location')} **Chủ đề** · Đăng nhập\n${icon('edit')} **Nội dung** · Cần hướng dẫn` } });
   });
 
   it('accepts a warranty request only for the current guild and customer and preserves the issue', async () => {
