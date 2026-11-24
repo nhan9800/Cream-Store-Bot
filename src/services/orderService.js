@@ -20,6 +20,7 @@ import { membershipPriorityForSpend } from '../config/membershipProgram.js';
 import { STORE_ONE_GUILD_ID } from '../utils/locale.js';
 import { getBookingInvoiceForOrder, isBookingPayOSReceipt } from './bookingLedgerService.js';
 import { getStoredPayOSReceivedAmount } from '../utils/payosReceipt.js';
+import { PaidOrderRefundError, recordPaidOrderRefund, REFUND_HOLD_MESSAGE } from './paidOrderRefundService.js';
 
 function createOrderStmt() {
   return db.prepare(`
@@ -47,7 +48,7 @@ function saveCompletionMessageStmt(){return db.prepare(`UPDATE orders SET comple
 function attachPaymentMessageStmt(){return db.prepare('UPDATE orders SET payment_message_id=?, updated_at=? WHERE order_code=?');}
 function savePaymentLinkStmt(){return db.prepare('UPDATE orders SET payment_link_id=?, payment_checkout_url=?, payment_qr_code=?, payment_qr_url=?, payment_qr_text=?, payment_expired_at=?, updated_at=? WHERE order_code=?');}
 function resetPaymentLinkStmt(){return db.prepare('UPDATE orders SET payment_link_id=NULL, payment_checkout_url=NULL, payment_qr_code=NULL, payment_qr_url=NULL, payment_qr_text=NULL, payment_expired_at=NULL, payment_message_id=NULL, payos_order_code=?, updated_at=? WHERE order_code=?');}
-function completeOrderStmt(){return db.prepare(`UPDATE orders SET status='COMPLETED', status_changed_at=?, completed_by_id=?, completed_at=?, feedback_requested_at=?, feedback_due_at=?, updated_at=? WHERE order_code=? AND status=? AND payment_status=? AND customer_id=? AND guild_id=? AND total_amount=? AND updated_at=? AND status NOT IN ('CANCELLED','REFUNDED','FAILED') AND payment_status NOT IN ('CANCELLED','REFUNDED')`);}
+function completeOrderStmt(){return db.prepare(`UPDATE orders SET status='COMPLETED', status_changed_at=?, completed_by_id=?, completed_at=?, feedback_requested_at=?, feedback_due_at=?, updated_at=? WHERE order_code=? AND status=? AND payment_status=? AND customer_id=? AND guild_id=? AND total_amount=? AND updated_at=? AND status NOT IN ('CANCELLED','REFUND_PENDING','REFUNDED','FAILED') AND payment_status NOT IN ('CANCELLED','REFUNDED')`);}
 function cancelOrderStmt(){return db.prepare(`UPDATE orders SET status='CANCELLED', status_changed_at=?, payment_status='CANCELLED', payment_cancel_reason=COALESCE(?, payment_cancel_reason), updated_at=? WHERE order_code=?`);}
 function saveDeliveryStmt(){return db.prepare(`UPDATE orders SET delivered_by_id=?, delivered_at=?, credential_email=?, credential_password=?, credential_profile=?, credential_pin=?, delivery_login_url=?, claim_notes=?, delivery_dm_channel_id=?, delivery_dm_message_id=?, updated_at=? WHERE order_code=?`);}
 function markFeedbackSubmittedStmt(){return db.prepare(`UPDATE orders SET feedback_submitted_at=?, updated_at=? WHERE order_code=?`);}
@@ -211,6 +212,7 @@ export function ensureOrderExpiry(orderCode, baseDate = new Date()) { const orde
 
 export function markOrderCompleted(orderCode, completedById, timeoutHours = config.feedbackTimeoutHours, expectedOrder = null) {
   const order = getOrderByCode(orderCode); if (!order) return null;
+  if (order.status === 'REFUND_PENDING') throw new PaidOrderRefundError(REFUND_HOLD_MESSAGE);
   if (['CANCELLED', 'REFUNDED', 'FAILED'].includes(order.status) || ['CANCELLED', 'REFUNDED'].includes(order.payment_status)) {
     throw Object.assign(new Error('Đơn đã dừng xử lý nên không thể hoàn thành.'), { code: 'ORDER_NOT_COMPLETABLE' });
   }
@@ -280,6 +282,24 @@ export function cancelOrder(orderCode, reason = null, { actorId = 'SYSTEM', expe
   scheduleCtvOrderLogSync(updated);
   scheduleAdminOrderCenterRefresh(updated.guild_id);
   return updated;
+}
+
+export function updatePaidOrderRefund(options) {
+  const result = recordPaidOrderRefund(db, options);
+  if (!result.changed) return result;
+  const { order, updated } = result;
+  try {
+    if (updated.status === 'REFUNDED' && order.guild_id !== 'WEB' && order.customer_id !== 'WEB') {
+      refundOrderPoints(order.guild_id, order.customer_id, order.order_code);
+    }
+    markAdminOrderReminderLifecycleChanged(order, updated);
+    syncCustomerStats(updated.guild_id, updated.customer_id);
+    scheduleAdminOrderCenterRefresh(updated.guild_id);
+    broadcastDashboardEvent('order_update');
+  } catch (error) {
+    console.error('[ORDER_REFUND] Could not refresh derived order data:', error.code || error.name);
+  }
+  return result;
 }
 export function saveDelivery(orderCode,deliveredById,credentialEmail,credentialPassword,credentialProfile,credentialPin,deliveryLoginUrl,claimNotes,dmChannelId,dmMessageId){const timestamp=nowIso(); saveDeliveryStmt().run(deliveredById,timestamp,credentialEmail!=null?encrypt(credentialEmail):null,credentialPassword!=null?encrypt(credentialPassword):null,credentialProfile!=null?encrypt(credentialProfile):null,credentialPin!=null?encrypt(credentialPin):null,deliveryLoginUrl ?? null,claimNotes ?? null,dmChannelId ?? null,dmMessageId ?? null,timestamp,orderCode); return getOrderByCode(orderCode);}
 
@@ -679,6 +699,7 @@ export function reconcileWalletPaidOrders() {
 }
 export function setOrderStatus(orderCode,status){
   const order=getOrderByCode(orderCode); if(!order) return null; 
+  if (['REFUND_PENDING', 'REFUNDED'].includes(order.status)) return null;
   setOrderStatusStmt().run(status, nowIso(), nowIso(), orderCode); 
   const updated=getOrderByCode(orderCode);
   markAdminOrderReminderLifecycleChanged(order, updated);

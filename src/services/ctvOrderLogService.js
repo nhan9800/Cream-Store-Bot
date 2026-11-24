@@ -30,6 +30,7 @@ const ORDER_STATUS_LABELS = Object.freeze({
   WARRANTY: 'ĐANG BẢO HÀNH',
   WARRANTY_OPEN: 'ĐANG BẢO HÀNH',
   REFUNDED: 'ĐÃ HOÀN TIỀN',
+  REFUND_PENDING: 'CHỜ HOÀN TIỀN',
   CANCELLED: 'ĐÃ HỦY',
   FAILED: 'XỬ LÝ THẤT BẠI',
 });

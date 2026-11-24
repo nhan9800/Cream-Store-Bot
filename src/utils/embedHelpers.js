@@ -128,6 +128,7 @@ export function statusPill(status, customLabels = {}, E = null) {
         PROCESSING:      { emoji: r('order_processing'), text: 'Đang xử lý' },
         COMPLETED:       { emoji: r('order_complete'),   text: 'Hoàn thành' },
         CANCELLED:       { emoji: r('order_cancel'),     text: 'Đã huỷ' },
+        REFUND_PENDING:  { emoji: r('payment_refund'),   text: 'Chờ hoàn tiền' },
         REFUNDED:        { emoji: r('order_cancel'),     text: 'Đã hoàn tiền' },
         OPEN:            { emoji: r('order_processing'), text: 'Đang mở' },
         CLOSED:          { emoji: r('icon_lock'),        text: 'Đã đóng' },

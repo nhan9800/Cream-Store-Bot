@@ -1,15 +1,23 @@
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { PermissionFlagsBits, SlashCommandBuilder } from 'discord.js';
 import { getGuildConfig } from '../services/guildConfigService.js';
-import { getOrderByCode, cancelOrder, markOrderPaid, markOrderCompleted, ensureOrderExpiry, restoreCancelledPayOSOrder, OrderPaymentError } from '../services/orderService.js';
+import { getOrderByCode, cancelOrder, markOrderPaid, markOrderCompleted, ensureOrderExpiry, restoreCancelledPayOSOrder, OrderPaymentError, updatePaidOrderRefund } from '../services/orderService.js';
 import { sendOrderCancelledFlow, updateOrderLogMessage, sendCompletedFlow } from '../services/notificationService.js';
 import { emitStaffLog } from '../services/staffLogService.js';
 import { assertStaffCapability } from '../utils/permissions.js';
 import { ORDER_CANCEL_BLOCKED } from '../services/orderStateMachine.js';
+import { PaidOrderRefundError } from '../services/paidOrderRefundService.js';
+import { formatCurrency } from '../utils/formatters.js';
+
+const refundActions = {
+  REFUND_PENDING: { message: 'đang **Chờ hoàn tiền**. Các bước giao hàng và hoàn thành đã tạm dừng.', event: 'ORDER_REFUND_REQUESTED' },
+  REFUNDED: { message: 'đã ghi nhận **Hoàn tiền** theo số tiền quản lý xác nhận.', event: 'ORDER_REFUND_RECORDED' },
+  WITHDRAW_REFUND: { message: 'đã trở về trạng thái trước yêu cầu hoàn tiền.', event: 'ORDER_REFUND_WITHDRAWN' },
+};
 
 export const data = new SlashCommandBuilder()
   .setName('quanly-don')
-  .setDescription('Công cụ quản lý đơn nâng cao (Hủy đơn, Đã thanh toán, Hoàn thành) ở mọi nơi.')
+  .setDescription('Quản lý thanh toán, giao hàng, hủy đơn và ghi nhận hoàn tiền.')
   .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
   .addStringOption((option) => option.setName('ma_don').setDescription('Mã đơn hàng, ví dụ CN_123456').setRequired(true))
   .addStringOption((option) =>
@@ -19,9 +27,14 @@ export const data = new SlashCommandBuilder()
       .addChoices(
         { name: 'Đánh dấu Đã Thanh Toán', value: 'PAID' },
         { name: 'Đánh dấu Hoàn Thành', value: 'COMPLETED' },
-        { name: 'Hủy Đơn / Xóa Đơn', value: 'CANCELLED' }
+        { name: 'Hủy đơn chưa nhận tiền', value: 'CANCELLED' },
+        { name: 'Ghi nhận yêu cầu hoàn tiền', value: 'REFUND_PENDING' },
+        { name: 'Xác nhận đã hoàn tiền bên ngoài bot', value: 'REFUNDED' },
+        { name: 'Rút yêu cầu hoàn tiền', value: 'WITHDRAW_REFUND' },
       )
-  );
+  )
+  .addIntegerOption(option => option.setName('so_tien_hoan').setDescription('Số VND thực tế đã hoàn. Chỉ dùng khi xác nhận đã hoàn.').setMinValue(1))
+  .addStringOption(option => option.setName('ly_do').setDescription('Ghi chú nội bộ về yêu cầu hoàn tiền').setMaxLength(240));
 
 export async function execute(interaction) {
   const E = createEmojiResolver(interaction?.guildId);
@@ -37,20 +50,51 @@ export async function execute(interaction) {
   const action = interaction.options.getString('hanh_dong', true);
   const currentOrder = getOrderByCode(orderCode);
 
-  if (!currentOrder) {
-    await interaction.editReply(`${E('status_warn')} Không tìm thấy mã đơn này.`);
+  if (!currentOrder || currentOrder.guild_id !== interaction.guildId) {
+    await interaction.editReply(`${E('status_warn')} Không tìm thấy mã đơn trong máy chủ này.`);
     return;
   }
 
   try {
+    if (Object.hasOwn(refundActions, action)) {
+      const amount = interaction.options.getInteger('so_tien_hoan');
+      const reason = interaction.options.getString('ly_do')?.trim();
+      const { updated, changed } = updatePaidOrderRefund({
+        orderCode, guildId: interaction.guildId, actorId: interaction.user.id, action, amount, reason,
+      });
+      if (!changed) {
+        const message = updated.status === 'REFUNDED' ? 'đã ghi nhận hoàn tiền' : 'đang chờ hoàn tiền';
+        await interaction.editReply(`${E('status_info')} Đơn \`${orderCode}\` ${message} từ trước.`);
+        return;
+      }
+      const { message, event } = refundActions[action];
+      const amountText = action === 'REFUNDED' ? ` Số tiền đã ghi nhận **${formatCurrency(amount)}**.` : '';
+      const close = action !== 'WITHDRAW_REFUND' ? '\n> Nếu ticket vẫn mở, dùng `/close` và xác nhận để lưu transcript rồi đóng.' : '';
+      await interaction.editReply(`${E('status_check')} Đơn \`${orderCode}\` ${message}${amountText}${close}`);
+      await Promise.allSettled([
+        updateOrderLogMessage(interaction.guild, updated),
+        emitStaffLog(interaction.client, { guildId: interaction.guildId, actorId: interaction.user.id,
+          targetId: updated.customer_id, action: event, detail: `${event}${amountText}`, relatedOrderCode: orderCode }),
+      ]);
+      return;
+    }
+
     if (action === 'CANCELLED') {
+      if (currentOrder.status === 'REFUNDED') {
+        await interaction.editReply(`${E('status_info')} Đơn này đã ghi nhận hoàn tiền.`);
+        return;
+      }
+      if (currentOrder.payment_status === 'PAID') {
+        await interaction.editReply(`${E('status_warn')} Đơn đã nhận tiền. Trong \`/quanly-don\`, chọn **Ghi nhận yêu cầu hoàn tiền**. Để đóng ticket, quản lý dùng \`/close\`.`);
+        return;
+      }
       if (currentOrder.status === 'CANCELLED') {
         await interaction.editReply(`${E('status_info')} Đơn này đã bị hủy từ trước.`);
         return;
       }
-      const order = currentOrder.guild_id === interaction.guildId
-        ? cancelOrder(orderCode, 'Hủy thủ công qua lệnh quản lý', { actorId: interaction.user.id })
-        : null;
+      const order = cancelOrder(orderCode, 'Hủy thủ công qua lệnh quản lý', {
+        actorId: interaction.user.id, expectedOrder: currentOrder,
+      });
       if (!order) {
         await interaction.editReply(`${E('status_warn')} ${ORDER_CANCEL_BLOCKED}`);
         return;
@@ -120,7 +164,7 @@ export async function execute(interaction) {
       return;
     }
   } catch (error) {
-    if (error instanceof OrderPaymentError) {
+    if (error instanceof OrderPaymentError || error instanceof PaidOrderRefundError) {
       await interaction.editReply(`${E('status_warn')} ${error.message}`);
       return;
     }
