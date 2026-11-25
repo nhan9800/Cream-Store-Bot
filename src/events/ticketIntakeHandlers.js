@@ -1,9 +1,13 @@
 import { ActionRowBuilder, escapeMarkdown, MessageFlags, ModalBuilder, PermissionFlagsBits, TextInputBuilder, TextInputStyle } from 'discord.js';
 import { getCustomerFlag, getTicketMuteStatus } from '../services/blacklistService.js';
-import { getOrderByCode } from '../services/orderService.js';
+import { getOrderByCode, listWarrantyEligibleOrders } from '../services/orderService.js';
 import { openWarrantyTicket } from '../services/warrantyService.js';
 import { STORE_ONE_GUILD_ID } from '../utils/locale.js';
 import { buildPurchaseIntake } from '../utils/ticketIntakeView.js';
+import {
+  buildWarrantyIssueModal, buildWarrantyIssueReport, buildWarrantyOrderPicker, buildWarrantySubmitted,
+  warrantyNotice, WARRANTY_ORDER_CODE, WARRANTY_PICK_ID, WARRANTY_QUESTIONS,
+} from '../utils/warrantyIntakeView.js';
 import { storefrontEmoji as icon } from '../utils/storefrontEmoji.js';
 import { handleTicketCreate } from './ticketHandlers.js';
 
@@ -24,6 +28,7 @@ const forms = {
       { id: 'issue', label: 'Mô tả cụ thể để staff hỗ trợ', max: 500, paragraph: true },
     ],
   },
+  // Legacy single-step form: only parses modals opened before the order picker shipped.
   warranty: {
     title: 'Bảo hành',
     questions: [
@@ -46,76 +51,127 @@ export function buildTicketIntakeModal(type) {
   }));
 }
 
-async function submitWarrantyIntake(interaction, data) {
+const privateReply = (interaction, key, message) => interaction.reply({
+  content: warrantyNotice(key, message), flags: MessageFlags.Ephemeral, allowedMentions: { parse: [] },
+});
+
+function isRestricted(interaction) {
+  return Number(getCustomerFlag(interaction.guildId, interaction.user.id).is_blacklisted) === 1
+    || Boolean(getTicketMuteStatus(interaction.guildId, interaction.user.id).is_ticket_muted);
+}
+
+function eligibleOrder(interaction, orderCode) {
+  const order = WARRANTY_ORDER_CODE.test(orderCode) ? getOrderByCode(orderCode) : null;
+  if (order?.guild_id !== interaction.guildId || order?.customer_id !== interaction.user.id) return { error: 'missing' };
+  if (!['COMPLETED', 'WARRANTY_OPEN'].includes(order.status)) return { error: 'status' };
+  return { order };
+}
+
+function rejectOrder(interaction, error) {
+  return error === 'missing'
+    ? privateReply(interaction, 'search', 'Không tìm thấy đơn của bạn trong máy chủ này. Kiểm tra mã đơn hoặc chọn **Hỗ trợ**.')
+    : privateReply(interaction, 'warn', 'Chỉ mở bảo hành cho đơn đã hoàn thành. Nếu cần kiểm tra đơn, hãy chọn **Hỗ trợ**.');
+}
+
+const restricted = interaction => privateReply(interaction, 'warn', 'Tài khoản của bạn đang bị giới hạn mở ticket.');
+
+async function showWarrantyPicker(interaction) {
+  if (isRestricted(interaction)) return restricted(interaction);
+  return interaction.reply(buildWarrantyOrderPicker(listWarrantyEligibleOrders(interaction.guildId, interaction.user.id)));
+}
+
+async function pickWarrantyOrder(interaction) {
+  const { order, error } = eligibleOrder(interaction, String(interaction.values?.[0] ?? ''));
+  if (error) return rejectOrder(interaction, error);
+  if (isRestricted(interaction)) return restricted(interaction);
+  return interaction.showModal(buildWarrantyIssueModal(order.order_code));
+}
+
+async function submitWarrantyIntake(interaction, orderCode, data) {
   const customerId = interaction.user.id;
-  const orderCode = data.code.toUpperCase();
-  const order = getOrderByCode(orderCode);
-  if (order?.guild_id !== interaction.guildId || order?.customer_id !== customerId) {
-    await interaction.reply({ content: 'Không tìm thấy đơn của bạn trong máy chủ này. Kiểm tra mã đơn hoặc chọn Hỗ trợ.', flags: MessageFlags.Ephemeral });
-    return;
-  }
-  if (!['COMPLETED', 'WARRANTY_OPEN'].includes(order.status)) {
-    await interaction.reply({ content: 'Chỉ mở bảo hành cho đơn đã hoàn thành. Nếu cần kiểm tra đơn, hãy chọn Hỗ trợ.', flags: MessageFlags.Ephemeral });
-    return;
-  }
-  if (Number(getCustomerFlag(interaction.guildId, customerId).is_blacklisted) === 1
-    || getTicketMuteStatus(interaction.guildId, customerId).is_ticket_muted) {
-    await interaction.reply({ content: 'Tài khoản của bạn đang bị giới hạn mở ticket.', flags: MessageFlags.Ephemeral });
-    return;
-  }
+  const { error } = eligibleOrder(interaction, orderCode);
+  if (error) return rejectOrder(interaction, error);
+  if (isRestricted(interaction)) return restricted(interaction);
   const key = `${interaction.guildId}:${orderCode}`;
   if (warrantyRequests.has(key)) {
-    await interaction.reply({ content: 'Yêu cầu bảo hành đang được xử lý. Vui lòng đợi phản hồi.', flags: MessageFlags.Ephemeral });
-    return;
+    return privateReply(interaction, 'pending', 'Yêu cầu bảo hành đang được xử lý. Vui lòng đợi phản hồi.');
   }
   warrantyRequests.add(key);
   try {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-    const issue = escapeMarkdown(data.issue);
+    const report = {
+      issue: escapeMarkdown(data.issue),
+      ...(data.since ? { since: escapeMarkdown(data.since) } : {}),
+      ...(data.tried ? { tried: escapeMarkdown(data.tried) } : {}),
+    };
+    const formData = {
+      issue: report.issue,
+      ...(report.since ? { issueSince: report.since } : {}),
+      ...(report.tried ? { triedSteps: report.tried } : {}),
+    };
     const result = await openWarrantyTicket({
-      guild: interaction.guild, customerId, actorId: customerId, orderCode, formData: { issue },
+      guild: interaction.guild, customerId, actorId: customerId, orderCode, formData,
     });
     const channel = result.channel;
     if (!channel) {
-      await interaction.editReply({ content: 'Không tìm thấy kênh bảo hành của đơn này. Hãy chọn Hỗ trợ để staff kiểm tra.' });
+      await interaction.editReply({ content: warrantyNotice('warn', 'Không tìm thấy kênh bảo hành của đơn này. Hãy chọn **Hỗ trợ** để staff kiểm tra.') });
       return;
     }
     if (result.reused && channel.isTextBased()
       && channel.permissionsFor(interaction.guild.roles.everyone)?.has(PermissionFlagsBits.ViewChannel) === false) {
-      await channel.send({ content: `**Lỗi đã báo** · ${issue}`, allowedMentions: { parse: [] }, nonce: interaction.id, enforceNonce: true });
+      await channel.send({ content: buildWarrantyIssueReport(report), allowedMentions: { parse: [] }, nonce: interaction.id, enforceNonce: true });
     }
-    await interaction.editReply({ content: `Ticket bảo hành của bạn: <#${channel.id}>.` });
-  } catch (error) {
-    console.error('[WARRANTY_INTAKE]', error.code || error.name);
+    await interaction.editReply({ content: buildWarrantySubmitted(orderCode, channel.id, Boolean(result.reused)) });
+  } catch (failure) {
+    console.error('[WARRANTY_INTAKE]', failure.code || failure.name);
     if (interaction.deferred) {
-      await interaction.editReply({ content: 'Chưa thể cập nhật yêu cầu bảo hành. Vui lòng thử lại hoặc chọn Hỗ trợ.' });
+      await interaction.editReply({ content: warrantyNotice('warn', 'Chưa thể cập nhật yêu cầu bảo hành. Vui lòng thử lại hoặc chọn **Hỗ trợ**.') });
     }
   } finally {
     warrantyRequests.delete(key);
   }
 }
 
+function readFields(interaction, questions) {
+  const data = Object.fromEntries(questions.map(({ id }) => [id, (interaction.fields.getTextInputValue(id) ?? '').trim()]));
+  const invalid = questions.some(({ id, max, optional }) => (!optional && !data[id]) || data[id].length > max);
+  return invalid ? null : data;
+}
+
 export async function handleTicketIntakeInteraction(interaction) {
   if (!interaction.customId?.startsWith('ticket:intake:')) return false;
   const [, , action, type, extra] = interaction.customId.split(':');
-  if (interaction.guildId !== STORE_ONE_GUILD_ID || !Object.hasOwn(forms, type) || extra !== undefined) {
-    await interaction.reply({ content: 'Biểu mẫu này chỉ dùng ở bảng tạo ticket của Cenar Store.', flags: MessageFlags.Ephemeral });
+  const warrantyForm = action === 'form' && type === 'warranty' && extra !== undefined;
+  if (interaction.guildId !== STORE_ONE_GUILD_ID || !Object.hasOwn(forms, type)
+    || (extra !== undefined && !(warrantyForm && WARRANTY_ORDER_CODE.test(extra)))) {
+    await privateReply(interaction, 'info', 'Biểu mẫu này chỉ dùng ở bảng tạo ticket của Cenar Store.');
     return true;
   }
   if (action === 'open' && interaction.isButton()) {
-    await interaction.showModal(buildTicketIntakeModal(type));
+    if (type === 'warranty') await showWarrantyPicker(interaction);
+    else await interaction.showModal(buildTicketIntakeModal(type));
+    return true;
+  }
+  if (interaction.customId === WARRANTY_PICK_ID && interaction.isStringSelectMenu?.()) {
+    await pickWarrantyOrder(interaction);
     return true;
   }
   if (action !== 'form' || !interaction.isModalSubmit()) return true;
+  if (warrantyForm) {
+    const data = readFields(interaction, WARRANTY_QUESTIONS);
+    if (!data) await privateReply(interaction, 'warn', 'Vui lòng mô tả lỗi bạn đang gặp rồi gửi lại.');
+    else await submitWarrantyIntake(interaction, extra, data);
+    return true;
+  }
 
   const { title, questions } = forms[type];
-  const data = Object.fromEntries(questions.map(({ id }) => [id, interaction.fields.getTextInputValue(id).trim()]));
-  if (questions.some(({ id, max, optional }) => (!optional && !data[id]) || data[id].length > max)) {
-    await interaction.reply({ content: 'Vui lòng nhập đủ các trường bắt buộc rồi gửi lại.', flags: MessageFlags.Ephemeral });
+  const data = readFields(interaction, questions);
+  if (!data) {
+    await privateReply(interaction, 'warn', 'Vui lòng nhập đủ các trường bắt buộc rồi gửi lại.');
     return true;
   }
   if (type === 'warranty') {
-    await submitWarrantyIntake(interaction, data);
+    await submitWarrantyIntake(interaction, data.code.toUpperCase(), { issue: data.issue });
     return true;
   }
 

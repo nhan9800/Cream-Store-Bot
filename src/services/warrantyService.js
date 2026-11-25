@@ -131,6 +131,8 @@ export function normalizeWarrantyFormData(order, formData = {}) {
     accountInfo: meaningful(formData?.accountInfo),
     password: meaningful(formData?.password),
     ...(issue ? { issue } : {}),
+    ...(meaningful(formData?.issueSince) ? { issueSince: meaningful(formData.issueSince) } : {}),
+    ...(meaningful(formData?.triedSteps) ? { triedSteps: meaningful(formData.triedSteps) } : {}),
     purchaseDate: timeline.purchaseDate,
     dateExpired: timeline.dateExpired,
   };
@@ -179,6 +181,8 @@ export function buildWarrantyTicketOpenedV2({ order, ticket, channel, formData, 
       formData.purchaseDate && `${E('warranty_purchase')} **${international ? 'Purchase date' : 'Ngày mua'}** — ${formData.purchaseDate}`,
       formData.dateExpired  && `${E('warranty_expiry')} **${international ? 'Expiry date' : 'Ngày hết hạn'}** — ${formData.dateExpired}`,
       formData.issue        && `${E('icon_doc')} **${international ? 'Reported issue' : 'Lỗi đã báo'}** — ${formData.issue}`,
+      formData.issueSince   && `${E('icon_clock')} **${international ? 'Started' : 'Bắt đầu từ'}** — ${formData.issueSince}`,
+      formData.triedSteps   && `${E('icon_book')} **${international ? 'Already tried' : 'Đã thử'}** — ${formData.triedSteps}`,
     ].filter(Boolean);
 
     if (fields.length) {
