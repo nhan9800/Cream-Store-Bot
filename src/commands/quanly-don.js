@@ -1,11 +1,13 @@
 import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { PermissionFlagsBits, SlashCommandBuilder } from 'discord.js';
 import { getGuildConfig } from '../services/guildConfigService.js';
-import { getOrderByCode, cancelOrder, markOrderPaid, markOrderCompleted, ensureOrderExpiry, restoreCancelledPayOSOrder, OrderPaymentError, updatePaidOrderRefund } from '../services/orderService.js';
+import {
+  getOrderByCode, cancelOrderForManager, markOrderPaid, markOrderCompleted, ensureOrderExpiry, reopenOrderForManager,
+  OrderPaymentError, updatePaidOrderRefund,
+} from '../services/orderService.js';
 import { sendOrderCancelledFlow, updateOrderLogMessage, sendCompletedFlow } from '../services/notificationService.js';
 import { emitStaffLog } from '../services/staffLogService.js';
 import { assertStaffCapability } from '../utils/permissions.js';
-import { ORDER_CANCEL_BLOCKED } from '../services/orderStateMachine.js';
 import { PaidOrderRefundError } from '../services/paidOrderRefundService.js';
 import { formatCurrency } from '../utils/formatters.js';
 
@@ -14,6 +16,12 @@ const refundActions = {
   REFUNDED: { message: 'đã ghi nhận **Hoàn tiền** theo số tiền quản lý xác nhận.', event: 'ORDER_REFUND_RECORDED' },
   WITHDRAW_REFUND: { message: 'đã trở về trạng thái trước yêu cầu hoàn tiền.', event: 'ORDER_REFUND_WITHDRAWN' },
 };
+
+const STOPPED_STATUSES = new Set(['CANCELLED', 'FAILED', 'REFUNDED', 'REFUND_PENDING']);
+
+function managerReply(E, lines, warnings = []) {
+  return [...lines.filter(Boolean), ...warnings.map(warning => `${E('status_warn')} ${warning}`)].join('\n');
+}
 
 export const data = new SlashCommandBuilder()
   .setName('quanly-don')
@@ -27,7 +35,7 @@ export const data = new SlashCommandBuilder()
       .addChoices(
         { name: 'Đánh dấu Đã Thanh Toán', value: 'PAID' },
         { name: 'Đánh dấu Hoàn Thành', value: 'COMPLETED' },
-        { name: 'Hủy đơn chưa nhận tiền', value: 'CANCELLED' },
+        { name: 'Hủy đơn', value: 'CANCELLED' },
         { name: 'Ghi nhận yêu cầu hoàn tiền', value: 'REFUND_PENDING' },
         { name: 'Xác nhận đã hoàn tiền bên ngoài bot', value: 'REFUNDED' },
         { name: 'Rút yêu cầu hoàn tiền', value: 'WITHDRAW_REFUND' },
@@ -80,50 +88,41 @@ export async function execute(interaction) {
     }
 
     if (action === 'CANCELLED') {
-      if (currentOrder.status === 'REFUNDED') {
-        await interaction.editReply(`${E('status_info')} Đơn này đã ghi nhận hoàn tiền.`);
-        return;
-      }
-      if (currentOrder.payment_status === 'PAID') {
-        await interaction.editReply(`${E('status_warn')} Đơn đã nhận tiền. Trong \`/quanly-don\`, chọn **Ghi nhận yêu cầu hoàn tiền**. Để đóng ticket, quản lý dùng \`/close\`.`);
-        return;
-      }
-      if (currentOrder.status === 'CANCELLED') {
+      const { updated: order, changed, warnings, keptPayment } = cancelOrderForManager({
+        orderCode, guildId: interaction.guildId, actorId: interaction.user.id, reason: 'Hủy thủ công qua lệnh quản lý',
+      });
+      if (!changed) {
         await interaction.editReply(`${E('status_info')} Đơn này đã bị hủy từ trước.`);
         return;
       }
-      const order = cancelOrder(orderCode, 'Hủy thủ công qua lệnh quản lý', {
-        actorId: interaction.user.id, expectedOrder: currentOrder,
-      });
-      if (!order) {
-        await interaction.editReply(`${E('status_warn')} ${ORDER_CANCEL_BLOCKED}`);
-        return;
-      }
-      await updateOrderLogMessage(interaction.guild, order);
-      await emitStaffLog(interaction.client, { guildId: interaction.guildId, actorId: interaction.user.id, targetId: order.customer_id, action: 'ORDER_EDITED', detail: 'Hủy đơn', relatedOrderCode: order.order_code });
-
-      const cancellationNotice = await sendOrderCancelledFlow({
-        guild: interaction.guild,
-        order,
-        reason: `Hủy thủ công bởi staff ${interaction.user.tag}`,
-      });
-
-      await interaction.editReply(`${E('status_check')} Đã hủy đơn \`${orderCode}\` thành công! ${cancellationNotice.dmSent ? 'Đã gửi DM giao diện mới cho khách.' : 'Khách đang tắt DM nên không thể gửi riêng.'}`);
+      const [, , notice] = await Promise.allSettled([
+        updateOrderLogMessage(interaction.guild, order),
+        emitStaffLog(interaction.client, { guildId: interaction.guildId, actorId: interaction.user.id, targetId: order.customer_id,
+          action: 'ORDER_EDITED', detail: keptPayment ? 'Hủy đơn đã nhận tiền, giữ dữ liệu thanh toán' : 'Hủy đơn', relatedOrderCode: order.order_code }),
+        sendOrderCancelledFlow({ guild: interaction.guild, order, reason: `Hủy thủ công bởi staff ${interaction.user.tag}` }),
+      ]);
+      const dmSent = notice.status === 'fulfilled' && notice.value?.dmSent;
+      await interaction.editReply(managerReply(E, [
+        `${E('status_check')} Đã hủy đơn \`${orderCode}\`. ${dmSent ? 'Đã gửi DM cho khách.' : 'Không gửi được DM cho khách.'}`,
+        keptPayment && '> Đơn đã nhận tiền nên bot giữ nguyên dữ liệu thanh toán. Nếu cần trả tiền cho khách, chọn **Ghi nhận yêu cầu hoàn tiền**.',
+      ], warnings));
       return;
     }
 
     if (action === 'PAID') {
-      if (currentOrder.status === 'CANCELLED') {
-        const order = restoreCancelledPayOSOrder({ orderCode, guildId: interaction.guildId, actorId: interaction.user.id });
-        await interaction.editReply(`${E('status_check')} Đơn \`${orderCode}\` đã được đưa về **Đang xử lý**. Bot giữ nguyên giao dịch PayOS đã xác nhận.`);
+      if (STOPPED_STATUSES.has(currentOrder.status)) {
+        const { updated: order, warnings, manualPayment } = reopenOrderForManager({
+          orderCode, guildId: interaction.guildId, actorId: interaction.user.id, markPaid: true,
+        });
+        await interaction.editReply(managerReply(E, [
+          `${E('status_check')} Đơn \`${orderCode}\` đã được đưa về **Đang xử lý**. ${manualPayment
+            ? 'Đã ghi nhận thanh toán thủ công theo tổng đơn.' : 'Bot giữ nguyên dữ liệu thanh toán đã có.'}`,
+        ], warnings));
         await Promise.allSettled([
           updateOrderLogMessage(interaction.guild, order),
           emitStaffLog(interaction.client, {
-            guildId: interaction.guildId,
-            actorId: interaction.user.id,
-            targetId: order.customer_id,
-            action: 'ORDER_PAYMENT_RESTORED',
-            detail: 'Đưa đơn đã hủy về xử lý bằng giao dịch PayOS gốc',
+            guildId: interaction.guildId, actorId: interaction.user.id, targetId: order.customer_id,
+            action: 'ORDER_PAYMENT_RESTORED', detail: manualPayment ? 'Mở lại đơn và xác nhận thanh toán thủ công' : 'Mở lại đơn với dữ liệu thanh toán đã có',
             relatedOrderCode: order.order_code,
           }),
         ]);
@@ -134,16 +133,13 @@ export async function execute(interaction) {
         return;
       }
       const order = markOrderPaid(orderCode, { amountPaid: currentOrder.total_amount, transactionId: 'MANUAL', transactionContent: 'Xác nhận thủ công' });
-      await updateOrderLogMessage(interaction.guild, order);
-      await emitStaffLog(interaction.client, { guildId: interaction.guildId, actorId: interaction.user.id, targetId: order.customer_id, action: 'ORDER_EDITED', detail: 'Xác nhận thanh toán thủ công', relatedOrderCode: order.order_code });
-      
-      // Thông báo cho khách hàng
-      try {
-        const customer = await interaction.client.users.fetch(order.customer_id);
-        await customer.send(`${E('icon_money_wings')} **Cenar Store** - Đơn hàng \`${orderCode}\` của bạn đã được xác nhận thanh toán thủ công! Đơn đang chờ xử lý.`).catch(() => null);
-      } catch (e) {}
-      
       await interaction.editReply(`${E('status_check')} Đã cập nhật trạng thái **Đã thanh toán** cho đơn \`${orderCode}\`!`);
+      await Promise.allSettled([
+        updateOrderLogMessage(interaction.guild, order),
+        emitStaffLog(interaction.client, { guildId: interaction.guildId, actorId: interaction.user.id, targetId: order.customer_id, action: 'ORDER_EDITED', detail: 'Xác nhận thanh toán thủ công', relatedOrderCode: order.order_code }),
+        interaction.client.users.fetch(order.customer_id)
+          .then(customer => customer.send(`${E('icon_money_wings')} **Cenar Store** - Đơn hàng \`${orderCode}\` của bạn đã được xác nhận thanh toán thủ công! Đơn đang chờ xử lý.`)),
+      ]);
       return;
     }
 
@@ -152,19 +148,31 @@ export async function execute(interaction) {
         await interaction.editReply(`${E('status_info')} Đơn này đã hoàn thành rồi.`);
         return;
       }
-      // Khác với /hoanthanh, lệnh này là Override admin, cho phép hoàn thành ngay cả khi chưa thanh toán xong (nếu staff muốn vậy)
-      let order = currentOrder.status === 'CANCELLED' && currentOrder.payment_status === 'PAID'
-        ? restoreCancelledPayOSOrder({ orderCode, guildId: interaction.guildId, actorId: interaction.user.id, complete: true })
-        : markOrderCompleted(orderCode, interaction.user.id, 24);
+      // Override admin: hoàn thành được mọi đơn, kể cả đơn đã hủy/hoàn tiền hoặc chưa thanh toán xong.
+      let order;
+      let warnings = [];
+      if (STOPPED_STATUSES.has(currentOrder.status)) {
+        ({ updated: order, warnings } = reopenOrderForManager({
+          orderCode, guildId: interaction.guildId, actorId: interaction.user.id, complete: true,
+        }));
+      } else {
+        order = markOrderCompleted(orderCode, interaction.user.id, 24);
+      }
       order = ensureOrderExpiry(order.order_code, new Date(order.completed_at ?? Date.now())) ?? order;
-      await updateOrderLogMessage(interaction.guild, order);
-      const result = await sendCompletedFlow({ guild: interaction.guild, order, actorId: interaction.user.id, supportId: interaction.user.id });
-      await emitStaffLog(interaction.client, { guildId: interaction.guildId, actorId: interaction.user.id, targetId: order.customer_id, action: 'ORDER_COMPLETE_MANUAL', detail: 'Ép hoàn thành qua quản lý', relatedOrderCode: order.order_code });
-      await interaction.editReply(`${E('status_check')} Đã ép **Hoàn thành** đơn \`${orderCode}\`! ${result.dmSent ? 'Đã gửi DM cho khách.' : 'Không thể gửi DM cho khách.'}`);
+      const [, flow] = await Promise.allSettled([
+        updateOrderLogMessage(interaction.guild, order),
+        sendCompletedFlow({ guild: interaction.guild, order, actorId: interaction.user.id, supportId: interaction.user.id }),
+        emitStaffLog(interaction.client, { guildId: interaction.guildId, actorId: interaction.user.id, targetId: order.customer_id, action: 'ORDER_COMPLETE_MANUAL', detail: 'Ép hoàn thành qua quản lý', relatedOrderCode: order.order_code }),
+      ]);
+      const dmSent = flow.status === 'fulfilled' && flow.value?.dmSent;
+      await interaction.editReply(managerReply(E, [
+        `${E('status_check')} Đã ép **Hoàn thành** đơn \`${orderCode}\`! ${dmSent ? 'Đã gửi DM cho khách.' : 'Không thể gửi DM cho khách.'}`,
+      ], warnings));
       return;
     }
   } catch (error) {
-    if (error instanceof OrderPaymentError || error instanceof PaidOrderRefundError) {
+    if (error instanceof OrderPaymentError || error instanceof PaidOrderRefundError
+      || ['ORDER_NOT_COMPLETABLE', 'ORDER_COMPLETION_CONFLICT'].includes(error?.code)) {
       await interaction.editReply(`${E('status_warn')} ${error.message}`);
       return;
     }

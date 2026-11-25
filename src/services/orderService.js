@@ -429,6 +429,141 @@ export function restoreCancelledPayOSOrder({ orderCode, guildId, actorId, comple
   return updated;
 }
 
+// ── Manager override for Discord /quanly-don ──
+// Managers can move any order of their guild (including auto-cancelled,
+// refunded or long-finished orders). The guards below only stop unsafe
+// concurrency (a running delivery) and AutoBuy orders, whose supplier workflow
+// may spend real money. Every change is written to order_status_history.
+const MANAGER_STOPPED_STATUSES = new Set(['CANCELLED', 'FAILED', 'REFUNDED', 'REFUND_PENDING']);
+
+function assertManagerCanChange(order, guildId, { blockSupplier = true } = {}) {
+  if (!order || order.guild_id !== guildId) {
+    throw new OrderPaymentError('ORDER_NOT_FOUND', 'Không tìm thấy mã đơn trong máy chủ này.');
+  }
+  if (blockSupplier && order.fulfillment_mode === 'SUPPLIER') {
+    throw new OrderPaymentError('SUPPLIER_ORDER', 'Đơn AutoBuy cần được xử lý trong bảng quản trị AutoBuy.');
+  }
+  const sending = db.prepare(`SELECT 1 FROM order_fulfillments
+    WHERE order_code = ? AND status = 'SENDING' AND lease_until > ?`).get(order.order_code, nowIso());
+  if (sending) {
+    throw new OrderPaymentError('DELIVERY_RUNNING', 'Bot đang giao hàng cho đơn này. Chờ lượt giao xong rồi thử lại.');
+  }
+}
+
+function managerOrderWarnings(order) {
+  ensureStatusHistoryTable(db);
+  const warnings = [];
+  const refunded = order.status === 'REFUNDED' || order.payment_status === 'REFUNDED'
+    || db.prepare(`SELECT 1 FROM wallet_transactions
+      WHERE related_code = ? AND customer_id = ? AND guild_id = ? AND amount > 0
+        AND type IN ('REFUND', 'ORDER_REFUND', 'REFUND_ORDER')`).get(order.order_code, order.customer_id, order.guild_id)
+    || db.prepare("SELECT 1 FROM order_status_history WHERE order_code = ? AND new_status = 'REFUNDED'").get(order.order_code);
+  if (refunded) warnings.push('Đơn từng được ghi nhận hoàn tiền. Kiểm tra để không trả tiền hai lần.');
+  if (order.delivered_at || db.prepare('SELECT 1 FROM order_delivery_items WHERE order_code = ? LIMIT 1').get(order.order_code)) {
+    warnings.push('Đơn đã có dữ liệu giao hàng từ trước.');
+  }
+  return warnings;
+}
+
+function afterManagerChange(order, updated) {
+  markAdminOrderReminderLifecycleChanged(order, updated);
+  syncCustomerStats(updated.guild_id, updated.customer_id);
+  scheduleCtvOrderLogSync(updated);
+  scheduleAdminOrderCenterRefresh(updated.guild_id);
+  broadcastDashboardEvent('order_update');
+}
+
+/**
+ * Reopen a stopped order (cancelled, failed, refunded or awaiting refund) to
+ * PROCESSING. Existing payment evidence is kept. With markPaid and no money on
+ * record, the manager's confirmation is stored as a MANUAL payment. With
+ * complete, the reopened order is completed in the same transaction.
+ */
+export function reopenOrderForManager({ orderCode, guildId, actorId, markPaid = false, complete = false }) {
+  const result = db.transaction(() => {
+    const order = getOrderByCode(orderCode);
+    assertManagerCanChange(order, guildId);
+    if (!MANAGER_STOPPED_STATUSES.has(order.status)) {
+      throw new OrderPaymentError('ORDER_ACTIVE', 'Đơn đang hoạt động nên không cần mở lại.');
+    }
+    const warnings = managerOrderWarnings(order);
+    const timestamp = nowIso();
+    const settled = ['PAID', 'FREE'].includes(order.payment_status);
+    const hasMoney = Number(order.amount_paid ?? 0) > 0 || Boolean(order.paid_at);
+    const payment = {
+      status: order.payment_status, amount: order.amount_paid, paidAt: order.paid_at,
+      transactionId: order.paid_transaction_id, content: order.paid_transaction_content,
+    };
+    let manualPayment = false;
+    if (!settled) {
+      if (hasMoney) {
+        payment.status = 'PAID';
+      } else if (markPaid) {
+        Object.assign(payment, {
+          status: 'PAID', amount: validateOrderPaymentAmount(order, order.total_amount), paidAt: timestamp,
+          transactionId: 'MANUAL', content: 'Quản lý xác nhận thủ công qua /quanly-don',
+        });
+        manualPayment = true;
+      } else {
+        payment.status = 'UNPAID';
+      }
+    }
+    db.prepare(`UPDATE orders SET status = 'PROCESSING', status_changed_at = ?, payment_status = ?, amount_paid = ?,
+      paid_at = ?, paid_transaction_id = ?, paid_transaction_content = ?, updated_at = ? WHERE order_code = ?`)
+      .run(timestamp, payment.status, payment.amount ?? 0, payment.paidAt ?? null, payment.transactionId ?? null,
+        payment.content ?? null, timestamp, orderCode);
+    recordStatusChange(db, {
+      orderCode, previousStatus: order.status, newStatus: 'PROCESSING', actor: actorId,
+      reason: 'Quản lý mở lại đơn qua /quanly-don',
+      metadata: { previousPaymentStatus: order.payment_status, paymentStatus: payment.status, manualPayment, warnings },
+    });
+    const updated = complete ? markOrderCompleted(orderCode, actorId, 24) : getOrderByCode(orderCode);
+    return { order, updated, warnings, manualPayment };
+  }).immediate();
+  if (!complete) afterManagerChange(result.order, result.updated);
+  return result;
+}
+
+/**
+ * Cancel any order. Unpaid orders keep the normal cancellation (payment marked
+ * CANCELLED). Paid or finished orders keep their payment evidence so the refund
+ * actions and reports still see the money received.
+ */
+export function cancelOrderForManager({ orderCode, guildId, actorId, reason = null }) {
+  const result = db.transaction(() => {
+    const order = getOrderByCode(orderCode);
+    const unpaid = canCancelUnpaidOrder(order);
+    assertManagerCanChange(order, guildId, { blockSupplier: !unpaid });
+    if (order.status === 'CANCELLED') return { order, updated: order, changed: false, warnings: [], keptPayment: false };
+    const warnings = managerOrderWarnings(order);
+    const timestamp = nowIso();
+    if (unpaid) {
+      cancelOrderStmt().run(timestamp, reason, timestamp, orderCode);
+    } else {
+      db.prepare(`UPDATE orders SET status = 'CANCELLED', status_changed_at = ?,
+        payment_cancel_reason = COALESCE(?, payment_cancel_reason), updated_at = ? WHERE order_code = ?`)
+        .run(timestamp, reason, timestamp, orderCode);
+    }
+    clearClaimStmt().run(timestamp, orderCode);
+    recordStatusChange(db, {
+      orderCode, previousStatus: order.status, newStatus: 'CANCELLED', actor: actorId,
+      reason: reason || 'Quản lý hủy đơn qua /quanly-don', metadata: { keptPayment: !unpaid, warnings },
+    });
+    return { order, updated: getOrderByCode(orderCode), changed: true, warnings, keptPayment: !unpaid };
+  }).immediate();
+  if (!result.changed) return result;
+  const { order, updated } = result;
+  if (order.guild_id !== 'WEB' && order.customer_id !== 'WEB') {
+    try {
+      refundOrderPoints(order.guild_id, order.customer_id, order.order_code);
+    } catch (error) {
+      console.error('[LOYALTY] Lỗi refundOrderPoints trong cancelOrderForManager:', error);
+    }
+  }
+  afterManagerChange(order, updated);
+  return result;
+}
+
 // The durable queue is committed with the payment; Discord may be unavailable.
 export function queueOrderDelivery(orderCode) {
   const timestamp = nowIso();

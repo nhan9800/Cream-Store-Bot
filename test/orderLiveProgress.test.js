@@ -13,7 +13,7 @@ const databasePath = vi.hoisted(() => {
 import { db, initDatabase } from '../src/database/db.js';
 import { config } from '../src/config.js';
 import { createTicket, closeTicket } from '../src/services/ticketService.js';
-import { createOrder, getOrderByCode, queueOrderDelivery, recordOrderPayment, markOrderCompleted, setOrderStatus } from '../src/services/orderService.js';
+import { cancelOrder, createOrder, getOrderByCode, queueOrderDelivery, recordOrderPayment, markOrderCompleted, setOrderStatus } from '../src/services/orderService.js';
 import { getOrderProgress, updateOrderProgress } from '../src/services/orderProgressService.js';
 import { registerAdminRoutes } from '../src/services/adminApiRoutes.js';
 import { deliverPaidOrder } from '../src/services/autoDeliveryService.js';
@@ -159,7 +159,6 @@ describe('live order progress', () => {
 describe('Discord paid-order refund', () => {
   it('replaces paid cancellation with a reversible hold and records an actual partial refund once', async () => {
     const order = fixture();
-    expect(await manage(order, 'CANCELLED')).toContain('Ghi nhận yêu cầu hoàn tiền');
     expect(await manage(order, 'REFUNDED', { amount: 50_000 })).toContain('trước');
     expect(await manage(order, 'REFUND_PENDING', { guildId: 'other-shop' })).toContain('Không tìm thấy');
     expect(await manage(order, 'REFUND_PENDING', { manager: false })).toContain('mới được dùng');
@@ -170,7 +169,6 @@ describe('Discord paid-order refund', () => {
     expect(getOrderProgress(getOrderByCode(order.order_code))).toMatchObject({ stage: 'REFUND_PENDING', writable: false });
     expect(() => markOrderCompleted(order.order_code, 'admin-progress')).toThrow('chờ hoàn tiền');
     expect(setOrderStatus(order.order_code, 'COMPLETED')).toBeNull();
-    expect(await manage(order, 'COMPLETED')).toContain('chờ hoàn tiền');
     expect(await manage(order, 'REFUNDED', { amount: 110_000 })).toContain('số đã nhận');
     expect(await manage(order, 'REFUNDED')).toContain('số đã nhận');
     expect(await manage(order, 'WITHDRAW_REFUND')).toContain('trạng thái trước');
@@ -186,6 +184,60 @@ describe('Discord paid-order refund', () => {
     const events = getOrderTimeline(db, order.order_code).filter(row => row.new_status === 'REFUNDED');
     expect(events).toHaveLength(1);
     expect(JSON.parse(events[0].metadata)).toEqual({ amount: 50_000, currency: 'VND' });
+  });
+
+  it('lets a manager cancel, reopen or complete any order of the shop, keeping payment evidence', async () => {
+    const paid = fixture();
+    const cancelled = await manage(paid, 'CANCELLED');
+    expect(cancelled).toContain('Đã hủy đơn');
+    expect(cancelled).toContain('Ghi nhận yêu cầu hoàn tiền');
+    expect(getOrderByCode(paid.order_code)).toMatchObject({ status: 'CANCELLED', payment_status: 'PAID',
+      amount_paid: paid.amount_paid, paid_at: paid.paid_at });
+    expect(await manage(paid, 'CANCELLED')).toContain('từ trước');
+    expect(await manage(paid, 'PAID')).toContain('giữ nguyên dữ liệu thanh toán');
+    expect(getOrderByCode(paid.order_code)).toMatchObject({ status: 'PROCESSING', payment_status: 'PAID', amount_paid: paid.amount_paid });
+
+    const finished = fixture();
+    markOrderCompleted(finished.order_code, 'admin-progress');
+    db.prepare("UPDATE orders SET completed_at='2025-01-01T00:00:00.000Z', created_at='2025-01-01T00:00:00.000Z' WHERE order_code=?")
+      .run(finished.order_code);
+    expect(await manage(finished, 'CANCELLED')).toContain('Đã hủy đơn');
+    expect(getOrderByCode(finished.order_code)).toMatchObject({ status: 'CANCELLED', payment_status: 'PAID' });
+    expect(await manage(finished, 'COMPLETED')).toContain('Hoàn thành');
+    expect(getOrderByCode(finished.order_code)).toMatchObject({ status: 'COMPLETED', payment_status: 'PAID' });
+
+    const expired = fixture(false);
+    expect(cancelOrder(expired.order_code, 'Hết hạn thanh toán')).toMatchObject({ status: 'CANCELLED', payment_status: 'CANCELLED' });
+    expect(await manage(expired, 'COMPLETED')).toContain('Hoàn thành');
+    expect(getOrderByCode(expired.order_code)).toMatchObject({ status: 'COMPLETED', payment_status: 'UNPAID' });
+
+    const expiredPaid = fixture(false);
+    cancelOrder(expiredPaid.order_code, 'Hết hạn thanh toán');
+    expect(await manage(expiredPaid, 'PAID')).toContain('thanh toán thủ công');
+    expect(getOrderByCode(expiredPaid.order_code)).toMatchObject({ status: 'PROCESSING', payment_status: 'PAID',
+      amount_paid: 100_000, paid_transaction_id: 'MANUAL' });
+
+    const held = fixture();
+    await manage(held, 'REFUND_PENDING');
+    expect(await manage(held, 'COMPLETED')).toContain('Hoàn thành');
+    expect(getOrderByCode(held.order_code)).toMatchObject({ status: 'COMPLETED', payment_status: 'PAID' });
+
+    const refunded = fixture();
+    await manage(refunded, 'REFUND_PENDING');
+    await manage(refunded, 'REFUNDED', { amount: 100_000 });
+    const reopened = await manage(refunded, 'PAID');
+    expect(reopened).toContain('Đang xử lý');
+    expect(reopened).toContain('hoàn tiền');
+    const timeline = getOrderTimeline(db, refunded.order_code).map(row => [row.old_status, row.new_status, row.actor]);
+    expect(timeline.at(-1)).toEqual(['REFUNDED', 'PROCESSING', 'admin-progress']);
+
+    const supplier = fixture();
+    db.prepare("UPDATE orders SET fulfillment_mode='SUPPLIER' WHERE order_code=?").run(supplier.order_code);
+    expect(await manage(supplier, 'CANCELLED')).toContain('AutoBuy');
+    db.prepare("INSERT INTO order_fulfillments (order_code, status, retry_at, lease_until, updated_at) VALUES (?, 'SENDING', ?, ?, ?)")
+      .run(held.order_code, new Date().toISOString(), new Date(Date.now() + 60_000).toISOString(), new Date().toISOString());
+    expect(await manage(held, 'CANCELLED')).toContain('đang giao hàng');
+    expect(getOrderByCode(held.order_code).status).toBe('COMPLETED');
   });
 
   it('supports an already completed order and rejects unpaid and supplier orders', async () => {

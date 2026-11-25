@@ -366,19 +366,6 @@ describe('payment and fulfillment reliability', () => {
   it.each([
     ['different server', (order) => confirmPaymentInteraction(order, { guildId: '111111111111111111' }), 'máy chủ này'],
     ['non-manager', (order) => confirmPaymentInteraction(order, { manager: false }), 'Chỉ staff/manager'],
-    ['refunded', (order) => {
-      addWalletBalance(order.guild_id, customerId, order.total_amount, 'REFUND', 'test refund', order.order_code);
-      return confirmPaymentInteraction(order);
-    }, 'hoàn tiền hoặc giao hàng'],
-    ['incomplete PayOS receipt', (order) => {
-      db.prepare('UPDATE payment_events SET raw_payload = ? WHERE order_code = ?')
-        .run(JSON.stringify({ amount: order.total_amount, amountPaid: 500 }), order.order_code);
-      return confirmPaymentInteraction(order);
-    }, 'chưa đủ tổng đơn'],
-    ['unmatched receipt', (order) => {
-      db.prepare('UPDATE payment_events SET transaction_id = ? WHERE order_code = ?').run('unmatched', order.order_code);
-      return confirmPaymentInteraction(order);
-    }, 'Chưa tìm thấy giao dịch PayOS gốc'],
   ])('blocks /quanly-don recovery for a %s', async (_case, setup, message) => {
     const order = createPendingOrder(1, process.env.GUILD_ID);
     cancelOrder(order.order_code, 'expired');
@@ -388,6 +375,26 @@ describe('payment and fulfillment reliability', () => {
     await manageOrder(interaction);
     expect(interaction.editReply).toHaveBeenLastCalledWith(expect.stringContaining(message));
     expect(getOrderByCode(order.order_code)).toMatchObject({ status: 'CANCELLED', payment_status: 'PAID' });
+  });
+
+  it.each([
+    ['refunded', (order) => addWalletBalance(order.guild_id, customerId, order.total_amount, 'REFUND', 'test refund', order.order_code), 'hoàn tiền'],
+    ['incomplete PayOS receipt', (order) => db.prepare('UPDATE payment_events SET raw_payload = ? WHERE order_code = ?')
+      .run(JSON.stringify({ amount: order.total_amount, amountPaid: 500 }), order.order_code), 'Đang xử lý'],
+    ['unmatched receipt', (order) => db.prepare('UPDATE payment_events SET transaction_id = ? WHERE order_code = ?')
+      .run('unmatched', order.order_code), 'Đang xử lý'],
+  ])('lets a manager reopen a cancelled paid order with a %s and keeps the payment evidence', async (_case, setup, message) => {
+    const order = createPendingOrder(1, process.env.GUILD_ID);
+    cancelOrder(order.order_code, 'expired');
+    const { updated: paid } = confirmPayment(order, 'cancelled-discord-payment');
+    setup(order);
+    const interaction = confirmPaymentInteraction(order);
+
+    await manageOrder(interaction);
+    expect(interaction.editReply).toHaveBeenLastCalledWith(expect.stringContaining(message));
+    expect(getOrderByCode(order.order_code)).toMatchObject({ status: 'PROCESSING', payment_status: 'PAID',
+      amount_paid: paid.amount_paid, paid_transaction_id: paid.paid_transaction_id });
+    expect(db.prepare('SELECT * FROM order_fulfillments WHERE order_code = ?').get(order.order_code)).toBeUndefined();
   });
 
   it('rolls the payment event back when the order update fails so a replay can recover', () => {
