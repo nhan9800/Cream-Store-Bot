@@ -29,7 +29,7 @@ import { getCustomerFlag, getTicketMuteStatus } from '../services/blacklistServi
 import { canOpenMultipleOrderTickets, isStaffMember, isManager, assertStaffCapability, TICKET_MEMBER_PERMISSIONS } from '../utils/permissions.js';
 import { emitStaffLog } from '../services/staffLogService.js';
 import { getOrderByCode, getLatestOrderByTicketChannel, cancelOrder, getQueuePosition, setOrderStatus, claimOrder, releaseOrderClaim } from '../services/orderService.js';
-import { closeTicket, createTicket, getOpenTicketByCustomer, getTicketByChannelId, getTicketById, keepTicketOpen } from '../services/ticketService.js';
+import { closeTicket, createTicket, getOpenTicketByCustomer, getOpenTicketBySubject, getTicketByChannelId, getTicketById, keepTicketOpen } from '../services/ticketService.js';
 import { archiveTicketConversation } from '../services/ticketClosureService.js';
 import { sendOrderCancelledFlow, updateOrderLogMessage } from '../services/notificationService.js';
 import { verifyPayOSInvoiceCancellation } from '../services/paymentService.js';
@@ -154,13 +154,24 @@ export async function handleTicketCreate(interaction, ticketType = 'ORDER', gmai
         ? `Bạn đã mở quá nhiều ticket liên tiếp. Vui lòng chờ ${config.ctvTicketOpenBurstWindowSeconds} giây.`
         : `Bạn vừa mở ticket rồi. Vui lòng chờ ${config.ticketOpenCooldownSeconds} giây rồi thử lại.`,
     });
+    // A topic intake (Liên Quân quote) only joins an open ticket of the same topic,
+    // never an unrelated order ticket the customer left open.
     const existingTicket = allowMultipleTickets
       ? null
-      : getOpenTicketByCustomer(interaction.guildId, interaction.user.id, normalizedType);
+      : intake?.subjectPrefix
+        ? getOpenTicketBySubject(interaction.guildId, interaction.user.id, normalizedType, intake.subjectPrefix)
+        : getOpenTicketByCustomer(interaction.guildId, interaction.user.id, normalizedType);
     if (existingTicket) {
       // Kiểm tra channel còn tồn tại không
       const existingChannel = await interaction.guild.channels.fetch(existingTicket.channel_id).catch(() => null);
       if (existingChannel) {
+        if (intake?.subjectPrefix && existingTicket.ticket_subject === intake.title) {
+          await safeReply(interaction, {
+            content: `${E('status_info')} Bạn đã có ticket cho **${intake.title}** tại ${existingChannel}.`,
+            ephemeral: true,
+          });
+          return;
+        }
         if (intake && existingChannel.isTextBased()
           && existingChannel.permissionsFor(interaction.guild.roles.everyone)?.has(PermissionFlagsBits.ViewChannel) === false) {
           await existingChannel.send({
