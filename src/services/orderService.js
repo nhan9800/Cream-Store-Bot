@@ -64,6 +64,7 @@ function markWalletOrderPaidStmt(){return db.prepare(`UPDATE orders SET payment_
 function setOrderStatusStmt(){return db.prepare('UPDATE orders SET status=?, status_changed_at=?, updated_at=? WHERE order_code=?');}
 function completeWarrantyStmt(){return db.prepare(`UPDATE orders SET status='COMPLETED', status_changed_at=?, warranty_completed_at=?, warranty_completed_by_id=?, warranty_count=COALESCE(warranty_count,0)+1, updated_at=? WHERE order_code=? AND status='WARRANTY_OPEN'`);}
 function getOutstandingOrdersStmt(){return db.prepare(`SELECT * FROM orders WHERE guild_id=? AND status IN ('PENDING_PAYMENT','PROCESSING','WARRANTY_OPEN') AND (? IS NULL OR customer_id=?) ORDER BY priority_rank DESC, created_at ASC LIMIT ? OFFSET ?`);}
+function listWarrantyOrdersStmt(){return db.prepare(`SELECT * FROM orders WHERE guild_id=? AND customer_id=? AND status IN ('COMPLETED','WARRANTY_OPEN') ORDER BY CASE status WHEN 'WARRANTY_OPEN' THEN 0 ELSE 1 END, COALESCE(completed_at, updated_at, created_at) DESC, id DESC LIMIT ?`);}
 function getOutstandingSummaryStmt(){return db.prepare(`SELECT COUNT(*) total_orders, SUM(CASE WHEN status='PENDING_PAYMENT' THEN 1 ELSE 0 END) waiting_payment, SUM(CASE WHEN status='PROCESSING' THEN 1 ELSE 0 END) processing, SUM(CASE WHEN status='WARRANTY_OPEN' THEN 1 ELSE 0 END) warranty_open FROM orders WHERE guild_id=? AND status IN ('PENDING_PAYMENT','PROCESSING','WARRANTY_OPEN') AND (? IS NULL OR customer_id=?)`);}
 function insertPaymentEventStmt(){return db.prepare(`INSERT OR IGNORE INTO payment_events (order_code,provider,transaction_id,amount,content,raw_payload,created_at) VALUES (?,?,?,?,?,?,?)`);}
 function getPaymentEventByTxStmt(){return db.prepare('SELECT * FROM payment_events WHERE provider=? AND transaction_id=? LIMIT 1');}
@@ -207,6 +208,8 @@ function generateUniquePayosCode(){while(true){const c=Number(randomDigits(6)); 
 // Xoá link PayOS cũ + cấp payos_order_code MỚI để tạo lại hoá đơn (QR đổi theo). Dùng khi đơn hết hạn.
 export function resetPaymentLinkForRegen(orderCode){const order=getOrderByCode(orderCode); if(!order) return null; const newPayosCode=generateUniquePayosCode(); resetPaymentLinkStmt().run(newPayosCode, nowIso(), orderCode); return getOrderByCode(orderCode);}
 
+/** Completed or under-warranty orders the customer owns in this guild, newest first (Discord select limit 25). */
+export function listWarrantyEligibleOrders(guildId, customerId, limit = 25){return listWarrantyOrdersStmt().all(guildId, customerId, Math.min(25, Math.max(1, Number(limit) || 25)));}
 export function setOrderExpiry(orderCode, expiryAt){ setOrderExpiryStmt().run(expiryAt, nowIso(), orderCode); return getOrderByCode(orderCode); }
 export function ensureOrderExpiry(orderCode, baseDate = new Date()) { const order = getOrderByCode(orderCode); if (!order) return null; if (order.expiry_at) return order; const expiryDate = addOrderDuration(baseDate, order, config.defaultOrderDurationMonths); if (!expiryDate) return order; return setOrderExpiry(orderCode, expiryDate.toISOString()); }
 
