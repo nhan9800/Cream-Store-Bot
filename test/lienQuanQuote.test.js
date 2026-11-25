@@ -51,7 +51,7 @@ describe('Liên Quân purchase cards', () => {
     expect(source.deferReply).toHaveBeenCalledWith({ flags: 64 });
     expect(fetch.mock.lastCall[0].href).toBe(source.message.components[0].components[0].items[0].media.url);
     expect(mockTicket).toHaveBeenCalledWith(source, 'ORDER', null, { intake: {
-      title: `Acc Liên Quân · ${account.code}`,
+      title: `Acc Liên Quân · ${account.code}`, subjectPrefix: 'Acc Liên Quân · ',
       text: expect.stringContaining(`${account.heroes} tướng`),
       attachment: { attachment: jpeg, name: lienQuanImageName(account), description: expect.any(String) },
     } });

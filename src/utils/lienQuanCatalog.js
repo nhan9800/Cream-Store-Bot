@@ -10,6 +10,7 @@ export const LIEN_QUAN_CATEGORY_ID = '1514606994256957600';
 export const LIEN_QUAN_TOPIC = 'Acc Liên Quân · 80.000–100.000đ tùy acc · Bấm Mua acc để hỏi giá trong ticket riêng.';
 export const LIEN_QUAN_BUTTON_PREFIX = 'lien-quan:quote:';
 export const LIEN_QUAN_PRICE = '80.000–100.000đ';
+export const LIEN_QUAN_TICKET_PREFIX = 'Acc Liên Quân · ';
 export const LIEN_QUAN_ATTACHMENT_LIMIT = 1024 * 1024;
 
 export const LIEN_QUAN_ACCOUNTS = [

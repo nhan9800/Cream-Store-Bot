@@ -2,7 +2,7 @@ import { ChannelType, MessageFlags } from 'discord.js';
 import { STORE_ONE_GUILD_ID } from '../utils/locale.js';
 import {
   buildLienQuanQuoteText, lienQuanImageName, lienQuanImageUrl, readLienQuanImage, LIEN_QUAN_ACCOUNTS,
-  LIEN_QUAN_BUTTON_PREFIX, LIEN_QUAN_CATEGORY_ID, LIEN_QUAN_CHANNEL_NAMES,
+  LIEN_QUAN_BUTTON_PREFIX, LIEN_QUAN_CATEGORY_ID, LIEN_QUAN_CHANNEL_NAMES, LIEN_QUAN_TICKET_PREFIX,
 } from '../utils/lienQuanCatalog.js';
 import { handleTicketCreate } from './ticketHandlers.js';
 
@@ -35,7 +35,7 @@ export async function handleLienQuanQuote(interaction) {
   }
 
   await handleTicketCreate(interaction, 'ORDER', null, {
-    intake: { title: `Acc Liên Quân · ${account.code}`, text: buildLienQuanQuoteText(account),
+    intake: { title: LIEN_QUAN_TICKET_PREFIX + account.code, subjectPrefix: LIEN_QUAN_TICKET_PREFIX, text: buildLienQuanQuoteText(account),
       attachment: { attachment, name, description: `Ảnh acc khách đã chọn · ${account.code}` } },
   });
 }

@@ -154,6 +154,9 @@ export function reserveWebsiteSupportTicket(input) {
 }
 export const getTicketByChannelId = (channelId) => getTicketByChannelStmt().get(channelId) ?? null;
 export const getOpenTicketByCustomer = (guildId, customerId, ticketType='ORDER') => getOpenTicketByCustomerStmt().get(guildId, customerId, ticketType) ?? null;
+function getOpenTicketBySubjectStmt(){return db.prepare(`SELECT * FROM tickets WHERE guild_id=? AND customer_id=? AND ticket_type=? AND status='OPEN' AND substr(ticket_subject,1,length(?))=? ORDER BY id DESC LIMIT 1`);}
+// Open ticket of this customer whose subject starts with the prefix, e.g. every Liên Quân quote ticket.
+export const getOpenTicketBySubject = (guildId, customerId, ticketType, prefix) => getOpenTicketBySubjectStmt().get(guildId, customerId, ticketType, prefix, prefix) ?? null;
 export const getOpenWarrantyTicket = (guildId, customerId, orderCode) => getOpenWarrantyTicketStmt().get(guildId, customerId, orderCode) ?? null;
 export function closeTicket(ticketId, closedById){closeTicketStmt().run(nowIso(), closedById, ticketId); return getTicketById(ticketId);}
 export function closeTicketIfOpen(ticketId, closedById){
