@@ -22,6 +22,7 @@ import {
 } from './orderService.js';
 import { getProductById } from './productCatalogService.js';
 import { getGuildConfig } from './guildConfigService.js';
+import { priceBoardChannelId } from '../config/storeForums202611.js';
 import { openWarrantyTicket } from './warrantyService.js';
 import { sendOrRefreshPaymentQr, sendVietQRPayment } from './paymentService.js';
 import { buildOrderCreatedV2, buildQueuePositionV2 } from '../utils/embeds.js';
@@ -277,7 +278,8 @@ export function buildWarrantyLookupPayload({ ticket, guildId, orders = [], reaso
 export async function sendTicketAiWelcome({ channel, ticket, guildId }) {
   if (!channel?.isTextBased?.() || !ticket || ticket.ticket_type === 'APPEAL') return null;
   const E = createEmojiResolver(guildId);
-  const priceUrl = `https://discord.com/channels/${guildId}/1514606995842273280`;
+  const priceChannelId = priceBoardChannelId(guildId, getGuildConfig(guildId));
+  const priceUrl = priceChannelId ? `https://discord.com/channels/${guildId}/${priceChannelId}` : null;
   const lookup = withButtonEmoji(
     new ButtonBuilder()
       .setCustomId(`${AI_SUPPORT_PREFIX}warranty_lookup:${ticket.id}`)
@@ -285,10 +287,10 @@ export async function sendTicketAiWelcome({ channel, ticket, guildId }) {
       .setStyle(ButtonStyle.Secondary),
     E.component('warranty_shield'),
   );
-  const prices = withButtonEmoji(
+  const prices = priceUrl ? withButtonEmoji(
     new ButtonBuilder().setStyle(ButtonStyle.Link).setLabel('Xem Bảng Giá').setURL(priceUrl),
     E.component('icon_price'),
-  );
+  ) : null;
   const typeLine = ticket.ticket_type === 'ORDER'
     ? 'Hãy gửi tên sản phẩm, thời hạn và số lượng. AI sẽ tư vấn từ bảng giá thật; khi bạn chốt, bot tạo bước xác nhận trước khi lên đơn.'
     : 'Hãy mô tả vấn đề. Nếu đây là yêu cầu bảo hành hoặc bạn tạo nhầm loại ticket, dùng nút tra đơn bên dưới.';
@@ -297,7 +299,7 @@ export async function sendTicketAiWelcome({ channel, ticket, guildId }) {
     `> ${E('cenar_support')} ${typeLine}`,
     `${E('status_info')} Staff nhắn vào ticket sẽ tạm tiếp quản; AI tự quay lại sau thời gian tạm nghỉ nếu khách vẫn cần hỗ trợ.`,
     `${E('status_warn')} AI không xác nhận thanh toán, hoàn tiền, kết quả bảo hành hoặc yêu cầu mật khẩu/OTP.`,
-  ], accentFor('info'), [new ActionRowBuilder().addComponents(lookup, prices)]));
+  ], accentFor('info'), [new ActionRowBuilder().addComponents(...[lookup, prices].filter(Boolean))]));
 }
 
 async function sendWarrantyOpened(message, result, orderCode) {

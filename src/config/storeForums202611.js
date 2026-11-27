@@ -13,3 +13,9 @@ export const STORE_FORUMS = Object.freeze({
     boost: '1568246987554295854',
   }),
 });
+
+/** Where customers should go to see prices: the Store1 price forum, otherwise the guild's configured list. */
+export function priceBoardChannelId(guildId, guildConfig = null) {
+  if (guildId === STORE_FORUMS.guildId) return STORE_FORUMS.priceForumId;
+  return guildConfig?.price_list_channel_id || null;
+}

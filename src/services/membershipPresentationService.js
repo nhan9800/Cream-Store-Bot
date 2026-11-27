@@ -121,7 +121,7 @@ export async function refreshMembershipPresentation(client,{guildId=config.guild
         ledger.messageId = channel.id;
       }
       if(!channel) {
-        const price=channels.get('1514606995842273280');
+        const price=channels.get('1568246895812280350');
         channel=await guild.channels.create({name:'đặc-quyền-thành-viên',type:ChannelType.GuildText,parent:price?.parentId || undefined,
           permissionOverwrites:[{id:guild.id,allow:[PermissionFlagsBits.ViewChannel,PermissionFlagsBits.ReadMessageHistory],deny:[PermissionFlagsBits.SendMessages,PermissionFlagsBits.CreatePublicThreads,PermissionFlagsBits.CreatePrivateThreads]},
             {id:client.user.id,allow:[PermissionFlagsBits.ViewChannel,PermissionFlagsBits.ReadMessageHistory,PermissionFlagsBits.SendMessages,PermissionFlagsBits.EmbedLinks]}],

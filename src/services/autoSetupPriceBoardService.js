@@ -32,7 +32,7 @@ export function getPriceBoardPublicationState(guildId) {
   return publicationStates.get(String(guildId)) || { status: 'not_started' };
 }
 const PRIMARY_GUILD_ID = '1282637033340403754';
-const PRIMARY_PRICE_CHANNEL_ID = '1514606995842273280';
+const PRIMARY_PRICE_CHANNEL_ID = '1568246895812280350'; // Store1 price forum (old text channel 1514606995842273280 was deleted)
 const PRICE_BOARD_EMOJI = {
   icon_store: 'cenar_board26_mint',
   icon_cart: 'cenar_board26_cart',
