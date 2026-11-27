@@ -2,6 +2,7 @@ import { ChannelType, PermissionFlagsBits as P } from 'discord.js';
 import { getRefundCase } from './geminiRefundService.js';
 import { buildRefundOffer } from './refundPresentation.js';
 import { isStaffMember } from '../utils/permissions.js';
+import { isGemini18MonthRefundNotice } from '../config/geminiRefundNoticeScope.js';
 
 /** Never publish a customer's financial quote into a shared or unrelated ticket. */
 export async function isPrivateRefundTicket(channel, guild, customerId, guildConfig) {
@@ -28,6 +29,7 @@ export async function isPrivateRefundTicket(channel, guild, customerId, guildCon
 export async function sendRefundTicketNotice(db, { id, guild, guildConfig }) {
   const row = getRefundCase(db, id);
   if (!row?.active || row.guild_id !== guild.id) return 'Hồ sơ đã đóng hoặc khác shop.';
+  if (!isGemini18MonthRefundNotice(row)) return 'Ngoài phạm vi thông báo Gemini 18 tháng đang bảo hành.';
   if (row.notice_state === 'SENT') return 'Đã gửi DM; không gửi trùng qua ticket.';
   if (row.ticket_notice_state !== 'UNSENT') return `Ticket đã xử lý (${row.ticket_notice_state}); không gửi lại.`;
   const tickets = db.prepare(`SELECT * FROM tickets WHERE guild_id=? AND customer_id=?
@@ -38,7 +40,7 @@ export async function sendRefundTicketNotice(db, { id, guild, guildConfig }) {
     const channel = await guild.channels.fetch(ticket.channel_id).catch(() => null);
     if (!await isPrivateRefundTicket(channel, guild, row.customer_id, guildConfig)) continue;
     const fresh = getRefundCase(db, id);
-    if (!fresh.active) return 'Đơn vừa thay đổi; không gửi thông báo.';
+    if (!isGemini18MonthRefundNotice(fresh)) return 'Đơn vừa thay đổi; không gửi thông báo.';
     const claimed = db.prepare(`UPDATE order_refund_cases SET ticket_notice_state='SENDING',ticket_notice_channel_id=?,updated_at=?
       WHERE id=? AND ticket_notice_state='UNSENT'`).run(channel.id, new Date().toISOString(), id).changes;
     if (!claimed) return 'Ticket đã được xử lý bởi lượt khác.';

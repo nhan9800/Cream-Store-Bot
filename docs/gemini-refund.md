@@ -2,6 +2,8 @@
 
 Owner policy confirmed 2026-11-27: reconcile Gemini orders currently in warranty, deduct the used service and an additional 10% of the original paid price. This is disclosed as a processing-cost deduction; the implementation does not claim independent evidence of tax paid.
 
+Notification correction, 2026-11-27: only Gemini **18-month** orders originating from warranty are included in DM/ticket announcements. Use stored order duration and the refund transition's original warranty status, not a guessed plan from its display name. The owner explicitly chose to keep the other four existing refund cases/statuses for separate shop review; do not withdraw or recalculate them. `/hoan-tien`, manager QR and the all-case status list remain available for that separate review. Existing notices outside the campaign are corrected in place without another ping.
+
 ## Accounting and states
 
 `/gemini-refund` → **Xem đối soát** reads original `payment_events`, paid amount, completion/expiry and status history. Mismatched receipts, missing dates, supplier/Booking invoices or previously refunded orders require separate review. Proration uses actual elapsed milliseconds over the recorded calendar service interval and excludes recorded warranty downtime. It stops at the current warranty opening, never at the date the shop gets around to processing. Deductions round down to VND; refunds cannot be negative or exceed the receipt.

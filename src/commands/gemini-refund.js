@@ -8,6 +8,7 @@ import { previewGeminiRefunds, applyGeminiRefunds, ensureRefundCases, getRefundC
 import { buildRefundOffer, buildRefundPayout } from '../services/refundPresentation.js';
 import { updateOrderLogMessage } from '../services/notificationService.js';
 import { sendRefundTicketNotice } from '../services/refundTicketNoticeService.js';
+import { isGemini18MonthRefundNotice } from '../config/geminiRefundNoticeScope.js';
 
 let dmQuarantined = false;
 
@@ -17,8 +18,8 @@ export const data = new SlashCommandBuilder().setName('gemini-refund')
   .addStringOption(o => o.setName('hanh_dong').setDescription('Thao tác').setRequired(true).addChoices(
     { name: 'Xem đối soát trước khi chuyển', value: 'PREVIEW' },
     { name: 'Chuyển các đơn đã đối soát sang chờ hoàn', value: 'APPLY' },
-    { name: 'Gửi hồ sơ cho khách (chưa thông báo)', value: 'NOTIFY' },
-    { name: 'Gửi hồ sơ trong ticket riêng (DM bị chặn)', value: 'TICKET_NOTIFY' },
+    { name: 'Thông báo Gemini 18 tháng (chưa thông báo)', value: 'NOTIFY' },
+    { name: 'Thông báo Gemini 18 tháng trong ticket riêng', value: 'TICKET_NOTIFY' },
     { name: 'Xem QR của một đơn', value: 'QR' },
     { name: 'Xem tiến độ nhận tài khoản', value: 'STATUS' },
   ))
@@ -72,6 +73,7 @@ export async function execute(interaction) {
     if (action !== 'NOTIFY') throw new GeminiRefundError('Thao tác không hợp lệ.');
     const results = [];
     for (const row of rows) {
+      if (!isGemini18MonthRefundNotice(row)) { results.push(`${row.order_code}: ngoài phạm vi thông báo Gemini 18 tháng đang bảo hành.`); continue; }
       if (dmQuarantined) { results.push(`${row.order_code}: Discord chặn DM (20026); dùng thao tác gửi trong ticket riêng.`); continue; }
       if (!claimRefundNotice(db, row.id)) { results.push(`${row.order_code}: đã xử lý DM (${row.notice_state})`); continue; }
       try {
