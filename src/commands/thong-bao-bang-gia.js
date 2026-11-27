@@ -8,7 +8,8 @@ import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { formatCurrency } from '../utils/formatters.js';
 import { getNitroTrialEligibility, isNitroTrialProduct } from '../constants/nitroTrial.js';
 
-const PRIMARY_PRICE_CHANNEL_ID = '1514606995842273280';
+import { STORE_FORUMS } from '../config/storeForums202611.js';
+const PRIMARY_PRICE_CHANNEL_ID = STORE_FORUMS.priceForumId;
 
 function findNitroOption(products, marker) {
   return products.find((product) => (
