@@ -42,7 +42,7 @@ describe('Persistent refund intake', () => {
     db = new Database(':memory:');
     db.exec(`CREATE TABLE orders(order_code TEXT PRIMARY KEY,guild_id TEXT,customer_id TEXT,product_name TEXT,
       status TEXT,payment_status TEXT,amount_paid INTEGER,total_amount INTEGER,completed_at TEXT,expiry_at TEXT,
-      status_changed_at TEXT,updated_at TEXT,fulfillment_mode TEXT);
+      status_changed_at TEXT,updated_at TEXT,fulfillment_mode TEXT,duration_months INTEGER,duration_days INTEGER);
       CREATE TABLE payment_events(id INTEGER PRIMARY KEY,order_code TEXT,provider TEXT,transaction_id TEXT,amount INTEGER);
       CREATE TABLE wallet_transactions(id INTEGER PRIMARY KEY,related_code TEXT,type TEXT,amount INTEGER);
       CREATE TABLE order_fulfillments(order_code TEXT,status TEXT,lease_until TEXT);`);

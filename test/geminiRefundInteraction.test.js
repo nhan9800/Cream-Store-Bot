@@ -69,7 +69,8 @@ describe('refund UI privacy and authorization', () => {
   });
   it('stops the whole DM batch on Discord 20026, without further requests or retries', async () => {
     mocks.db.prepare = () => ({ all: () => [{ id: 'a' }, { id: 'b' }] });
-    mocks.getCase.mockImplementation((_db, id) => ({ id, order_code: `CN_${id}`, customer_id: id, active: true, notice_state: 'UNSENT' }));
+    mocks.getCase.mockImplementation((_db, id) => ({ id, order_code: `CN_${id}`, customer_id: id, active: true, notice_state: 'UNSENT',
+      productName: 'Gemini', durationMonths: 18, durationDays: null, refundFromStatus: 'WARRANTY_OPEN' }));
     mocks.claim.mockReturnValue(true);
     const fetch = vi.fn().mockRejectedValue(Object.assign(new Error('restricted'), { code: 20026 }));
     const i = interaction({ client: { users: { fetch } }, options: { getString: () => 'NOTIFY' } });

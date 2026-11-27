@@ -12,11 +12,13 @@ describe('private refund ticket notices', () => {
   const cfg = { support_role_id: 'support' };
   beforeEach(() => {
     db = new Database(':memory:');
-    db.exec(`CREATE TABLE orders(order_code TEXT,guild_id TEXT,status TEXT,status_changed_at TEXT);
+    db.exec(`CREATE TABLE orders(order_code TEXT,guild_id TEXT,status TEXT,status_changed_at TEXT,
+      product_name TEXT,duration_months INTEGER,duration_days INTEGER);
       CREATE TABLE tickets(id INTEGER,channel_id TEXT,guild_id TEXT,customer_id TEXT,related_order_code TEXT,status TEXT,ticket_type TEXT);
-      INSERT INTO orders VALUES ('CN_123456','shop','REFUND_PENDING','frozen');
+      INSERT INTO orders VALUES ('CN_123456','shop','REFUND_PENDING','frozen','Gemini',18,NULL);
       INSERT INTO tickets VALUES (1,'private','shop','buyer','CN_123456','OPEN','WARRANTY');`);
     ensureRefundCases(db);
+    db.prepare("INSERT INTO order_status_history(order_code,old_status,new_status) VALUES ('CN_123456','WARRANTY_OPEN','REFUND_PENDING')").run();
     db.prepare(`INSERT INTO order_refund_cases(id,order_code,guild_id,customer_id,quote_json,pending_status_at,created_at,updated_at)
       VALUES ('case','CN_123456','shop','buyer','{}','frozen','now','now')`).run();
     viewers = new Map([['buyer', { id: 'buyer', permissions: permit(false) }], ['staff', { id: 'staff', permissions: permit(true) }],
@@ -78,5 +80,17 @@ describe('private refund ticket notices', () => {
   });
   it('claims once even if two managers start the same send concurrently', async () => {
     await Promise.all([send(), send()]); expect(channel.send).toHaveBeenCalledTimes(1);
+  });
+  it.each([6,12,24,null])('never sends or claims a notice for a non-18-month plan (%s)', async months => {
+    db.prepare('UPDATE orders SET duration_months=?').run(months);
+    expect(await send()).toContain('Ngoài phạm vi');
+    expect(channel.send).not.toHaveBeenCalled();
+    expect(db.prepare('SELECT stage,ticket_notice_state FROM order_refund_cases').get())
+      .toEqual({ stage: 'AWAITING_DETAILS', ticket_notice_state: 'UNSENT' });
+    expect(db.prepare('SELECT status FROM orders').get().status).toBe('REFUND_PENDING');
+  });
+  it('does not treat an ordinary completed purchase as a warranty refund announcement', async () => {
+    db.exec("UPDATE order_status_history SET old_status='COMPLETED'");
+    expect(await send()).toContain('Ngoài phạm vi'); expect(channel.send).not.toHaveBeenCalled();
   });
 });

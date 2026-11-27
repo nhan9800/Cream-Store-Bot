@@ -124,9 +124,14 @@ export function getRefundCase(db, id) {
   ensureRefundCases(db);
   const row = db.prepare('SELECT * FROM order_refund_cases WHERE id=? OR order_code=?').get(id, id);
   if (!row) return null;
-  const order = db.prepare('SELECT status,status_changed_at FROM orders WHERE order_code=? AND guild_id=?').get(row.order_code, row.guild_id);
+  const order = db.prepare(`SELECT status,status_changed_at,product_name,duration_months,duration_days
+    FROM orders WHERE order_code=? AND guild_id=?`).get(row.order_code, row.guild_id);
+  const request = db.prepare(`SELECT old_status FROM order_status_history WHERE order_code=?
+    AND new_status='REFUND_PENDING' ORDER BY id DESC LIMIT 1`).get(row.order_code);
   return { ...row, quote: JSON.parse(row.quote_json), active: order?.status === 'REFUND_PENDING'
-    && order.status_changed_at === row.pending_status_at, orderStatus: order?.status };
+    && order.status_changed_at === row.pending_status_at, orderStatus: order?.status,
+    productName: order?.product_name, durationMonths: order?.duration_months, durationDays: order?.duration_days,
+    refundFromStatus: request?.old_status };
 }
 
 export function requireRefundOwner(db, id, customerId) {
