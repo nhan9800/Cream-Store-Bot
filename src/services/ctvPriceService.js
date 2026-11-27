@@ -32,8 +32,8 @@ export const CTV_OFFICIAL_PRICE_CATALOG = Object.freeze({
     { label: 'Boost Server 3 Tháng', price: 240_000 },
   ]),
   gemini: Object.freeze([
-    { label: 'Gemini Pro + 5 TB Google One 12 Tháng · Full bảo hành', price: 250_000 },
-    { label: 'Gemini Pro Antigravity 24 Tháng · Bảo hành 12 tháng', price: 250_000 },
+    { label: 'Gemini Pro Antigravity 3 Tháng · Full bảo hành', price: 150_000 },
+    { label: 'Gemini Pro Antigravity 6 Tháng · Full bảo hành', price: 280_000 },
   ]),
   youtubeStable: Object.freeze([
     { label: 'YouTube Premium 6 Tháng · Ổn định cao', price: 250_000 },

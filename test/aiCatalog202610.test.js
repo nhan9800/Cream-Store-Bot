@@ -65,62 +65,68 @@ function collectComponents(payload) {
   return components;
 }
 
-describe('Gemini Pro CDK November 2026 launch', () => {
-  it('keeps six-month duration distinct from activation-only coverage and optional YouTube Lite', () => {
-    const product = getActiveProducts(GUILD_ID).find(p => p.product_key === GEMINI_PRO_CDK_KEY);
-    expect(product).toMatchObject({ price: 190000, original_price: 0, duration_months: 6, activation_method: 'OWN_ACCOUNT', login_required: 0, is_active: 1 });
-    expect(product.warranty_policy).toBe('Chỉ bảo hành kích hoạt thành công · không bảo hành sau kích hoạt');
-    expect(product.description).toContain('lỗi CDK');
-    expect(product.description).toContain('https://payments.google.com/');
-    expect(product.description).toContain('rời nhóm gia đình Google');
-    expect(product.description).toContain('không cam kết đi kèm');
-    expect(product.description).toContain('vẫn có thể có quảng cáo');
-    expect(product.description).toContain('không phải không giới hạn');
-    for (const model of ['Gemini 4 Argon', 'Claude Opus 5.5', 'Claude Sonnet 5.5']) expect(product.description).toContain(model);
-    expect(product.quota_value).toBeNull();
-    expect(product.virtual_purchase_count).toBe(0);
+describe('Gemini Pro Antigravity plans (2026-11-27)', () => {
+  const RETIRED_GEMINI_KEYS = [GEMINI_PRO_CDK_KEY, 'gemini-pro-antigravity-24-months',
+    'gemini-pro-google-one-5tb-12-months-full-warranty'];
+
+  it('sells only the owner-set 3-month 150k and 6-month 280k full-warranty plans', () => {
+    const gemini = getActiveProducts(GUILD_ID).filter((p) => /gemini/i.test(p.name));
+    expect(gemini.map(({ product_key, price, duration_months, warranty_policy }) => ({ product_key, price, duration_months, warranty_policy })))
+      .toEqual([
+        { product_key: 'gemini-pro-antigravity-3-months-full-warranty', price: 150000, duration_months: 3, warranty_policy: 'Full 3 tháng' },
+        { product_key: 'gemini-pro-antigravity-6-months-full-warranty', price: 280000, duration_months: 6, warranty_policy: 'Full 6 tháng' },
+      ]);
     const knowledge = generateProductKnowledgeText(GUILD_ID);
-    expect(knowledge).toContain(product.description);
-    expect(extractRequestedDuration(product.name)).toEqual({ days: null, months: 6 });
+    for (const product of gemini) {
+      expect(product.description).toContain('model mới trong Antigravity');
+      expect(product.description).toContain('tuân theo Google');
+      expect(knowledge).toContain(product.description);
+      expect(extractRequestedDuration(product.name)).toEqual({ days: null, months: product.duration_months });
+    }
     expect(AUTOMATIC_MARKETING_PAUSED).toBe(true);
     expect(AUTOMATIC_PRICE_BOARD_PAUSED).toBe(true);
   });
 
-  it('adds one stable SKU on repeated migrations and preserves existing products and order snapshots', () => {
+  it('retires every earlier Gemini Pro offer without dropping rows or order references', () => {
     const database = new Database(':memory:');
     try {
+      database.pragma('foreign_keys = ON');
       database.exec(db.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'product_catalog'").get().sql);
+      const insert = database.prepare("INSERT INTO product_catalog (guild_id, name, product_key, price, duration_months, service_type) VALUES ('WEB', ?, ?, ?, ?, 'AI')");
+      const oldIds = [
+        insert.run('Gemini Pro 6 Tháng (CDK · BH Kích Hoạt)', RETIRED_GEMINI_KEYS[0], 190000, 6).lastInsertRowid,
+        insert.run('Gemini Pro 2 Năm (Antigravity · BH 12 Tháng)', RETIRED_GEMINI_KEYS[1], 250000, 24).lastInsertRowid,
+        insert.run('Gemini Pro + 5 TB Google One 12 Tháng (Full BH)', RETIRED_GEMINI_KEYS[2], 250000, 12).lastInsertRowid,
+      ];
+      database.exec('CREATE TABLE historical_orders (product_id INTEGER REFERENCES product_catalog(id), amount INTEGER)');
+      database.prepare('INSERT INTO historical_orders VALUES (?, 190000)').run(oldIds[0]);
       seedProductCatalog(database);
-      database.prepare('DELETE FROM product_catalog WHERE product_key = ?').run(GEMINI_PRO_CDK_KEY);
-      const before = database.prepare('SELECT id, product_key, name, price, description, duration_months, warranty_policy, is_active FROM product_catalog ORDER BY id').all();
-      database.exec('CREATE TABLE order_snapshot (product_id INTEGER, duration_months INTEGER, warranty TEXT)');
-      database.prepare('INSERT INTO order_snapshot VALUES (?, 12, ?)').run(before[0].id, 'Original warranty');
-      const order = database.prepare('SELECT * FROM order_snapshot').get();
       seedProductCatalog(database);
-      const product = database.prepare('SELECT * FROM product_catalog WHERE product_key = ?').get(GEMINI_PRO_CDK_KEY);
-      seedProductCatalog(database);
-      expect(database.prepare('SELECT id FROM product_catalog WHERE product_key = ?').all(GEMINI_PRO_CDK_KEY)).toEqual([{ id: product.id }]);
-      expect(database.prepare('SELECT COUNT(*) AS n FROM product_catalog').get().n).toBe(before.length + 1);
-      expect(database.prepare('SELECT id, product_key, name, price, description, duration_months, warranty_policy, is_active FROM product_catalog WHERE product_key != ? ORDER BY id').all(GEMINI_PRO_CDK_KEY)).toEqual(before);
-      expect(database.prepare('SELECT * FROM order_snapshot').get()).toEqual(order);
-      expect(database.prepare('SELECT is_active FROM product_catalog WHERE product_key = ?').get(GEMINI_PRO_CDK_KEY).is_active).toBe(1);
+      const find = database.prepare('SELECT price, is_active FROM product_catalog WHERE id = ?');
+      expect(oldIds.map((id) => find.get(id))).toEqual([
+        { price: 190000, is_active: 0 }, { price: 250000, is_active: 0 }, { price: 250000, is_active: 0 },
+      ]);
+      expect(database.prepare("SELECT product_key, price FROM product_catalog WHERE is_active = 1 AND name LIKE '%Gemini%' ORDER BY price").all()).toEqual([
+        { product_key: 'gemini-pro-antigravity-3-months-full-warranty', price: 150000 },
+        { product_key: 'gemini-pro-antigravity-6-months-full-warranty', price: 280000 },
+      ]);
+      expect(database.prepare('SELECT * FROM historical_orders').get()).toEqual({ product_id: oldIds[0], amount: 190000 });
+      expect(database.pragma('foreign_key_check')).toEqual([]);
     } finally { database.close(); }
   });
 
-  it('renders limited warranty and mandatory preparation in both locales within Discord limits', () => {
+  it('renders both plans with full warranty and their terms in both locales within Discord limits', () => {
     const products = getActiveProducts(GUILD_ID);
-    const product = products.find(p => p.product_key === GEMINI_PRO_CDK_KEY);
     for (const guildId of [GUILD_ID, '1070676180103086132']) {
       const payloads = buildPriceBoardPayloads(guildId, {}, products);
       const components = payloads.flatMap(collectComponents);
-      const block = components.find(c => c.type === 10 && c.content.startsWith('### ') && c.content.includes('Gemini Pro 6'));
-      expect(block.content).toMatch(/190[.,]000/);
-      expect(block.content).toMatch(/kích hoạt thành công|Successful activation only/);
-      expect(block.content).toMatch(/không bảo hành sau kích hoạt|no post-activation warranty/);
-      expect(block.content).toContain('https://payments.google.com/');
-      expect(block.content).toMatch(/không cam kết đi kèm|inclusion is not guaranteed/);
-      expect(block.content).not.toMatch(/Full trong suốt thời gian sử dụng|Full coverage for the entire service period/);
-      expect(components.filter(c => c.type === 3).flatMap(c => c.options).filter(o => o.value === String(product.id))).toHaveLength(1);
+      for (const [months, price] of [[3, /150[.,]000/], [6, /280[.,]000/]]) {
+        const block = components.find(c => c.type === 10 && c.content.startsWith('### ') && c.content.includes(`Gemini Pro ${months}`));
+        expect(block.content).toMatch(price);
+        expect(block.content).toMatch(/Full trong suốt thời gian sử dụng|Full coverage for the entire service period/);
+        expect(block.content).toMatch(/model mới trong Antigravity|latest models in Antigravity/);
+      }
+      expect(components.some(c => c.type === 10 && /CDK|190[.,]000|2 Năm|5 TB/.test(c.content) && /Gemini/.test(c.content))).toBe(false);
       for (const payload of payloads) {
         const panel = collectComponents(payload);
         expect(panel.reduce((sum, c) => sum + (c.content?.length || 0), 0)).toBeLessThanOrEqual(3800);
@@ -144,10 +150,6 @@ describe('November 6 catalog refresh', () => {
     for (const p of ai.filter((p) => /Pro (200|500)/.test(p.name))) {
       expect(p.warranty_policy).toContain('Xác nhận');
     }
-    const gemini = products.find((p) => p.product_key === 'gemini-pro-antigravity-24-months');
-    expect(gemini).toMatchObject({ price: 250000, duration_months: 24, warranty_policy: 'Bảo hành 12 tháng' });
-    expect(gemini.description).toMatch(/Gemini 4 Argon.*Claude Opus 5.5.*Claude Sonnet 5.5/);
-    expect(generateProductKnowledgeText(GUILD_ID)).toContain(gemini.description);
   });
 
   it('retires legacy offers without dropping rows, order references or retained product IDs', () => {

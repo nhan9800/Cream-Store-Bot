@@ -21,12 +21,12 @@ import { formatInternationalPrice, translateCatalogGroup, translateProductName, 
 import { getNitroTrialEligibility, isNitroTrialProduct } from '../constants/nitroTrial.js';
 import { API_CREDIT_DURATION, isApiCreditProduct } from '../config/apiCreditCatalog.js';
 import { AUTOMATIC_PRICE_BOARD_PAUSED } from '../config/marketingAutomationPolicy.js';
-import { GEMINI_PRO_CDK_KEY } from '../config/geminiProCdk202611.js';
+import { GEMINI_PRO_ANTIGRAVITY_KEYS } from '../config/geminiProAntigravity202611.js';
 import { STORE_FORUMS } from '../config/storeForums202611.js';
 import { isCapcutProduct } from '../config/capcutCatalog.js';
 import { listForumPosts, upsertForumPost } from './forumPublicationService.js';
 
-export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.29';
+export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.30';
 const publicationStates = new Map();
 export function getPriceBoardPublicationState(guildId) {
   return publicationStates.get(String(guildId)) || { status: 'not_started' };
@@ -87,7 +87,7 @@ export const PRICE_GROUPS = [
   },
   {
     key: 'gemini', titleSlot: 'brand_gemini', title: 'Gemini & Google One', accent: 0x4285F4,
-    note: 'CDK 6 tháng chỉ bảo hành kích hoạt thành công. Gói Antigravity 24 tháng bảo hành 12 tháng. Xem điều kiện từng gói.',
+    note: 'Gemini Pro 3 tháng và 6 tháng, đủ model mới trong Antigravity, bảo hành full suốt thời gian sử dụng.',
     match: (p) => p.service_type === 'AI' && /gemini/i.test(p.name),
   },
   {
@@ -213,7 +213,7 @@ function setButtonEmoji(button, E, slot) {
 
 const FULL_WARRANTY_PRODUCT_KEYS = new Set([
   'chatgpt-plus-direct-payment-1-month-full-warranty',
-  'gemini-pro-google-one-5tb-12-months-full-warranty',
+  ...GEMINI_PRO_ANTIGRAVITY_KEYS,
   'adobe-creative-cloud-1-month',
   'adobe-creative-cloud-1-month-1000-ai-credits',
   'adobe-creative-cloud-12-months-no-ai-credits',
@@ -372,7 +372,7 @@ export function buildPriceGroupPayload(guildId, group, products) {
         ] : warrantyPolicy ? [
           `> ${E('warranty_shield')} **${international ? 'Warranty' : 'Bảo hành'}:** ${international ? translateProductWarranty(warrantyPolicy) : warrantyPolicy}`,
         ] : []),
-        ...([GEMINI_PRO_CDK_KEY, 'gemini-pro-antigravity-24-months', 'claude-pro-1-month',
+        ...([...GEMINI_PRO_ANTIGRAVITY_KEYS, 'claude-pro-1-month',
           'discord-nitro-boost-12-months-auto-renew-2-months'].includes(product.product_key) ? [
           `> ${E('status_info')} **${international ? 'Terms' : 'Điều kiện'}:** ${international ? translateProductDescription(product.description) : product.description}`,
         ] : []),

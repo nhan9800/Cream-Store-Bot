@@ -137,7 +137,7 @@ const WEEKLY_STORIES = Object.freeze([
     chapters: Object.freeze([
       { name: 'Một lời hẹn', copy: 'Mai viết lời hẹn đầu tiên. Bản nháp còn vụng, nhưng nghe đúng giọng của mình là cô giữ lại.', focus: 'ChatGPT chính chủ Plus 485k hoặc 500k · xem riêng mức bảo hành' },
       { name: 'Gọi hội bạn', copy: 'Tấm thiệp cần một ngày hẹn. Hội bạn vào phòng trò chuyện, người chọn giờ, người chọn chỗ ngồi.', focus: 'Nitro Boost Login từ 85k · Boost Server từ 110k' },
-      { name: 'Những ảnh chưa gửi', copy: 'Mai lục lại ảnh chuyến đi cũ. Cả nhóm gom vào một thư mục chung để không ai bị bỏ quên trên tấm thiệp.', focus: 'Gemini Pro + Google One 5 TB từ 120k · Office 365 200k' },
+      { name: 'Những ảnh chưa gửi', copy: 'Mai lục lại ảnh chuyến đi cũ. Cả nhóm gom vào một thư mục chung để không ai bị bỏ quên trên tấm thiệp.', focus: 'Gemini Pro Antigravity từ 150k · Office 365 200k' },
       { name: 'Chiếc lá bên lề', copy: 'Mai đặt một chiếc lá cạnh trang giấy, sửa màu ảnh rồi ghép đoạn video nhỏ. Tấm thiệp bắt đầu có không khí mùa thu.', focus: 'Adobe từ 140k · CapCut từ 55k · Claude Pro x5 từ 1,9 triệu' },
       { name: 'Bài hát của cả nhóm', copy: 'Có người gửi lại bài hát nghe trên chuyến đi. Mai bật playlist, thêm tên bài vào góc thiệp rồi mỉm cười.', focus: 'Spotify Premium từ 110k · chọn thời hạn theo nhịp nghe' },
       { name: 'Buổi tối trước cuộc hẹn', copy: 'Thiệp đã gửi, Mai tạm cất điện thoại. Một bộ phim quen làm buổi tối bớt vội trước ngày gặp bạn.', focus: 'Netflix 4K Private 75k · YouTube Premium từ 58k' },
@@ -163,7 +163,7 @@ const WEEKLY_STORIES = Object.freeze([
     chapters: Object.freeze([
       { name: 'Trang đầu không vội', copy: 'Linh mở cuốn sổ, ghi một nơi muốn đến và ba điều muốn nhớ. Bản kế hoạch chỉ cần vừa với một tuần.', focus: 'ChatGPT Plus · chính chủ hoặc cấp acc, bảo hành ghi riêng' },
       { name: 'Thêm một người bạn', copy: 'Linh gửi lịch hẹn cho bạn rồi cùng chọn đường đi. Chuyến đi vui hơn khi cả hai biết mình muốn gì.', focus: 'Nitro Boost Login · Boost Server' },
-      { name: 'Nhặt những mẩu ghi chú', copy: 'Một tấm ảnh, một địa chỉ, một dòng nhắn được xếp vào thư mục. Linh để cuốn sổ giấy và sổ số cùng kể một chuyện.', focus: 'Gemini Pro + Google One 5 TB · Office 365' },
+      { name: 'Nhặt những mẩu ghi chú', copy: 'Một tấm ảnh, một địa chỉ, một dòng nhắn được xếp vào thư mục. Linh để cuốn sổ giấy và sổ số cùng kể một chuyện.', focus: 'Gemini Pro Antigravity · Office 365' },
       { name: 'Màu của một buổi chiều', copy: 'Linh sửa lại tấm ảnh chiều hôm trước rồi ghép vài khung hình. Cuốn sổ giờ có cả hình lẫn lời.', focus: 'Adobe · CapCut Pro · Claude Pro x5' },
       { name: 'Bài hát trên đường', copy: 'Bạn gửi một playlist cho chuyến đi. Linh nghe thử, giữ lại ba bài và ghi tên vào trang còn trống.', focus: 'Spotify Premium · chọn gói nghe phù hợp' },
       { name: 'Tối về nhà', copy: 'Chuyến đi khép lại bằng một tối xem phim. Linh cất cuốn sổ, để những đoạn video đợi đến ngày mai.', focus: 'Netflix 4K Private · YouTube Premium ổn định' },

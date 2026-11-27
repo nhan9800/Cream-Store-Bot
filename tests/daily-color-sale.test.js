@@ -27,7 +27,7 @@ describe('Daily Color sale campaign', () => {
     const content = Object.values(buildDailyColorSaleSections({ E: emojiResolver, customEmojis })).join('\n');
     for (const price of [
       '90.000đ', '115.000đ', '140.000đ', '850.000đ', '110.000đ', '280.000đ',
-      '75.000đ', '190.000đ', '200.000đ', '250.000đ', '400.000đ', '530.000đ',
+      '75.000đ', '150.000đ', '200.000đ', '250.000đ', '400.000đ', '530.000đ',
       '2.650.000đ', '4.500.000đ', '12.800.000đ', '550.000đ', '55.000đ', '290.000đ',
     ]) expect(content).toContain(price);
 
@@ -36,7 +36,7 @@ describe('Daily Color sale campaign', () => {
       'Office 365', 'ChatGPT Plus chính chủ', 'Claude Pro chính chủ',
       'CapCut Pro', 'Spotify Premium', 'YouTube Premium', 'Adobe', 'Locket', 'GearUP', 'Bot Custom',
     ]) expect(content.toLowerCase()).toContain(product.toLowerCase());
-    expect(content).toContain('Có thể thêm 5 thành viên');
+    expect(content).not.toMatch(/Google One 5 TB|Gemini Pro · CDK|190\.000đ/);
     expect(content).not.toMatch(/API Codex\/Claude|MoMo Pay|Claude Pro x5|Trial Boost|18 tháng/i);
   });
 

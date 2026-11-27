@@ -191,7 +191,9 @@ describe('Partner and CTV system', () => {
       expect(text).toContain('795.000 VND');
       expect(text).toContain('Chính chủ, kích hoạt một lần');
       expect(text).toContain('Boost Server 3 Tháng');
-      expect(text).toContain('Gemini Pro Antigravity 24 Tháng · Bảo hành 12 tháng');
+      expect(text).toContain('Gemini Pro Antigravity 3 Tháng · Full bảo hành');
+      expect(text).toContain('Gemini Pro Antigravity 6 Tháng · Full bảo hành');
+      expect(text).not.toMatch(/Gemini Pro.*(24 Tháng|5 TB|CDK)/);
       expect(text).toContain('YouTube Premium · Ổn định cao');
       expect(text).toContain('dòng YouTube duy nhất đang mở bán');
       expect(text).toContain('Dòng gia hạn/đổi Family mỗi tháng đã dừng bán');
@@ -202,7 +204,7 @@ describe('Partner and CTV system', () => {
     }
     expect(CTV_OFFICIAL_PRICE_CATALOG.nitro.map((item) => item.price)).toEqual([85_000, 95_000, 95_000, 795_000]);
     expect(CTV_OFFICIAL_PRICE_CATALOG.spotify.map((item) => item.price)).toEqual([160_000, 260_000]);
-    expect(CTV_OFFICIAL_PRICE_CATALOG.gemini.map((item) => item.price)).toEqual([250_000, 250_000]);
+    expect(CTV_OFFICIAL_PRICE_CATALOG.gemini.map((item) => item.price)).toEqual([150_000, 280_000]);
     expect(CTV_OFFICIAL_PRICE_CATALOG).not.toHaveProperty('youtubeMonthly');
     expect(CTV_OFFICIAL_PRICE_CATALOG.youtubeStable.map((item) => item.price)).toEqual([250_000, 400_000]);
   });
