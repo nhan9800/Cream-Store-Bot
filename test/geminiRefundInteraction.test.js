@@ -20,7 +20,7 @@ const interaction = (extra = {}) => ({ customId: 'refund:bank:test-case', user: 
   reply: vi.fn(), editReply: vi.fn(), showModal: vi.fn(), deferReply: vi.fn(),
   isButton: () => true, isModalSubmit: () => false, options: { getString: key => ({ ma_don: 'CN_123456', hanh_dong: 'PREVIEW' })[key] },
   ...extra });
-beforeEach(() => { vi.clearAllMocks(); mocks.capability.mockReturnValue(true); mocks.owner.mockReturnValue({ guild_id: 'shop' }); mocks.offer.mockReturnValue({ content: 'private offer' }); });
+beforeEach(() => { vi.clearAllMocks(); mocks.capability.mockReturnValue(true); mocks.owner.mockReturnValue({ guild_id: 'shop',quote_revision:1,quote:{feeBps:3000,refund:60000} }); mocks.offer.mockReturnValue({ content: 'private offer' }); });
 describe('refund UI privacy and authorization', () => {
   it('opens a four-field modal only after checking the actual customer', async () => {
     const i = interaction(); await handleRefundInteraction(i);
@@ -33,6 +33,28 @@ describe('refund UI privacy and authorization', () => {
     const i = interaction(); await handleRefundInteraction(i);
     expect(i.showModal).not.toHaveBeenCalled();
     expect(i.reply).toHaveBeenCalledWith({ content: 'Không tìm thấy hồ sơ', ephemeral: true });
+  });
+  it('rejects an old modal before reading bank fields when a newer proposal is pending', async () => {
+    mocks.owner.mockReturnValueOnce({quote_revision:1,pending_quote_revision:2,quote:{feeBps:1000,refund:80000},pendingQuote:{feeBps:3000,refund:60000}});
+    const getTextInputValue=vi.fn();
+    const i=interaction({customId:'refund:submit:test-case:1',isButton:()=>false,isModalSubmit:()=>true,fields:{getTextInputValue}});
+    await handleRefundInteraction(i);
+    expect(getTextInputValue).not.toHaveBeenCalled(); expect(mocks.submit).not.toHaveBeenCalled();
+    expect(i.reply.mock.lastCall[0]).toMatchObject({ephemeral:true,content:expect.stringContaining('Bảng tính đã cập nhật')});
+  });
+  it('opens only the current proposal with its exact percentage and amount in acceptance', async () => {
+    mocks.owner.mockReturnValueOnce({stage:'READY_TO_PAY',quote_revision:1,pending_quote_revision:2,
+      quote:{feeBps:1000,refund:80000},pendingQuote:{feeBps:4000,refund:50000}});
+    const i=interaction({customId:'refund:bank:test-case:2'}); await handleRefundInteraction(i);
+    const modal=i.showModal.mock.lastCall[0].toJSON();
+    expect(modal.custom_id).toBe('refund:submit:test-case:2');
+    expect(modal.components[3].components[0].label).toBe('Đồng ý 40% & hoàn 50.000đ');
+  });
+  it('returns the ready accepted card privately without reopening intake', async () => {
+    mocks.owner.mockReturnValueOnce({stage:'READY_TO_PAY',quote_revision:1,quote:{feeBps:1000,refund:80000}});
+    const i=interaction(); await handleRefundInteraction(i);
+    expect(i.showModal).not.toHaveBeenCalled();
+    expect(i.reply.mock.lastCall[0].flags).toBe(32768|64);
   });
   it('acknowledges a modal privately before storing details, with no channel message', async () => {
     const fields = { bank: 'MB', account: '00123456789', name: 'NGUYEN VAN A', accept: 'ĐỒNG Ý' };
@@ -55,6 +77,11 @@ describe('refund UI privacy and authorization', () => {
     mocks.capability.mockReturnValue(false); const i = interaction(); await manager(i);
     expect(mocks.preview).not.toHaveBeenCalled(); expect(mocks.apply).not.toHaveBeenCalled();
     expect(i.deferReply).toHaveBeenCalledWith({ ephemeral: true });
+  });
+  it.each(['FEE_PREVIEW','FEE_APPLY','REFRESH'])('blocks %s before accessing cases for a non-manager', async action => {
+    mocks.capability.mockReturnValue(false);
+    await manager(interaction({options:{getString:()=>action}}));
+    expect(mocks.cases).not.toHaveBeenCalled(); expect(mocks.getCase).not.toHaveBeenCalled();
   });
   it('offers a private same-shop command when DMs are blocked', async () => {
     const i = interaction(); await customer(i);

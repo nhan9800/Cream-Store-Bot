@@ -1,7 +1,8 @@
 import Database from 'better-sqlite3';
 import { beforeEach, afterEach, describe, it, expect } from 'vitest';
 import { quoteGeminiRefund, previewGeminiRefunds, applyGeminiRefunds, getRefundCase,
-  submitRefundBank, requireRefundOwner, readRefundBank, claimRefundNotice, finishRefundNotice } from '../src/services/geminiRefundService.js';
+  submitRefundBank, requireRefundOwner, readRefundBank, claimRefundNotice, finishRefundNotice,
+  previewRefundFeeChange,proposeRefundFeeChange } from '../src/services/geminiRefundService.js';
 import { recordPaidOrderRefund } from '../src/services/paidOrderRefundService.js';
 import { crc16, buildRefundVietQR } from '../src/utils/refundVietQR.js';
 
@@ -14,14 +15,14 @@ const history = [event('2026-01-11', 'WARRANTY_OPEN')];
 const receipt = [{ amount: 100000, provider: 'PAYOS' }];
 
 describe('Gemini refund accounting', () => {
-  it('uses actual paid price and freezes at warranty opening, with 10% of original price', () => {
+  it('uses actual paid price and freezes at warranty opening, with 30% of original price', () => {
     expect(quoteGeminiRefund(order, history, receipt)).toMatchObject({ paid: 100000, usageDeduction: 10000,
-      fee: 10000, refund: 80000, usedMs: 10 * 86400000 });
+      fee: 30000, refund: 60000, usedMs: 10 * 86400000 });
   });
   it('excludes earlier warranty downtime and tolerates SQL second precision', () => {
     const h = [event('2026-01-03', 'WARRANTY_OPEN'), event('2026-01-05', 'COMPLETED', 'WARRANTY_OPEN'), ...history];
     expect(quoteGeminiRefund({ ...order, status_changed_at: '2026-01-11T00:00:00.800Z' }, h, receipt))
-      .toMatchObject({ usageDeduction: 8000, refund: 82000, downtimeMs: 2 * 86400000 + 800 });
+      .toMatchObject({ usageDeduction: 8000, refund: 62000, downtimeMs: 2 * 86400000 + 800 });
   });
   it.each([
     [{ ...order, amount_paid: 90000 }, history, receipt],
@@ -94,10 +95,10 @@ describe('Persistent refund intake', () => {
   it('does not record payout before intake or with a mismatched amount', () => {
     const row = apply();
     const record = amount => recordPaidOrderRefund(db, { orderCode: order.order_code, guildId: 'shop', actorId: 'manager', action: 'REFUNDED', amount });
-    expect(() => record(80000)).toThrow();
+    expect(() => record(60000)).toThrow();
     submit(row);
     expect(() => record(100000)).toThrow();
-    record(80000);
+    record(60000);
     expect(getRefundCase(db, row.id)).toMatchObject({ active: false, stage: 'PAID', orderStatus: 'REFUNDED' });
   });
   it('marks withdrawals invalid and never retries an uncertain DM send', () => {
@@ -114,6 +115,58 @@ describe('Persistent refund intake', () => {
     expect(() => apply()).toThrow();
     expect(db.prepare('SELECT status FROM orders').get().status).toBe('WARRANTY_OPEN');
     expect(db.prepare('SELECT count(*) AS n FROM order_refund_cases').get().n).toBe(0);
+  });
+  const propose = (row, feePercent = 40) => {
+    const p = previewRefundFeeChange(db,{orderCode:row.order_code,guildId:'shop',feePercent});
+    return proposeRefundFeeChange(db,{orderCode:row.order_code,guildId:'shop',feePercent,actorId:'manager',fingerprint:p.fingerprint});
+  };
+  it.each([29,41,30.5,NaN])('rejects a fee outside the 30–40 percent policy (%s)', feePercent => {
+    const row=apply(); expect(()=>propose(row,feePercent)).toThrow();
+  });
+  it('keeps an accepted old quote and bank details usable while a higher proposal awaits consent', () => {
+    const row=submit(apply()); const saved=propose(row).row;
+    expect(saved.quote).toEqual(row.quote);
+    expect(saved.quote_revision).toBe(1); expect(saved.accepted_quote_revision).toBe(1);
+    expect(saved.pendingQuote).toMatchObject({feeBps:4000,fee:40000,refund:50000});
+    expect(saved.pending_quote_revision).toBe(2);
+    expect(readRefundBank(saved)).toEqual(readRefundBank(row));
+    expect(db.prepare('SELECT amount_paid,payment_status,status FROM orders').get())
+      .toEqual({amount_paid:100000,payment_status:'PAID',status:'REFUND_PENDING'});
+  });
+  it('accepts only the current proposal revision, then switches amount and consent together', () => {
+    const old=submit(apply()); const row=propose(old).row;
+    expect(()=>submit(row)).toThrow('Bảng tính đã thay đổi');
+    const accepted=submitRefundBank(db,{id:row.id,customerId:'buyer',revision:2,bank:{bin:'970422',shortName:'MB'},
+      account:'0123456789',name:'NGUYEN VAN A',accepted:'ĐỒNG Ý'});
+    expect(accepted).toMatchObject({quote_revision:2,accepted_quote_revision:2,pendingQuote:null,stage:'READY_TO_PAY'});
+    expect(accepted.quote.refund).toBe(50000);
+    const history=db.prepare('SELECT revision,state FROM order_refund_quote_history ORDER BY revision').all();
+    expect(history).toEqual([{revision:1,state:'ACCEPTED'},{revision:2,state:'ACCEPTED'}]);
+    const record=amount=>recordPaidOrderRefund(db,{orderCode:row.order_code,guildId:'shop',actorId:'manager',action:'REFUNDED',amount});
+    expect(()=>record(60000)).toThrow(); record(50000);
+  });
+  it('preserves and migrates an existing 10% accepted agreement when proposing 30%', () => {
+    let row=apply(); const legacy={...row.quote,feeBps:1000,fee:10000,refund:80000};
+    db.prepare('UPDATE order_refund_cases SET quote_json=?').run(JSON.stringify(legacy));
+    db.prepare('UPDATE order_refund_quote_history SET quote_json=?').run(JSON.stringify(legacy));
+    row=submit(row);
+    const changed=propose(row,30).row;
+    expect(changed.quote).toEqual(legacy); expect(changed.pendingQuote.refund).toBe(60000);
+    expect(changed.accepted_at).toBe(row.accepted_at);
+    expect(readRefundBank(changed)).toMatchObject({account:'0123456789'});
+  });
+  it('is idempotent and rejects a stale manager preview after customer acceptance', () => {
+    const row=apply(); const p=previewRefundFeeChange(db,{orderCode:row.order_code,guildId:'shop',feePercent:40});
+    submit(row);
+    expect(()=>proposeRefundFeeChange(db,{orderCode:row.order_code,guildId:'shop',feePercent:40,actorId:'manager',fingerprint:p.fingerprint})).toThrow('vừa thay đổi');
+    expect(propose(row,40).changed).toBe(true); expect(propose(row,40).changed).toBe(false);
+    expect(db.prepare('SELECT count(*) AS n FROM order_refund_quote_history').get().n).toBe(2);
+  });
+  it('can withdraw an unaccepted proposal without changing the accepted agreement', () => {
+    const row=submit(apply()); propose(row,40); const result=propose(row,30).row;
+    expect(result.pendingQuote).toBeNull(); expect(result.quote).toEqual(row.quote);
+    expect(result.accepted_quote_revision).toBe(1);
+    expect(db.prepare("SELECT state FROM order_refund_quote_history WHERE revision=2").get().state).toBe('WITHDRAWN');
   });
 });
 
