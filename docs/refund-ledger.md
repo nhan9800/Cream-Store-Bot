@@ -50,3 +50,20 @@ Mỗi lý do kèm một đoạn giải thích cho khách (`REFUND_REASONS[*].exp
   - Số tiền lấy từ lịch sử trạng thái của đơn.
   - Nếu lịch sử không ghi số tiền: tạm tính là hoàn toàn bộ, đặt `needs_review=1` và chờ đối soát.
 - Sổ không lưu thông tin ngân hàng của khách. Thông tin này chỉ nằm trong hồ sơ Gemini đã được mã hóa.
+
+## Hồ sơ hoàn tiền và QR chuyển khoản (mọi sản phẩm)
+
+1. **Mở hồ sơ.** Quản lý chạy `/hoantien mo-ho-so ma_don ly_do [phi_phan_tram] [khau_tru_khac]`. Lệnh này:
+   - chuyển đơn sang `REFUND_PENDING`;
+   - tạo `order_refund_cases` với `kind='STANDARD'`;
+   - gửi thẻ hồ sơ vào ticket riêng của khách. Nếu tính lại trước khi khách xác nhận, bot sửa đúng thẻ đó và không tag lại khách.
+2. **Khách nhập tài khoản.** Khách bấm **Xác nhận & nhập tài khoản** và điền ngân hàng, STK và tên chủ tài khoản.
+   - Bot từ chối: ngân hàng không nhận ra hoặc mơ hồ, dãy số giống số thẻ, và tên có ký tự không phải chữ.
+   - Dữ liệu khách nhập được lưu dạng nháp mã hóa (`draft_bank_encrypted`), hết hạn sau 30 phút.
+3. **Khách xem trước.** Panel riêng tư hiển thị tên ngân hàng đầy đủ, STK chia nhóm 4 số, tên đã chuẩn hóa không dấu, số tiền, và đúng mã QR mà shop sẽ quét. Khách bấm **Đúng thông tin** thì mới chấp nhận bảng tính và lưu `bank_encrypted` (`READY_TO_PAY`). Bấm **Sửa lại** sẽ mở lại form.
+4. **Shop chuyển tiền.** Lấy QR bằng `/hoantien qr ma_don` (chỉ bạn thấy) hoặc ở website admin → Hoàn tiền → **Mở QR chuyển** (chỉ admin). Chuyển xong, chạy `/hoantien ghi-nhan` với đúng số tiền của bảng tính khách đã chấp nhận.
+
+Mọi QR đều tạo bằng `buildVerifiedRefundVietQR`:
+- Payload theo chuẩn NAPAS VietQR (dynamic QR, GUID `A000000727`, dịch vụ `QRIBFTTA`, tiền tệ 704, nội dung `HOAN CNxxxxxx`).
+- Payload được đọc ngược lại để kiểm tra CRC-16/CCITT, BIN, STK và số tiền trước khi render.
+- Ảnh QR được render cục bộ bằng `qrcode`; không gửi thông tin ngân hàng ra dịch vụ ngoài.

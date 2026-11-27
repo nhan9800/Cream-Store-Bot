@@ -35,7 +35,7 @@ afterAll(() => {
 
 function createLinkedOrder(options = {}) {
   sequence += 1;
-  const product = db.prepare('SELECT * FROM product_catalog WHERE product_key = ?').get('discord-nitro-boost-2-months-login-mail-guaranteed');
+  const product = db.prepare('SELECT * FROM product_catalog WHERE product_key = ?').get('discord-nitro-boost-2-months-login-keep-mail-7-days');
   const customerId = `link-customer-${sequence}`;
   const channelId = `link-ticket-${sequence}`;
   const ticket = createTicket({ guildId: 'WEB', channelId, customerId, openedById: customerId, ticketType: 'ORDER' });
@@ -62,5 +62,5 @@ describe('order to catalog linkage', () => {
 });
 
 function productIdPlaceholder() {
-  return db.prepare('SELECT id FROM product_catalog WHERE product_key = ?').get('discord-nitro-boost-2-months-login-mail-guaranteed').id;
+  return db.prepare('SELECT id FROM product_catalog WHERE product_key = ?').get('discord-nitro-boost-2-months-login-keep-mail-7-days').id;
 }

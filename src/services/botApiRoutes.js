@@ -1616,6 +1616,10 @@ export function registerBotApiRoutes(app) {
             const { generateUniqueOrderCode, createOrder, getOrderByCode, saveOrderLogMessage } = await import('./orderService.js');
             
             const firstItem = catalogProduct;
+            const nitroPricing = await import('../config/nitroPricing202611.js');
+            if (nitroPricing.isNitroRenewalProduct(firstItem) && !nitroPricing.hasPriorNitroPurchase(db, customerId)) {
+                return res.status(403).json({ ok: false, code: 'NOT_ELIGIBLE', error: nitroPricing.NITRO_RENEWAL_NOT_ELIGIBLE });
+            }
             
             // Xử lý duration_months, tránh undefined/null
             let durationMonths = firstItem.duration_months;

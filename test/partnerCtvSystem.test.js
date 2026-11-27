@@ -202,7 +202,7 @@ describe('Partner and CTV system', () => {
       expect(text).toContain('shop còn nhiều mặt hàng khác');
       expect(text).toContain('Spotify Premium Add Family 12 Tháng');
     }
-    expect(CTV_OFFICIAL_PRICE_CATALOG.nitro.map((item) => item.price)).toEqual([85_000, 95_000, 95_000, 795_000]);
+    expect(CTV_OFFICIAL_PRICE_CATALOG.nitro.map((item) => item.price)).toEqual([85_000, 95_000, 795_000]);
     expect(CTV_OFFICIAL_PRICE_CATALOG.spotify.map((item) => item.price)).toEqual([160_000, 260_000]);
     expect(CTV_OFFICIAL_PRICE_CATALOG.gemini.map((item) => item.price)).toEqual([150_000, 280_000]);
     expect(CTV_OFFICIAL_PRICE_CATALOG).not.toHaveProperty('youtubeMonthly');

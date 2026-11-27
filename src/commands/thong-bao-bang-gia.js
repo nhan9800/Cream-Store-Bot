@@ -20,19 +20,19 @@ function findNitroOption(products, marker) {
 
 export function buildPriceAnnouncementContent(guildId, products) {
   const E = createEmojiResolver(guildId);
-  const keepMail = findNitroOption(products, 'Giữ Mail 7 Ngày');
-  const guaranteedMail = findNitroOption(products, 'Mail Bao Sống');
+  const keepMail = findNitroOption(products, '20–30 Phút');
+  const renewal = products.find((product) => product.is_active !== 0 && product.product_key === 'discord-nitro-boost-2-months-renewal-returning');
   const nitroTrial = products.find((product) => product.is_active !== 0 && isNitroTrialProduct(product));
   const netflixSlot = products.find((product) => (
     product.is_active !== 0 && product.product_key === 'netflix-extra-1-month-renewable'
   ));
   const priceChannelMention = `<#${PRIMARY_PRICE_CHANNEL_ID}>`;
 
-  const nitroLines = keepMail && guaranteedMail
+  const nitroLines = keepMail
     ? [
       `### ${E('brand_nitro')} Nitro Boost Login · 2 Tháng`,
-      `- **Giữ mail 7 ngày:** ${formatCurrency(keepMail.price)}`,
-      `- **Mail bao sống:** ${formatCurrency(guaranteedMail.price)}`,
+      `- **Gói 2 tháng:** ${formatCurrency(keepMail.price)} · xong trong 20–30 phút`,
+      ...(renewal ? [`- **Gia hạn khách cũ:** ${formatCurrency(renewal.price)} · bot tự kiểm tra đơn Nitro trước đó`] : []),
     ]
     : [];
   const trialLines = nitroTrial

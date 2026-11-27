@@ -24,8 +24,7 @@ export const CTV_OFFICIAL_PANEL_MARKER = 'CENAR-CTV-PRICE-BOARD-V3';
 export const CTV_OFFICIAL_PRICE_CATALOG = Object.freeze({
   nitro: Object.freeze([
     { label: 'Nitro Boost Login 1 Tháng', price: 85_000 },
-    { label: 'Nitro Boost Login 2 Tháng · Giữ mail 7 ngày', price: 95_000 },
-    { label: 'Nitro Boost Login 2 Tháng · Mail bao sống', price: 95_000 },
+    { label: 'Nitro Boost Login 2 Tháng · Xong trong 20–30 phút', price: 95_000 },
     { label: 'Nitro Boost Login 12 Tháng · Chính chủ, kích hoạt một lần', price: 795_000 },
   ]),
   boost: Object.freeze([

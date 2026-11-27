@@ -7,6 +7,8 @@ This repository owns Discord interactions, commerce rules, order and payment sta
 - [Session workflow and evidence](docs/agent-harness.md)
 - [Bot and website boundary](docs/architecture.md)
 - [Website integration contract](docs/BOT_API.md)
+- [UI craft playbook: cards, custom emoji, announcements](docs/ui-craft-playbook.md) and [Components V2 style guide](docs/discord-components-v2-style-guide.md)
+- [Refund ledger, cases and VietQR](docs/refund-ledger.md)
 - [Announcement behavior and verification](docs/announcement-ai-repair-20261030.md)
 - [VibeHost deployment](docs/VIBEHOST_DEPLOY_GUIDE.md) and [rollback](docs/rollback.md)
 

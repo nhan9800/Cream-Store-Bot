@@ -22,6 +22,7 @@ import { getBookingInvoiceForOrder, isBookingPayOSReceipt } from './bookingLedge
 import { getStoredPayOSReceivedAmount } from '../utils/payosReceipt.js';
 import { PaidOrderRefundError, recordPaidOrderRefund, REFUND_HOLD_MESSAGE } from './paidOrderRefundService.js';
 import { voidRefundLedgerRow } from './refundLedgerService.js';
+import { hasPriorNitroPurchase, isNitroRenewalProduct, NITRO_RENEWAL_NOT_ELIGIBLE } from '../config/nitroPricing202611.js';
 
 function createOrderStmt() {
   return db.prepare(`
@@ -170,6 +171,14 @@ export function createOrder({ guildId, ticketId, ticketChannelId, customerId, pr
                 AND LOWER(TRIM(same_name.name)) = LOWER(TRIM(?))) = 1)
       ORDER BY CASE WHEN COALESCE(pc.duration_months, 0) = COALESCE(?, 0) THEN 0 ELSE 1 END, pc.id
       LIMIT 1`).get(productName, safeDurationMonths, productName, safeDurationMonths)?.id ?? null;
+  }
+
+  // Backstop for every creation path: the returning-customer Nitro price needs a prior Nitro order.
+  if (linkedProductId) {
+    const linked = db.prepare('SELECT product_key FROM product_catalog WHERE id = ?').get(linkedProductId);
+    if (isNitroRenewalProduct(linked) && !hasPriorNitroPurchase(db, customerId)) {
+      throw new OrderPaymentError('NOT_ELIGIBLE', NITRO_RENEWAL_NOT_ELIGIBLE);
+    }
   }
 
   let resultId;

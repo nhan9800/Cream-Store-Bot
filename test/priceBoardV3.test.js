@@ -183,41 +183,41 @@ describe('Cenar price board V3', () => {
     expect(creativePayload).toContain('7 ngày');
   });
 
-  it('publishes both current Nitro Login 2-month options at 115k and 136k', () => {
+  it('publishes the 115k 2-month Nitro and the 100k returning-customer renewal', () => {
     const nitroSeedProducts = DEFAULT_PRODUCT_CATALOG
-      .filter((product) => product.name.includes('Discord Nitro Boost 2 Tháng (Login ·'));
-    const sevenDayMail = nitroSeedProducts.find((product) => product.name.includes('Giữ Mail 7 Ngày'));
-    const guaranteedMail = nitroSeedProducts.find((product) => product.name.includes('Mail Bao Sống'));
-
-    expect(sevenDayMail?.price).toBe(115000);
-    expect(guaranteedMail?.price).toBe(136000);
+      .filter((product) => product.name.startsWith('Discord Nitro Boost 2 Tháng'));
+    const main = nitroSeedProducts.find((product) => product.name.includes('20–30 Phút'));
+    const renewal = nitroSeedProducts.find((product) => product.name.includes('Gia Hạn Khách Cũ'));
+    expect(nitroSeedProducts).toHaveLength(2);
+    expect(main?.price).toBe(115000);
+    expect(renewal?.price).toBe(100000);
+    expect(nitroSeedProducts.some((product) => product.name.includes('Mail Bao Sống'))).toBe(false);
 
     const products = [
-      ...getActiveProducts(GUILD_ID).filter((product) => (
-        !product.name.startsWith('Discord Nitro Boost 2 Tháng (Login)')
-      )),
+      ...getActiveProducts(GUILD_ID).filter((product) => !product.name.startsWith('Discord Nitro Boost 2 Tháng')),
       ...nitroSeedProducts.map((product, index) => ({ ...product, id: `nitro-seed-${index + 1}` })),
     ];
     const nitroPayload = buildPriceBoardPayloads(GUILD_ID, {}, products)
       .map(serialize)
       .find((json) => json.includes('Discord Nitro'));
-    expect(nitroPayload).toContain('Giữ Mail 7 Ngày');
-    expect(nitroPayload).toContain('Mail Bao Sống');
+    expect(nitroPayload).toContain('20–30 Phút');
+    expect(nitroPayload).toContain('Gia Hạn Khách Cũ');
     expect(nitroPayload).toContain('115.000');
-    expect(nitroPayload).toContain('136.000');
+    expect(nitroPayload).toContain('100.000');
+    expect(nitroPayload).not.toContain('136.000');
 
     const nitroPanel = buildPriceBoardPayloads(GUILD_ID, {}, products)
       .map((payload) => payload.components[0].toJSON())
       .find((container) => JSON.stringify(container).includes('Discord Nitro'));
     const keepMailBlock = nitroPanel.components.find((component) => (
-      component.type === 10 && component.content.includes('Giữ Mail 7 Ngày')
+      component.type === 10 && component.content.includes('20–30 Phút')
     ));
     expect(keepMailBlock.content).toContain('**Thời hạn:** `2 tháng`');
     expect(keepMailBlock.content).not.toContain('**Thời hạn:** `7 ngày`');
 
     const announcement = buildPriceAnnouncementContent(GUILD_ID, nitroSeedProducts);
     expect(announcement).toContain('115.000');
-    expect(announcement).toContain('136.000');
+    expect(announcement).toContain('100.000');
     expect(announcement).not.toContain('99k');
   });
 
