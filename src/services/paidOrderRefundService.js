@@ -28,6 +28,8 @@ export function recordPaidOrderRefund(db, { orderCode, guildId, actorId, action,
 
     let next = 'REFUND_PENDING';
     let metadata = null;
+    const hasCases = db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name='order_refund_cases'").get();
+    const refundCase = hasCases ? db.prepare('SELECT * FROM order_refund_cases WHERE order_code=? AND guild_id=?').get(orderCode, guildId) : null;
     if (action === 'REFUND_PENDING') {
       if (status === next) return { order, updated: order, changed: false };
       if (!REVIEWABLE.has(status)) throw new PaidOrderRefundError('Trạng thái hiện tại chưa hỗ trợ ghi nhận hoàn tiền.');
@@ -39,6 +41,10 @@ export function recordPaidOrderRefund(db, { orderCode, guildId, actorId, action,
     } else if (action === 'REFUNDED') {
       if (!Number.isSafeInteger(amount) || amount < 1 || amount > received) {
         throw new PaidOrderRefundError('Nhập đúng số VND đã hoàn thực tế, từ 1đ đến số đã nhận.');
+      }
+      if (refundCase && (refundCase.pending_status_at !== order.status_changed_at
+        || refundCase.stage !== 'READY_TO_PAY' || amount !== JSON.parse(refundCase.quote_json).refund)) {
+        throw new PaidOrderRefundError('Hồ sơ Gemini chưa sẵn sàng hoặc số tiền khác bảng tính khách đã xác nhận. Cần đối soát lại trước khi ghi nhận đã hoàn.');
       }
       next = 'REFUNDED';
       metadata = { amount, currency: 'VND' };
@@ -60,6 +66,10 @@ export function recordPaidOrderRefund(db, { orderCode, guildId, actorId, action,
     };
     recordStatusChange(db, { orderCode, previousStatus: status, newStatus: next, actor: actorId,
       reason: reason ? `${reasonByAction[action]} · ${reason}` : reasonByAction[action], metadata });
+    if (refundCase && action !== 'REFUND_PENDING') {
+      db.prepare('UPDATE order_refund_cases SET stage=?,updated_at=? WHERE id=?')
+        .run(action === 'REFUNDED' ? 'PAID' : 'INVALIDATED', now, refundCase.id);
+    }
     return { order, updated: readOrder.get(orderCode, guildId), changed: true };
   }).immediate();
 }

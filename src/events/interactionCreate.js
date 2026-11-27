@@ -330,6 +330,11 @@ export function registerInteractionHandler(client, commands) {
       // publication lock instead of the generic button cooldown.
       if (await handleAnnouncementDraftInteraction(interaction)) return;
 
+      if (interaction.customId?.startsWith('refund:')) {
+        const { handleRefundInteraction } = await import('./refundHandlers.js');
+        if (await handleRefundInteraction(interaction)) return;
+      }
+
       if (interaction.customId?.startsWith('booking:')) {
         const { handleBookingInteraction } = await import('./bookingHandlers.js');
         if (await handleBookingInteraction(interaction)) return;
