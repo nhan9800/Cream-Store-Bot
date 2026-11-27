@@ -83,6 +83,9 @@ import {
   getActiveRefund, getDailyNetRevenue, getRefundHistory, getRefundSummary, getRevenueSummary, listRefunds,
   REFUND_REASONS, MAX_REFUND_FEE_PERCENT, RefundLedgerError,
 } from './refundLedgerService.js';
+import { listOpenRefundCases } from './refundCaseService.js';
+import { getRefundCase } from './geminiRefundService.js';
+import { buildRefundPayoutData } from './refundPresentation.js';
 
 function catalogKey(value) {
   return String(value || '')
@@ -440,6 +443,29 @@ export function registerAdminRoutes(app) {
     } catch (e) {
       if (e instanceof RefundLedgerError) return errorResponse(res, 400, e.message);
       console.error('[ADMIN]', e); res.status(500).json({ ok: false, error: 'Lỗi máy chủ nội bộ.' });
+    }
+  });
+
+  // Open refund cases (no bank details) so staff can follow up from the website.
+  app.get('/api/bot/admin/refund-cases', requireAdminRole, (req, res) => {
+    try {
+      res.json({ ok: true, data: listOpenRefundCases(db) });
+    } catch (e) {
+      console.error('[ADMIN]', e); res.status(500).json({ ok: false, error: 'Lỗi máy chủ nội bộ.' });
+    }
+  });
+
+  // Bank details + locally rendered VietQR for a customer-confirmed case. Admin role only.
+  app.get('/api/bot/admin/refund-cases/:code/payout', requireAdminRole, async (req, res) => {
+    try {
+      if (req.adminRole !== 'admin') return errorResponse(res, 403, 'Chỉ admin được xem thông tin nhận tiền của khách.');
+      const code = String(req.params.code || '').trim().toUpperCase();
+      const row = getRefundCase(db, code);
+      if (!row?.active || row.stage !== 'READY_TO_PAY') return errorResponse(res, 409, 'Khách chưa xác nhận thông tin nhận hoàn hoặc hồ sơ đã đóng.');
+      res.set('Cache-Control', 'no-store');
+      res.json({ ok: true, data: await buildRefundPayoutData(row) });
+    } catch (e) {
+      console.error('[ADMIN] refund payout', e.name); res.status(500).json({ ok: false, error: 'Không tạo được QR hoàn tiền.' });
     }
   });
 

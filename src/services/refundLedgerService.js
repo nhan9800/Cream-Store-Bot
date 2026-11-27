@@ -170,11 +170,12 @@ export function insertRefundLedgerRow(db, { order, amount, actorId, refundedAt, 
   transferReference, note, caseQuote = null }) {
   ensureRefundLedger(db);
   const paid = Number(order.amount_paid);
-  let reason = normalizeReason(reasonCode ?? (caseQuote ? 'PROVIDER_CHANGE' : 'OTHER'));
+  const standardCase = caseQuote?.kind === 'STANDARD';
+  let reason = normalizeReason(reasonCode ?? (standardCase ? caseQuote.reasonCode : caseQuote ? 'PROVIDER_CHANGE' : 'OTHER'));
   let breakdown;
   let source = 'MANUAL';
   if (caseQuote) {
-    source = 'GEMINI_CASE';
+    source = standardCase ? 'REFUND_CASE' : 'GEMINI_CASE';
     const feeAmount = Number(caseQuote.fee || 0);
     const usage = Number(caseQuote.usageDeduction || 0);
     breakdown = {
