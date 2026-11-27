@@ -3,6 +3,7 @@ import { getRefundCase } from './geminiRefundService.js';
 import { buildRefundOffer } from './refundPresentation.js';
 import { isStaffMember } from '../utils/permissions.js';
 import { isGemini18MonthRefundNotice } from '../config/geminiRefundNoticeScope.js';
+import { createHash } from 'node:crypto';
 
 /** Never publish a customer's financial quote into a shared or unrelated ticket. */
 export async function isPrivateRefundTicket(channel, guild, customerId, guildConfig) {
@@ -45,7 +46,7 @@ export async function sendRefundTicketNotice(db, { id, guild, guildConfig }) {
       WHERE id=? AND ticket_notice_state='UNSENT'`).run(channel.id, new Date().toISOString(), id).changes;
     if (!claimed) return 'Ticket đã được xử lý bởi lượt khác.';
     try {
-      const message = await channel.send({ ...buildRefundOffer(fresh), content: `<@${row.customer_id}> Shop đã mở hồ sơ hoàn cho đơn \`${row.order_code}\`. Vui lòng đọc bảng tính và dùng nút bên dưới; thông tin tài khoản được nhập trong biểu mẫu riêng tư.`,
+      const message = await channel.send({ ...buildRefundOffer(fresh,{mentionCustomer:true}),
         allowedMentions: { users: [row.customer_id], parse: [] }, nonce: `rf-ticket-${row.order_code}`, enforceNonce: true });
       db.prepare(`UPDATE order_refund_cases SET ticket_notice_state='SENT',ticket_notice_message_id=?,updated_at=? WHERE id=?`)
         .run(message.id, new Date().toISOString(), id);
@@ -58,4 +59,28 @@ export async function sendRefundTicketNotice(db, { id, guild, guildConfig }) {
     }
   }
   return 'Không tìm thấy ticket riêng đúng khách/đơn. Khách dùng /hoan-tien ma_don.';
+}
+
+export async function refreshRefundTicketNotice(db, { id, guild, guildConfig }) {
+  const row = getRefundCase(db,id);
+  if (!row?.active || row.guild_id !== guild.id || !isGemini18MonthRefundNotice(row)) return 'Ngoài phạm vi cập nhật thông báo Gemini 18 tháng.';
+  if (row.ticket_notice_state !== 'SENT' || !row.ticket_notice_message_id || !row.ticket_notice_channel_id) return 'Chưa có thông báo đã gửi để sửa.';
+  const ticket = db.prepare(`SELECT 1 FROM tickets WHERE channel_id=? AND guild_id=? AND customer_id=?
+    AND related_order_code=? AND status='OPEN'`).get(row.ticket_notice_channel_id,row.guild_id,row.customer_id,row.order_code);
+  const channel = ticket ? await guild.channels.fetch(row.ticket_notice_channel_id).catch(()=>null) : null;
+  if (!await isPrivateRefundTicket(channel,guild,row.customer_id,guildConfig)) return 'Ticket không còn đúng phạm vi riêng tư.';
+  const message = await channel.messages.fetch(row.ticket_notice_message_id).catch(()=>null);
+  const componentText = node => JSON.stringify(node?.toJSON?.() || node);
+  const recognizable = message?.embeds?.some(e=>e.title === `HỒ SƠ HOÀN TIỀN · ${row.order_code}`)
+    || message?.components?.some(c=>componentText(c).includes(`refund:bank:${row.id}`)
+      || componentText(c).includes(`**${row.order_code}**`));
+  if (!message || message.author.id !== guild.client.user.id || !recognizable) return 'Thông báo gốc không khớp; chưa chỉnh sửa.';
+  const fresh = getRefundCase(db,id);
+  if (!isGemini18MonthRefundNotice(fresh)) return 'Hồ sơ vừa thay đổi; chưa chỉnh sửa.';
+  const payload = buildRefundOffer(fresh);
+  const renderHash = createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+  if (fresh.ticket_notice_render_hash === renderHash) return 'Thông báo đã đúng phiên bản hiện tại.';
+  await message.edit({...payload,content:null,embeds:[]});
+  db.prepare('UPDATE order_refund_cases SET ticket_notice_render_hash=? WHERE id=?').run(renderHash,id);
+  return 'Đã cập nhật thông báo cũ, không gửi thêm hoặc tag lại.';
 }

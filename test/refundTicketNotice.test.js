@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PermissionFlagsBits as P } from 'discord.js';
 vi.mock('../src/services/refundPresentation.js', () => ({ buildRefundOffer: () => ({ embeds: [{ title: 'Private quote' }], components: [] }) }));
 import { ensureRefundCases } from '../src/services/geminiRefundService.js';
-import { sendRefundTicketNotice, isPrivateRefundTicket } from '../src/services/refundTicketNoticeService.js';
+import { sendRefundTicketNotice, isPrivateRefundTicket, refreshRefundTicketNotice } from '../src/services/refundTicketNoticeService.js';
 
 describe('private refund ticket notices', () => {
   let db, guild, channel, viewers, roles;
@@ -92,5 +92,23 @@ describe('private refund ticket notices', () => {
   it('does not treat an ordinary completed purchase as a warranty refund announcement', async () => {
     db.exec("UPDATE order_status_history SET old_status='COMPLETED'");
     expect(await send()).toContain('Ngoài phạm vi'); expect(channel.send).not.toHaveBeenCalled();
+  });
+  it('refreshes the exact bot-owned ticket message in place, privately and idempotently',async()=>{
+    const message={author:{id:'bot'},embeds:[{title:'HỒ SƠ HOÀN TIỀN · CN_123456'}],components:[],edit:vi.fn().mockResolvedValue({})};
+    channel.messages={fetch:vi.fn().mockResolvedValue(message)};
+    await send();
+    const options={id:'case',guild,guildConfig:cfg};
+    expect(await refreshRefundTicketNotice(db,options)).toContain('Đã cập nhật');
+    expect(message.edit.mock.lastCall[0]).toMatchObject({content:null,embeds:[]});
+    expect(await refreshRefundTicketNotice(db,options)).toContain('đã đúng phiên bản');
+    expect(message.edit).toHaveBeenCalledTimes(1); expect(channel.send).toHaveBeenCalledTimes(1);
+    expect(db.prepare('SELECT status FROM orders').get().status).toBe('REFUND_PENDING');
+  });
+  it('never edits another author or an outside-scope case',async()=>{
+    const message={author:{id:'other'},embeds:[{title:'HỒ SƠ HOÀN TIỀN · CN_123456'}],components:[],edit:vi.fn()};
+    channel.messages={fetch:vi.fn().mockResolvedValue(message)}; await send();
+    await refreshRefundTicketNotice(db,{id:'case',guild,guildConfig:cfg}); expect(message.edit).not.toHaveBeenCalled();
+    db.exec('UPDATE orders SET duration_months=24');
+    expect(await refreshRefundTicketNotice(db,{id:'case',guild,guildConfig:cfg})).toContain('Ngoài phạm vi');
   });
 });

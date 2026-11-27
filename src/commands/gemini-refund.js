@@ -4,11 +4,13 @@ import { getGuildConfig } from '../services/guildConfigService.js';
 import { assertStaffCapability } from '../utils/permissions.js';
 import { formatCurrency as money } from '../utils/formatters.js';
 import { previewGeminiRefunds, applyGeminiRefunds, ensureRefundCases, getRefundCase,
-  claimRefundNotice, finishRefundNotice, GeminiRefundError } from '../services/geminiRefundService.js';
+  claimRefundNotice, finishRefundNotice, GeminiRefundError, previewRefundFeeChange, proposeRefundFeeChange, refundReview } from '../services/geminiRefundService.js';
 import { buildRefundOffer, buildRefundPayout } from '../services/refundPresentation.js';
 import { updateOrderLogMessage } from '../services/notificationService.js';
-import { sendRefundTicketNotice } from '../services/refundTicketNoticeService.js';
+import { sendRefundTicketNotice, refreshRefundTicketNotice } from '../services/refundTicketNoticeService.js';
 import { isGemini18MonthRefundNotice } from '../config/geminiRefundNoticeScope.js';
+import { DEFAULT_REFUND_FEE_PERCENT, MIN_REFUND_FEE_PERCENT, MAX_REFUND_FEE_PERCENT } from '../config/refundFeePolicy.js';
+import { createEmojiResolver } from '../utils/emojiHelper.js';
 
 let dmQuarantined = false;
 
@@ -22,9 +24,14 @@ export const data = new SlashCommandBuilder().setName('gemini-refund')
     { name: 'Thông báo Gemini 18 tháng trong ticket riêng', value: 'TICKET_NOTIFY' },
     { name: 'Xem QR của một đơn', value: 'QR' },
     { name: 'Xem tiến độ nhận tài khoản', value: 'STATUS' },
+    { name: 'Xem điều chỉnh khấu trừ theo đơn', value: 'FEE_PREVIEW' },
+    { name: 'Đề xuất điều chỉnh khấu trừ theo đơn', value: 'FEE_APPLY' },
+    { name: 'Cập nhật giao diện hồ sơ 18 tháng đã gửi', value: 'REFRESH' },
   ))
   .addStringOption(o => o.setName('ma_doi_soat').setDescription('Mã bảng đối soát vừa xem; bắt buộc khi chuyển').setMaxLength(20))
-  .addStringOption(o => o.setName('ma_don').setDescription('Mã đơn cần xem QR'));
+  .addStringOption(o => o.setName('ma_don').setDescription('Mã đơn xem QR hoặc điều chỉnh khoản khấu trừ'))
+  .addIntegerOption(o=>o.setName('phan_tram_phi').setDescription('Khấu trừ bổ sung trên giá gốc; mặc định 30%, tối đa 40%')
+    .setMinValue(MIN_REFUND_FEE_PERCENT).setMaxValue(MAX_REFUND_FEE_PERCENT));
 
 export async function execute(interaction) {
   await interaction.deferReply({ ephemeral: true });
@@ -34,12 +41,32 @@ export async function execute(interaction) {
   }
   try {
     const action = interaction.options.getString('hanh_dong', true);
+    const E = createEmojiResolver(interaction.guildId);
     ensureRefundCases(db);
+    if (action === 'FEE_PREVIEW' || action === 'FEE_APPLY') {
+      const orderCode = interaction.options.getString('ma_don')?.trim().toUpperCase();
+      const feePercent = interaction.options.getInteger('phan_tram_phi') ?? DEFAULT_REFUND_FEE_PERCENT;
+      const p = previewRefundFeeChange(db,{orderCode,guildId:interaction.guildId,feePercent});
+      if (action === 'FEE_PREVIEW') {
+        await interaction.editReply([
+          `## ${E('panel_edit')} Điều chỉnh khoản khấu trừ · ${orderCode}`,
+          `${E('payment_money')} Giá mua gốc **${money(p.quote.paid)}** · đã dùng **${money(p.quote.usageDeduction)}**`,
+          `Bảng hiện tại: **${p.row.quote.feeBps/100}% · còn hoàn ${money(p.row.quote.refund)}**${p.row.accepted_at?' · khách đã xác nhận':''}`,
+          `${E('icon_price')} Đề xuất: **${feePercent}% · trừ ${money(p.quote.fee)} · còn hoàn ${money(p.quote.refund)}**`,
+          `${E('status_info')} Đây là khoản bổ sung do shop đề xuất, không phải xác nhận thuế đã nộp. Phương án đã được khách chấp nhận vẫn giữ nguyên cho đến khi khách đồng ý mức mới.`,
+          `Mã đối soát: \`${p.fingerprint}\``,
+        ].join('\n')); return;
+      }
+      const result = proposeRefundFeeChange(db,{orderCode,guildId:interaction.guildId,actorId:interaction.user.id,
+        feePercent,fingerprint:interaction.options.getString('ma_doi_soat')});
+      const refreshed = await refreshRefundTicketNotice(db,{id:result.row.id,guild:interaction.guild,guildConfig:getGuildConfig(interaction.guildId)});
+      await interaction.editReply(`${E('status_check')} ${result.changed?'Đã lưu đề xuất để khách xem và tự xác nhận.':'Mức đề xuất này đã có, không tạo trùng.'}\n${refreshed}`); return;
+    }
     if (action === 'PREVIEW') {
       const p = previewGeminiRefunds(db, interaction.guildId);
       await interaction.editReply([
         '## Đối soát Gemini đang bảo hành',
-        ...p.ready.map(r => `**${r.orderCode}** · Gốc ${money(r.quote.paid)} − dùng ${money(r.quote.usageDeduction)} − phí 10% ${money(r.quote.fee)} = **${money(r.quote.refund)}**`),
+        ...p.ready.map(r => `**${r.orderCode}** · Gốc ${money(r.quote.paid)} − dùng ${money(r.quote.usageDeduction)} − bổ sung ${r.quote.feeBps/100}% ${money(r.quote.fee)} = **${money(r.quote.refund)}**`),
         ...p.blocked.map(r => `${r.orderCode} · Cần kiểm tra: ${r.reason}`),
         `**Tổng ${p.ready.length} đơn: ${money(p.ready.reduce((s, r) => s + r.quote.refund, 0))}**`,
         `Mã đối soát: \`${p.fingerprint}\``,
@@ -61,7 +88,13 @@ export async function execute(interaction) {
     const rows = db.prepare('SELECT id FROM order_refund_cases WHERE guild_id=? ORDER BY created_at').all(interaction.guildId)
       .map(r => getRefundCase(db, r.id)).filter(r => r.active);
     if (action === 'STATUS') {
-      await interaction.editReply(rows.map(r => `**${r.order_code}** · ${r.stage === 'READY_TO_PAY' ? 'Chờ shop chuyển hoàn' : 'Chờ thông tin nhận hoàn'} · ${money(r.quote.refund)} · DM: ${r.notice_state} · Ticket: ${r.ticket_notice_state}`).join('\n') || 'Không có hồ sơ đang chờ.'); return;
+      await interaction.editReply(rows.map(r => `**${r.order_code}** · ${r.stage === 'READY_TO_PAY' ? 'Chờ shop chuyển hoàn' : 'Chờ thông tin nhận hoàn'} · hiện tại ${r.quote.feeBps/100}%/${money(r.quote.refund)}${r.pendingQuote?` · đề xuất ${refundReview(r).quote.feeBps/100}%/${money(refundReview(r).quote.refund)}`:''} · Ticket: ${r.ticket_notice_state}`).join('\n') || 'Không có hồ sơ đang chờ.'); return;
+    }
+    if (action === 'REFRESH') {
+      const results=[];
+      for (const row of rows.filter(isGemini18MonthRefundNotice)) results.push(`${row.order_code}: ${await refreshRefundTicketNotice(db,{
+        id:row.id,guild:interaction.guild,guildConfig:getGuildConfig(interaction.guildId)})}`);
+      await interaction.editReply(results.join('\n') || 'Không có hồ sơ 18 tháng đang chờ.'); return;
     }
     if (action === 'TICKET_NOTIFY') {
       const results = [];

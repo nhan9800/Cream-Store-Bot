@@ -1,0 +1,3 @@
+export const DEFAULT_REFUND_FEE_PERCENT = 30;
+export const MIN_REFUND_FEE_PERCENT = 30;
+export const MAX_REFUND_FEE_PERCENT = 40;

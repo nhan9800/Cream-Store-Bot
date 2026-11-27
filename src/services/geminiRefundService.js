@@ -2,6 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { encrypt, decrypt, isEncrypted } from '../utils/crypto.js';
 import { recordPaidOrderRefund, PaidOrderRefundError } from './paidOrderRefundService.js';
 import { ensureStatusHistoryTable } from './orderStateMachine.js';
+import { DEFAULT_REFUND_FEE_PERCENT, MIN_REFUND_FEE_PERCENT, MAX_REFUND_FEE_PERCENT } from '../config/refundFeePolicy.js';
 
 export class GeminiRefundError extends PaidOrderRefundError {}
 const WARRANTY = new Set(['WARRANTY', 'WARRANTY_OPEN']);
@@ -23,9 +24,21 @@ export function ensureRefundCases(db) {
   )`);
   const columns = new Set(db.prepare('PRAGMA table_info(order_refund_cases)').all().map(c => c.name));
   for (const [name, type] of [['ticket_notice_state', "TEXT NOT NULL DEFAULT 'UNSENT'"],
-    ['ticket_notice_channel_id', 'TEXT'], ['ticket_notice_message_id', 'TEXT']]) {
+    ['ticket_notice_channel_id', 'TEXT'], ['ticket_notice_message_id', 'TEXT'],
+    ['quote_revision', 'INTEGER NOT NULL DEFAULT 1'], ['accepted_quote_revision', 'INTEGER'],
+    ['pending_quote_json', 'TEXT'], ['pending_quote_revision', 'INTEGER'], ['ticket_notice_render_hash', 'TEXT']]) {
     if (!columns.has(name)) db.exec(`ALTER TABLE order_refund_cases ADD COLUMN ${name} ${type}`);
   }
+  db.exec(`CREATE TABLE IF NOT EXISTS order_refund_quote_history (
+    case_id TEXT NOT NULL, revision INTEGER NOT NULL, quote_json TEXT NOT NULL,
+    state TEXT NOT NULL, actor_id TEXT, created_at TEXT NOT NULL, accepted_at TEXT,
+    PRIMARY KEY(case_id,revision)
+  )`);
+  db.prepare(`INSERT OR IGNORE INTO order_refund_quote_history(case_id,revision,quote_json,state,created_at,accepted_at)
+    SELECT id,quote_revision,quote_json,CASE WHEN accepted_at IS NULL THEN 'OFFERED' ELSE 'ACCEPTED' END,created_at,accepted_at
+    FROM order_refund_cases`).run();
+  db.prepare(`UPDATE order_refund_cases SET accepted_quote_revision=quote_revision
+    WHERE accepted_at IS NOT NULL AND accepted_quote_revision IS NULL`).run();
 }
 
 /** Fixed, auditable quote. Warranty downtime is never billed as service. */
@@ -68,12 +81,13 @@ export function quoteGeminiRefund(order, history, receipts, walletEntries = []) 
   const totalMs = end - start;
   // Integer VND, round deductions down; never charge more than actual receipt.
   const usageDeduction = Number(BigInt(paid) * BigInt(usedMs) / BigInt(totalMs));
-  const fee = Number(BigInt(paid) * 1000n / 10000n);
+  const feeBps = DEFAULT_REFUND_FEE_PERCENT * 100;
+  const fee = Number(BigInt(paid) * BigInt(feeBps) / 10000n);
   const refund = Math.max(0, paid - usageDeduction - fee);
   if (!refund) fail('Không còn số dư hoàn, cần quản lý xem riêng.');
   return { version: 1, paid, start: new Date(start).toISOString(), end: new Date(end).toISOString(),
     cutoff: new Date(cutoff).toISOString(), totalMs, usedMs, downtimeMs,
-    usageDeduction, feeBps: 1000, fee, refund };
+    usageDeduction, feeBps, fee, refund };
 }
 
 export function previewGeminiRefunds(db, guildId) {
@@ -107,7 +121,7 @@ export function applyGeminiRefunds(db, { guildId, actorId, fingerprint }) {
     const created = [];
     for (const row of preview.ready) {
       const { updated } = recordPaidOrderRefund(db, { guildId, actorId, orderCode: row.orderCode,
-        action: 'REFUND_PENDING', reason: 'Gemini: trừ thời gian dùng thực tế và phí xử lý 10% giá gốc; chờ khách xác nhận' });
+        action: 'REFUND_PENDING', reason: `Gemini: trừ thời gian dùng thực tế và khoản bổ sung ${DEFAULT_REFUND_FEE_PERCENT}% giá gốc; chờ khách xác nhận` });
       const now = new Date().toISOString();
       const id = randomUUID();
       db.prepare(`INSERT INTO order_refund_cases
@@ -128,10 +142,56 @@ export function getRefundCase(db, id) {
     FROM orders WHERE order_code=? AND guild_id=?`).get(row.order_code, row.guild_id);
   const request = db.prepare(`SELECT old_status FROM order_status_history WHERE order_code=?
     AND new_status='REFUND_PENDING' ORDER BY id DESC LIMIT 1`).get(row.order_code);
-  return { ...row, quote: JSON.parse(row.quote_json), active: order?.status === 'REFUND_PENDING'
+  return { ...row, quote: JSON.parse(row.quote_json), pendingQuote: row.pending_quote_json ? JSON.parse(row.pending_quote_json) : null,
+    active: order?.status === 'REFUND_PENDING'
     && order.status_changed_at === row.pending_status_at, orderStatus: order?.status,
     productName: order?.product_name, durationMonths: order?.duration_months, durationDays: order?.duration_days,
     refundFromStatus: request?.old_status };
+}
+
+export function refundReview(row) {
+  return { quote: row.pendingQuote || row.quote, revision: row.pending_quote_revision || row.quote_revision || 1 };
+}
+
+/** A proposed increase never replaces a previously accepted amount without customer consent. */
+export function previewRefundFeeChange(db, { orderCode, guildId, feePercent = DEFAULT_REFUND_FEE_PERCENT }) {
+  if (!Number.isInteger(feePercent) || feePercent < MIN_REFUND_FEE_PERCENT || feePercent > MAX_REFUND_FEE_PERCENT) {
+    fail(`Khoản khấu trừ bổ sung phải từ ${MIN_REFUND_FEE_PERCENT}% đến ${MAX_REFUND_FEE_PERCENT}% giá mua gốc.`);
+  }
+  const row = getRefundCase(db, orderCode);
+  if (!row?.active || row.guild_id !== guildId || !/gemini/i.test(row.productName || '')) fail('Không tìm thấy hồ sơ Gemini đang chờ hoàn trong shop này.');
+  const fee = Number(BigInt(row.quote.paid) * BigInt(feePercent) / 100n);
+  const quote = { ...row.quote, feeBps: feePercent * 100, fee,
+    refund: Math.max(0, row.quote.paid - row.quote.usageDeduction - fee) };
+  if (!Number.isSafeInteger(quote.refund) || quote.refund < 1) fail('Không còn số dư hoàn theo mức đề xuất; cần đối soát riêng.');
+  const noChange = refundReview(row).quote.feeBps === quote.feeBps;
+  const withdrawProposal = Boolean(row.pendingQuote && row.quote.feeBps === quote.feeBps);
+  return { row, quote, feePercent, noChange, withdrawProposal,
+    fingerprint: hash({ row, quote, feePercent }).slice(0,20) };
+}
+
+export function proposeRefundFeeChange(db, options) {
+  ensureRefundCases(db);
+  return db.transaction(() => {
+    const preview = previewRefundFeeChange(db, options);
+    if (preview.fingerprint !== options.fingerprint) fail('Hồ sơ vừa thay đổi. Hãy xem lại bảng điều chỉnh trước khi xác nhận.');
+    const { row, quote } = preview;
+    if (preview.noChange) return { row, changed: false };
+    const now = new Date().toISOString();
+    if (row.pending_quote_revision) db.prepare(`UPDATE order_refund_quote_history SET state=?
+      WHERE case_id=? AND revision=? AND state='PROPOSED'`)
+      .run(preview.withdrawProposal ? 'WITHDRAWN' : 'SUPERSEDED', row.id, row.pending_quote_revision);
+    if (preview.withdrawProposal) {
+      db.prepare(`UPDATE order_refund_cases SET pending_quote_json=NULL,pending_quote_revision=NULL,updated_at=? WHERE id=?`).run(now,row.id);
+    } else {
+      const revision = db.prepare('SELECT COALESCE(MAX(revision),0)+1 AS next FROM order_refund_quote_history WHERE case_id=?').get(row.id).next;
+      db.prepare(`INSERT INTO order_refund_quote_history(case_id,revision,quote_json,state,actor_id,created_at)
+        VALUES (?,?,?,'PROPOSED',?,?)`).run(row.id,revision,JSON.stringify(quote),options.actorId,now);
+      db.prepare(`UPDATE order_refund_cases SET pending_quote_json=?,pending_quote_revision=?,updated_at=? WHERE id=?`)
+        .run(JSON.stringify(quote),revision,now,row.id);
+    }
+    return { row: getRefundCase(db,row.id), changed: true };
+  }).immediate();
 }
 
 export function requireRefundOwner(db, id, customerId) {
@@ -141,24 +201,31 @@ export function requireRefundOwner(db, id, customerId) {
   return row;
 }
 
-export function submitRefundBank(db, { id, customerId, bank, account, name, accepted }) {
+export function submitRefundBank(db, { id, customerId, bank, account, name, accepted, revision = 1 }) {
   return db.transaction(() => {
     const row = requireRefundOwner(db, id, customerId);
-    if (row.stage !== 'AWAITING_DETAILS') fail('Đã nhận thông tin. Muốn sửa, hãy liên hệ shop trước khi chuyển tiền.');
+    const review = refundReview(row);
+    if (revision !== review.revision) fail('Bảng tính đã thay đổi. Vui lòng mở lại hồ sơ và đọc phương án mới trước khi xác nhận.');
+    if (row.stage !== 'AWAITING_DETAILS' && !row.pendingQuote) fail('Đã nhận thông tin. Muốn sửa, hãy liên hệ shop trước khi chuyển tiền.');
     if (accepted?.trim().toUpperCase() !== 'ĐỒNG Ý') fail('Cần nhập ĐỒNG Ý để xác nhận bảng tính. Nếu chưa đồng ý, hãy trao đổi với shop.');
     if (!bank || !/^\d{6}$/.test(bank.bin) || !/^[A-Za-z0-9]{1,19}$/.test(account)
       || !/^[\p{L} .'-]{3,80}$/u.test(name)) fail('Thông tin ngân hàng chưa hợp lệ. Không nhập số thẻ, mật khẩu hoặc OTP.');
     const encrypted = encrypt(JSON.stringify({ bankBin: bank.bin, bankName: bank.shortName, account, name }));
     if (!isEncrypted(encrypted)) fail('Chưa thể lưu thông tin an toàn.');
     const now = new Date().toISOString();
-    db.prepare(`UPDATE order_refund_cases SET bank_encrypted=?, stage='READY_TO_PAY', accepted_at=?, updated_at=? WHERE id=?`)
-      .run(encrypted, now, now, row.id);
+    if (review.revision !== row.quote_revision) db.prepare(`UPDATE order_refund_quote_history SET state='SUPERSEDED'
+      WHERE case_id=? AND revision=? AND state='OFFERED'`).run(row.id,row.quote_revision);
+    db.prepare(`UPDATE order_refund_cases SET bank_encrypted=?, stage='READY_TO_PAY', accepted_at=?,
+      accepted_quote_revision=?,quote_json=?,quote_revision=?,pending_quote_json=NULL,pending_quote_revision=NULL,updated_at=? WHERE id=?`)
+      .run(encrypted,now,revision,JSON.stringify(review.quote),revision,now,row.id);
+    db.prepare(`UPDATE order_refund_quote_history SET state='ACCEPTED',accepted_at=? WHERE case_id=? AND revision=?`).run(now,row.id,revision);
     return getRefundCase(db, row.id);
   }).immediate();
 }
 
 export function readRefundBank(row) {
-  if (!row?.active || row.stage !== 'READY_TO_PAY' || !isEncrypted(row.bank_encrypted)) fail('Khách chưa xác nhận hoặc hồ sơ đã đóng.');
+  if (!row?.active || row.stage !== 'READY_TO_PAY' || row.accepted_quote_revision !== row.quote_revision
+    || !isEncrypted(row.bank_encrypted)) fail('Khách chưa xác nhận hoặc hồ sơ đã đóng.');
   const raw = decrypt(row.bank_encrypted);
   if (isEncrypted(raw)) fail('Không giải mã được thông tin nhận tiền.');
   return JSON.parse(raw);

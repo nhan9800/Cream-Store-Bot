@@ -43,7 +43,8 @@ export function recordPaidOrderRefund(db, { orderCode, guildId, actorId, action,
         throw new PaidOrderRefundError('Nhập đúng số VND đã hoàn thực tế, từ 1đ đến số đã nhận.');
       }
       if (refundCase && (refundCase.pending_status_at !== order.status_changed_at
-        || refundCase.stage !== 'READY_TO_PAY' || amount !== JSON.parse(refundCase.quote_json).refund)) {
+        || refundCase.stage !== 'READY_TO_PAY' || amount !== JSON.parse(refundCase.quote_json).refund
+        || (refundCase.quote_revision != null && refundCase.accepted_quote_revision !== refundCase.quote_revision))) {
         throw new PaidOrderRefundError('Hồ sơ Gemini chưa sẵn sàng hoặc số tiền khác bảng tính khách đã xác nhận. Cần đối soát lại trước khi ghi nhận đã hoàn.');
       }
       next = 'REFUNDED';
