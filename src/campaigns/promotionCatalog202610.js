@@ -1,4 +1,3 @@
-import { GEMINI_PRO_CDK_KEY, GEMINI_PRO_CDK_WARRANTY } from '../config/geminiProCdk202611.js';
 // Data-only publication manifest. Never import database/db.js here: importing
 // that module opens SQLite. These public prices contain no customer data.
 // SALE means the owner supplied this campaign price, not an inferred discount.
@@ -106,16 +105,13 @@ export const PROMOTION_CATALOG_ROWS = Object.freeze([
   catalog('creation', 'adobe-creative-cloud-12-months-4000-ai-credits', 'Adobe Creative Cloud · 4.000 AI credits/tháng', 3800000, {
     duration: '1 năm', account: 'Shop cấp tài khoản', warranty: 'Full BH 12 tháng', notes: ['4.000 credits reset mỗi tháng.'],
   }),
-  catalog('creation', GEMINI_PRO_CDK_KEY, 'Gemini Pro · CDK', 190000, {
-    duration: '6 tháng', account: 'Tài khoản chính chủ · Kích hoạt CDK', warranty: GEMINI_PRO_CDK_WARRANTY,
-    notes: ['Đóng hồ sơ Google Payments tại https://payments.google.com/ và rời Google Family trước kích hoạt. Lỗi CDK liên hệ Admin; không bảo hành sau kích hoạt thành công. YouTube Premium Lite có thể có hoặc không, vẫn có thể có quảng cáo.'],
+  catalog('creation', 'gemini-pro-antigravity-3-months-full-warranty', 'Gemini Pro Antigravity', 150000, {
+    duration: '3 tháng', warranty: 'Full BH 3 tháng',
+    notes: ['Đủ model mới trong Antigravity theo xác nhận của shop; nguồn bền, dùng lâu dài.'],
   }),
-  sale('creation', 'sale-gemini-pro-google-one-5tb-12-months', 'Gemini Pro + Google One 5 TB', 120000, {
-    catalogKey: 'gemini-pro-google-one-5tb-12-months-full-warranty', duration: '12 tháng', notes: ['Có thể thêm 5 thành viên. Shop xác nhận điều kiện gói và bảo hành trước khi mua.'],
-  }),
-  catalog('creation', 'gemini-pro-antigravity-24-months', 'Gemini Pro Antigravity', 250000, {
-    duration: '24 tháng', warranty: 'BH 12 tháng',
-    notes: ['Shop xác nhận hỗ trợ Gemini 4 Argon, Claude Opus 5.5 và Claude Sonnet 5.5.'],
+  catalog('creation', 'gemini-pro-antigravity-6-months-full-warranty', 'Gemini Pro Antigravity', 280000, {
+    duration: '6 tháng', warranty: 'Full BH 6 tháng',
+    notes: ['Đủ model mới trong Antigravity theo xác nhận của shop; nguồn bền, dùng lâu dài.'],
   }),
   sale('creation', 'sale-office-365-onedrive-12-months', 'Office 365 + OneDrive 1 TB', 200000, {
     catalogKey: 'office-365-onedrive-12-months', duration: '12 tháng',

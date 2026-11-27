@@ -1,6 +1,6 @@
 import fs from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { GEMINI_PRO_CDK_PRODUCT } from '../src/config/geminiProCdk202611.js';
+import { GEMINI_PRO_ANTIGRAVITY_PRODUCTS } from '../src/config/geminiProAntigravity202611.js';
 import {
   PROMOTION_CATALOG_ROWS,
   PROMOTION_CATALOG_SECTIONS,
@@ -12,7 +12,6 @@ import {
 const ownerPrices = {
   'sale-server-boost-3-months': 280000,
   'sale-netflix-premium-4k-private-1-month': 75000,
-  'sale-gemini-pro-google-one-5tb-12-months': 120000,
   'sale-office-365-onedrive-12-months': 200000,
   'sale-capcut-pro-1-month': 55000,
   'sale-capcut-pro-6-months': 290000,
@@ -25,7 +24,7 @@ const ownerPrices = {
 function seedProducts() {
   const source = fs.readFileSync(new URL('../src/database/db.js', import.meta.url), 'utf8');
   const literal = `${source.split('export const DEFAULT_PRODUCT_CATALOG = ')[1].split('\n];')[0]}\n]`;
-  return Function('GEMINI_PRO_CDK_PRODUCT', `return ${literal}`)(GEMINI_PRO_CDK_PRODUCT);
+  return Function('GEMINI_PRO_ANTIGRAVITY_PRODUCTS', `return ${literal}`)(GEMINI_PRO_ANTIGRAVITY_PRODUCTS);
 }
 
 function keyOf(product) {

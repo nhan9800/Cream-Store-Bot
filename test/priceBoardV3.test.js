@@ -380,7 +380,7 @@ describe('Cenar price board V3', () => {
     expect(() => buildAiCreativePricingAnnouncement(GUILD_ID, products)).toThrow('Thiếu sản phẩm đang mở bán');
   });
 
-  it('keeps the full-warranty Gemini packages distinct from the activation-only CDK offer', () => {
+  it('lists only the full-warranty Gemini Pro Antigravity plans', () => {
     const products = getActiveProducts(GUILD_ID);
     const claudePro = products.find((product) => (
       product.product_key === AI_CREATIVE_PRICING_UPDATE.productKeys.claudePro
@@ -389,24 +389,16 @@ describe('Cenar price board V3', () => {
 
     expect(claudePro?.price).toBe(550000);
     expect(claudePro?.original_price).toBe(0);
-    expect(geminiProducts).toHaveLength(3);
-    expect(geminiProducts.map((product) => [product.product_key, product.price])).toEqual(expect.arrayContaining([
-      [AI_CREATIVE_PRICING_UPDATE.productKeys.gemini12Months, 250000],
-      ['gemini-pro-antigravity-24-months', 250000],
-    ]));
-    const fullWarrantyGemini = geminiProducts.filter((product) => [
-      AI_CREATIVE_PRICING_UPDATE.productKeys.gemini12Months,
-    ].includes(product.product_key));
-    expect(fullWarrantyGemini).toHaveLength(1);
-    expect(fullWarrantyGemini.every((product) => /Full/.test(product.warranty_policy))).toBe(true);
-    const cdk = geminiProducts.find((product) => product.duration_months === 6);
-    expect(cdk.price).toBe(190000);
-    expect(cdk.warranty_policy).toContain('không bảo hành sau kích hoạt');
+    expect(geminiProducts.map((product) => [product.product_key, product.price, product.warranty_policy])).toEqual([
+      ['gemini-pro-antigravity-3-months-full-warranty', 150000, 'Full 3 tháng'],
+      ['gemini-pro-antigravity-6-months-full-warranty', 280000, 'Full 6 tháng'],
+    ]);
 
     const payloadJson = buildPriceBoardPayloads(GUILD_ID, {}, products).map(serialize).join('\n');
     expect(payloadJson).toContain('530.000');
-    expect(payloadJson).toContain('250.000');
-    expect(payloadJson).toContain('Bảo hành 12 tháng');
+    expect(payloadJson).toContain('150.000');
+    expect(payloadJson).toContain('280.000');
+    expect(payloadJson).not.toContain('190.000');
     expect(payloadJson).not.toContain('69.000');
     expect(payloadJson).not.toContain('Bảo hành 4 tháng đầu');
 

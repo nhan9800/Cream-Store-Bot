@@ -1,5 +1,6 @@
 import { config } from '../config.js';
 import { GEMINI_PRO_CDK_DESCRIPTION, GEMINI_PRO_CDK_DESCRIPTION_EN, GEMINI_PRO_CDK_WARRANTY, GEMINI_PRO_CDK_WARRANTY_EN } from '../config/geminiProCdk202611.js';
+import { translateGeminiAntigravityDescription } from '../config/geminiProAntigravity202611.js';
 
 const GROUP_COPY = Object.freeze({
   nitro: ['Discord Nitro', 'Login packages for 1 and 2 months, and a single 12-month activation on your own account.'],
@@ -8,7 +9,7 @@ const GROUP_COPY = Object.freeze({
   decor_no_nitro: ['Discord Profile Decor · Non-Nitro Accounts', 'Packages designed for accounts without an active Nitro subscription.'],
   decor_gift: ['Discord Profile Decor · Gift & Combo', 'Delivered as a gift or combo without requesting your password.'],
   chatgpt: ['ChatGPT Plus & Pro', 'Four one-month subscriptions on your own account. Check the warranty terms for each plan.'],
-  gemini: ['Gemini & Google One', 'The 6-month CDK plan covers successful activation only. The 24-month Antigravity plan has 12 months of warranty.'],
+  gemini: ['Gemini & Google One', '3-month and 6-month Gemini Pro plans with the latest Antigravity models and full warranty for the entire period.'],
   claude: ['Claude Pro', 'One month on your own account, with one month of subscription warranty. Locked accounts are excluded.'],
   adobe: ['Adobe Creative Cloud', 'All Apps, trial duration and device limits are shown per package.'],
   creative_tools: ['CapCut Pro & Microsoft 365', 'Video, productivity and cloud storage tools.'],
@@ -79,6 +80,8 @@ export function translateProductWarranty(value) {
 
 export function translateProductDescription(value) {
   if (value === GEMINI_PRO_CDK_DESCRIPTION) return GEMINI_PRO_CDK_DESCRIPTION_EN;
+  const geminiAntigravityEn = translateGeminiAntigravityDescription(value);
+  if (geminiAntigravityEn) return geminiAntigravityEn;
   return String(value || '')
     .replace(/Claude Pro x5 trên tài khoản chính chủ của khách trong 1 tháng, bảo hành 7 ngày\./g, 'Claude Pro x5 on your own account for 1 month, with 7 days of warranty.')
     .replace(/Thanh toán ban đầu ([\d.]+)đ; shop giữ lại phần API (\d+) USD và hoàn lại cho khách ([\d.]+)đ, chi phí sau hoàn là ([\d.]+)đ\./g,

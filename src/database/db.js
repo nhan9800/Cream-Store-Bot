@@ -1,5 +1,5 @@
 import fs from 'node:fs';
-import { GEMINI_PRO_CDK_PRODUCT } from '../config/geminiProCdk202611.js';
+import { GEMINI_PRO_ANTIGRAVITY_PRODUCTS } from '../config/geminiProAntigravity202611.js';
 import { BOOST_PRODUCT_KEY, BOOST_PRICE_SETTING, parseBoostPrice } from '../config/boostCatalog.js';
 import { CAPCUT_PRODUCT_KEYS, capcutPriceSetting, parseCapcutPrice } from '../config/capcutCatalog.js';
 import path from 'node:path';
@@ -1870,38 +1870,7 @@ export const DEFAULT_PRODUCT_CATALOG = [
     { name: 'Decor Discord Combo Gift - Gói 180k', description: 'Trang trí hồ sơ dạng Combo Gift (bấm nhận ngay). Tiết kiệm tối đa.', price: 180000, duration_months: 1, service_type: 'decor', emoji: '🎁', original_price: 220000 },
 
     // AI & Phần Mềm
-    GEMINI_PRO_CDK_PRODUCT,
-    {
-      product_key: 'gemini-pro-antigravity-24-months',
-      name: 'Gemini Pro 2 Năm (Antigravity · BH 12 Tháng)',
-      description: 'Gói Gemini Pro 24 tháng, bảo hành 12 tháng. Các model shop xác nhận hỗ trợ trong Antigravity gồm Gemini 4 Argon, Claude Opus 5.5 và Claude Sonnet 5.5. Quyền truy cập và hạn mức thực tế phụ thuộc nền tảng.',
-      warranty_policy: 'Bảo hành 12 tháng',
-      price: 250000,
-      duration_months: 24,
-      service_type: 'AI',
-      emoji: 'brand_gemini',
-      original_price: 0,
-      is_featured: 1,
-    },
-    {
-      product_key: 'gemini-pro-google-one-5tb-12-months-full-warranty',
-      name: 'Gemini Pro + 5 TB Google One 12 Tháng (Full BH)',
-      aliases: [
-        'Gemini Advanced & 5 TB Google One (1 Năm - Full BH)',
-        'Gemini Pro + 5TB Google Driver (12 Tháng)',
-        'Gemini Pro + 5TB Google Drive (12 Tháng)',
-      ],
-      description: 'Gemini Pro kèm 5 TB Google One trong 12 tháng theo nguồn triển khai mới, bảo hành full suốt thời gian sử dụng.',
-      warranty_policy: 'Full 12 tháng',
-      price: 250000,
-      ctv_price: 250000,
-      duration_months: 12,
-      service_type: 'AI',
-      emoji: 'brand_gemini',
-      original_price: 0,
-      is_featured: 1,
-      virtual_purchase_count: 0,
-    },
+    ...GEMINI_PRO_ANTIGRAVITY_PRODUCTS,
     { product_key: 'claude-pro-1-month', name: 'Claude Pro Chính Chủ 1 Tháng (Full BH · Trừ Khóa Acc)', aliases: ['Claude Pro 1 Tháng (Full BH)', 'Claude Pro Add Team 1 Tháng (Full BH)'], description: 'CDK Claude Pro 1 tháng trên tài khoản chính chủ iOS. ĐIỀU KIỆN: đăng ký trước 15/09/2026, hoàn tất KYC trước khi nạp, không thuộc Team/Organization đã bị khóa hoặc vô hiệu hóa. RỦI RO: Claude có thể không kích hoạt hoặc mất gói dù Apple đã trừ tiền; nạp CDK không bảo đảm thành công 100%. HOÀN TIỀN: tài khoản đủ điều kiện dùng Apple ID yêu cầu Apple hoàn tiền; shop chỉ hoàn sau khi Apple hoàn tiền thành công và xác minh đã thực nhận. Tài khoản không đủ điều kiện hoặc KYC thất bại không được bảo hành nạp không lên gói; sau khi Apple hoàn tiền thành công shop khấu trừ 7% phí xử lý và hoàn 93%. Shop không ứng trước tiền hoàn. Ví dụ đơn 525.000đ: phí 36.750đ, hoàn 488.250đ. Thời gian và kết quả phụ thuộc Apple.', warranty_policy: 'Bảo hành theo điều khoản CDK iOS · không bảo đảm kích hoạt 100%', price: 550000, duration_months: 1, service_type: 'AI', emoji: 'brand_claude', original_price: 0, activation_method: 'OWN_ACCOUNT', is_featured: 1, virtual_purchase_count: 126 },
     {
       product_key: 'chatgpt-plus-direct-payment-1-month-full-warranty',
@@ -2143,9 +2112,8 @@ export function seedProductCatalog(dbInstance) {
         OR (
           LOWER(REPLACE(name, ' ', '')) LIKE '%gemini%'
           AND COALESCE(product_key, '') NOT IN (
-            'gemini-pro-cdk-6-months-activation-warranty',
-            'gemini-pro-google-one-5tb-12-months-full-warranty',
-            'gemini-pro-antigravity-24-months'
+            'gemini-pro-antigravity-3-months-full-warranty',
+            'gemini-pro-antigravity-6-months-full-warranty'
           )
         )
       )

@@ -9,7 +9,7 @@ vi.mock('../src/services/emojiService.js', () => ({
 }));
 import { installDiscordEmojiBoundary } from '../src/utils/discordEmojiBoundary.js';
 import { withManualAnnouncementWrite } from '../src/utils/manualAnnouncementWrite.js';
-import { GEMINI_PRO_CDK_PRODUCT } from '../src/config/geminiProCdk202611.js';
+import { GEMINI_PRO_ANTIGRAVITY_PRODUCTS } from '../src/config/geminiProAntigravity202611.js';
 import { SHOP_RELAUNCH, buildShopRelaunchPayloads, prepareShopRelaunch, readShopRelaunchProducts } from '../src/campaigns/shopRelaunch20261113.js';
 import { getShopRelaunchPublicationHealth, publishShopRelaunch, shopRelaunchPublicationInternals } from '../src/services/shopRelaunchPublicationService.js';
 
@@ -80,7 +80,7 @@ describe('current-catalog shop relaunch presentation', () => {
   it('builds the full current seed without old sale prices, stock claims or Discord overflow', () => {
     const source = fs.readFileSync(new URL('../src/database/db.js', import.meta.url), 'utf8');
     const literal = `${source.split('export const DEFAULT_PRODUCT_CATALOG = ')[1].split('\n];')[0]}\n]`;
-    const products = Function('GEMINI_PRO_CDK_PRODUCT', `return ${literal}`)(GEMINI_PRO_CDK_PRODUCT)
+    const products = Function('GEMINI_PRO_ANTIGRAVITY_PRODUCTS', `return ${literal}`)(GEMINI_PRO_ANTIGRAVITY_PRODUCTS)
       .map((product, index) => ({ id: index + 1, name: product.name, key: product.product_key || String(index),
         price: product.price, originalPrice: product.original_price || 0, service_type: product.service_type, warranty: product.warranty_policy || '' }));
     const payloads = buildShopRelaunchPayloads({ products, E });
