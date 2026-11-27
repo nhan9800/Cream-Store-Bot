@@ -1,6 +1,7 @@
 import { Client, Events, PermissionFlagsBits, REST, Routes } from 'discord.js';
 import { assertRuntimeConfig, collectPaymentConfigIssues, config } from './config.js';
 import { db, initDatabase } from './database/db.js';
+import { backfillRefundLedger } from './services/refundLedgerService.js';
 import { getClientOptions, loadCommands, registerInteractionHandler } from './events/interactionCreate.js';
 import { startScheduler } from './services/schedulerService.js';
 import { adoptStoreOneReminderRouting } from './services/reminderRoutingService.js';
@@ -64,6 +65,12 @@ export async function buildClient() {
   console.log('[MARKETING-PAUSE]', JSON.stringify(pauseAutomaticMarketing()));
   const adminOrderAgingMigration = resetLegacyWarrantyAgingStateOnce();
   console.log(`[ADMIN-ORDER-AGING-MIGRATION] changed=${adminOrderAgingMigration.changed} skipped=${adminOrderAgingMigration.skipped}`);
+  try {
+    const refundBackfill = backfillRefundLedger(db);
+    console.log(`[REFUND-LEDGER] backfilled=${refundBackfill}`);
+  } catch (error) {
+    console.error('[REFUND-LEDGER] backfill failed:', error.code || error.name);
+  }
   const walletReconciliation = reconcileWalletPaidOrders();
   console.log(`[WALLET-RECONCILIATION] scanned=${walletReconciliation.scanned} repaired=${walletReconciliation.repaired.length}`);
   for (const repaired of walletReconciliation.repaired) {

@@ -71,8 +71,8 @@ export const PROMOTION_CATALOG_ROWS = Object.freeze([
   // 01: Only the active Nitro terms.
   catalog('connection', 'discord-nitro-boost-trial-3-months-first-offer', 'Nitro Boost Trial', 64000, { duration: '3 tháng', notes: ['Tài khoản được tạo trên 1 tháng và chưa từng sử dụng Nitro.'] }),
   catalog('connection', 'discord-nitro-boost-1-thang-login', 'Nitro Boost Login', 90000, { duration: '1 tháng' }),
-  catalog('connection', 'discord-nitro-boost-2-months-login-keep-mail-7-days', 'Nitro Boost Login · Giữ mail 7 ngày', 115000, { duration: '2 tháng' }),
-  catalog('connection', 'discord-nitro-boost-2-months-login-mail-guaranteed', 'Nitro Boost Login · Mail bao sống', 136000, { duration: '2 tháng' }),
+  catalog('connection', 'discord-nitro-boost-2-months-login-keep-mail-7-days', 'Nitro Boost Login · Xong trong 20–30 phút', 115000, { duration: '2 tháng' }),
+  catalog('connection', 'discord-nitro-boost-2-months-renewal-returning', 'Nitro Boost · Gia hạn khách cũ', 100000, { duration: '2 tháng' }),
   catalog('connection', 'discord-nitro-boost-1-nam-login', 'Nitro Boost Login · Chính chủ', 850000, { duration: '12 tháng', notes: ['Kích hoạt trọn 12 tháng một lần, không gia hạn tự động.', 'Có hàng liền; dòng ổn định được shop tiếp tục duy trì.'] }),
   catalog('connection', 'discord-nitro-boost-12-months-auto-renew-2-months', 'Nitro Boost · Gia hạn tự động 2 tháng/lần', 650000, { duration: '12 tháng', notes: ['650.000đ cho toàn bộ 12 tháng, gồm 6 kỳ, mỗi kỳ 2 tháng.', 'Gia hạn tự động theo kỳ; mở ticket để xác nhận tài khoản và cách kích hoạt.'] }),
   sale('connection', 'sale-server-boost-3-months', 'Boost Server · Nâng cấp máy chủ', 280000, {

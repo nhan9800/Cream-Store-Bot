@@ -1,12 +1,17 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({ db: {}, owner: vi.fn(), submit: vi.fn(), preview: vi.fn(), apply: vi.fn(),
-  cases: vi.fn(), offer: vi.fn(), payout: vi.fn(), capability: vi.fn(), getCase: vi.fn(), claim: vi.fn(), finish: vi.fn() }));
+  cases: vi.fn(), offer: vi.fn(), payout: vi.fn(), capability: vi.fn(), getCase: vi.fn(), claim: vi.fn(), finish: vi.fn(),
+  saveDraft: vi.fn(), confirmDraft: vi.fn(), preview2: vi.fn(), submitted: vi.fn(), staffLog: vi.fn() }));
 vi.mock('../src/database/db.js', () => ({ db: mocks.db }));
 vi.mock('../src/services/geminiRefundService.js', async importOriginal => ({ ...(await importOriginal()),
   requireRefundOwner: mocks.owner, submitRefundBank: mocks.submit, previewGeminiRefunds: mocks.preview,
   applyGeminiRefunds: mocks.apply, ensureRefundCases: mocks.cases, getRefundCase: mocks.getCase,
   claimRefundNotice: mocks.claim, finishRefundNotice: mocks.finish }));
-vi.mock('../src/services/refundPresentation.js', () => ({ buildRefundOffer: mocks.offer, buildRefundPayout: mocks.payout }));
+vi.mock('../src/services/refundPresentation.js', () => ({ buildRefundOffer: mocks.offer, buildRefundPayout: mocks.payout,
+  buildRefundPreview: mocks.preview2, buildRefundSubmitted: mocks.submitted }));
+vi.mock('../src/services/refundCaseService.js', async importOriginal => ({ ...(await importOriginal()),
+  saveRefundDraft: mocks.saveDraft, confirmRefundDraft: mocks.confirmDraft }));
+vi.mock('../src/services/staffLogService.js', () => ({ emitStaffLog: mocks.staffLog }));
 vi.mock('../src/services/guildConfigService.js', () => ({ getGuildConfig: () => ({}) }));
 vi.mock('../src/utils/permissions.js', () => ({ assertStaffCapability: mocks.capability }));
 vi.mock('../src/services/notificationService.js', () => ({ updateOrderLogMessage: vi.fn() }));
@@ -22,17 +27,17 @@ const interaction = (extra = {}) => ({ customId: 'refund:bank:test-case', user: 
   ...extra });
 beforeEach(() => { vi.clearAllMocks(); mocks.capability.mockReturnValue(true); mocks.owner.mockReturnValue({ guild_id: 'shop',quote_revision:1,quote:{feeBps:3000,refund:60000} }); mocks.offer.mockReturnValue({ content: 'private offer' }); });
 describe('refund UI privacy and authorization', () => {
-  it('opens a four-field modal only after checking the actual customer', async () => {
+  it('opens a three-field modal only after checking the actual customer', async () => {
     const i = interaction(); await handleRefundInteraction(i);
     expect(mocks.owner).toHaveBeenCalledWith(mocks.db, 'test-case', 'buyer');
-    expect(i.showModal.mock.lastCall[0].toJSON().components).toHaveLength(4);
+    expect(i.showModal.mock.lastCall[0].toJSON().components).toHaveLength(3);
     expect(mocks.submit).not.toHaveBeenCalled();
   });
   it('rejects a forged button and keeps the reply private', async () => {
     mocks.owner.mockImplementationOnce(() => { throw new GeminiRefundError('Không tìm thấy hồ sơ'); });
     const i = interaction(); await handleRefundInteraction(i);
     expect(i.showModal).not.toHaveBeenCalled();
-    expect(i.reply).toHaveBeenCalledWith({ content: 'Không tìm thấy hồ sơ', ephemeral: true });
+    expect(i.reply).toHaveBeenCalledWith({ content: 'Không tìm thấy hồ sơ', flags: 64 });
   });
   it('rejects an old modal before reading bank fields when a newer proposal is pending', async () => {
     mocks.owner.mockReturnValueOnce({quote_revision:1,pending_quote_revision:2,quote:{feeBps:1000,refund:80000},pendingQuote:{feeBps:3000,refund:60000}});
@@ -40,7 +45,7 @@ describe('refund UI privacy and authorization', () => {
     const i=interaction({customId:'refund:submit:test-case:1',isButton:()=>false,isModalSubmit:()=>true,fields:{getTextInputValue}});
     await handleRefundInteraction(i);
     expect(getTextInputValue).not.toHaveBeenCalled(); expect(mocks.submit).not.toHaveBeenCalled();
-    expect(i.reply.mock.lastCall[0]).toMatchObject({ephemeral:true,content:expect.stringContaining('Bảng tính đã cập nhật')});
+    expect(i.reply.mock.lastCall[0]).toMatchObject({flags:64,content:expect.stringContaining('Bảng tính đã cập nhật')});
   });
   it('opens only the current proposal with its exact percentage and amount in acceptance', async () => {
     mocks.owner.mockReturnValueOnce({stage:'READY_TO_PAY',quote_revision:1,pending_quote_revision:2,
@@ -48,7 +53,7 @@ describe('refund UI privacy and authorization', () => {
     const i=interaction({customId:'refund:bank:test-case:2'}); await handleRefundInteraction(i);
     const modal=i.showModal.mock.lastCall[0].toJSON();
     expect(modal.custom_id).toBe('refund:submit:test-case:2');
-    expect(modal.components[3].components[0].label).toBe('Đồng ý 40% & hoàn 50.000đ');
+    expect(modal.title).toBe('Nhận hoàn 50.000 VND');
   });
   it('returns the ready accepted card privately without reopening intake', async () => {
     mocks.owner.mockReturnValueOnce({stage:'READY_TO_PAY',quote_revision:1,quote:{feeBps:1000,refund:80000}});
@@ -56,15 +61,26 @@ describe('refund UI privacy and authorization', () => {
     expect(i.showModal).not.toHaveBeenCalled();
     expect(i.reply.mock.lastCall[0].flags).toBe(32768|64);
   });
-  it('acknowledges a modal privately before storing details, with no channel message', async () => {
-    const fields = { bank: 'MB', account: '00123456789', name: 'NGUYEN VAN A', accept: 'ĐỒNG Ý' };
-    mocks.submit.mockReturnValue({ stage: 'READY_TO_PAY' });
+  it('shows a private preview after the modal and stores nothing final until confirmed', async () => {
+    const fields = { bank: 'MB', account: '00123456789', name: 'NGUYEN VAN A' };
+    mocks.saveDraft.mockReturnValue({ row: { id: 'test-case' }, draft: {}, quote: { refund: 60000 }, revision: 1 });
+    mocks.preview2.mockResolvedValue({ content: 'private preview' });
     const i = interaction({ customId: 'refund:submit:test-case', isButton: () => false, isModalSubmit: () => true,
       fields: { getTextInputValue: id => fields[id] } });
     await handleRefundInteraction(i);
-    expect(i.deferReply).toHaveBeenCalledWith({ ephemeral: true });
-    expect(mocks.submit.mock.lastCall[1]).toMatchObject({ customerId: 'buyer', bank: { bin: '970422' }, account: '00123456789' });
-    expect(i.editReply).toHaveBeenCalledWith({ content: 'private offer' });
+    expect(i.deferReply).toHaveBeenCalledWith({ flags: 64 });
+    expect(mocks.saveDraft.mock.lastCall[1]).toMatchObject({ customerId: 'buyer', bankInput: 'MB', account: '00123456789', revision: 1 });
+    expect(mocks.submit).not.toHaveBeenCalled(); expect(mocks.confirmDraft).not.toHaveBeenCalled();
+    expect(i.editReply).toHaveBeenCalledWith({ content: 'private preview' });
+  });
+  it('confirms the previewed details only from the owner button and replaces the preview', async () => {
+    mocks.confirmDraft.mockReturnValue({ guild_id: 'shop', customer_id: 'buyer', order_code: 'CN_123456', quote: { refund: 60000 } });
+    mocks.submitted.mockReturnValue({ content: 'submitted' });
+    const update = vi.fn();
+    const i = interaction({ customId: 'refund:confirm:test-case:1', update, client: {} });
+    await handleRefundInteraction(i);
+    expect(mocks.confirmDraft).toHaveBeenCalledWith(mocks.db, { id: 'test-case', customerId: 'buyer', revision: 1 });
+    expect(update).toHaveBeenCalledWith({ content: 'submitted', attachments: [], files: [] });
   });
   it('does not expose internal errors, even if an exception contains sensitive input', async () => {
     const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
@@ -92,7 +108,9 @@ describe('refund UI privacy and authorization', () => {
   });
   it('uses the known public bank directory without guessing ambiguous bank names', () => {
     expect(resolveRefundBank('VCB').bin).toBe('970436');
-    expect(resolveRefundBank('not a bank')).toBeUndefined();
+    expect(resolveRefundBank('not a bank')).toBeNull();
+    expect(resolveRefundBank('Vietcombank').bin).toBe('970436');
+    expect(resolveRefundBank('ngân hàng MB').bin).toBe('970422');
   });
   it('stops the whole DM batch on Discord 20026, without further requests or retries', async () => {
     mocks.db.prepare = () => ({ all: () => [{ id: 'a' }, { id: 'b' }] });

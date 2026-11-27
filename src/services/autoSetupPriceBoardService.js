@@ -26,7 +26,7 @@ import { STORE_FORUMS } from '../config/storeForums202611.js';
 import { isCapcutProduct } from '../config/capcutCatalog.js';
 import { listForumPosts, upsertForumPost } from './forumPublicationService.js';
 
-export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.30';
+export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.31';
 const publicationStates = new Map();
 export function getPriceBoardPublicationState(guildId) {
   return publicationStates.get(String(guildId)) || { status: 'not_started' };
@@ -57,7 +57,7 @@ const OFFICIAL_SPOTIFY_PRODUCT_KEYS = new Set([
 export const PRICE_GROUPS = [
   {
     key: 'nitro', titleSlot: 'brand_nitro', title: 'Discord Nitro', accent: 0x5865F2,
-    note: 'Nitro Login 1–2 tháng; chính chủ 12 tháng; gói 12 tháng gia hạn tự động mỗi 2 tháng. Trial 3 tháng dành cho tài khoản đủ điều kiện.',
+    note: 'Nitro Login 2 tháng 115k, xong trong 20–30 phút; khách cũ gia hạn 100k (bot tự kiểm tra đơn Nitro trước đó). Login 1 tháng; chính chủ 12 tháng; gói 12 tháng gia hạn tự động mỗi 2 tháng. Trial 3 tháng dành cho tài khoản đủ điều kiện.',
     match: (p) => p.service_type === 'GAME' && /nitro/i.test(p.name),
   },
   {

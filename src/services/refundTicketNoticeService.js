@@ -84,3 +84,32 @@ export async function refreshRefundTicketNotice(db, { id, guild, guildConfig }) 
   db.prepare('UPDATE order_refund_cases SET ticket_notice_render_hash=? WHERE id=?').run(renderHash,id);
   return 'Đã cập nhật thông báo cũ, không gửi thêm hoặc tag lại.';
 }
+
+/**
+ * Post (or refresh) a standard refund case card in the customer's private ticket.
+ * A re-quote edits the existing card instead of pinging again.
+ */
+export async function publishStandardRefundCase(db, { id, guild, guildConfig }) {
+  const row = getRefundCase(db, id);
+  if (!row?.active || row.guild_id !== guild.id) return { ok: false, message: 'Hồ sơ đã đóng hoặc khác shop.' };
+  if (row.ticket_notice_message_id && row.ticket_notice_channel_id) {
+    const channel = await guild.channels.fetch(row.ticket_notice_channel_id).catch(() => null);
+    const message = channel ? await channel.messages.fetch(row.ticket_notice_message_id).catch(() => null) : null;
+    if (message && message.author.id === guild.client.user.id && await isPrivateRefundTicket(channel, guild, row.customer_id, guildConfig)) {
+      await message.edit({ ...buildRefundOffer(row), content: null, embeds: [] });
+      return { ok: true, message: 'Đã cập nhật thẻ hồ sơ cũ trong ticket (không tag lại).', url: message.url };
+    }
+  }
+  const tickets = db.prepare(`SELECT channel_id FROM tickets WHERE guild_id=? AND customer_id=? AND status='OPEN'
+    AND (related_order_code=? OR channel_id=(SELECT ticket_channel_id FROM orders WHERE order_code=?))
+    ORDER BY id DESC`).all(row.guild_id, row.customer_id, row.order_code, row.order_code);
+  for (const ticket of tickets) {
+    const channel = await guild.channels.fetch(ticket.channel_id).catch(() => null);
+    if (!await isPrivateRefundTicket(channel, guild, row.customer_id, guildConfig)) continue;
+    const sent = await channel.send({ ...buildRefundOffer(row, { mentionCustomer: true }), allowedMentions: { users: [row.customer_id], parse: [] } });
+    db.prepare(`UPDATE order_refund_cases SET ticket_notice_state='SENT', ticket_notice_channel_id=?, ticket_notice_message_id=?, updated_at=? WHERE id=?`)
+      .run(channel.id, sent.id, new Date().toISOString(), id);
+    return { ok: true, message: 'Đã gửi hồ sơ vào ticket riêng của khách.', url: sent.url };
+  }
+  return { ok: false, message: 'Không tìm thấy ticket riêng đang mở của khách cho đơn này. Nhắn khách dùng `/hoan-tien ma_don:' + row.order_code + '`.' };
+}

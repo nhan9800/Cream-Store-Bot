@@ -21,6 +21,8 @@ import { STORE_ONE_GUILD_ID } from '../utils/locale.js';
 import { getBookingInvoiceForOrder, isBookingPayOSReceipt } from './bookingLedgerService.js';
 import { getStoredPayOSReceivedAmount } from '../utils/payosReceipt.js';
 import { PaidOrderRefundError, recordPaidOrderRefund, REFUND_HOLD_MESSAGE } from './paidOrderRefundService.js';
+import { voidRefundLedgerRow } from './refundLedgerService.js';
+import { hasPriorNitroPurchase, isNitroRenewalProduct, NITRO_RENEWAL_NOT_ELIGIBLE } from '../config/nitroPricing202611.js';
 
 function createOrderStmt() {
   return db.prepare(`
@@ -169,6 +171,14 @@ export function createOrder({ guildId, ticketId, ticketChannelId, customerId, pr
                 AND LOWER(TRIM(same_name.name)) = LOWER(TRIM(?))) = 1)
       ORDER BY CASE WHEN COALESCE(pc.duration_months, 0) = COALESCE(?, 0) THEN 0 ELSE 1 END, pc.id
       LIMIT 1`).get(productName, safeDurationMonths, productName, safeDurationMonths)?.id ?? null;
+  }
+
+  // Backstop for every creation path: the returning-customer Nitro price needs a prior Nitro order.
+  if (linkedProductId) {
+    const linked = db.prepare('SELECT product_key FROM product_catalog WHERE id = ?').get(linkedProductId);
+    if (isNitroRenewalProduct(linked) && !hasPriorNitroPurchase(db, customerId)) {
+      throw new OrderPaymentError('NOT_ELIGIBLE', NITRO_RENEWAL_NOT_ELIGIBLE);
+    }
   }
 
   let resultId;
@@ -512,6 +522,9 @@ export function reopenOrderForManager({ orderCode, guildId, actorId, markPaid = 
       paid_at = ?, paid_transaction_id = ?, paid_transaction_content = ?, updated_at = ? WHERE order_code = ?`)
       .run(timestamp, payment.status, payment.amount ?? 0, payment.paidAt ?? null, payment.transactionId ?? null,
         payment.content ?? null, timestamp, orderCode);
+    if (order.status === 'REFUNDED') {
+      voidRefundLedgerRow(db, { orderCode, actorId, reason: 'Quản lý mở lại đơn đã hoàn qua /quanly-don' });
+    }
     recordStatusChange(db, {
       orderCode, previousStatus: order.status, newStatus: 'PROCESSING', actor: actorId,
       reason: 'Quản lý mở lại đơn qua /quanly-don',

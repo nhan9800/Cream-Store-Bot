@@ -19,6 +19,7 @@ import { isApiCreditProduct } from '../config/apiCreditCatalog.js';
 import { isCapcutProduct } from '../config/capcutCatalog.js';
 import { assertCapcutPurchaseQuote } from '../services/capcutPricingService.js';
 import { db } from '../database/db.js';
+import { hasPriorNitroPurchase, isNitroRenewalProduct, NITRO_RENEWAL_NOT_ELIGIBLE } from '../config/nitroPricing202611.js';
 import { createEmojiResolver, withButtonEmoji } from '../utils/emojiHelper.js';
 import { CLAUDE_PRO_PRODUCT_KEY, acceptClaudeProTerms, clearClaudeProTermsAcceptance, claudeProTermsText, hasAcceptedClaudeProTerms, isClaudeProProduct } from '../config/claudeProTerms202611.js';
 import { getGuildConfig } from '../services/guildConfigService.js';
@@ -197,6 +198,11 @@ export async function handleProductPurchaseFlow(interaction, productId, expected
   const guildConfig = getGuildConfig(interaction.guildId);
   if (!guildConfig) {
     await interaction.editReply(`${E('status_warn')} Server chưa setup ticket.`);
+    return;
+  }
+
+  if (isNitroRenewalProduct(product) && !hasPriorNitroPurchase(db, interaction.user.id)) {
+    await interaction.editReply(`${E('status_warn')} ${NITRO_RENEWAL_NOT_ELIGIBLE}`);
     return;
   }
 

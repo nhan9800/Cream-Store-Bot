@@ -220,7 +220,7 @@ export function getRevenueStatsRaw(startDateIso, endDateIso) {
   const params = [];
   let sql = `
     SELECT COUNT(*) AS total_orders, 
-           COALESCE(SUM(CASE WHEN payment_status = 'PAID' THEN total_amount ELSE 0 END), 0) AS total_revenue,
+           COALESCE(SUM(CASE WHEN payment_status = 'PAID' AND status != 'CANCELLED' THEN amount_paid ELSE 0 END), 0) AS total_revenue,
            SUM(CASE WHEN status = 'COMPLETED' THEN 1 ELSE 0 END) AS completed_orders,
            SUM(CASE WHEN payment_status = 'UNPAID' THEN 1 ELSE 0 END) AS unpaid_orders
     FROM orders
