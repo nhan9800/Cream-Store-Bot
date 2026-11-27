@@ -7,6 +7,9 @@ import { previewGeminiRefunds, applyGeminiRefunds, ensureRefundCases, getRefundC
   claimRefundNotice, finishRefundNotice, GeminiRefundError } from '../services/geminiRefundService.js';
 import { buildRefundOffer, buildRefundPayout } from '../services/refundPresentation.js';
 import { updateOrderLogMessage } from '../services/notificationService.js';
+import { sendRefundTicketNotice } from '../services/refundTicketNoticeService.js';
+
+let dmQuarantined = false;
 
 export const data = new SlashCommandBuilder().setName('gemini-refund')
   .setDescription('Đối soát Gemini, mở hồ sơ nhận hoàn và xem QR riêng tư.')
@@ -15,6 +18,7 @@ export const data = new SlashCommandBuilder().setName('gemini-refund')
     { name: 'Xem đối soát trước khi chuyển', value: 'PREVIEW' },
     { name: 'Chuyển các đơn đã đối soát sang chờ hoàn', value: 'APPLY' },
     { name: 'Gửi hồ sơ cho khách (chưa thông báo)', value: 'NOTIFY' },
+    { name: 'Gửi hồ sơ trong ticket riêng (DM bị chặn)', value: 'TICKET_NOTIFY' },
     { name: 'Xem QR của một đơn', value: 'QR' },
     { name: 'Xem tiến độ nhận tài khoản', value: 'STATUS' },
   ))
@@ -56,11 +60,19 @@ export async function execute(interaction) {
     const rows = db.prepare('SELECT id FROM order_refund_cases WHERE guild_id=? ORDER BY created_at').all(interaction.guildId)
       .map(r => getRefundCase(db, r.id)).filter(r => r.active);
     if (action === 'STATUS') {
-      await interaction.editReply(rows.map(r => `**${r.order_code}** · ${r.stage === 'READY_TO_PAY' ? 'Chờ shop chuyển hoàn' : 'Chờ thông tin nhận hoàn'} · ${money(r.quote.refund)} · DM: ${r.notice_state}`).join('\n') || 'Không có hồ sơ đang chờ.'); return;
+      await interaction.editReply(rows.map(r => `**${r.order_code}** · ${r.stage === 'READY_TO_PAY' ? 'Chờ shop chuyển hoàn' : 'Chờ thông tin nhận hoàn'} · ${money(r.quote.refund)} · DM: ${r.notice_state} · Ticket: ${r.ticket_notice_state}`).join('\n') || 'Không có hồ sơ đang chờ.'); return;
+    }
+    if (action === 'TICKET_NOTIFY') {
+      const results = [];
+      for (const row of rows) results.push(`${row.order_code}: ${await sendRefundTicketNotice(db, {
+        id: row.id, guild: interaction.guild, guildConfig: getGuildConfig(interaction.guildId),
+      })}`);
+      await interaction.editReply(results.join('\n') || 'Không có hồ sơ đang chờ.'); return;
     }
     if (action !== 'NOTIFY') throw new GeminiRefundError('Thao tác không hợp lệ.');
     const results = [];
     for (const row of rows) {
+      if (dmQuarantined) { results.push(`${row.order_code}: Discord chặn DM (20026); dùng thao tác gửi trong ticket riêng.`); continue; }
       if (!claimRefundNotice(db, row.id)) { results.push(`${row.order_code}: đã xử lý DM (${row.notice_state})`); continue; }
       try {
         const customer = await interaction.client.users.fetch(row.customer_id);
@@ -68,8 +80,9 @@ export async function execute(interaction) {
         finishRefundNotice(db, row.id, dm.id);
         results.push(`${row.order_code}: đã gửi hồ sơ`);
       } catch (error) {
-        finishRefundNotice(db, row.id, null, Number(error.code) === 50007);
-        results.push(`${row.order_code}: ${Number(error.code) === 50007 ? 'khách khóa DM' : 'chưa xác nhận gửi được'}; khách dùng /hoan-tien ma_don`);
+        dmQuarantined ||= Number(error.code) === 20026;
+        finishRefundNotice(db, row.id, null, [50007,20026].includes(Number(error.code)));
+        results.push(`${row.order_code}: ${dmQuarantined ? 'Discord chặn DM (20026)' : Number(error.code) === 50007 ? 'khách khóa DM' : 'chưa xác nhận gửi được'}; dùng ticket riêng hoặc /hoan-tien ma_don`);
       }
     }
     await interaction.editReply(results.join('\n') || 'Không có hồ sơ đang chờ.');

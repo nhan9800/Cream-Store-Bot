@@ -1,10 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 const mocks = vi.hoisted(() => ({ db: {}, owner: vi.fn(), submit: vi.fn(), preview: vi.fn(), apply: vi.fn(),
-  cases: vi.fn(), offer: vi.fn(), payout: vi.fn(), capability: vi.fn() }));
+  cases: vi.fn(), offer: vi.fn(), payout: vi.fn(), capability: vi.fn(), getCase: vi.fn(), claim: vi.fn(), finish: vi.fn() }));
 vi.mock('../src/database/db.js', () => ({ db: mocks.db }));
 vi.mock('../src/services/geminiRefundService.js', async importOriginal => ({ ...(await importOriginal()),
   requireRefundOwner: mocks.owner, submitRefundBank: mocks.submit, previewGeminiRefunds: mocks.preview,
-  applyGeminiRefunds: mocks.apply, ensureRefundCases: mocks.cases }));
+  applyGeminiRefunds: mocks.apply, ensureRefundCases: mocks.cases, getRefundCase: mocks.getCase,
+  claimRefundNotice: mocks.claim, finishRefundNotice: mocks.finish }));
 vi.mock('../src/services/refundPresentation.js', () => ({ buildRefundOffer: mocks.offer, buildRefundPayout: mocks.payout }));
 vi.mock('../src/services/guildConfigService.js', () => ({ getGuildConfig: () => ({}) }));
 vi.mock('../src/utils/permissions.js', () => ({ assertStaffCapability: mocks.capability }));
@@ -65,5 +66,17 @@ describe('refund UI privacy and authorization', () => {
   it('uses the known public bank directory without guessing ambiguous bank names', () => {
     expect(resolveRefundBank('VCB').bin).toBe('970436');
     expect(resolveRefundBank('not a bank')).toBeUndefined();
+  });
+  it('stops the whole DM batch on Discord 20026, without further requests or retries', async () => {
+    mocks.db.prepare = () => ({ all: () => [{ id: 'a' }, { id: 'b' }] });
+    mocks.getCase.mockImplementation((_db, id) => ({ id, order_code: `CN_${id}`, customer_id: id, active: true, notice_state: 'UNSENT' }));
+    mocks.claim.mockReturnValue(true);
+    const fetch = vi.fn().mockRejectedValue(Object.assign(new Error('restricted'), { code: 20026 }));
+    const i = interaction({ client: { users: { fetch } }, options: { getString: () => 'NOTIFY' } });
+    await manager(i);
+    expect(fetch).toHaveBeenCalledTimes(1);
+    expect(mocks.finish).toHaveBeenCalledWith(mocks.db, 'a', null, true);
+    await manager(i);
+    expect(fetch).toHaveBeenCalledTimes(1);
   });
 });
