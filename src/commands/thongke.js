@@ -2,6 +2,8 @@ import { createEmojiResolver } from '../utils/emojiHelper.js';
 import { buildLegacyFeatureCard } from '../utils/featureCard.js';
 import { SlashCommandBuilder, PermissionFlagsBits, EmbedBuilder } from 'discord.js';
 import { getRevenueStatsRaw } from '../services/v11DbHelpers.js';
+import { db } from '../database/db.js';
+import { getRevenueSummary } from '../services/refundLedgerService.js';
 
 export const data = new SlashCommandBuilder()
   .setName('thongke')
@@ -46,6 +48,7 @@ export async function execute(interaction) {
     }
 
     const stats = getRevenueStatsRaw(startDateIso, endDateIso);
+    const revenue = getRevenueSummary(db, { from: startDateIso, to: endDateIso });
 
     const embed = new EmbedBuilder()
       .setTitle(`${E('icon_chart')} Báo Cáo Doanh Thu & Đơn Hàng`)
@@ -60,7 +63,10 @@ export async function execute(interaction) {
     const formatter = new Intl.NumberFormat('vi-VN', { style: 'currency', currency: 'VND' });
 
     embed.addFields(
-      { name: `${E('payment_money')} Tổng Doanh Thu`, value: `**${formatter.format(stats.total_revenue || 0)}**`, inline: false },
+      { name: `${E('payment_money')} Doanh Thu Thực Nhận`, value: `**${formatter.format(revenue.net)}**`, inline: false },
+      { name: 'Doanh thu gộp', value: formatter.format(revenue.gross), inline: true },
+      { name: 'Đã hoàn tiền', value: `${formatter.format(revenue.refunded)} · ${revenue.refundCount} đơn`, inline: true },
+      { name: 'Giữ lại từ đơn hoàn', value: formatter.format(revenue.retainedFromRefunds), inline: true },
       { name: `${E('order_product')} Tổng Đơn Hàng`, value: `${stats.total_orders || 0} đơn`, inline: true },
       { name: `${E('status_check')} Đã Hoàn Thành`, value: `${stats.completed_orders || 0} đơn`, inline: true },
       { name: `${E('order_pending')} Chưa Thanh Toán`, value: `${stats.unpaid_orders || 0} đơn`, inline: true }

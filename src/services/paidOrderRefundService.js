@@ -1,5 +1,6 @@
 import { getBookingInvoiceForOrder } from './bookingLedgerService.js';
 import { ensureStatusHistoryTable, normalizeStatus, recordStatusChange } from './orderStateMachine.js';
+import { insertRefundLedgerRow, RefundLedgerError } from './refundLedgerService.js';
 
 const REVIEWABLE = new Set(['PENDING_PAYMENT', 'PAYMENT_PROCESSING', 'PAID', 'PROCESSING',
   'WAITING_STAFF', 'DELIVERING', 'COMPLETED', 'WARRANTY', 'WARRANTY_OPEN', 'CANCELLED', 'FAILED']);
@@ -8,7 +9,8 @@ export const REFUND_HOLD_MESSAGE = 'Đơn đang chờ hoàn tiền. Hãy xử l�
 
 export class PaidOrderRefundError extends Error {}
 
-export function recordPaidOrderRefund(db, { orderCode, guildId, actorId, action, amount, reason }) {
+export function recordPaidOrderRefund(db, { orderCode, guildId, actorId, action, amount, reason,
+  reasonCode = null, feePercent = null, transferReference = null }) {
   if (!['REFUND_PENDING', 'REFUNDED', 'WITHDRAW_REFUND'].includes(action)) {
     throw new PaidOrderRefundError('Hành động hoàn tiền không hợp lệ.');
   }
@@ -48,7 +50,8 @@ export function recordPaidOrderRefund(db, { orderCode, guildId, actorId, action,
         throw new PaidOrderRefundError('Hồ sơ Gemini chưa sẵn sàng hoặc số tiền khác bảng tính khách đã xác nhận. Cần đối soát lại trước khi ghi nhận đã hoàn.');
       }
       next = 'REFUNDED';
-      metadata = { amount, currency: 'VND' };
+      metadata = { amount, currency: 'VND', ...(reasonCode ? { reasonCode } : {}),
+        ...(feePercent != null ? { feePercent } : {}), ...(transferReference ? { transferReference } : {}) };
     } else {
       ensureStatusHistoryTable(db);
       const request = db.prepare(`SELECT old_status FROM order_status_history
@@ -67,6 +70,16 @@ export function recordPaidOrderRefund(db, { orderCode, guildId, actorId, action,
     };
     recordStatusChange(db, { orderCode, previousStatus: status, newStatus: next, actor: actorId,
       reason: reason ? `${reasonByAction[action]} · ${reason}` : reasonByAction[action], metadata });
+    if (next === 'REFUNDED') {
+      try {
+        insertRefundLedgerRow(db, { order: { ...order, status: next }, amount, actorId, refundedAt: now,
+          reasonCode, feePercent, transferReference, note: reason || null,
+          caseQuote: refundCase ? JSON.parse(refundCase.quote_json) : null });
+      } catch (error) {
+        if (error instanceof RefundLedgerError) throw new PaidOrderRefundError(error.message);
+        throw error;
+      }
+    }
     if (refundCase && action !== 'REFUND_PENDING') {
       db.prepare('UPDATE order_refund_cases SET stage=?,updated_at=? WHERE id=?')
         .run(action === 'REFUNDED' ? 'PAID' : 'INVALIDATED', now, refundCase.id);

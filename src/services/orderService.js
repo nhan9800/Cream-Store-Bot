@@ -21,6 +21,7 @@ import { STORE_ONE_GUILD_ID } from '../utils/locale.js';
 import { getBookingInvoiceForOrder, isBookingPayOSReceipt } from './bookingLedgerService.js';
 import { getStoredPayOSReceivedAmount } from '../utils/payosReceipt.js';
 import { PaidOrderRefundError, recordPaidOrderRefund, REFUND_HOLD_MESSAGE } from './paidOrderRefundService.js';
+import { voidRefundLedgerRow } from './refundLedgerService.js';
 
 function createOrderStmt() {
   return db.prepare(`
@@ -512,6 +513,9 @@ export function reopenOrderForManager({ orderCode, guildId, actorId, markPaid = 
       paid_at = ?, paid_transaction_id = ?, paid_transaction_content = ?, updated_at = ? WHERE order_code = ?`)
       .run(timestamp, payment.status, payment.amount ?? 0, payment.paidAt ?? null, payment.transactionId ?? null,
         payment.content ?? null, timestamp, orderCode);
+    if (order.status === 'REFUNDED') {
+      voidRefundLedgerRow(db, { orderCode, actorId, reason: 'Quản lý mở lại đơn đã hoàn qua /quanly-don' });
+    }
     recordStatusChange(db, {
       orderCode, previousStatus: order.status, newStatus: 'PROCESSING', actor: actorId,
       reason: 'Quản lý mở lại đơn qua /quanly-don',

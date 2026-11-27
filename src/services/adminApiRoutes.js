@@ -79,6 +79,10 @@ import {
   resendYoutubeWarrantyClaim,
   syncYoutubeWarrantyClaims,
 } from './youtubeWarrantyClaimService.js';
+import {
+  getActiveRefund, getDailyNetRevenue, getRefundHistory, getRefundSummary, getRevenueSummary, listRefunds,
+  REFUND_REASONS, MAX_REFUND_FEE_PERCENT, RefundLedgerError,
+} from './refundLedgerService.js';
 
 function catalogKey(value) {
   return String(value || '')
@@ -353,7 +357,7 @@ export function registerAdminRoutes(app) {
   app.get('/api/bot/admin/stats', requireAdminRole, (req, res) => {
     try {
       const totalOrdersRow = db.prepare('SELECT COUNT(*) as total FROM orders').get();
-      const revenueRow = db.prepare("SELECT COALESCE(SUM(amount_paid), 0) AS total FROM orders WHERE payment_status = 'PAID' AND status != 'CANCELLED'").get();
+      const revenueSummary = getRevenueSummary(db);
       const usersRow = db.prepare('SELECT COUNT(*) as total FROM web_users').get();
       
       const botStatus = {
@@ -366,7 +370,11 @@ export function registerAdminRoutes(app) {
         ok: true,
         data: {
           totalOrders: totalOrdersRow.total,
-          revenue: revenueRow.total,
+          revenue: revenueSummary.net,
+          grossRevenue: revenueSummary.gross,
+          refundedTotal: revenueSummary.refunded,
+          refundCount: revenueSummary.refundCount,
+          retainedFromRefunds: revenueSummary.retainedFromRefunds,
           totalUsers: usersRow.total,
           botStatus
         }
@@ -379,15 +387,8 @@ export function registerAdminRoutes(app) {
   // ==== 1.1 REVENUE CHART ====
   app.get('/api/bot/admin/revenue-chart', requireAdminRole, (req, res) => {
     try {
-      const daily = db.prepare(`
-        SELECT date(created_at) AS day, COALESCE(SUM(amount_paid), 0) AS total
-        FROM orders
-        WHERE payment_status = 'PAID'
-          AND status != 'CANCELLED'
-          AND created_at >= datetime('now', '-30 days')
-        GROUP BY date(created_at)
-        ORDER BY day ASC
-      `).all();
+      // Net per day: received on that day's orders minus refunds paid out that day.
+      const daily = getDailyNetRevenue(db, { days: 30 });
 
       const todayHourly = db.prepare(`
         SELECT strftime('%H', created_at) AS hour, COALESCE(SUM(amount_paid), 0) AS total
@@ -406,6 +407,61 @@ export function registerAdminRoutes(app) {
           todayHourly
         }
       });
+    } catch (e) {
+      console.error('[ADMIN]', e); res.status(500).json({ ok: false, error: 'Lỗi máy chủ nội bộ.' });
+    }
+  });
+
+  // ==== 1.2 REFUND LEDGER (read-only; refunds are recorded in Discord) ====
+  const refundDate = (value) => {
+    const text = String(value || '').trim();
+    return /^d{4}-d{2}-d{2}(T[d:.]+Z?)?$/.test(text) ? text : null;
+  };
+  const refundFilters = (query) => ({
+    from: refundDate(query.from),
+    to: refundDate(query.to) && /^d{4}-d{2}-d{2}$/.test(String(query.to)) ? `${query.to}T23:59:59.999Z` : refundDate(query.to),
+  });
+  app.get('/api/bot/admin/refunds', requireAdminRole, (req, res) => {
+    try {
+      const range = refundFilters(req.query);
+      const reasonCode = REFUND_REASONS[String(req.query.reason || '').toUpperCase()] ? String(req.query.reason).toUpperCase() : null;
+      const { total, rows } = listRefunds(db, {
+        ...range, reasonCode, search: req.query.q ? String(req.query.q) : null,
+        needsReview: req.query.needsReview === '1', includeVoided: req.query.includeVoided === '1',
+        limit: req.query.limit, offset: req.query.offset,
+      });
+      res.json({ ok: true, data: {
+        total, rows,
+        summary: getRefundSummary(db, range),
+        revenue: getRevenueSummary(db, range),
+        reasons: Object.entries(REFUND_REASONS).map(([code, reason]) => ({ code, ...reason })),
+        maxFeePercent: MAX_REFUND_FEE_PERCENT,
+      } });
+    } catch (e) {
+      if (e instanceof RefundLedgerError) return errorResponse(res, 400, e.message);
+      console.error('[ADMIN]', e); res.status(500).json({ ok: false, error: 'Lỗi máy chủ nội bộ.' });
+    }
+  });
+
+  app.get('/api/bot/admin/refunds/:code', requireAdminRole, (req, res) => {
+    try {
+      const code = String(req.params.code || '').trim().toUpperCase();
+      const order = getOrderByCode(code);
+      if (!order) return errorResponse(res, 404, 'Không tìm thấy đơn.');
+      const history = db.prepare(`SELECT old_status, new_status, actor, reason, metadata, created_at
+        FROM order_status_history WHERE order_code = ? ORDER BY id ASC`).all(code);
+      res.json({ ok: true, data: {
+        order: {
+          order_code: order.order_code, product_name: order.product_name, customer_id: order.customer_id,
+          status: order.status, payment_status: order.payment_status, total_amount: order.total_amount,
+          amount_paid: order.amount_paid, paid_at: order.paid_at, paid_transaction_id: order.paid_transaction_id,
+          created_at: order.created_at, completed_at: order.completed_at, expiry_at: order.expiry_at,
+          duration_months: order.duration_months,
+        },
+        refund: getActiveRefund(db, code),
+        ledger: getRefundHistory(db, code),
+        history,
+      } });
     } catch (e) {
       console.error('[ADMIN]', e); res.status(500).json({ ok: false, error: 'Lỗi máy chủ nội bộ.' });
     }
@@ -663,6 +719,9 @@ export function registerAdminRoutes(app) {
     try {
       const status = normalizeStatus(req.body.status);
       const code = String(req.params.code || '').trim().toUpperCase();
+      if (status === 'REFUNDED') {
+        return errorResponse(res, 409, 'Ghi nhận hoàn tiền bằng lệnh /hoantien ghi-nhan trên Discord để lưu số tiền, phí và lý do vào sổ hoàn tiền.');
+      }
       const current = getOrderByCode(code);
       const client = req.app.locals.discordClient;
       const actorId = String(req.header('x-discord-id') || client?.user?.id || 'SYSTEM');

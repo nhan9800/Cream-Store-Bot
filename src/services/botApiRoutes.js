@@ -91,6 +91,7 @@ import { getShopRelaunchReleaseHealth } from './shopRelaunchReleaseService.js';
 import { getCompactSaleReleaseHealth } from './compactSaleReleaseService.js';
 import { getDiscordRateLimitHealth } from './discordRateLimitHealthService.js';
 import { getOAuthRequestGuardHealth } from './oauthBackupRoutes.js';
+import { getRefundSummary, getRevenueSummary } from './refundLedgerService.js';
 
 let storeInviteCache = { url: '', expiresAt: 0 };
 const websiteSupportProvisioning = new Map();
@@ -785,7 +786,7 @@ export function registerBotApiRoutes(app) {
                 pending_orders: db.prepare("SELECT COUNT(*) as c FROM orders WHERE status IN ('PENDING_PAYMENT', 'PROCESSING')").get()?.c ?? 0,
                 cancelled_orders: db.prepare("SELECT COUNT(*) as c FROM orders WHERE status = 'CANCELLED'").get()?.c ?? 0,
                 // Doanh thu: chỉ tính đơn đã PAID + không bị hủy
-                total_revenue: db.prepare("SELECT COALESCE(SUM(amount_paid), 0) as s FROM orders WHERE payment_status = 'PAID' AND status != 'CANCELLED'").get()?.s ?? 0,
+                total_revenue: getRevenueSummary(db).net,
                 total_customers: db.prepare("SELECT COUNT(DISTINCT customer_id) as c FROM customer_profiles").get()?.c ?? 0,
                 total_feedbacks: db.prepare("SELECT COUNT(*) as c FROM feedbacks WHERE is_visible = 1").get()?.c ?? 0,
                 avg_rating: db.prepare("SELECT ROUND(AVG(stars), 2) as r FROM feedbacks WHERE is_visible = 1").get()?.r ?? null,
@@ -793,12 +794,15 @@ export function registerBotApiRoutes(app) {
                     SELECT COUNT(*) as c FROM orders
                     WHERE date(created_at) = date('now', 'localtime')
                 `).get()?.c ?? 0,
-                today_revenue: db.prepare(`
+                today_revenue: (db.prepare(`
                     SELECT COALESCE(SUM(amount_paid), 0) as s FROM orders
                     WHERE payment_status = 'PAID'
                       AND status != 'CANCELLED'
                       AND date(paid_at) = date('now', 'localtime')
-                `).get()?.s ?? 0,
+                `).get()?.s ?? 0) - (getRefundSummary(db).count ? db.prepare(`
+                    SELECT COALESCE(SUM(refund_amount), 0) as s FROM order_refunds
+                    WHERE voided_at IS NULL AND date(refunded_at, 'localtime') = date('now', 'localtime')
+                `).get()?.s ?? 0 : 0),
             };
             return stats;
         });

@@ -2,6 +2,7 @@ import { db } from '../database/db.js';
 import { listFlags } from './blacklistService.js';
 import { getRecentStaffLogs } from './staffLogService.js';
 import { getStaffKpis } from './orderService.js';
+import { getRefundSummary } from './refundLedgerService.js';
 
 function summaryStmt() {
   return db.prepare(`
@@ -34,6 +35,10 @@ function topProductsStmt() {
 
 export function getDashboardData(guildId) {
   const summary = summaryStmt().get(guildId) ?? {};
+  const refunds = getRefundSummary(db, { guildId });
+  summary.revenue_gross = summary.revenue_paid ?? 0;
+  summary.revenue_refunded = refunds.refunded;
+  summary.revenue_paid = (summary.revenue_paid ?? 0) - refunds.refunded;
   summary.blacklisted = listFlags(guildId, 100).filter((item) => Number(item.is_blacklisted) === 1).length;
   return {
     summary,
