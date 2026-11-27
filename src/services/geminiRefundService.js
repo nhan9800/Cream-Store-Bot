@@ -21,6 +21,11 @@ export function ensureRefundCases(db) {
     bank_encrypted TEXT, accepted_at TEXT, notice_state TEXT NOT NULL DEFAULT 'UNSENT',
     notice_message_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL
   )`);
+  const columns = new Set(db.prepare('PRAGMA table_info(order_refund_cases)').all().map(c => c.name));
+  for (const [name, type] of [['ticket_notice_state', "TEXT NOT NULL DEFAULT 'UNSENT'"],
+    ['ticket_notice_channel_id', 'TEXT'], ['ticket_notice_message_id', 'TEXT']]) {
+    if (!columns.has(name)) db.exec(`ALTER TABLE order_refund_cases ADD COLUMN ${name} ${type}`);
+  }
 }
 
 /** Fixed, auditable quote. Warranty downtime is never billed as service. */
