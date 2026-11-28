@@ -14,7 +14,7 @@ export const NITRO_2M_PRODUCT = Object.freeze({
   name: 'Discord Nitro Boost 2 Tháng (Login · Xong Trong 20–30 Phút)',
   aliases: ['Discord Nitro Boost 2 Tháng (Login · Giữ Mail 7 Ngày)', 'Discord Nitro Boost 2 Tháng (Login)'],
   description: 'Nitro Boost Login 2 tháng. Shop hoàn thành đơn trong 20–30 phút sau khi nhận đơn. '
-    + 'Đăng nhập ngay khi nhận và giữ mail tối thiểu 7 ngày để được hỗ trợ bảo hành.',
+    + 'Đăng nhập ngay khi nhận, bảo mật mail và giữ mail shop cấp suốt thời gian sử dụng để được bảo hành và gia hạn.',
   price: NITRO_2M_PRICE,
   ctv_price: 95000,
   duration_months: 2,
