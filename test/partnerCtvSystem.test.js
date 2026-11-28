@@ -191,9 +191,9 @@ describe('Partner and CTV system', () => {
       expect(text).toContain('795.000 VND');
       expect(text).toContain('Chính chủ, kích hoạt một lần');
       expect(text).toContain('Boost Server 3 Tháng');
-      expect(text).toContain('Gemini Pro Antigravity 3 Tháng · Full bảo hành');
-      expect(text).toContain('Gemini Pro Antigravity 6 Tháng · Full bảo hành');
-      expect(text).not.toMatch(/Gemini Pro.*(24 Tháng|5 TB|CDK)/);
+      expect(text).toContain('Gemini Pro Antigravity 3 Tháng + 5 TB Google One · Full bảo hành');
+      expect(text).toContain('Gemini Pro Antigravity 6 Tháng + 5 TB Google One · Full bảo hành');
+      expect(text).not.toMatch(/Gemini Pro.*(24 Tháng|12 Tháng|18 Tháng|CDK)/);
       expect(text).toContain('YouTube Premium · Ổn định cao');
       expect(text).toContain('dòng YouTube duy nhất đang mở bán');
       expect(text).toContain('Dòng gia hạn/đổi Family mỗi tháng đã dừng bán');
