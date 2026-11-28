@@ -1,6 +1,7 @@
 const COMMAND_NAMES = Object.freeze({
   baohanh: 'warranty',
   'chuyen-server': 'migrate-server',
+  'chuyen-ticket': 'move-ticket',
   congno: 'customer-credit',
   'dac-quyen': 'benefits',
   dsbaohanh: 'warranty-list',

@@ -562,3 +562,31 @@ export async function openWarrantyTicket({ guild, customerId, actorId, orderCode
 export function getOrderTicketFromChannel(channelId) {
   return getTicketByChannelId(channelId);
 }
+
+/**
+ * Turn an existing open ticket into the warranty ticket of `order` (used by /chuyen-ticket when a
+ * customer opened a generic ticket for a warranty case). Mirrors the side effects of
+ * openWarrantyTicket without creating a channel: order → WARRANTY_OPEN, warranty panel in the
+ * ticket, warranty log, hub sync and the YouTube claim form.
+ */
+export async function attachWarrantyToTicket({ guild, guildConfig, order, ticket, channel, actorId }) {
+  const formData = normalizeWarrantyFormData(order, {});
+  const updatedOrder = order.status === 'COMPLETED' ? setOrderStatus(order.order_code, 'WARRANTY_OPEN') : null;
+  if (updatedOrder) await updateOrderLogMessage(guild, updatedOrder).catch(() => null);
+  const current = updatedOrder ?? order;
+  await channel.send(buildWarrantyTicketOpenedV2({ order: current, ticket, channel, formData, guildId: guild.id })).catch(() => null);
+  getCenarHub()?.openWarranty(order.order_code).catch(e => console.error('[HUB] Lỗi đồng bộ bảo hành:', e.message));
+  if (guildConfig?.warranty_log_channel_id) {
+    const logChannel = await guild.channels.fetch(guildConfig.warranty_log_channel_id).catch(() => null);
+    if (logChannel?.isTextBased()) {
+      await logChannel.send(buildWarrantyLogV2({ order: current, ticket, channel, formData, actorId, guildId: guild.id })).catch(() => null);
+    }
+  }
+  try {
+    const { claim } = ensureYoutubeWarrantyClaim({ order: current, ticket });
+    await publishYoutubeWarrantyClaim(guild.client, claim);
+  } catch (error) {
+    if (error?.code !== 'NOT_YOUTUBE') console.error(`[YOUTUBE-WARRANTY] Không thể tạo form cho ${order.order_code}:`, error);
+  }
+  return current;
+}
