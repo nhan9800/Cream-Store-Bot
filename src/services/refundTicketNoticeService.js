@@ -1,6 +1,6 @@
 import { ChannelType, PermissionFlagsBits as P } from 'discord.js';
 import { getRefundCase } from './geminiRefundService.js';
-import { buildRefundOffer } from './refundPresentation.js';
+import { buildRefundOffer, buildRefundOfferReplaced } from './refundPresentation.js';
 import { isStaffMember } from '../utils/permissions.js';
 import { isGemini18MonthRefundNotice } from '../config/geminiRefundNoticeScope.js';
 import { createHash } from 'node:crypto';
@@ -95,6 +95,14 @@ export async function publishStandardRefundCase(db, { id, guild, guildConfig }) 
   if (row.ticket_notice_message_id && row.ticket_notice_channel_id) {
     const channel = await guild.channels.fetch(row.ticket_notice_channel_id).catch(() => null);
     const message = channel ? await channel.messages.fetch(row.ticket_notice_message_id).catch(() => null) : null;
+    const reoffer = row.quote?.reoffer;
+    if (reoffer && message && message.author.id === guild.client.user.id && await isPrivateRefundTicket(channel, guild, row.customer_id, guildConfig)) {
+      // A withdrawn quote gets a fresh card that tags the customer; the old card loses its buttons.
+      const sent = await channel.send({ ...buildRefundOffer(row, { mentionCustomer: true }), allowedMentions: { users: [row.customer_id], parse: [] } });
+      await message.edit({ ...buildRefundOfferReplaced(row, { ...reoffer, url: sent.url }), content: null, embeds: [] }).catch(() => null);
+      db.prepare('UPDATE order_refund_cases SET ticket_notice_message_id=?, updated_at=? WHERE id=?').run(sent.id, new Date().toISOString(), id);
+      return { ok: true, message: 'Đã gửi bảng tính mới vào ticket, tag khách và tắt nút của bảng cũ.', url: sent.url };
+    }
     if (message && message.author.id === guild.client.user.id && await isPrivateRefundTicket(channel, guild, row.customer_id, guildConfig)) {
       await message.edit({ ...buildRefundOffer(row), content: null, embeds: [] });
       return { ok: true, message: 'Đã cập nhật thẻ hồ sơ cũ trong ticket (không tag lại).', url: message.url };

@@ -26,7 +26,7 @@ import { STORE_FORUMS } from '../config/storeForums202611.js';
 import { isCapcutProduct } from '../config/capcutCatalog.js';
 import { listForumPosts, upsertForumPost } from './forumPublicationService.js';
 
-export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.31';
+export const PRICE_BOARD_VERSION = 'CENAR-CATALOG-V3.32';
 const publicationStates = new Map();
 export function getPriceBoardPublicationState(guildId) {
   return publicationStates.get(String(guildId)) || { status: 'not_started' };
@@ -87,7 +87,7 @@ export const PRICE_GROUPS = [
   },
   {
     key: 'gemini', titleSlot: 'brand_gemini', title: 'Gemini & Google One', accent: 0x4285F4,
-    note: 'Gemini Pro 3 tháng và 6 tháng, đủ model mới trong Antigravity, bảo hành full suốt thời gian sử dụng.',
+    note: 'Gemini Pro 3 tháng và 6 tháng kèm 5 TB Google One, đủ model mới trong Antigravity, bảo hành full suốt thời gian sử dụng.',
     match: (p) => p.service_type === 'AI' && /gemini/i.test(p.name),
   },
   {
