@@ -9,7 +9,7 @@ const GROUP_COPY = Object.freeze({
   decor_no_nitro: ['Discord Profile Decor · Non-Nitro Accounts', 'Packages designed for accounts without an active Nitro subscription.'],
   decor_gift: ['Discord Profile Decor · Gift & Combo', 'Delivered as a gift or combo without requesting your password.'],
   chatgpt: ['ChatGPT Plus & Pro', 'Four one-month subscriptions on your own account. Check the warranty terms for each plan.'],
-  gemini: ['Gemini & Google One', '3-month and 6-month Gemini Pro plans with the latest Antigravity models and full warranty for the entire period.'],
+  gemini: ['Gemini & Google One', '3-month and 6-month Gemini Pro plans with 5 TB of Google One storage, the latest Antigravity models and full warranty for the entire period.'],
   claude: ['Claude Pro', 'One month on your own account, with one month of subscription warranty. Locked accounts are excluded.'],
   adobe: ['Adobe Creative Cloud', 'All Apps, trial duration and device limits are shown per package.'],
   creative_tools: ['CapCut Pro & Microsoft 365', 'Video, productivity and cloud storage tools.'],
