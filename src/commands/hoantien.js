@@ -8,9 +8,9 @@ import { PaidOrderRefundError } from '../services/paidOrderRefundService.js';
 import { updateOrderLogMessage } from '../services/notificationService.js';
 import { emitStaffLog } from '../services/staffLogService.js';
 import {
-  getActiveRefund, getRefundSummary, getRevenueSummary, MAX_REFUND_FEE_PERCENT, previewOrderRefund, REFUND_REASONS, RefundLedgerError,
+  getActiveRefund, getRefundSummary, getRevenueSummary, MAX_REFUND_FEE_PERCENT, MAX_REFUND_OTHER_ITEMS, previewOrderRefund, REFUND_REASONS, RefundLedgerError,
 } from '../services/refundLedgerService.js';
-import { getRefundCase } from '../services/geminiRefundService.js';
+import { getRefundCase, refundReview } from '../services/geminiRefundService.js';
 import { openStandardRefundCase } from '../services/refundCaseService.js';
 import { buildRefundPayout } from '../services/refundPresentation.js';
 import { publishStandardRefundCase } from '../services/refundTicketNoticeService.js';
@@ -26,17 +26,34 @@ const reasonOption = (required) => (option) => option.setName('ly_do').setDescri
 const feeOption = (option) => option.setName('phi_phan_tram')
   .setDescription(`Phí hoàn tiền tự chỉnh, 0–${MAX_REFUND_FEE_PERCENT}%. Bỏ trống = mặc định theo lý do`)
   .setMinValue(0).setMaxValue(MAX_REFUND_FEE_PERCENT);
-const otherOption = (option) => option.setName('khau_tru_khac').setDescription('Khấu trừ khác (VND)').setMinValue(0);
+const otherOption = (option) => option.setName('khau_tru_khac').setDescription('Khấu trừ khác không tên (VND)').setMinValue(0);
+const COST_SLOTS = Array.from({ length: MAX_REFUND_OTHER_ITEMS }, (_, i) => i + 1);
+// Up to three named extra costs, e.g. "Phí chuyển khoản liên ngân hàng" · 5.000đ. The customer sees each line.
+const withCosts = (sub) => {
+  for (const n of COST_SLOTS) {
+    sub.addStringOption((option) => option.setName(`chi_phi_${n}_ten`).setDescription(`Tên chi phí khác ${n} (khách sẽ thấy)`).setMaxLength(60))
+      .addIntegerOption((option) => option.setName(`chi_phi_${n}_tien`).setDescription(`Số tiền chi phí khác ${n} (VND)`).setMinValue(1));
+  }
+  return sub;
+};
+const readCosts = (options) => COST_SLOTS.map((n) => ({ label: options.getString(`chi_phi_${n}_ten`)?.trim() || null,
+  amount: options.getInteger(`chi_phi_${n}_tien`) })).filter((item) => item.label || item.amount);
 
 export const data = new SlashCommandBuilder()
   .setName('hoantien')
   .setDescription('Tính, gửi hồ sơ, quét QR, ghi nhận và thống kê hoàn tiền.')
   .setDefaultMemberPermissions(PermissionFlagsBits.ManageGuild)
-  .addSubcommand((sub) => sub.setName('tinh').setDescription('Xem bảng tính hoàn tiền (chưa gửi khách, chưa ghi nhận)')
-    .addStringOption(orderOption).addStringOption(reasonOption(false)).addNumberOption(feeOption).addIntegerOption(otherOption))
-  .addSubcommand((sub) => sub.setName('mo-ho-so').setDescription('Mở hồ sơ và gửi bảng tính vào ticket để khách nhập STK')
+  .addSubcommand((sub) => withCosts(sub.setName('tinh').setDescription('Xem bảng tính hoàn tiền (chưa gửi khách, chưa ghi nhận)')
+    .addStringOption(orderOption).addStringOption(reasonOption(false)).addNumberOption(feeOption).addIntegerOption(otherOption)))
+  .addSubcommand((sub) => withCosts(sub.setName('mo-ho-so').setDescription('Mở hồ sơ và gửi bảng tính vào ticket để khách nhập STK')
     .addStringOption(orderOption).addStringOption(reasonOption(true)).addNumberOption(feeOption).addIntegerOption(otherOption)
-    .addStringOption((option) => option.setName('ghi_chu').setDescription('Ghi chú nội bộ').setMaxLength(200)))
+    .addStringOption((option) => option.setName('ghi_chu').setDescription('Ghi chú nội bộ').setMaxLength(200))))
+  .addSubcommand((sub) => withCosts(sub.setName('chao-lai').setDescription('Hủy mức hoàn cũ (kể cả khi khách đã nhập STK) và gửi mức mới')
+    .addStringOption(orderOption)
+    .addStringOption((option) => option.setName('ly_do_dieu_chinh').setDescription('Lý do hủy mức cũ, khách sẽ đọc').setRequired(true).setMinLength(5).setMaxLength(300))
+    .addStringOption((option) => option.setName('xac_nhan').setDescription('Shop chưa chuyển tiền theo mức cũ?').setRequired(true)
+      .addChoices({ name: 'Đúng, shop CHƯA chuyển tiền theo mức cũ', value: 'NOT_PAID' }))
+    .addStringOption(reasonOption(false)).addNumberOption(feeOption).addIntegerOption(otherOption)))
   .addSubcommand((sub) => sub.setName('qr').setDescription('Mở QR chuyển hoàn theo STK khách đã xác nhận (chỉ bạn thấy)')
     .addStringOption(orderOption))
   .addSubcommand((sub) => sub.setName('ghi-nhan').setDescription('Ghi nhận đã chuyển khoản hoàn cho khách (vào sổ doanh thu)')
@@ -98,22 +115,36 @@ export async function execute(interaction) {
     const reasonCode = interaction.options.getString('ly_do');
     const feePercent = interaction.options.getNumber('phi_phan_tram');
     const otherDeduction = interaction.options.getInteger('khau_tru_khac') ?? 0;
+    const otherItems = ['tinh', 'mo-ho-so', 'chao-lai'].includes(sub) ? readCosts(interaction.options) : [];
 
     if (sub === 'tinh') {
-      await reply(quoteCard({ guildId, order, quote: previewOrderRefund(db, order, { reasonCode: reasonCode ?? 'OTHER', feePercent, otherDeduction }) }));
+      await reply(quoteCard({ guildId, order, quote: previewOrderRefund(db, order, { reasonCode: reasonCode ?? 'OTHER', feePercent, otherDeduction, otherItems }) }));
       return;
     }
 
-    if (sub === 'mo-ho-so') {
-      const row = openStandardRefundCase(db, { orderCode, guildId, actorId: interaction.user.id, reasonCode, feePercent, otherDeduction,
-        note: interaction.options.getString('ghi_chu')?.trim() || null });
+    if (sub === 'mo-ho-so' || sub === 'chao-lai') {
+      const reoffer = sub === 'chao-lai' ? { note: interaction.options.getString('ly_do_dieu_chinh', true),
+        notPaid: interaction.options.getString('xac_nhan', true) === 'NOT_PAID' } : null;
+      // A re-offer keeps the previous reason and fee unless the manager changes them.
+      const previous = reoffer ? getRefundCase(db, orderCode) : null;
+      const prevQuote = previous?.guild_id === guildId ? refundReview(previous).quote : null;
+      const prevStandard = prevQuote?.kind === 'STANDARD';
+      const useReason = reasonCode ?? (prevStandard ? prevQuote.reasonCode : null) ?? 'OTHER';
+      const useFee = feePercent ?? (reasonCode == null && prevStandard ? prevQuote.feeBps / 100 : null);
+      const note = reoffer ? `Chào lại: ${reoffer.note}` : interaction.options.getString('ghi_chu')?.trim() || null;
+      const row = openStandardRefundCase(db, { orderCode, guildId, actorId: interaction.user.id, reasonCode: useReason, feePercent: useFee,
+        otherDeduction, otherItems, note, reoffer });
       const opened = await publishStandardRefundCase(db, { id: row.id, guild: interaction.guild, guildConfig });
-      const quote = previewOrderRefund(db, getOrderByCode(orderCode), { reasonCode, feePercent, otherDeduction });
-      await reply(quoteCard({ guildId, order, quote, opened }));
+      const quote = previewOrderRefund(db, getOrderByCode(orderCode), { reasonCode: useReason, feePercent: useFee, otherDeduction, otherItems });
+      await reply(quoteCard({ guildId, order, quote, opened, reoffer: row.quote.reoffer }));
       await Promise.allSettled([
         updateOrderLogMessage(interaction.guild, getOrderByCode(orderCode)),
-        emitStaffLog(interaction.client, { guildId, actorId: interaction.user.id, targetId: order.customer_id, action: 'ORDER_REFUND_CASE_OPENED',
-          detail: `Mở hồ sơ hoàn ${formatCurrency(row.quote.refund)} · ${reasonCode}`, relatedOrderCode: orderCode }),
+        emitStaffLog(interaction.client, { guildId, actorId: interaction.user.id, targetId: order.customer_id,
+          action: reoffer ? 'ORDER_REFUND_REOFFERED' : 'ORDER_REFUND_CASE_OPENED',
+          detail: reoffer
+            ? `Chào lại ${formatCurrency(row.quote.reoffer.previousRefund)} → ${formatCurrency(row.quote.refund)} · ${reoffer.note}`.slice(0, 300)
+            : `Mở hồ sơ hoàn ${formatCurrency(row.quote.refund)} · ${useReason}`,
+          relatedOrderCode: orderCode }),
       ]);
       return;
     }

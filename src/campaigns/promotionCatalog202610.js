@@ -105,13 +105,13 @@ export const PROMOTION_CATALOG_ROWS = Object.freeze([
   catalog('creation', 'adobe-creative-cloud-12-months-4000-ai-credits', 'Adobe Creative Cloud · 4.000 AI credits/tháng', 3800000, {
     duration: '1 năm', account: 'Shop cấp tài khoản', warranty: 'Full BH 12 tháng', notes: ['4.000 credits reset mỗi tháng.'],
   }),
-  catalog('creation', 'gemini-pro-antigravity-3-months-full-warranty', 'Gemini Pro Antigravity', 150000, {
+  catalog('creation', 'gemini-pro-antigravity-3-months-full-warranty', 'Gemini Pro Antigravity + 5 TB Google One', 150000, {
     duration: '3 tháng', warranty: 'Full BH 3 tháng',
-    notes: ['Đủ model mới trong Antigravity theo xác nhận của shop; nguồn bền, dùng lâu dài.'],
+    notes: ['Đủ model mới trong Antigravity theo xác nhận của shop; kèm 5 TB Google One (Drive, Gmail, Photos); nguồn bền, dùng lâu dài.'],
   }),
-  catalog('creation', 'gemini-pro-antigravity-6-months-full-warranty', 'Gemini Pro Antigravity', 280000, {
+  catalog('creation', 'gemini-pro-antigravity-6-months-full-warranty', 'Gemini Pro Antigravity + 5 TB Google One', 280000, {
     duration: '6 tháng', warranty: 'Full BH 6 tháng',
-    notes: ['Đủ model mới trong Antigravity theo xác nhận của shop; nguồn bền, dùng lâu dài.'],
+    notes: ['Đủ model mới trong Antigravity theo xác nhận của shop; kèm 5 TB Google One (Drive, Gmail, Photos); nguồn bền, dùng lâu dài.'],
   }),
   sale('creation', 'sale-office-365-onedrive-12-months', 'Office 365 + OneDrive 1 TB', 200000, {
     catalogKey: 'office-365-onedrive-12-months', duration: '12 tháng',

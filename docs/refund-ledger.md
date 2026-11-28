@@ -67,3 +67,17 @@ Mọi QR đều tạo bằng `buildVerifiedRefundVietQR`:
 - Payload theo chuẩn NAPAS VietQR (dynamic QR, GUID `A000000727`, dịch vụ `QRIBFTTA`, tiền tệ 704, nội dung `HOAN CNxxxxxx`).
 - Payload được đọc ngược lại để kiểm tra CRC-16/CCITT, BIN, STK và số tiền trước khi render.
 - Ảnh QR được render cục bộ bằng `qrcode`; không gửi thông tin ngân hàng ra dịch vụ ngoài.
+
+## Chào lại mức hoàn và chi phí khác có tên (2026-11-28)
+
+- **Chi phí khác có tên.** Các lệnh `tinh`, `mo-ho-so` và `chao-lai` nhận tối đa 3 khoản `chi_phi_N_ten` + `chi_phi_N_tien`, ví dụ "Phí chuyển khoản liên ngân hàng" 5.000đ.
+  - Khách thấy dòng **Chi phí khác** kèm từng khoản bên dưới.
+  - Nếu dùng thêm `khau_tru_khac` không có tên, số này được liệt kê thành dòng "Khấu trừ khác".
+  - Tổng các khoản trừ vẫn không vượt quá số đã trả. Danh sách khoản lưu trong `quote_json.otherItems` và trong bảng tính của dòng sổ.
+- **Chào lại sau khi khách đã nhập STK:** `/hoantien chao-lai ma_don ly_do_dieu_chinh xac_nhan:"shop CHƯA chuyển tiền" [ly_do] [phi_phan_tram] [khau_tru_khac] [chi_phi_N_*]`.
+  - Chỉ dùng khi shop **chưa chuyển tiền** theo mức cũ. Nếu đã chuyển, ghi nhận bằng `ghi-nhan`.
+  - Lý do điều chỉnh (5–300 ký tự) hiển thị cho khách.
+  - Bỏ trống lý do/phí thì giữ như bảng trước.
+  - Bảng tính đã chấp nhận chuyển sang `WITHDRAWN` trong `order_refund_quote_history`. STK đã lưu bị xóa, hồ sơ quay về `AWAITING_DETAILS` với revision mới, kèm `quote.reoffer` (mức cũ, revision cũ, lý do, người chào lại).
+  - Ticket: bot gửi thẻ mới và tag khách. Thẻ cũ bị tắt nút và đổi thành "đã được thay thế". Khách xem trước và xác nhận lại từ đầu; nút của bảng cũ bị từ chối vì sai revision.
+  - Staff log: `ORDER_REFUND_REOFFERED` (mức cũ → mức mới, lý do).

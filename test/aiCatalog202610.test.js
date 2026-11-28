@@ -79,6 +79,8 @@ describe('Gemini Pro Antigravity plans (2026-11-27)', () => {
     const knowledge = generateProductKnowledgeText(GUILD_ID);
     for (const product of gemini) {
       expect(product.description).toContain('model mới trong Antigravity');
+      expect(product.name).toContain('+ 5 TB Google One');
+      expect(product.description).toContain('5 TB lưu trữ Google One');
       expect(product.description).toContain('tuân theo Google');
       expect(knowledge).toContain(product.description);
       expect(extractRequestedDuration(product.name)).toEqual({ days: null, months: product.duration_months });
@@ -125,8 +127,9 @@ describe('Gemini Pro Antigravity plans (2026-11-27)', () => {
         expect(block.content).toMatch(price);
         expect(block.content).toMatch(/Full trong suốt thời gian sử dụng|Full coverage for the entire service period/);
         expect(block.content).toMatch(/model mới trong Antigravity|latest models in Antigravity/);
+        expect(block.content).toMatch(/5 TB/);
       }
-      expect(components.some(c => c.type === 10 && /CDK|190[.,]000|2 Năm|5 TB/.test(c.content) && /Gemini/.test(c.content))).toBe(false);
+      expect(components.some(c => c.type === 10 && /CDK|190[.,]000|2 Năm|12 Tháng (Full BH)/.test(c.content) && /Gemini/.test(c.content))).toBe(false);
       for (const payload of payloads) {
         const panel = collectComponents(payload);
         expect(panel.reduce((sum, c) => sum + (c.content?.length || 0), 0)).toBeLessThanOrEqual(3800);

@@ -53,14 +53,21 @@ export function toCaseQuote(quote) {
     usedMs: ms(quote.usedDays), totalMs: ms(quote.totalDays), downtimeMs: 0,
     usageDeduction: quote.usageDeduction, feeBps: Math.round(quote.feePercent * 100), fee: quote.feeAmount,
     otherDeduction: quote.otherDeduction, refund: quote.refund,
+    ...(quote.otherItems?.length ? { otherItems: quote.otherItems } : {}),
   };
 }
 
 /**
  * Open (or re-quote, while the customer has not accepted yet) a refund case for any
  * regular paid order. Moves the order to REFUND_PENDING when needed.
+ *
+ * `reoffer` lets the shop withdraw a quote the customer already accepted, before any
+ * money moved: the manager must give a customer-facing reason and confirm nothing was
+ * transferred at the old amount. The stored bank details are cleared, so the customer
+ * reviews the new quote and confirms the preview again.
  */
-export function openStandardRefundCase(db, { orderCode, guildId, actorId, reasonCode, feePercent, otherDeduction = 0, note = null }) {
+export function openStandardRefundCase(db, { orderCode, guildId, actorId, reasonCode, feePercent, otherDeduction = 0, otherItems = [],
+  note = null, reoffer = null }) {
   ensureRefundDrafts(db);
   return db.transaction(() => {
     let order = db.prepare('SELECT * FROM orders WHERE order_code = ? AND guild_id = ?').get(orderCode, guildId);
@@ -70,17 +77,28 @@ export function openStandardRefundCase(db, { orderCode, guildId, actorId, reason
       order = recordPaidOrderRefund(db, { orderCode, guildId, actorId, action: 'REFUND_PENDING', reason }).updated;
     }
     if (order.status !== 'REFUND_PENDING') fail('Đơn này không thể mở hồ sơ hoàn (đã hoàn hoặc trạng thái không hỗ trợ).');
-    const quote = toCaseQuote(previewOrderRefund(db, order, { reasonCode, feePercent, otherDeduction }));
+    const quote = toCaseQuote(previewOrderRefund(db, order, { reasonCode, feePercent, otherDeduction, otherItems }));
     if (quote.refund < 1) fail('Theo bảng tính không còn số tiền hoàn. Kiểm tra lại phí hoặc thời gian đã dùng.');
     const existing = getRefundCase(db, orderCode);
     const now = new Date().toISOString();
-    if (existing?.active && existing.accepted_at) {
-      fail('Khách đã xác nhận bảng tính hiện tại. Liên hệ khách trước khi đổi số tiền.');
+    if (reoffer) {
+      const reason = String(reoffer.note ?? '').replace(/s+/g, ' ').trim();
+      if (!existing?.active) fail('Đơn chưa có hồ sơ hoàn đang mở. Dùng /hoantien mo-ho-so trước.');
+      if (reoffer.notPaid !== true) fail('Chỉ chào lại khi shop CHƯA chuyển tiền theo mức cũ. Nếu đã chuyển, ghi nhận bằng /hoantien ghi-nhan.');
+      if (reason.length < 5) fail('Cần ghi lý do điều chỉnh (ít nhất 5 ký tự). Khách sẽ đọc lý do này.');
+      const previous = existing.accepted_at
+        ? { quote: existing.quote, revision: existing.accepted_quote_revision || existing.quote_revision || 1 }
+        : refundReview(existing);
+      quote.reoffer = { previousRefund: previous.quote.refund, previousRevision: previous.revision,
+        wasAccepted: Boolean(existing.accepted_at), note: reason.slice(0, 300), at: now, by: actorId };
+    } else if (existing?.active && existing.accepted_at) {
+      fail('Khách đã xác nhận bảng tính hiện tại. Muốn hủy mức cũ và chào mức mới, dùng /hoantien chao-lai (shop chưa chuyển tiền).');
     }
     let id = existing?.id;
     if (existing) {
       const revision = db.prepare('SELECT COALESCE(MAX(revision),0)+1 AS next FROM order_refund_quote_history WHERE case_id=?').get(existing.id).next;
       db.prepare(`UPDATE order_refund_quote_history SET state='SUPERSEDED' WHERE case_id=? AND state IN ('OFFERED','PROPOSED')`).run(existing.id);
+      if (reoffer) db.prepare(`UPDATE order_refund_quote_history SET state='WITHDRAWN' WHERE case_id=? AND state='ACCEPTED'`).run(existing.id);
       db.prepare(`INSERT INTO order_refund_quote_history(case_id,revision,quote_json,state,actor_id,created_at) VALUES (?,?,?,'OFFERED',?,?)`)
         .run(existing.id, revision, JSON.stringify(quote), actorId, now);
       db.prepare(`UPDATE order_refund_cases SET quote_json=?, quote_revision=?, pending_quote_json=NULL, pending_quote_revision=NULL,

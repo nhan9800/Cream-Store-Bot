@@ -118,14 +118,32 @@ export function serviceWindow(order, cutoffAt) {
  * Standard refund quote. Integer VND; deductions round down so the customer is
  * never charged more than the formula. refund = paid − used time − fee − other.
  */
-export function quoteStandardRefund(order, { reasonCode, feePercent, otherDeduction = 0, cutoffAt } = {}) {
+export const MAX_REFUND_OTHER_ITEMS = 3;
+
+/** Named extra costs (label + VND) the shop deducts on top of usage and fee. */
+export function normalizeOtherItems(items = []) {
+  const list = (items || []).filter((item) => item && (item.amount || item.label));
+  if (list.length > MAX_REFUND_OTHER_ITEMS) throw new RefundLedgerError(`Tối đa ${MAX_REFUND_OTHER_ITEMS} khoản chi phí khác.`);
+  return list.map((item) => {
+    const amount = Number(item.amount);
+    const label = String(item.label ?? '').replace(/[s`*_~|<>@#]+/g, ' ').trim().slice(0, 60) || 'Chi phí khác';
+    if (!Number.isSafeInteger(amount) || amount < 1) throw new RefundLedgerError(`Khoản "${label}" cần số tiền VND lớn hơn 0.`);
+    return { label, amount };
+  });
+}
+
+export function quoteStandardRefund(order, { reasonCode, feePercent, otherDeduction = 0, otherItems = [], cutoffAt } = {}) {
   const paid = Number(order.amount_paid);
   if (order.payment_status !== 'PAID' || !Number.isSafeInteger(paid) || paid < 1) {
     throw new RefundLedgerError('Đơn chưa có số tiền đã nhận để tính hoàn.');
   }
   const reason = normalizeReason(reasonCode);
   const fee = normalizeFeePercent(feePercent, reason);
-  const other = Number(otherDeduction || 0);
+  const named = normalizeOtherItems(otherItems);
+  const plain = Number(otherDeduction || 0);
+  // An unnamed amount next to named costs is listed as its own line so every deduction is itemised.
+  const items = named.length && plain > 0 ? [...named, { label: 'Khấu trừ khác', amount: plain }] : named;
+  const other = plain + named.reduce((sum, item) => sum + item.amount, 0);
   if (!Number.isSafeInteger(other) || other < 0 || other > paid) throw new RefundLedgerError('Khấu trừ khác không hợp lệ.');
   const window = serviceWindow(order, cutoffAt);
   const usageDeduction = window.totalMs > 0 ? Number(BigInt(paid) * BigInt(Math.round(window.usedMs)) / BigInt(Math.round(window.totalMs))) : 0;
@@ -141,6 +159,8 @@ export function quoteStandardRefund(order, { reasonCode, feePercent, otherDeduct
     feeAmount,
     usageDeduction,
     otherDeduction: otherApplied,
+    otherItems: items,
+    otherCapped: otherApplied < other,
     usedDays: window.totalMs ? Math.round((window.usedMs / DAY_MS) * 10) / 10 : 0,
     totalDays: window.totalMs ? Math.round((window.totalMs / DAY_MS) * 10) / 10 : 0,
     start: isoOrNull(window.start),

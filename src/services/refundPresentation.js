@@ -39,6 +39,19 @@ export function refundDecorations(guildId, keys = Object.keys(SLOTS)) {
 }
 const OFFER_KEYS = ['brand', 'receipt', 'calendar', 'paid', 'usage', 'fee', 'other', 'total', 'change', 'info', 'private', 'submit', 'contact', 'reason'];
 
+/** Named extra costs are listed under one header line, so the card keeps one emoji per line. */
+export function otherLines(q, d = {}) {
+  if (!(q.otherDeduction > 0)) return [];
+  const items = q.otherItems || [];
+  if (!items.length) return [`${d.other || ''} **Khấu trừ khác** · −${money(q.otherDeduction)}`];
+  const listed = items.reduce((sum, item) => sum + item.amount, 0);
+  return [
+    `${d.other || ''} **Chi phí khác** · −${money(q.otherDeduction)}`,
+    ...items.map(item => `- ${item.label} · −${money(item.amount)}`),
+    ...(listed > q.otherDeduction ? [`-# Tổng chi phí khác được giới hạn ở ${money(q.otherDeduction)} để số hoàn không âm.`] : []),
+  ];
+}
+
 export function refundQuoteLines(q, d = {}) {
   const feeLabel = isStandard(q)
     ? `Phí xử lý hoàn tiền ${percent(q)}%${REFUND_REASONS[q.reasonCode] ? ` · ${REFUND_REASONS[q.reasonCode].label}` : ''}`
@@ -47,7 +60,7 @@ export function refundQuoteLines(q, d = {}) {
     `${d.paid || ''} **Tiền mua đã nhận** · ${money(q.paid)}`,
     `${d.usage || ''} **Trừ thời gian đã sử dụng** · −${money(q.usageDeduction)}`,
     `${d.fee || ''} **${feeLabel}** · −${money(q.fee)}`,
-    ...(q.otherDeduction > 0 ? [`${d.other || ''} **Khấu trừ khác** · −${money(q.otherDeduction)}`] : []),
+    ...otherLines(q, d),
     '', `### ${d.total || ''} Số còn hoàn: ${money(q.refund)}`,
     `-# Tiền gốc − phần đã dùng − ${isStandard(q) ? 'phí xử lý' : 'khoản bổ sung'}. Các khoản trừ làm tròn xuống 1đ.`,
   ];
@@ -69,6 +82,10 @@ export function buildRefundOffer(row, { mentionCustomer = false } = {}) {
     .addSeparatorComponents(separator())
     .addTextDisplayComponents(T(timeSection(q, d)));
   const amount = new ContainerBuilder().setAccentColor(proposal ? 0xe8b977 : 0x79d4bd);
+  if (q.reoffer && !proposal) amount.addTextDisplayComponents(T(`### ${d.change} Shop đã điều chỉnh bảng tính
+Bảng tính ${q.reoffer.previousRevision} (còn hoàn ${money(q.reoffer.previousRefund)})${q.reoffer.wasAccepted ? ' bạn đã xác nhận' : ''} **đã được hủy**. Shop chưa chuyển khoản theo mức đó.
+**Lý do điều chỉnh:** ${q.reoffer.note}
+Bảng tính mới: **còn hoàn ${money(q.refund)}**. Thông tin tài khoản bạn gửi trước đó đã được xóa, vui lòng đọc lại và xác nhận lại.`)).addSeparatorComponents(separator());
   if (proposal) amount.addTextDisplayComponents(T(`### ${d.change} Phương án mới shop đề xuất\nBảng trước: **${percent(row.quote)}% · còn hoàn ${money(row.quote.refund)}**${row.accepted_at ? ' · đã được bạn xác nhận' : ''}.\nĐề xuất mới: **${percent(q)}% · còn hoàn ${money(q.refund)}**.\n${row.accepted_at ? 'Phương án đã xác nhận trước đó vẫn được giữ cho đến khi bạn đồng ý thay đổi.' : 'Vui lòng đọc các khoản thay đổi trước khi quyết định.'}`)).addSeparatorComponents(separator());
   amount.addTextDisplayComponents(T(refundQuoteLines(q, d).join('\n')));
   if (isStandard(q) && REFUND_REASONS[q.reasonCode]) {
@@ -90,6 +107,17 @@ export function buildRefundOffer(row, { mentionCustomer = false } = {}) {
 
 async function qrPng(payload) {
   return QRCode.toBuffer(payload, { type: 'png', width: 720, margin: 4, errorCorrectionLevel: 'M' });
+}
+
+/** The old ticket card after a re-offer: no buttons, points the customer to the new card. */
+export function buildRefundOfferReplaced(row, { previousRevision, previousRefund, url = null }) {
+  const d = refundDecorations(row.guild_id, ['change', 'receipt']);
+  const card = new ContainerBuilder().setAccentColor(0x5f6d87)
+    .addTextDisplayComponents(T(`### ${d.change} Bảng tính ${previousRevision} đã được thay thế`),
+      T(`${d.receipt} **${row.order_code}** · mức cũ còn hoàn ${money(previousRefund)} không còn hiệu lực.${url ? `
+[Xem bảng tính mới](${url})` : ' Xem bảng tính mới bên dưới.'}`))
+    .addTextDisplayComponents(T('-# Cenar Store · Nút trên bảng cũ đã tắt'));
+  return { flags: MessageFlags.IsComponentsV2, components: [card], allowedMentions: { parse: [] } };
 }
 
 /** Customer-only preview of exactly what the shop will transfer, shown before anything is saved. */

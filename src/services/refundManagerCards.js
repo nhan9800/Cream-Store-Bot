@@ -3,7 +3,7 @@
 import { ContainerBuilder, MessageFlags, SeparatorBuilder, SeparatorSpacingSize, TextDisplayBuilder } from 'discord.js';
 import { formatCurrency as money } from '../utils/formatters.js';
 import { REFUND_REASONS } from './refundLedgerService.js';
-import { refundDecorations } from './refundPresentation.js';
+import { otherLines, refundDecorations } from './refundPresentation.js';
 
 const T = (content) => new TextDisplayBuilder().setContent(content);
 const sep = () => new SeparatorBuilder().setDivider(true).setSpacing(SeparatorSpacingSize.Small);
@@ -17,21 +17,22 @@ function breakdown(q, d) {
     `${d.paid} **Khách đã thanh toán** · ${money(q.paid)}`,
     q.usageDeduction ? `${d.usage} **Trừ thời gian đã dùng** (${q.usedDays}/${q.totalDays} ngày) · −${money(q.usageDeduction)}` : `${d.usage} **Thời gian đã dùng** · không trừ`,
     `${d.fee} **Phí hoàn ${q.feePercent}%** · −${money(q.feeAmount)}`,
-    ...(q.otherDeduction ? [`${d.other} **Khấu trừ khác** · −${money(q.otherDeduction)}`] : []),
+    ...otherLines(q, d),
     `## ${d.total} Hoàn cho khách: ${money(q.refund)}`,
     `-# Shop giữ lại ${money(q.retained)} · tính vào doanh thu`,
   ].join('\n');
 }
 
-export function quoteCard({ guildId, order, quote, opened = null }) {
-  const d = refundDecorations(guildId, ['brand', 'receipt', 'calendar', 'paid', 'usage', 'fee', 'other', 'total', 'reason', 'submit', 'info']);
+export function quoteCard({ guildId, order, quote, opened = null, reoffer = null }) {
+  const d = refundDecorations(guildId, ['brand', 'receipt', 'calendar', 'paid', 'usage', 'fee', 'other', 'total', 'reason', 'submit', 'info', 'change']);
   const head = new ContainerBuilder().setAccentColor(opened ? COLORS.done : COLORS.quote)
-    .addTextDisplayComponents(T(`# ${d.brand} ${opened ? 'ĐÃ MỞ HỒ SƠ HOÀN TIỀN' : 'BẢNG TÍNH HOÀN TIỀN'}`),
+    .addTextDisplayComponents(T(`# ${d.brand} ${reoffer ? 'ĐÃ CHÀO LẠI MỨC HOÀN' : opened ? 'ĐÃ MỞ HỒ SƠ HOÀN TIỀN' : 'BẢNG TÍNH HOÀN TIỀN'}`),
       T(`${d.receipt} **${order.order_code}** · ${order.product_name}\n-# Khách <@${order.customer_id}> · thời gian dùng tính đến ${quote.cutoff ? vnTime(quote.cutoff) : 'chưa giao hàng'}`))
     .addSeparatorComponents(sep())
     .addTextDisplayComponents(T(breakdown(quote, d)))
-    .addSeparatorComponents(sep())
-    .addTextDisplayComponents(T(`### ${d.reason} ${reasonLabel(quote.reasonCode)}\n${REFUND_REASONS[quote.reasonCode]?.explanation ?? ''}`));
+    .addSeparatorComponents(sep());
+  if (reoffer) head.addTextDisplayComponents(T(`### ${d.change} Đã hủy bảng tính ${reoffer.previousRevision}\nMức cũ còn hoàn ${money(reoffer.previousRefund)}${reoffer.wasAccepted ? ' (khách đã xác nhận STK, thông tin đó đã được xóa)' : ''}.\n**Lý do gửi khách:** ${reoffer.note}`)).addSeparatorComponents(sep());
+  head.addTextDisplayComponents(T(`### ${d.reason} ${reasonLabel(quote.reasonCode)}\n${REFUND_REASONS[quote.reasonCode]?.explanation ?? ''}`));
   const next = new ContainerBuilder().setAccentColor(COLORS.stats).addTextDisplayComponents(T(opened
     ? `### ${d.submit} Bước tiếp theo\n${opened.message}${opened.url ? `\n[Mở thẻ hồ sơ trong ticket](${opened.url})` : ''}\nKhách bấm **Xác nhận & nhập tài khoản**, xem trước rồi xác nhận. Sau đó dùng \`/hoantien qr ma_don:${order.order_code}\` để quét chuyển.`
     : `### ${d.info} Chưa gửi gì cho khách\nĐồng ý số liệu thì gửi hồ sơ: \`/hoantien mo-ho-so ma_don:${order.order_code} ly_do:${quote.reasonCode} phi_phan_tram:${quote.feePercent}\``));
