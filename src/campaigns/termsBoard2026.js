@@ -4,8 +4,6 @@ import {
   ButtonStyle,
   ContainerBuilder,
   MessageFlags,
-  SeparatorBuilder,
-  SeparatorSpacingSize,
   TextDisplayBuilder,
 } from 'discord.js';
 import { createEmojiResolver, withButtonEmoji } from '../utils/emojiHelper.js';
@@ -28,106 +26,89 @@ export const TERMS_BOARD = Object.freeze({
   supportChannelId: '1514607020098191393',
   youtubeGuideChannelId: '1568246979128074280',
   nitroGuideChannelId: '1568246897754513518',
-  marker: 'CENAR-TERMS-BOARD-V1',
-  youtubeRejoinFee: 65_000,
+  websiteTermsUrl: 'https://cenarstore.xyz/terms',
+  // V2 approved by the owner on 2026-11-28; same rules as the website /terms page.
+  marker: 'CENAR-TERMS-BOARD-V2',
+  effectiveDate: '28/11/2026',
+  familyRejoinFee: 65_000,
   processingOrderRefundPercent: 50,
+  maxRefundFeePercent: 50,
+  providerChangeFeePercent: 30,
   flags: MessageFlags.IsComponentsV2,
 });
-
-const divider = () => new SeparatorBuilder()
-  .setDivider(true)
-  .setSpacing(SeparatorSpacingSize.Small);
 
 function money(value) {
   return `${Number(value).toLocaleString('vi-VN')}đ`;
 }
 
+const section = (accent, lines) => new ContainerBuilder()
+  .setAccentColor(accent)
+  .addTextDisplayComponents(new TextDisplayBuilder().setContent(normalizeV2Text(lines.join('\n'))));
+
 export function buildTermsBoardPayload() {
   const policy = TERMS_BOARD;
   const E = createEmojiResolver(policy.guildId);
 
-  const header = new ContainerBuilder()
-    .setAccentColor(0x7C3AED)
-    .addTextDisplayComponents(new TextDisplayBuilder().setContent(normalizeV2Text([
-      `# ${E('partner_rules')} ĐIỀU KHOẢN DỊCH VỤ & BẢO HÀNH`,
-      `> ${E('verify_shield')} Quy định giúp shop xử lý sự cố đúng quy trình và bảo vệ quyền lợi khách hàng.`,
-      `> Đặt hàng tại **Cenar Store** đồng nghĩa khách đã đọc và đồng ý với phiên bản mới nhất tại kênh này.`,
-    ].join('\n'))));
+  const header = section(0x7C3AED, [
+    `# ${E('icon_book')} ĐIỀU KHOẢN DỊCH VỤ, BẢO HÀNH & HOÀN TIỀN · V2`,
+    `${E('icon_calendar')} Hiệu lực từ **${policy.effectiveDate}**. Đơn đã thanh toán theo điều khoản lúc mua, trừ khi bản mới có lợi hơn cho bạn.`,
+  ]);
 
-  const general = new ContainerBuilder()
-    .setAccentColor(0x2563EB)
-    .addTextDisplayComponents(new TextDisplayBuilder().setContent(normalizeV2Text([
-      `## ${E('warranty_shield')} 01 · CHÍNH SÁCH BẢO HÀNH CHUNG`,
-      `• Giữ mã đơn, thông tin tài khoản và nội dung bàn giao để đối chiếu khi cần.`,
-      `• Gửi feedback sau khi hoàn tất đơn để ghi nhận quyền lợi bảo hành.`,
-      `• Không tự đổi thông tin, rời nhóm, xoá profile hoặc can thiệp sản phẩm khi chưa được Admin hướng dẫn.`,
-      `• Tự ý rời server Cenar Store có thể bị từ chối bảo hành với đơn còn thời hạn.`,
-    ].join('\n'))));
+  const orderAndWarranty = section(0x2563EB, [
+    `## ${E('warranty_shield')} 01 · ĐẶT HÀNG, GIAO HÀNG & BẢO HÀNH`,
+    `${E('order_id')} Giữ mã đơn \`CN_xxxxxx\`; chuyển đúng số tiền và nội dung QR.`,
+    `${E('icon_price')} Giá sale đăng trên Discord áp dụng khi đặt qua ticket.`,
+    `${E('icon_clock')} Quá **24 giờ** sau thanh toán chưa giao (trừ gói ghi lâu hơn): chờ tiếp hoặc **hoàn 100%**.`,
+    `${E('status_check')} Bảo hành theo từng gói. Lỗi shop không sửa được: hoàn phần còn lại, **phí 0%**.`,
+    `${E('ticket_open')} Báo sự cố tại <#${policy.supportChannelId}> trước khi tự thao tác.`,
+    `${E('icon_heart')} Feedback **không phải điều kiện bảo hành**. Rời server không làm mất bảo hành.`,
+  ]);
 
-  const orderAndConduct = new ContainerBuilder()
-    .setAccentColor(0xF97316)
-    .addTextDisplayComponents(new TextDisplayBuilder().setContent(normalizeV2Text([
-      `## ${E('payment_refund')} 02 · HOÀN ĐƠN, CHI PHÍ & QUY TẮC ỨNG XỬ`,
-      `${E('order_complete')} **Đơn đã giao đúng cam kết** · Shop không hoàn tiền khi khách đổi ý.`,
-      `**Đơn vừa đặt hoặc đang xử lý** · Khi khách đổi ý, mức hoàn tối đa **${policy.processingOrderRefundPercent}% giá trị sản phẩm** sau đối soát chi phí. Dự kiến **2–3 tuần** nếu được duyệt.`,
-      `Quyền theo luật, bảo hành và hoàn tiền riêng vẫn áp dụng.`,
-    ].join('\n'))))
-    .addSeparatorComponents(divider())
-    .addTextDisplayComponents(new TextDisplayBuilder().setContent(normalizeV2Text([
-      `### Tôn trọng trong trao đổi và hỗ trợ`,
-      `• Khách hàng và staff cần lịch sự, cung cấp thông tin đúng sự thật và hợp tác xử lý sự cố.`,
-      `• Với hành vi lăng mạ, đe doạ, quấy rối hoặc tiếp tục xúc phạm sau khi được nhắc nhở, shop có quyền dừng hỗ trợ, huỷ đơn và từ chối phục vụ.`,
-      `> Chi phí đã phát sinh **không được hoàn lại**; phần giá trị còn lại, nếu có, được đối soát theo chính sách hoàn đơn ở trên.`,
-    ].join('\n'))));
+  const refund = section(0xF97316, [
+    `## ${E('payment_money')} 02 · HỦY ĐƠN & HOÀN TIỀN`,
+    `**Số hoàn = Đã trả − Thời gian đã dùng − Phí xử lý (0–${policy.maxRefundFeePercent}%) − Chi phí khác có tên**`,
+    `• Đổi ý khi **đang xử lý**: hoàn tối đa **${policy.processingOrderRefundPercent}%** sau đối soát chi phí. Đã giao đúng mà đổi ý: shop không bắt buộc hoàn.`,
+    `• Nhà cung cấp đổi chính sách / ngừng dịch vụ: hoàn phần còn lại, phí thường **${policy.providerChangeFeePercent}%**.`,
+    `${E('payment_qr')} Bạn **xem trước** bảng tính, STK, tên, số tiền và QR trong ticket riêng rồi mới xác nhận.`,
+    `${E('icon_cycle')} Trước khi chuyển, shop có thể gửi bảng mới kèm lý do; bạn xác nhận lại.`,
+    `${E('status_warn')} Chuyển khoản dự kiến **2–3 tuần**. Shop không hỏi mật khẩu, số thẻ, OTP. Vi phạm quy định làm mất gói: không hoàn.`,
+  ]);
 
-  const youtube = new ContainerBuilder()
-    .setAccentColor(0xFF0000)
-    .addTextDisplayComponents(new TextDisplayBuilder().setContent(normalizeV2Text([
-      `## ${E('brand_youtube')} 03 · YOUTUBE PREMIUM & GOOGLE FAMILY`,
-      `### Khi mất Premium hoặc Family bị lỗi`,
-      `• **Việc đầu tiên:** giữ nguyên tài khoản và liên hệ Admin ngay.`,
-      `• **Không tự ý rời Google Family.** Tự rời nhóm làm gián đoạn bảo hành và có thể kích hoạt giới hạn Family của Google.`,
-    ].join('\n'))))
-    .addSeparatorComponents(divider())
-    .addTextDisplayComponents(new TextDisplayBuilder().setContent(normalizeV2Text([
-      `### ${E('icon_price')} Trường hợp khách tự ý rời nhóm`,
-      `> Đơn **không còn được bảo hành miễn phí**. Muốn tiếp tục sử dụng, khách đóng phí hỗ trợ **${money(policy.youtubeRejoinFee)}** để shop kiểm tra và thêm lại.`,
-      `> Phí gồm **một lần kiểm tra/xử lý giới hạn Google Family 12 tháng** nếu Gmail đủ điều kiện; không cam kết mọi Gmail đều xử lý thành công.`,
-      `• Nếu Gmail cũ không đủ điều kiện do giới hạn/slot Google, khách phải đổi Gmail; phí thêm lại vẫn là **${money(policy.youtubeRejoinFee)}**.`,
-      `• Cần cung cấp **Gmail cá nhân**, **Gmail chủ Family** và **mã đơn**.`,
-    ].join('\n'))));
+  const family = section(0xFF0000, [
+    `## ${E('brand_youtube', 'cenar_youtube')} 03 · YOUTUBE & SPOTIFY FAMILY`,
+    `${E('icon_group')} **Không tự rời nhóm**; mất Premium thì báo shop ngay.`,
+    `> Tự rời nhóm: hết bảo hành miễn phí, phí thêm lại **${money(policy.familyRejoinFee)}**, gồm 1 lần kiểm tra giới hạn Family; không cam kết mọi Gmail.`,
+    '• Báo lỗi YouTube: gửi Gmail, Gmail chủ Family, mã đơn.',
+  ]);
 
-  const nitro = new ContainerBuilder()
-    .setAccentColor(0x5865F2)
-    .addTextDisplayComponents(new TextDisplayBuilder().setContent(normalizeV2Text([
-      `## ${E('brand_nitro')} 04 · DISCORD NITRO LOGIN & MAIL SHOP CẤP`,
-      `• **Bảo mật ngay khi nhận mail:** đổi mật khẩu Gmail, bật 2FA, thêm số điện thoại và email khôi phục trước khi sử dụng Nitro.`,
-      `• Nếu không hoàn tất, shop từ chối trách nhiệm với mất mail, chiếm quyền truy cập hoặc mất Nitro do tài khoản chưa được bảo mật.`,
-      `• **Mail còn sống:** giữ mail shop cấp và gia hạn đúng chu kỳ **2 tháng/lần**.`,
-      `• **Mail chết nhưng Nitro còn:** liên hệ Admin ngay, không tự can thiệp.`,
-      `• **Mail chết và Nitro cũng mất:** **không thuộc phạm vi bảo hành**; shop chỉ hỗ trợ giá ưu đãi nếu khách muốn mua lại.`,
-      `> Bảo quản mail shop cấp là điều kiện bắt buộc để duy trì bảo hành và gia hạn.`,
-    ].join('\n'))));
+  const nitro = section(0x5865F2, [
+    `## ${E('brand_nitro', 'cenar_board26_nitro')} 04 · NITRO LOGIN & MAIL SHOP CẤP`,
+    `${E('icon_key')} **Bảo mật ngay:** đổi mật khẩu Gmail, bật 2FA, thêm SĐT và email khôi phục.`,
+    '• Giữ mail shop cấp **suốt thời gian sử dụng** để được bảo hành và gia hạn.',
+    '• Mail chết, Nitro còn: báo Admin ngay. Mất cả mail và Nitro do chưa bảo mật: ngoài bảo hành, shop hỗ trợ giá ưu đãi mua lại.',
+  ]);
 
-  const netflix = new ContainerBuilder()
-    .setAccentColor(0xE50914)
-    .addTextDisplayComponents(new TextDisplayBuilder().setContent(normalizeV2Text([
-      `## ${E('brand_netflix', 'cenar_board26_netflix')} 05 · ĐIỀU KHOẢN NETFLIX`,
-      `${E('ticket_user')} Giữ nguyên tên hồ sơ. Không xoá hoặc dùng hồ sơ người khác.`,
-      `${E('icon_lock')} Giữ nguyên PIN hồ sơ và mật khẩu.`,
-      `${E('music_play')} Đăng nhập tối đa **3 thiết bị**. Chỉ xem trên **1 thiết bị cùng lúc**.`,
-      `> Xem cùng lúc từ **2 thiết bị trở lên** sẽ bị thu hồi quyền sử dụng và không được bảo hành.`,
-    ].join('\n'))));
+  const netflix = section(0xE50914, [
+    `## ${E('brand_netflix', 'cenar_board26_netflix')} 05 · NETFLIX & TÀI KHOẢN DÙNG CHUNG`,
+    `${E('ticket_user')} Giữ nguyên tên hồ sơ, PIN, email, mật khẩu; không dùng hồ sơ người khác, không thêm thanh toán.`,
+    `${E('music_play')} Đăng nhập tối đa **3 thiết bị**. Chỉ xem trên **1 thiết bị cùng lúc**.`,
+    '> Xem cùng lúc từ **2 thiết bị**: thu hồi quyền dùng, không bảo hành.',
+  ]);
 
-  const footer = new ContainerBuilder()
-    .setAccentColor(0xF59E0B)
-    .addTextDisplayComponents(new TextDisplayBuilder().setContent(normalizeV2Text([
-      `## ${E('cenar_verified')} 06 · TIẾN ĐỘ, HỖ TRỢ & HIỆU LỰC`,
-      `• Tiến độ phụ thuộc nguồn hàng; staff sẽ cập nhật trong ticket.`,
-      `• Báo sự cố tại <#${policy.supportChannelId}> **trước khi tự thao tác**.`,
-      `• Điều khoản có thể đổi theo nhà cung cấp; phiên bản tại kênh này là phiên bản có hiệu lực.`,
-      `-# ${policy.marker}`,
-    ].join('\n'))));
+  const ownAccounts = section(0x10B981, [
+    `## ${E('order_product')} 06 · TÀI KHOẢN CHÍNH CHỦ, KEY & DỊCH VỤ DISCORD`,
+    '• **Chính chủ** (ChatGPT, Gemini, Canva…): không tự hủy gói, đổi thanh toán, rời workspace khi chưa hỏi shop; bị khóa do bạn vi phạm chính sách thì không bảo hành.',
+    '• **Key Windows:** 1 key 1 máy; bảo hành kích hoạt lần đầu, cài lại cùng máy được hỗ trợ, đổi mainboard/máy thì không.',
+    '• Nitro Trial cần tài khoản đủ điều kiện. Làm Decor/Boost xong thì đổi mật khẩu.',
+  ]);
+
+  const footer = section(0xF59E0B, [
+    `## ${E('icon_announce')} 07 · GIA HẠN, ỨNG XỬ & CẬP NHẬT`,
+    `${E('music_refresh')} Bot nhắc gia hạn khoảng **3 ngày** trước khi hết hạn; gia hạn bằng \`/renew\` hoặc ticket.`,
+    `${E('status_info')} Lăng mạ, đe doạ, quấy rối sau khi được nhắc: shop dừng hỗ trợ; đơn đã trả xử lý theo mục 02.`,
+    '• Thay đổi được đăng tại kênh này và website. Quyền người tiêu dùng theo luật luôn được giữ.',
+    `-# ${policy.marker}`,
+  ]);
 
   const supportButton = withButtonEmoji(
     new ButtonBuilder()
@@ -137,31 +118,36 @@ export function buildTermsBoardPayload() {
     E.component('cenar_support'),
     E.component('ticket_open'),
   );
+  const websiteButton = withButtonEmoji(
+    new ButtonBuilder().setLabel('Toàn Văn Trên Website').setStyle(ButtonStyle.Link).setURL(policy.websiteTermsUrl),
+    E.component('icon_web'),
+  );
   const youtubeGuideButton = withButtonEmoji(
     new ButtonBuilder()
       .setLabel('Hướng Dẫn YouTube')
       .setStyle(ButtonStyle.Link)
       .setURL(`https://discord.com/channels/${policy.guildId}/${policy.youtubeGuideChannelId}`),
-    E.component('brand_youtube'),
+    E.component('icon_search'),
   );
   const nitroGuideButton = withButtonEmoji(
     new ButtonBuilder()
       .setLabel('Hướng Dẫn Nitro')
       .setStyle(ButtonStyle.Link)
       .setURL(`https://discord.com/channels/${policy.guildId}/${policy.nitroGuideChannelId}`),
-    E.component('brand_nitro'),
+    E.component('icon_tip'),
   );
 
   return {
     components: [
       header,
-      general,
-      orderAndConduct,
-      youtube,
+      orderAndWarranty,
+      refund,
+      family,
       nitro,
       netflix,
+      ownAccounts,
       footer,
-      new ActionRowBuilder().addComponents(supportButton, youtubeGuideButton, nitroGuideButton),
+      new ActionRowBuilder().addComponents(supportButton, websiteButton, youtubeGuideButton, nitroGuideButton),
     ],
     flags: policy.flags,
     allowedMentions: { parse: [], roles: [], users: [], repliedUser: false },
@@ -214,7 +200,9 @@ export async function publishTermsBoard(client) {
 
   const boards = [...candidates.values()]
     .filter((message) => isTermsBoardMessage(message, client.user.id));
-  const current = boards.find(hasCurrentMarker);
+  // An older versioned board (e.g. V1) is edited in place to the current version.
+  const current = boards.find(hasCurrentMarker)
+    || boards.find((message) => messageContains(message, (text) => text.includes(TERMS_MARKER_PREFIX)));
   const payload = buildTermsBoardPayload();
 
   if (current) {
